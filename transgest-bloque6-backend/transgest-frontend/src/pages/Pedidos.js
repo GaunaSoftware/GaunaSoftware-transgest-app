@@ -14,7 +14,7 @@ import { driverName, stopSchedule } from "./orders/quickInfo";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
-import { cargoPayload } from "../utils/cargoDimensions";
+import { cargoPayload, fullLoadLength } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
@@ -6845,6 +6845,12 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   };
   const vehiculoActual = vehiculosLocal.find(v => v.id === form.vehiculo_id);
   const remolqueActual = vehiculosLocal.find(v => v.id === (form.remolque_id_manual || vehiculoActual?.remolque_id));
+  const longitudCargaCompleta = fullLoadLength(form, vehiculosLocal);
+  useEffect(() => {
+    if ((form.tipo_carga || 'completa') !== 'completa') return;
+    setForm(previous => Number(previous.carga_largo_m) === longitudCargaCompleta && Number(previous.metros_lineales) === longitudCargaCompleta
+      ? previous : { ...previous, carga_largo_m: longitudCargaCompleta, metros_lineales: longitudCargaCompleta, _cargoLengthManual: true });
+  }, [form.id, form.tipo_carga, longitudCargaCompleta]);
   // Aviso si la carga (metros lineales) supera los metros de carga del remolque
   // asignado (p. ej. viaje de 13,65 m en una plataforma de 11 m).
   const cargaMetrosLineales = parseFloat(String(form.metros_lineales ?? "").replace(",", ".")) || 0;

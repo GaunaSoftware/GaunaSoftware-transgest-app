@@ -1,14 +1,15 @@
+import {driverStops,stopData,stopDone} from "./driverStops";
 import { lazy, Suspense, useMemo } from 'react';
 const RutaMapa=lazy(()=>import('../../components/RutaMapa'));
-const list=value=>{if(Array.isArray(value))return value;try {const parsed=JSON.parse(value||'[]');return Array.isArray(parsed)?parsed:[];}catch{return [];}};
 export function driverRoutePoints(pedido,pasos={}) {
-  return [['carga',list(pedido.puntos_carga),pedido.origen],['descarga',list(pedido.puntos_descarga),pedido.destino]].flatMap(([type,items,fallback])=>{
-    const stops=items.length?items:[{nombre:fallback,direccion:fallback}];
-    return stops.map((p,i)=>{
-      const done=['entregado','facturado'].includes(pedido.estado)||['completado','entregado','finalizado'].includes(p.estado)||(type==='carga'?pasos.carga_ok:pasos.descarga_ok);
-      const active=!done&&(type==='carga'?(pasos.carga_iniciada||pasos.carga_proceso):pasos.posicionado_descarga);
-      return {...p,tipo:type,label:p.nombre||p.direccion||fallback||`Parada ${i+1}`,tone:{color:done?'#059669':active?'#f59e0b':'#3b82f6',label:done?'Completada':active?'En curso':'Pendiente'},title:`${type==='carga'?'Carga':'Descarga'} ${i+1} · ${done?'Completada':active?'En curso':'Pendiente'}`};
-    });
+  const stops=driverStops(pedido);
+  return stops.map(stop=>{
+    const progress=stopData(stop,pasos,stops);
+    const done=['entregado','facturado'].includes(pedido.estado)||['entregado','completado'].includes(stop.estado)||stopDone(stop,progress);
+    const legacyActive=!pasos.paradas&&stop.index===0&&(stop.tipo==='carga'?pasos.carga_iniciada:pasos.posicionado_descarga);
+    const active=!done&&(legacyActive||(stop.tipo==='carga'?(progress.carga_iniciada||progress.carga_proceso):progress.posicionado_descarga));
+    const label=done?'Completada':active?'En curso':'Pendiente';
+    return {...stop,tone:{color:done?'#059669':active?'#f59e0b':'#3b82f6',label},title:`${stop.tipo==='carga'?'Carga':'Descarga'} ${stop.index+1} · ${label}`};
   });
 }
 export default function DriverTripMap({pedido,pasos,chofer}) {

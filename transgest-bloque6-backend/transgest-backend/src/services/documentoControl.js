@@ -70,6 +70,9 @@ function firstStopInfo(stops = [], fallbackName = "") {
 function normalizeStopList(stops = [], fallback = {}) {
   return (Array.isArray(stops) ? stops : []).map((stop, index) => ({
     orden: index + 1,
+    mercancia: stop.mercancia || '', bultos: stop.bultos ?? '', peso_kg: stop.peso_kg ?? '',
+    confirmacion_chofer: stop.confirmacion_chofer || null,
+    firma_parada: stop.firma_parada || null,
     nombre: stop.nombre || stop.name || stop.cliente_nombre || "",
     direccion: stop.direccion || stop.address || stop.nombre || stop.name || "",
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || fallback.fecha || "",
@@ -1320,7 +1323,9 @@ async function buildDocumentoControlHtml({
       <td>${escapeHtml(item.nombre || "-")}</td>
       <td>${escapeHtml(item.direccion || "-")}${item.google_maps_url ? `<br><a href="${escapeHtml(item.google_maps_url)}">${escapeHtml(item.google_maps_url)}</a>` : ""}</td>
       <td>${escapeHtml(item.fecha || "-")}</td>
-      <td>${escapeHtml(item.hora || item.ventana || "-")}</td>
+      <td>${escapeHtml(item.hora || item.ventana || "-")}
+      ${item.mercancia ? `<br>${escapeHtml(item.mercancia)} · ${escapeHtml(item.bultos)} bultos · ${escapeHtml(item.peso_kg)} kg` : ''}
+      ${item.firma_parada ? `<br>Firmado: ${escapeHtml(item.firma_parada.firmante?.nombre || '')} · ${escapeHtml(item.firma_parada.firmado_at || '')}` : ''}</td>
     </tr>
   `).join("");
   const firmaBox = (label, firma = {}, extra = "") => {
@@ -1541,6 +1546,8 @@ async function generateDocumentoControlPdf({
         .text(text(item.direccion), { width: 500 });
       doc.font("Helvetica").fontSize(8).fillColor("#64748b")
         .text(`Fecha: ${text(item.fecha)}  Hora/ventana: ${text(item.hora || item.ventana)}`);
+      if(item.mercancia)doc.text(`${text(item.mercancia)} · ${text(item.bultos)} bultos · ${text(item.peso_kg)} kg`,{width:500});
+      if(item.firma_parada)doc.text(`Firmado: ${text(item.firma_parada.firmante?.nombre)} · ${text(item.firma_parada.firmado_at)}`,{width:500});
       doc.moveDown(0.45);
     });
   };

@@ -42,3 +42,10 @@ export function updateCargo(p,key,value){
  }
  return next;
 }
+
+export function fullLoadLength(form, vehicles = []) {
+ const tractor=vehicles.find(v=>v.id===form.vehiculo_id);
+ const trailer=vehicles.find(v=>v.id===(form.remolque_id_manual||form.remolque_id||tractor?.remolque_id));
+ const length=number(trailer?.metros_carga);
+ return length>0?length:13.65;
+}

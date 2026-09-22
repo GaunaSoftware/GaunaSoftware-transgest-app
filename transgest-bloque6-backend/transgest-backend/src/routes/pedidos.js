@@ -852,6 +852,8 @@ function normalizeChoferPasosPayload(value = {}) {
     "albaran_carga",
     "albaran_descarga",
     "firma_entrega",
+    "firma_cargador",
+    "mercancia_confirmada",
     "aviso_espera_carga",
     "aviso_espera_descarga",
     "dcd_revisado",
@@ -909,6 +911,8 @@ function normalizeChoferPasosPayload(value = {}) {
     "albaran_carga_at",
     "albaran_descarga_at",
     "firma_entrega_at",
+    "firma_cargador_at",
+    "mercancia_confirmada_at",
     "aviso_espera_carga_at",
     "aviso_espera_descarga_at",
     "dcd_revisado_at",
@@ -919,6 +923,11 @@ function normalizeChoferPasosPayload(value = {}) {
       if (Number.isFinite(d.getTime())) next[key] = d.toISOString();
     }
   });
+  for(const [key,val] of Object.entries(source)) {
+    if(/^protocolo_[a-z_]+$/.test(key)) next[key]=key.endsWith('_at')?String(val):Boolean(val);
+  }
+  if(source.paradas && typeof source.paradas==='object') next.paradas=source.paradas;
+  if(source.parada_id) next.parada_id=String(source.parada_id).slice(0,180);
   return next;
 }
 
@@ -930,7 +939,7 @@ function hasStopUsableLocation(stop = {}) {
   return Number.isFinite(lat) && Number.isFinite(lng);
 }
 
-async function guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location = {}, actorId = null }) {
+async function guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location = {}, actorId = null, paradaId = null }) {
   const lat = Number(location?.lat);
   const lng = Number(location?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -941,7 +950,9 @@ async function guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location 
   const pedido = rows[0];
   if (!pedido) return null;
   const puntos = normalizePedidoJsonList(pedido.puntos_carga);
-  const first = puntos[0] && typeof puntos[0] === "object" ? { ...puntos[0] } : { direccion: pedido.origen || "", tipo: "carga" };
+  const pointIndex=paradaId?require('../services/driverStops').driverStops(pedido).find(s=>s.id===paradaId)?.index:0;
+  if(pointIndex==null)return null;
+  const first = puntos[pointIndex] && typeof puntos[pointIndex] === "object" ? { ...puntos[pointIndex] } : { direccion: pedido.origen || "", tipo: "carga" };
   if (hasStopUsableLocation(first) || String(pedido.ultima_posicion || "").trim()) return null;
   const capturedAt = location.captured_at || new Date().toISOString();
   const mapsUrl = googleMapsSearchUrl(`${lat},${lng}`);
@@ -954,7 +965,7 @@ async function guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location 
     ubicacion_precision_m: location.accuracy_m ?? null,
     ubicacion_capturada_at: capturedAt,
   };
-  const nextPuntos = [nextFirst, ...puntos.slice(1)];
+  const nextPuntos = puntos.length?puntos.map((point,i)=>i===pointIndex?nextFirst:point):[nextFirst];
   await db.query(
     `UPDATE pedidos
         SET puntos_carga=$1::jsonb,
@@ -974,7 +985,7 @@ async function guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location 
     "chofer_ubicacion_carga",
     "Ubicacion de carga guardada por chofer",
     `El chofer ha marcado posicion de carga para el pedido ${pedido.numero || pedidoId}.`,
-    { pedido_id: pedidoId, lat, lng, google_maps_url: mapsUrl, dedupe_key: `ubicacion-carga:${pedidoId}` },
+    { pedido_id: pedidoId, lat, lng, google_maps_url: mapsUrl, dedupe_key: `ubicacion-carga:${pedidoId}:${paradaId||"principal"}` },
     actorId
   );
   return nextPuntos;
@@ -1744,12 +1755,21 @@ async function savePedidoChoferPasos({
   actorId = null,
 }) {
   await ensureColaboradorWorkflowSchema();
+  let stopResult=null;
+  if(patch.parada_id){
+    const result=await require('../services/driverStops').saveStop(db,{pedidoId,empresaId,choferId,patch});
+    await logPedidoEvento(pedidoId,empresaId,'chofer_parada.actualizada',{parada_id:patch.parada_id,parada:result.data.paradas[patch.parada_id]},actorTipo,actorId);
+    if(result.state==='entregado')await programarAutomatismosEntrega(pedidoId,empresaId,actorId,{});
+    if(result.idempotent)return result.data;
+    stopResult=result;
+  }
   const current = await getPedidoChoferPasos(pedidoId, empresaId);
-  const nextData = {
+  const nextData = stopResult ? stopResult.data.paradas[patch.parada_id] : {
     ...current.data,
     ...normalizeChoferPasosPayload(patch),
     updated_at: new Date().toISOString(),
   };
+  if(!stopResult){
   await db.query(
     `INSERT INTO pedido_chofer_pasos (pedido_id, empresa_id, chofer_id, data, updated_at)
      VALUES ($1,$2,$3,$4,NOW())
@@ -1767,6 +1787,7 @@ async function savePedidoChoferPasos({
     actorTipo,
     actorId
   );
+  }
   const pedidoMeta = await db.query(
     "SELECT id, numero, origen, destino, origen_pais, destino_pais, estado::text AS estado, chofer_id, fecha_carga, hora_carga, fecha_descarga, fecha_entrega, hora_descarga FROM pedidos WHERE id=$1 AND empresa_id=$2 LIMIT 1",
     [pedidoId, empresaId]
@@ -1848,7 +1869,7 @@ async function savePedidoChoferPasos({
       }
     }
   }
-  await sincronizarPedidoYChoferDesdePasos();
+  if(!stopResult)await sincronizarPedidoYChoferDesdePasos();
   async function avisarParalizacion(fase, titulo, mins, dedupeSuffix) {
     if (!mins || mins <= 60) return;
     const paisOperacion = inferPaisOperacionPedido(pedido, fase);
@@ -1894,7 +1915,7 @@ async function savePedidoChoferPasos({
         minutos: mins,
         paralizacion: calculo,
         ruta: `${pedido.origen || ""} -> ${pedido.destino || ""}`,
-        dedupe_key: `paralizacion:${fase}:${pedidoId}:${dedupeSuffix}`,
+        dedupe_key: `paralizacion:${fase}:${pedidoId}:${patch.parada_id||"viaje"}:${dedupeSuffix}`,
       },
       actorId
     );
@@ -1933,10 +1954,10 @@ async function savePedidoChoferPasos({
     await aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch: nextData, actorId }).catch(e => logger.warn("No se pudo calcular km en vacio desde pasos:", e.message));
   }
   if (patch.carga_iniciada && patch.carga_ubicacion) {
-    await guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location: patch.carga_ubicacion, actorId })
+    await guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location: patch.carga_ubicacion, actorId, paradaId:patch.parada_id })
       .catch(e => logger.warn("No se pudo guardar ubicacion de carga desde app chofer:", e.message));
   }
-  return nextData;
+  return stopResult?.data || nextData;
 }
 
 function addDays(date, days) {
@@ -1994,6 +2015,15 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
   `, [pedidoId, empresaId]);
   const pedido = rows[0];
   if (!pedido) return null;
+  const progress=await getPedidoChoferPasos(pedidoId,empresaId);
+  const operationalStops=require('../services/driverStops').driverStops(pedido);
+  for(const type of ['carga','descarga']) {
+    const key=type==='carga'?'puntos_carga':'puntos_descarga';
+    pedido[key]=operationalStops.filter(s=>s.tipo===type).map(stop=>{
+      const real=progress.data?.paradas?.[stop.id];
+      return real?.mercancia_confirmada?{...stop,mercancia:real.mercancia_cargada,bultos:real.mercancia_palets,peso_kg:real.mercancia_peso_kg,confirmacion_chofer:real,firma_parada:pedido.firma_evidencia?.paradas?.[stop.id]||null}:stop;
+    });
+  }
   const ordenCarga = await ensurePedidoOrdenCargaNumero(pedido.id, empresaId).catch((error) => {
     logger.warn("No se pudo asegurar la numeracion de orden de carga:", error.message);
     return null;
@@ -6711,7 +6741,7 @@ router.get("/:id/documento-control-digital", async (req, res) => {
     if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, ctx.pedido))) {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
-    if(req.user?.rol==='chofer' && !(await getPedidoChoferPasos(req.params.id,empresaId)).data.carga_ok) return res.status(409).json({error:'El documento estará disponible cuando marques la carga como finalizada.'});
+    if(req.user?.rol==='chofer' && !await (async()=>{const d=(await getPedidoChoferPasos(req.params.id,empresaId)).data;return d.carga_ok||Object.values(d.paradas||{}).some(s=>s.tipo==='carga'&&s.carga_ok);})()) return res.status(409).json({error:'El documento estará disponible cuando marques la carga como finalizada.'});
     res.json(await buildPedidoDocumentoControlResponse(req, ctx, empresaId));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -7709,7 +7739,7 @@ router.get("/:id/eventos", async (req, res) => {
     await ensureColaboradorWorkflowSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     if (!pedidoRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
@@ -7738,7 +7768,7 @@ router.get("/:id/chofer-pasos", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     const pedido = pedidoRows[0];
@@ -7757,7 +7787,7 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id, puntos_carga, puntos_descarga FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     const pedido = pedidoRows[0];
@@ -7765,7 +7795,12 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
     if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
       return res.status(403).json({ error: "No puedes modificar este pedido" });
     }
+    if(req.body?.paradas) return res.status(400).json({error:'Envía únicamente los cambios de la parada actual.'});
     const patch = normalizeChoferPasosPayload(req.body || {});
+    if(req.user?.rol==='chofer'&&!patch.parada_id&&Object.keys(patch).some(key=>!key.startsWith('dcd_')&&key!=='updated_at')) {
+      const existing=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
+      if(existing.paradas || require('../services/driverStops').driverStops(pedido).length>2)return res.status(409).json({error:'Actualiza la app para confirmar cada carga y descarga por separado.',code:'DRIVER_STOP_REQUIRED'});
+    }
     if(Object.keys(patch).some(key=>!key.startsWith("dcd_") && key!=="updated_at")) await assertDriverWorkday(req);
     const saved = await savePedidoChoferPasos({
       pedidoId: req.params.id,
@@ -9027,6 +9062,10 @@ router.patch("/:id/estado",
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
     }
+    if(req.user?.rol==='chofer'&&estado==='entregado') {
+      const progress=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
+      if(progress.paradas&&!progress.firma_entrega)return res.status(409).json({error:'Confirma y firma todas las descargas antes de finalizar el viaje.',code:'DRIVER_DELIVERIES_PENDING'});
+    }
     // Proteccion: cuando el chofer ya esta haciendo los pasos del viaje (en curso),
     // nadie desde trafico/pedidos puede cambiarle el estado. Solo el propio chofer
     // (desde su app) o gerencia. Asi no se pisa el estado real del viaje.
@@ -9880,7 +9919,7 @@ router.post("/:id/firma", async (req, res) => {
     const { rows: pedidoRows } = await db.query(
       `SELECT id, numero, origen, destino, fecha_carga, fecha_descarga, fecha_entrega,
               vehiculo_id, chofer_id, chofer2_id, estado::text AS estado,
-              firma_evidencia
+              firma_evidencia, puntos_carga, puntos_descarga, mercancia, bultos, peso_kg
          FROM pedidos
         WHERE id=$1 AND empresa_id=$2
         LIMIT 1`,
@@ -9892,6 +9931,18 @@ router.post("/:id/firma", async (req, res) => {
       return res.status(403).json({ error: "No puedes firmar este pedido" });
     }
 
+    let signedStop=null;
+    if(req.body.parada_id){
+      await assertDriverWorkday(req);
+      const helpers=require('../services/driverStops');
+      signedStop=helpers.driverStops(pedido).find(s=>s.id===req.body.parada_id);
+      const steps=(await getPedidoChoferPasos(pedido.id,empresaId)).data;
+      if(!signedStop || (signedStop.tipo==='carga'?'cargador':'destinatario')!==firmaRol)return res.status(409).json({error:'La firma no corresponde a esta parada.'});
+      const data=helpers.stopData(signedStop,steps,helpers.driverStops(pedido));
+      if(helpers.activeDriverStop(pedido,steps)?.id!==signedStop.id)return res.status(409).json({error:'Esta parada ya está cerrada o aún no es la parada actual.'});
+      if(signedStop.tipo==='carga'?!(data.mercancia_confirmada&&data.albaran_carga):!(data.descarga_ok&&data.albaran_descarga))return res.status(409).json({error:'Completa los datos y el albarán de esta parada antes de firmar.'});
+      signedStop={...signedStop,mercancia:data.mercancia_cargada,bultos:data.mercancia_palets,peso_kg:data.mercancia_peso_kg};
+    }
     const firmadoAt = new Date().toISOString();
     const firmaHash = sha256Hex(firmaImagen);
     const pedidoContext = buildFirmaPedidoContext(pedido);
@@ -9908,6 +9959,7 @@ router.post("/:id/firma", async (req, res) => {
         carga: pedido.fecha_carga || null,
         descarga: pedido.fecha_descarga || pedido.fecha_entrega || null,
       },
+      parada: signedStop,
       pedido_context: pedidoContext,
       pedido_context_hash_sha256: sha256Hex(stableJson(pedidoContext)),
       firmante: {
@@ -9934,6 +9986,7 @@ router.post("/:id/firma", async (req, res) => {
       integrity_hash_sha256: sha256Hex(stableJson(evidenciaBase)),
     };
     const evidenciaMulti = mergeFirmaEvidencia(pedido.firma_evidencia || null, firmaRol, evidencia);
+    if(signedStop) evidenciaMulti.paradas={...(pedido.firma_evidencia?.paradas||{}),[signedStop.id]:evidencia};
 
     const roleSetSql = {
       cargador: "firma_cargador = $1, firma_cargador_nombre = $2, firma_cargador_fecha = $5",

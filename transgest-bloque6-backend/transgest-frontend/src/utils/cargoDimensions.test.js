@@ -1,4 +1,4 @@
-import {palletLayout,cargoCount,cargoLength,cargoPayload,updateCargo} from './cargoDimensions';
+import {fullLoadLength,palletLayout,cargoCount,cargoLength,cargoPayload,updateCargo} from './cargoDimensions';
 
 test('calculates complete rows and their occupied width',()=>{
  expect(palletLayout(1,'europeo')).toEqual({length:0.8,width:1.2});
@@ -32,4 +32,12 @@ test('manual dimensions survive later quantity edits and are used by groupage',(
  expect(p.carga_ancho_m).toBe('2,1');
  expect(cargoPayload(p).metros_lineales).toBe(2.5);
  expect(cargoLength({palets_tipo:'granel',bultos:4,carga_largo_m:3})).toBe(3);
+});
+
+test('full load uses explicit trailer, linked trailer, or 13.65m fallback',()=>{
+ const vehicles=[{id:'tractor',remolque_id:'long'},{id:'long',metros_carga:15},{id:'short',metros_carga:'12,5'}];
+ expect(fullLoadLength({vehiculo_id:'tractor'},vehicles)).toBe(15);
+ expect(fullLoadLength({vehiculo_id:'tractor',remolque_id_manual:'short'},vehicles)).toBe(12.5);
+ expect(fullLoadLength({},vehicles)).toBe(13.65);
+ expect(fullLoadLength({remolque_id_manual:'missing'},vehicles)).toBe(13.65);
 });

@@ -132,6 +132,28 @@ async function main(){
    await db.transaction(c=>require('../src/services/verifactiWebhook').processReceipts(c,eid));
    assert.equal((await pg.query('SELECT estado_envio FROM factura_registros_fiscales WHERE factura_id=$1',[draft])).rows[0].estado_envio,'aceptado','Late pending webhook cannot undo acceptance');
    assert.equal((await pg.query('SELECT count(*)::int AS n FROM fiscal_webhook_receipts')).rows[0].n,1);
+   const webhookInvoices=[];
+   for(const [index,status] of ['Correcto','Incorrecto'].entries()) {
+    const invoiceId=crypto.randomUUID(),recordId=crypto.randomUUID();
+    webhookInvoices.push(invoiceId);
+    await pg.query(`INSERT INTO facturas(id,empresa_id,cliente_id,numero,serie,fecha,fecha_vencimiento,estado,base_imponible,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,total) VALUES($1,$2,$3,$4,'A','2026-09-22','2026-10-22','emitida',100,21,21,0,0,121)`,[invoiceId,eid,cid,`A-2026-W${index}`]);
+    await pg.query("INSERT INTO factura_registros_fiscales(id,empresa_id,factura_id,modo,huella,payload) VALUES($1,$2,$3,'verifactu',$4,$5)",[recordId,eid,invoiceId,`webhook-hash-${index}`,JSON.stringify(payload())]);
+    await pg.query("INSERT INTO factura_envios_fiscales(registro_id,factura_id,empresa_id,sistema,payload,provider_uuid) VALUES($1,$2,$3,'verifactu',$4,$5)",[recordId,invoiceId,eid,JSON.stringify(payload()),`webhook-qa-${index}`]);
+    const body=JSON.stringify([{uuid:`webhook-qa-${index}`,nif:'B12345678',estado:status,mensaje_error:status==='Incorrecto'?'Datos rechazados en prueba':undefined}]);
+    assert.equal((await send(body,sign(body),crypto.randomUUID())).status,202);
+   }
+   const unknownId=crypto.randomUUID();
+   const unknownBody=JSON.stringify([{uuid:'not-owned-by-company',nif:'B12345678',estado:'Correcto'}]);
+   assert.equal((await send(unknownBody,sign(unknownBody),unknownId)).status,202);
+   await db.transaction(c=>require('../src/services/verifactiWebhook').processReceipts(c,eid));
+   const states=(await pg.query('SELECT factura_id,estado_envio,ultimo_error FROM factura_registros_fiscales WHERE factura_id=ANY($1::uuid[])',[webhookInvoices])).rows;
+   assert.equal(states.find(r=>r.factura_id===webhookInvoices[0]).estado_envio,'aceptado');
+   assert.equal(states.find(r=>r.factura_id===webhookInvoices[1]).estado_envio,'error');
+   assert.match(states.find(r=>r.factura_id===webhookInvoices[1]).ultimo_error,/Datos rechazados/);
+   assert.equal((await pg.query('SELECT processed_at FROM fiscal_webhook_receipts WHERE event_id=$1',[unknownId])).rows[0].processed_at,null);
+   await db.transaction(c=>outbox.recoverAcceptedInvoices(c,eid));
+   assert.equal((await pg.query('SELECT count(*)::int AS n FROM accounting_invoice_outbox WHERE factura_id=$1',[webhookInvoices[0]])).rows[0].n,3);
+   assert.equal((await pg.query('SELECT count(*)::int AS n FROM accounting_invoice_outbox WHERE factura_id=$1',[webhookInvoices[1]])).rows[0].n,0);
   }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
  }finally{global.fetch=originalFetch;await pg.close();}
  console.log('Fiscal/ClaveiCon: mapping, XML, migration, idempotency, acceptance, isolation, HMAC and ordered exports passed.');

@@ -1,10 +1,10 @@
 import React, {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import ReportCenter from './ReportCenter';
-import {getBiReportCatalog,getBiReportViews,saveBiReportView,updateBiReportView,runBiReport,getBiReportPage} from '../../services/api';
+import {getBiReportCatalog,getBiReportViews,getBiWeeklySettings,saveBiWeeklySettings,saveBiReportView,updateBiReportView,runBiReport,getBiReportPage} from '../../services/api';
 
 jest.mock('../../services/api',()=>({
-  getBiReportCatalog:jest.fn(),getBiReportViews:jest.fn(),saveBiReportView:jest.fn(),
+  getBiReportCatalog:jest.fn(),getBiReportViews:jest.fn(),getBiWeeklySettings:jest.fn(),saveBiWeeklySettings:jest.fn(),saveBiReportView:jest.fn(),
   updateBiReportView:jest.fn(),deleteBiReportView:jest.fn(),runBiReport:jest.fn(),getBiReportPage:jest.fn(),
   exportBiReport:jest.fn(),downloadBiReport:jest.fn()
 }));
@@ -20,6 +20,9 @@ const catalog={templates:[{id:'direccion',name:'Dirección',metrics:['ingreso'],
 let node,root;
 beforeEach(()=>{
   jest.clearAllMocks();getBiReportCatalog.mockResolvedValue(catalog);getBiReportViews.mockResolvedValue([shared]);
+  getBiWeeklySettings.mockResolvedValue({hora:'Lunes 09:00 Europe/Madrid',gerentes:[
+    {id:'manager-1',nombre:'Gerente A',email:'gerente-a@example.test'},
+    {id:'manager-2',nombre:'Gerente B',email:'gerente-b@example.test'}],destinatarios:[],ultimos_envios:[]});
   node=document.createElement('div');document.body.append(node);root=createRoot(node);
 });
 afterEach(()=>{act(()=>root.unmount());node.remove();});
@@ -74,4 +77,27 @@ test('manager can request the completed previous week with one action',async()=>
   expect(runBiReport).toHaveBeenCalledWith({configuracion:expect.objectContaining({template:'vehiculo',periodo:'semana_anterior'})});
   expect(node.textContent).toContain('21 sept 2026');
   expect(node.textContent).toContain('El margen directo no es beneficio neto');
+});
+
+test('weekly delivery is opt-in and restricted to the selected managers',async()=>{
+  saveBiWeeklySettings.mockResolvedValue({destinatarios:['manager-1']});
+  getBiWeeklySettings.mockResolvedValueOnce({hora:'Lunes 09:00 Europe/Madrid',gerentes:[
+    {id:'manager-1',nombre:'Gerente A',email:'gerente-a@example.test'},
+    {id:'manager-2',nombre:'Gerente B',email:'gerente-b@example.test'}],destinatarios:[],ultimos_envios:[]})
+    .mockResolvedValueOnce({hora:'Lunes 09:00 Europe/Madrid',gerentes:[
+      {id:'manager-1',nombre:'Gerente A',email:'gerente-a@example.test'},
+      {id:'manager-2',nombre:'Gerente B',email:'gerente-b@example.test'}],destinatarios:['manager-1'],ultimos_envios:[]});
+  await act(async()=>root.render(<ReportCenter initialState={{}} role="gerente" ownerId="manager-1"/>));
+  expect(saveBiWeeklySettings).not.toHaveBeenCalled();
+  const first=[...node.querySelectorAll('.bi-weekly-people label')][0].querySelector('input');
+  await act(async()=>{first.click();});
+  await act(async()=>clickButton('Guardar destinatarios'));
+  expect(saveBiWeeklySettings).toHaveBeenCalledWith({destinatarios:['manager-1']});
+  expect(node.textContent).toContain('Envío semanal activado');
+});
+
+test('accounting role cannot see recipient settings',async()=>{
+  await act(async()=>root.render(<ReportCenter initialState={{}} role="contable" ownerId="accountant-1"/>));
+  expect(getBiWeeklySettings).not.toHaveBeenCalled();
+  expect(node.textContent).not.toContain('Envío semanal de rentabilidad');
 });

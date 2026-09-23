@@ -2,7 +2,7 @@
 
 ## Alcance y reglas
 
-Aplican [BI_RULES.md](BI_RULES.md) y las instrucciones versionadas del repositorio. Esta tarea audita las fases 1–5 y ejecuta **fase 6**, más el informe semanal expresamente solicitado, en el worktree aislado `tmp/bi-phase1` (rama `codex/bi-phase1-reliability`, base `6b9a65e`). No hay acceso a producción, fusión ni despliegue. El trabajo ajeno permanece en sus respectivos worktrees.
+Aplican [BI_RULES.md](BI_RULES.md) y las instrucciones versionadas del repositorio. Esta tarea audita las fases 1–5 y ejecuta **fase 6**, más el informe semanal expresamente solicitado, en el worktree aislado `tmp/bi-phase1` (rama `codex/bi-phase1-reliability`, base `6b9a65e`). La comprobación posterior de Asensi fue de solo lectura por autorización expresa del usuario; no hubo fusión, despliegue ni modificación productiva. El trabajo ajeno permanece en sus respectivos worktrees.
 
 ## Estado de fases
 
@@ -80,3 +80,11 @@ No se han creado tablas, migraciones, servicios externos ni datos de demostraci�
 4. `bi_report_exports` conserva el binario privado con caducidad de 24 horas. Crear y descargar exige la misma empresa, el mismo usuario, el rol/módulo/plan y un run no caducado. No hay enlaces anónimos. La ejecución nueva purga los registros vencidos de su empresa. No se implementan envíos ni programación.
 5. El PDF usa PDFKit con Liberation Sans embebida (licencia OFL incluida), diseño A4 paginado, encabezado/pie, cabecera de tabla repetida, filas sin partir, logo de empresa cuando `logo_base64` contiene PNG/JPEG válido, y avisos explícitos de cobertura. Los gráficos son vectoriales y el top 8 queda etiquetado. XLSX reutiliza el empaquetador OOXML ya existente e incorpora fechas tipadas, números con signo, parámetros, definiciones y advertencias. CSV usa UTF-8, separador `;` y neutralización de fórmulas solo para texto; los importes negativos siguen siendo numéricos.
 6. Esta fase añade la migración **aditiva** `20260923_bi_report_center.sql`. No se aplicó en producción ni se modificaron facturas históricas. La instalación de esta fase requiere ejecutar las migraciones normales antes de utilizar el centro. La fase 6 queda pendiente de instrucción expresa.
+
+## Continuación solicitada · envío automático semanal
+
+1. La programación es opt-in y se configura en el Centro de informes por un Gerente. Puede seleccionar uno o varios gerentes activos de su propia empresa. No se infiere el destinatario de «Email empresa»: en la comprobación autorizada de Asensi estaba vacío y había dos cuentas con rol Gerente.
+2. Un proceso del backend verifica cada 15 minutos, los lunes desde las 09:00 Europe/Madrid, la semana civil completa anterior. La clave única (empresa, destinatario, lunes de la semana informada) impide duplicados entre reinicios e instancias. La generación usa la plantilla de explotación por vehículo y el mismo contrato financiero y PDF que el informe a demanda.
+3. El servidor vuelve a comprobar empresa activa, usuario activo, rol Gerente, permiso de Informes, capacidad `kpis_avanzados` y producto TransGest antes de generar y enviar. La configuración y el historial de estados se filtran por empresa. Nunca se añade a la lista un rol de tráfico ni una cuenta de otra empresa.
+4. El mensaje usa el transporte de correo configurado para la empresa o el fallback existente de plataforma. Se guarda `enviado`, `sin_smtp`, `fallido` o `por_verificar`; un fallo ambiguo después de entregar al SMTP no se reintenta automáticamente para evitar duplicados. Un informe fallido puede solicitarse a demanda dentro del programa. La entrega real queda por validar tras migración y despliegue controlado.
+5. La migración `20260923_bi_weekly_delivery.sql` añade suscripciones y trazas de envío; no toca facturas ni pedidos. No contiene direcciones ni datos de Asensi. El usuario puede desactivar el envío quitando todos los destinatarios.

@@ -4,7 +4,7 @@ Estas reglas complementan las instrucciones del repositorio; no las sustituyen.
 
 - Fase activa: 6, auditoría y validación integral de las fases 1–5. La única ampliación funcional autorizada en esta fase es el informe semanal de flota solicitado por gerencia.
 - Trabajar en rama/worktree aislado; conservar cambios ajenos.
-- La instrucción actual autoriza el push de la rama aislada tras las comprobaciones; no autoriza fusionar, desplegar ni consultar/modificar producción.
+- La instrucción actual autoriza el push de la rama aislada tras las comprobaciones; no autoriza fusionar, desplegar ni modificar producción. El usuario autorizó posteriormente una comprobación de acceso **solo de lectura** con su cuenta de Asensi para preparar el envío semanal; esta excepción no autoriza enviar informes desde producción ni alterar suscripciones allí.
 - No alterar facturas históricas, precios ni capacidades de planes; no migraciones destructivas.
 - Mantener stack, identidad, navegación y autorización de empresa, rol y plan en servidor.
 - Reutilizar servicios, tablas y componentes. No añadir servicios de pago innecesarios.

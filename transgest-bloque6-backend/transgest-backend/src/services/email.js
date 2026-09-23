@@ -394,6 +394,18 @@ function htmlEscape(value) {
 }
 
 const PLANTILLAS = {
+  bi_rentabilidad_semanal: (data = {}) => ({
+    asunto: `TransGest · Informe semanal de rentabilidad · ${String(data.desde || '').replace(/[\r\n]/g, '')} a ${String(data.hasta || '').replace(/[\r\n]/g, '')}`,
+    html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#15201d;background:#fff;border:1px solid #d9e4e1;border-radius:14px;overflow:hidden">
+      <div style="background:#102f2a;color:#fff;padding:22px 28px;font-size:22px;font-weight:700">TransGest <span style="font-size:13px;font-weight:400;color:#a8e6d9">Informe de gerencia</span></div>
+      <div style="padding:26px 28px;line-height:1.55">
+        <h1 style="font-size:21px;margin:0 0 12px">Rentabilidad semanal de flota</h1>
+        <p style="margin:0 0 16px">${htmlEscape(data.empresa || 'Tu empresa')} · ${htmlEscape(data.desde || '')} a ${htmlEscape(data.hasta || '')}</p>
+        <p>Adjuntamos el informe PDF de la semana completa anterior con ingresos de servicios, costes directos registrados, margen directo, kilómetros totales y vacíos y desglose por vehículo.</p>
+        <div style="background:#eff8f5;border-left:4px solid #0f766e;padding:12px 15px;font-size:13px">El margen directo no es beneficio neto. Revisa dentro del PDF la cobertura y los gastos pendientes de valorar antes de tomar decisiones.</div>
+        <p style="font-size:13px;color:#526a62">Puedes generar de nuevo el informe y consultar el detalle desde Informes en TransGest.</p>
+      </div></div>`,
+  }),
   factura_reclamacion: (data = {}) => ({
     asunto: `Recordatorio de pago - Factura ${String(data.numero || "").replace(/[\r\n]/g, " ")}`,
     html: `<div style="${BASE_STYLE}">

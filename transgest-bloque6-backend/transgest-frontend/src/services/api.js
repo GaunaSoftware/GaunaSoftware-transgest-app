@@ -1225,6 +1225,8 @@ export const getBiAnalitica = (params={}) => apiFetch(`/informes/bi/analitica?${
 export const getBiWorkspace = (params={}, signal) => apiFetch(`/informes/bi/workspace?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true, signal });
 export const getBiReportCatalog = () => apiFetch('/informes/bi/reportes/catalogo', {silentSuccess:true});
 export const getBiReportViews = () => apiFetch('/informes/bi/reportes/vistas', {silentSuccess:true});
+export const getBiWeeklySettings = () => apiFetch('/informes/bi/reportes/semanal/configuracion', {silentSuccess:true});
+export const saveBiWeeklySettings = data => apiFetch('/informes/bi/reportes/semanal/configuracion', {method:'PUT',body:data});
 export const saveBiReportView = data => apiFetch('/informes/bi/reportes/vistas', {method:'POST',body:data});
 export const updateBiReportView = (id,data) => apiFetch(`/informes/bi/reportes/vistas/${encodeURIComponent(id)}`, {method:'PUT',body:data});
 export const deleteBiReportView = id => apiFetch(`/informes/bi/reportes/vistas/${encodeURIComponent(id)}`, {method:'DELETE'});

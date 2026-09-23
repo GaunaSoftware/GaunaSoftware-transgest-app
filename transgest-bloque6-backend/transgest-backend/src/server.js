@@ -1476,6 +1476,7 @@ async function startServer() {
     try { pedidosRoutes.startPedidosVencidosScheduler?.(); } catch (e) { logger.warn("Auto-incidencias: " + e.message); }
     try { require("./services/collectionScheduler").startScheduler(); } catch(e) {logger.error("Cobros: " + e.message);}
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
+    try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
   });
   } catch (e) {

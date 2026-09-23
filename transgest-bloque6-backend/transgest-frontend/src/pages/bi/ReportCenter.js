@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {getBiReportCatalog,getBiReportViews,saveBiReportView,updateBiReportView,deleteBiReportView,runBiReport,getBiReportPage,exportBiReport,downloadBiReport} from '../../services/api';
+import {getBiReportCatalog,getBiReportViews,getBiWeeklySettings,saveBiWeeklySettings,saveBiReportView,updateBiReportView,deleteBiReportView,runBiReport,getBiReportPage,exportBiReport,downloadBiReport} from '../../services/api';
 import './report-center.css';
 
 const date=value=>value?new Intl.DateTimeFormat('es-ES',{dateStyle:'medium'}).format(new Date(`${String(value).slice(0,10)}T12:00:00Z`)):'—';
@@ -16,9 +16,13 @@ export default function ReportCenter({initialState,choices={},role,ownerId}){
   const [catalog,setCatalog]=useState(null),[views,setViews]=useState([]),[config,setConfig]=useState(null);
   const [selected,setSelected]=useState(null),[name,setName]=useState(''),[description,setDescription]=useState(''),[scope,setScope]=useState('personal');
   const [run,setRun]=useState(null),[page,setPage]=useState(1),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [weeklySettings,setWeeklySettings]=useState(null),[weeklyIds,setWeeklyIds]=useState([]),[weeklyBusy,setWeeklyBusy]=useState(false),[weeklyError,setWeeklyError]=useState(''),[weeklyNotice,setWeeklyNotice]=useState('');
   useEffect(()=>{let live=true;Promise.all([getBiReportCatalog(),getBiReportViews()]).then(([c,v])=>{
     if(!live)return;setCatalog(c);setViews(v);setConfig(defaults(c.templates[0],initial.current));
   }).catch(e=>{if(live)setError(e.message||'No se pudo cargar el centro de informes');});return()=>{live=false;};},[]); // mounted per account
+  useEffect(()=>{setWeeklySettings(null);setWeeklyIds([]);setWeeklyError('');setWeeklyNotice('');if(role!=='gerente')return;let live=true;getBiWeeklySettings().then(settings=>{
+    if(live){setWeeklySettings(settings);setWeeklyIds(settings.destinatarios||[]);}
+  }).catch(e=>{if(live)setWeeklyError(e.message||'No se pudo cargar la programación semanal');});return()=>{live=false;};},[role,ownerId]);
   const edit=fn=>{activeRun.current=null;setConfig(old=>fn(old));setRun(null);setPage(1);setNotice('');};
   const template=catalog?.templates.find(t=>t.id===config?.template);
   const choiceMap={cliente_id:catalog?.opciones?.clientes||choices.clientes||[],ruta:choices.rutas||[],vehiculo_id:choices.vehiculos||[],ejecucion:choices.ejecuciones||[]};
@@ -40,6 +44,12 @@ export default function ReportCenter({initialState,choices={},role,ownerId}){
     setName('Rentabilidad semanal de flota');setDescription('Semana completa anterior; margen directo registrado, costes y kilómetros por camión.');setScope('personal');
     const result=await runBiReport({configuracion:next});activeRun.current=result.id;setRun(result);setPage(1);
     setNotice('Informe semanal preparado. Puedes verlo aquí o descargar su PDF. El margen directo no es beneficio neto.');});
+  const saveWeekly=async()=>{setWeeklyBusy(true);setWeeklyError('');setWeeklyNotice('');try{
+    const saved=await saveBiWeeklySettings({destinatarios:weeklyIds});setWeeklyIds(saved.destinatarios);
+    setWeeklySettings(old=>({...old,destinatarios:saved.destinatarios}));
+    setWeeklyNotice(saved.destinatarios.length?'Envío semanal activado para los gerentes seleccionados.':'Envío semanal desactivado.');
+    try{setWeeklySettings(await getBiWeeklySettings());}catch(_error){/* The save succeeded; recent status can be refreshed on the next visit. */}
+  }catch(e){setWeeklyError(e.message||'No se pudo guardar la programación');}finally{setWeeklyBusy(false);}};
   const changePage=next=>act('pagina',async()=>{const id=run.id;const report=await getBiReportPage(id,next);
     if(activeRun.current===id){setRun(old=>({...old,report}));setPage(next);}});
   const exportFormat=format=>act(format,async()=>{if(!run)throw new Error('Primero genera la vista previa.');
@@ -49,11 +59,19 @@ export default function ReportCenter({initialState,choices={},role,ownerId}){
     setNotice(`${format.toUpperCase()} descargado desde la misma ejecución que muestra la pantalla.`);});
   if(!catalog||!config)return <section className="bi-reports" role="status">{error||'Cargando catálogo y vistas guardadas…'}</section>;
   const report=run?.report,rows=report?.rows||[],totalRows=report?.metadata?.total_rows??rows.length;
+  const weeklyUnchanged=JSON.stringify([...weeklyIds].sort())===JSON.stringify([...(weeklySettings?.destinatarios||[])].sort());
   return <section className="bi-reports" aria-label="Centro de informes">
     <div className="bi-reports-intro"><div><h2>Informes a demanda</h2><p>Guarda una vista personal o compártela con usuarios autorizados de tu empresa. Pantalla y archivos usan la misma ejecución.</p>
       {role==='gerente'&&<button className="bi-weekly" disabled={!!busy} onClick={weekly}>Ver informe semanal de flota</button>}</div>
       <label>Vistas guardadas<select value={selected?.id||''} onChange={e=>selectView(e.target.value)}><option value="">Nueva vista</option>
         {views.map(v=><option key={v.id} value={v.id}>{v.alcance==='compartida'?'Compartida':'Personal'} · {v.nombre}</option>)}</select></label></div>
+    {role==='gerente'&&<div className="bi-weekly-settings"><div><h3>Envío semanal de rentabilidad</h3><p>PDF de la semana completa anterior. {weeklySettings?.hora||'Lunes desde las 09:00 Europe/Madrid'}. El margen directo se muestra separado de otros costes; no se presenta como beneficio neto.</p></div>
+      {weeklySettings?.gerentes?.length>0&&<div className="bi-weekly-people" role="group" aria-label="Gerentes destinatarios">{weeklySettings.gerentes.map(person=><label key={person.id}><input type="checkbox" checked={weeklyIds.includes(person.id)} onChange={e=>setWeeklyIds(ids=>e.target.checked?[...ids,person.id]:ids.filter(id=>id!==person.id))}/><span>{person.nombre}<small>{person.email}</small></span></label>)}</div>}
+      {!weeklySettings&&!weeklyError&&<p role="status">Cargando destinatarios…</p>}
+      {weeklySettings&&<div className="bi-reports-actions"><button className="bi-primary" disabled={weeklyBusy||weeklyUnchanged} onClick={saveWeekly}>{weeklyBusy?'Guardando…':'Guardar destinatarios'}</button><span>{weeklyIds.length?'Solo recibirán el informe los gerentes seleccionados.':'Sin destinatarios, no se envía automáticamente.'}</span></div>}
+      {weeklyError&&<p role="alert" className="bi-reports-error">{weeklyError}</p>}{weeklyNotice&&<p role="status" className="bi-reports-notice">{weeklyNotice}</p>}
+      {weeklySettings?.ultimos_envios?.length>0&&<details><summary>Estado de los últimos envíos</summary><div className="bi-report-scroll"><table><thead><tr><th>Semana</th><th>Destinatario</th><th>Estado</th><th>Detalle</th></tr></thead><tbody>{weeklySettings.ultimos_envios.map((entry,i)=><tr key={`${entry.user_id}-${entry.week_start}-${i}`}><td>{date(entry.week_start)}</td><td>{entry.email}</td><td>{entry.status.replaceAll('_',' ')}</td><td>{entry.error||'—'}</td></tr>)}</tbody></table></div></details>}
+    </div>}
     <div className="bi-reports-grid"><div className="bi-reports-editor">
       <div className="bi-reports-fields"><label>Plantilla<select value={config.template} onChange={e=>{const next=catalog.templates.find(t=>t.id===e.target.value);edit(()=>defaults(next,initialState));setSelected(null);setName(next.name);}}>
         {catalog.templates.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select></label>

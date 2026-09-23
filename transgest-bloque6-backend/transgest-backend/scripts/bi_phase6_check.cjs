@@ -1,10 +1,15 @@
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
 const zlib=require('node:zlib');
 const pdfParse=require('pdf-parse');
 const {buildEconomics}=require('../src/services/financialEconomics');
 const {evolution}=require('../src/services/financialWorkspace');
 const center=require('../src/services/biReportCenter');
 const exporter=require('../src/services/biReportExport');
+const dockerfile=fs.readFileSync(path.join(__dirname,'../Dockerfile'),'utf8');
+assert.match(dockerfile,/^COPY\s+assets\/fonts\/\s+\.\/assets\/fonts\/\s*$/m,
+  'The production image must include the embedded fonts required by BI PDFs');
 function sheetXml(buffer){let pos=0;while(pos<buffer.length-30&&buffer.readUInt32LE(pos)===0x04034b50){
   const compressed=buffer.readUInt32LE(pos+18),nameLen=buffer.readUInt16LE(pos+26),extra=buffer.readUInt16LE(pos+28);
   const name=buffer.subarray(pos+30,pos+30+nameLen).toString(),start=pos+30+nameLen+extra;

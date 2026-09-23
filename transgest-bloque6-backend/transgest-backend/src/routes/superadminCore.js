@@ -1941,6 +1941,7 @@ router.get("/integraciones", superAuth, async (req, res, next) => {
         entorno: fiscalConfig.entorno,
         email_alertas: fiscalConfig.email_alertas || "",
         verifactu_provider: fiscalConfig.verifactu?.proveedor || "directo",
+        representacion: fiscalConfig.verifactu?.representacion || {estado:'no_configurada'},
         sii_emitidas: !!fiscalConfig.sii?.incluir_emitidas,
         sii_recibidas: !!fiscalConfig.sii?.incluir_recibidas,
         ultima_prueba: fiscalConfig.ultima_prueba || null,
@@ -2410,6 +2411,22 @@ router.get("/config/ia-key", superAuth, async (req, res) => {
   }
 });
 
+router.put('/integraciones/fiscal/:empresaId/representacion',superAuth,async(req,res,next)=>{
+ try {res.json(await db.transaction(c=>require('../services/fiscalRepresentation').recordRepresentation(c,req.params.empresaId,null,req.body || {},req.superadmin?.id)));}
+ catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
+
+router.get('/integraciones/fiscal/:empresaId/claveicon',superAuth,async(req,res,next)=>{
+ try {
+  const empresa=await db.query('SELECT configuracion FROM empresas WHERE id=$1',[req.params.empresaId]);
+  if(!empresa.rows.length)return res.status(404).json({error:'Empresa no encontrada'});
+  const cfg=empresa.rows[0].configuracion?.claveicon || {};
+  const config=Object.fromEntries(['mode','enabled','codemp','sales_account','vat_account','withholding_account','customer_root','codtipopre','codban','ivagenast'].map(key=>[key,cfg[key]]));
+  const result=await db.query("SELECT COUNT(*) FILTER(WHERE status IN ('pending','processing'))::int AS pending,COUNT(*) FILTER(WHERE status IN ('failed','unknown'))::int AS errors,MAX(processed_at) AS last_synced_at FROM accounting_invoice_outbox WHERE empresa_id=$1 AND provider='claveicon'",[req.params.empresaId]);
+  res.json({config,...result.rows[0]});
+ }catch(e){next(e);}
+});
+
 router.get("/integraciones/fiscal/:empresaId/queue-summary", superAuth, async (req, res, next) => {
   try {
     const empresaId = req.params.empresaId;
@@ -2524,7 +2541,7 @@ router.post("/integraciones/fiscal/:empresaId/facturas/:facturaId/sincronizar", 
     const item = envio.rows[0];
     if (!item) return res.status(404).json({ error: "La factura aun no tiene un envio fiscal VERIFACTU para sincronizar." });
 
-    const providerUuid = extractProviderUuid(item.response || {});
+    const providerUuid = item.provider_uuid || extractProviderUuid(item.response || {});
     if (!providerUuid) return res.status(409).json({ error: "Esta factura aun no tiene UUID de proveedor en Verifacti." });
 
     const providerResult = await getVerifactiRecordStatus(config, providerUuid);
@@ -2537,7 +2554,7 @@ router.post("/integraciones/fiscal/:empresaId/facturas/:facturaId/sincronizar", 
         await markQueueError(
           client,
           item,
-          providerResult?.response?.error || providerResult?.response?.message || "Error devuelto por Verifacti al sincronizar.",
+          providerResult?.response?.mensaje_error || providerResult?.response?.error || providerResult?.response?.message || "Verifacti requiere revisar el registro fiscal antes de contabilizarlo.",
           null,
           false,
           providerResult

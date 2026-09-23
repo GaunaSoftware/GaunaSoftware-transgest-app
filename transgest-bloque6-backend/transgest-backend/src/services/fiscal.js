@@ -18,7 +18,7 @@ const FISCAL_DEFAULTS = {
     url: "",
     version: "",
     fecha: "",
-    productor: "Gauna Software",
+    productor: "GaunaSoftware",
     notas: "",
   },
   factura_b2b: {
@@ -300,6 +300,7 @@ function buildFiscalStatus(configInput = {}) {
       addCheck("Base URL Verifacti", !!config.verifactu.provider_base_url, "Falta la URL base de la API de Verifacti.");
       addCheck("API key Verifacti", !!config.verifactu.provider_api_key, "Falta la API key de Verifacti.");
       addCheck("Webhook secret Verifacti", !!config.verifactu.provider_webhook_secret, "Conviene definir un webhook secret para sincronizacion segura desde Verifacti.", "warning");
+      if(config.entorno==="produccion")addCheck("Representación verificada",config.verifactu.representacion?.estado==="valida" && config.verifactu.representacion?.nif===config.nif_declarante && !!config.verifactu.representacion?.validated_at && (!config.verifactu.representacion?.expires_at || new Date(config.verifactu.representacion.expires_at).getTime()>Date.now()),"Falta validar la representación de este NIF en Verifacti.");
       connectorReady = !!config.verifactu.provider_base_url && !!config.verifactu.provider_api_key;
     } else {
       addCheck("Alias certificado VERIFACTU", !!config.verifactu.certificado_alias, "Falta el alias del certificado VERIFACTU.");
@@ -444,6 +445,7 @@ function sanitizeFiscalConfigForClient(input = {}) {
       provider_base_url: config.verifactu.provider_base_url,
       provider_api_key_masked: maskSecret(config.verifactu.provider_api_key),
       provider_webhook_secret_masked: maskSecret(config.verifactu.provider_webhook_secret),
+      representacion: config.verifactu.representacion || {estado:"no_configurada"},
       software_nombre: config.verifactu.software_nombre,
       software_id: config.verifactu.software_id,
       software_version: config.verifactu.software_version,
@@ -462,7 +464,7 @@ function sanitizeFiscalConfigForClient(input = {}) {
   };
 }
 
-async function saveEmpresaFiscalConfig(empresaId, input, client = db) {
+async function saveEmpresaFiscalConfig(empresaId, input, client = db, options = {}) {
   const current = await getEmpresaFiscalConfig(empresaId, client);
   const raw = input && typeof input === "object" ? { ...input } : {};
   const rawVerifactu = raw.verifactu && typeof raw.verifactu === "object" ? { ...raw.verifactu } : {};
@@ -472,6 +474,7 @@ async function saveEmpresaFiscalConfig(empresaId, input, client = db) {
   if (!String(rawVerifactu.provider_webhook_secret || "").trim() && current.verifactu.provider_webhook_secret) {
     rawVerifactu.provider_webhook_secret = current.verifactu.provider_webhook_secret;
   }
+  if(!options.allowRepresentationUpdate)rawVerifactu.representacion=current.verifactu.representacion || {estado:"no_configurada"};
   raw.verifactu = rawVerifactu;
   const rawB2b = raw.factura_b2b && typeof raw.factura_b2b === "object" ? { ...raw.factura_b2b } : {};
   if (!String(rawB2b.api_key || "").trim() && current.factura_b2b.api_key) {
@@ -725,15 +728,21 @@ function buildFacturaFiscalPayload({ factura, cliente, empresaPerfil, lineas, co
       numero: factura.numero,
       factura_id: factura.id,
       rectificativa_de: factura.factura_original_numero || null,
+      rectificacion: factura.fiscal_metadata?.rectificacion || null,
     },
     emisor: {
       nombre: config.razon_social_declarante || empresaPerfil.razon_social || "",
       nif: config.nif_declarante || empresaPerfil.cif || "",
+      domicilio: empresaPerfil.domicilio || empresaPerfil.direccion || "",
     },
     receptor: {
       nombre: cliente.nombre || factura.cliente_nombre || "",
       nif: cliente.cif || factura.cliente_cif || "",
       email: cliente.email_facturacion || cliente.email || "",
+      direccion: cliente.direccion || "",
+      cp: cliente.cp || "",
+      ciudad: cliente.ciudad || "",
+      pais: cliente.pais || "",
     },
     importes: {
       base_imponible: Number(factura.base_imponible || 0),
@@ -743,6 +752,9 @@ function buildFacturaFiscalPayload({ factura, cliente, empresaPerfil, lineas, co
       cuota_irpf: Number(factura.cuota_irpf || 0),
       total: Number(factura.total || 0),
       moneda: "EUR",
+      iva_regimen: factura.iva_regimen || factura.fiscal_cliente_iva_regimen || "",
+      operacion_exenta: factura.fiscal_metadata?.operacion_exenta || null,
+      calificacion_operacion: factura.fiscal_metadata?.calificacion_operacion || null,
     },
     lineas: (lineas || []).map((linea, index) => ({
       orden: index + 1,
@@ -758,14 +770,7 @@ function buildFacturaFiscalPayload({ factura, cliente, empresaPerfil, lineas, co
 
   const canonical = JSON.stringify(sortedClone(payload));
   const huella = sha256(canonical);
-  const qrText = [
-    "TRANSGEST",
-    config.modo.toUpperCase(),
-    factura.numero,
-    factura.fecha,
-    Number(factura.total || 0).toFixed(2),
-    huella,
-  ].join("|");
+  const qrText = null; // An internal hash is not an official fiscal QR.
 
   return { payload, huella, qrText };
 }
@@ -894,7 +899,8 @@ async function appendFiscalEvent(client, recordId, facturaId, empresaId, eventTy
   );
 }
 
-async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = null, force = false, client = db }) {
+async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = null, force = false, allowEmissionIntent = false, client = db }) {
+  if(client===db)return db.transaction(tx=>ensureFacturaFiscalRecord({facturaId,empresaId,actorUserId,force,allowEmissionIntent,client:tx}));
   const config = await getEmpresaFiscalConfig(empresaId, client);
   if (config.modo === "ninguno") {
     return { skipped: true, reason: "fiscal_mode_disabled" };
@@ -906,19 +912,23 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
             c.cif AS cliente_cif,
             c.email AS cliente_email,
             c.email_facturacion,
+            c.direccion AS fiscal_cliente_direccion,c.cp AS fiscal_cliente_cp,c.ciudad AS fiscal_cliente_ciudad,c.pais AS fiscal_cliente_pais,
+            to_jsonb(c)->>'iva_regimen' AS fiscal_cliente_iva_regimen,
             e.nombre AS empresa_nombre,
             e.cfg_precios
        FROM facturas f
        JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
        JOIN empresas e ON e.id=f.empresa_id
-      WHERE f.id=$1 AND f.empresa_id=$2`,
+      WHERE f.id=$1 AND f.empresa_id=$2 FOR UPDATE OF f`,
     [facturaId, empresaId]
   );
   const factura = facturaRows[0];
   if (!factura) throw new Error("Factura no encontrada para registro fiscal");
-  if (factura.estado === "borrador") {
+  if (factura.estado === "borrador" && !allowEmissionIntent) {
     return { skipped: true, reason: "draft_invoice" };
   }
+
+  if(allowEmissionIntent)factura.estado="emitida";
 
   const { rows: lineas } = await client.query(
     "SELECT concepto, cantidad, precio_unit FROM factura_lineas WHERE factura_id=$1 ORDER BY orden,id",
@@ -934,6 +944,7 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
     cif: factura.cliente_cif,
     email: factura.cliente_email,
     email_facturacion: factura.email_facturacion,
+    direccion: factura.fiscal_cliente_direccion, cp: factura.fiscal_cliente_cp, ciudad: factura.fiscal_cliente_ciudad, pais: factura.fiscal_cliente_pais,
   };
 
   const { rows: existingRows } = await client.query(
@@ -942,7 +953,12 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
   );
   const existing = existingRows[0] || null;
 
-  if (existing && !force) {
+  if (existing) {
+    if(force) {
+      await client.query(`UPDATE factura_envios_fiscales SET next_retry_at=NOW(),updated_at=NOW() WHERE id=(SELECT id FROM factura_envios_fiscales WHERE factura_id=$1 AND empresa_id=$2 ORDER BY created_at DESC LIMIT 1) AND estado='error' AND retryable=true`,[facturaId,empresaId]);
+      await appendFiscalEvent(client,existing.id,facturaId,empresaId,'queue.retry_requested',{actor_user_id:actorUserId});
+      return {skipped:true,reason:'existing_delivery_reused',record:existing};
+    }
     return { skipped: true, reason: "already_exists", record: existing };
   }
 
@@ -968,22 +984,12 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
     `INSERT INTO factura_registros_fiscales
       (empresa_id, factura_id, modo, entorno, estado_registro, estado_envio, hash_anterior, huella, qr_text, payload, created_by, updated_by)
      VALUES ($1,$2,$3,$4,'alta','pendiente',$5,$6,$7,$8::jsonb,$9,$9)
-     ON CONFLICT (factura_id) DO UPDATE
-       SET modo=EXCLUDED.modo,
-           entorno=EXCLUDED.entorno,
-           estado_registro='alta',
-           estado_envio=CASE WHEN factura_registros_fiscales.estado_envio='aceptado' THEN 'aceptado' ELSE 'pendiente' END,
-           hash_anterior=EXCLUDED.hash_anterior,
-           huella=EXCLUDED.huella,
-           qr_text=EXCLUDED.qr_text,
-           payload=EXCLUDED.payload,
-           ultimo_error=NULL,
-           updated_by=EXCLUDED.updated_by,
-           updated_at=NOW()
+     ON CONFLICT (factura_id) DO NOTHING
      RETURNING *`,
     [empresaId, facturaId, config.modo, config.entorno, previousHash, huella, qrText, JSON.stringify(payload), actorUserId]
   );
   const record = recordRows[0];
+  if(!record){const saved=await client.query('SELECT * FROM factura_registros_fiscales WHERE factura_id=$1 AND empresa_id=$2',[facturaId,empresaId]);return {skipped:true,reason:'already_exists',record:saved.rows[0]};}
 
   const shouldQueue = (config.modo === "verifactu" && config.verifactu.envio_automatico)
     || (config.modo === "sii" && config.sii.envio_automatico);
@@ -1032,4 +1038,5 @@ module.exports = {
   getEmpresaFiscalQueueSummary,
   ensureFacturaFiscalRecord,
   buildFiscalXml,
+  buildFacturaFiscalPayload,
 };

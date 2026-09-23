@@ -8,17 +8,20 @@ function accountingConfigured() {
   return Boolean(process.env.ACCOUNTING_API_URL && process.env.ACCOUNTING_INGEST_KEY);
 }
 
-async function pushFacturaToAccounting({ empresaId, factura, clienteId }) {
+async function pushFacturaToAccounting({ empresaId, factura, clienteId, fromOutbox=false, partySnapshot=null }) {
   try {
     if (!accountingConfigured() || !factura || !empresaId) return { skipped: true };
 
+    const fiscal=await db.query("SELECT e.configuracion->'facturacion_fiscal'->>'modo' AS modo,r.estado_envio FROM empresas e LEFT JOIN factura_registros_fiscales r ON r.empresa_id=e.id AND r.factura_id=$2 WHERE e.id=$1",[empresaId,factura.id]);
+    if(fiscal.rows[0]?.modo==='verifactu' && fiscal.rows[0]?.estado_envio!=='aceptado')return {skipped:true,reason:'awaiting_aeat'};
+    if(fiscal.rows[0]?.modo==='verifactu' && !fromOutbox)return {skipped:true,reason:'durable_outbox'};
     let cliente = {};
     try {
       const { rows } = await db.query(
         "SELECT nombre, cif FROM clientes WHERE id=$1 AND empresa_id=$2 LIMIT 1",
         [clienteId || factura.cliente_id, empresaId]
       );
-      cliente = rows[0] || {};
+      cliente = partySnapshot || rows[0] || {};
     } catch { /* sin datos de cliente, se envia sin tercero */ }
 
     const payload = {
@@ -26,7 +29,7 @@ async function pushFacturaToAccounting({ empresaId, factura, clienteId }) {
       source_company_id: empresaId,
       source_ref: `factura:${factura.id}`,
       direction: "repercutido", // factura emitida a cliente = IVA repercutido
-      entry_date: String(factura.fecha || new Date().toISOString()).slice(0, 10),
+      entry_date: (factura.fecha instanceof Date ? factura.fecha.toISOString() : String(factura.fecha || new Date().toISOString())).slice(0, 10),
       invoice_number: factura.numero || "",
       party: { tax_id: cliente.cif || "", name: cliente.nombre || "" },
       base: Number(factura.base_imponible || 0),

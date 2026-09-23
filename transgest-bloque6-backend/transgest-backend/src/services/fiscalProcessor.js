@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 const db = require("./db");
 const { getEmpresaFiscalConfig } = require("./fiscal");
-const { createVerifactiRecord, getVerifactiRecordStatus } = require("./fiscalProviderVerifacti");
+const { createVerifactiRecord, getVerifactiRecordStatus, findVerifactiInvoice, mapInternalPayloadToVerifacti } = require("./fiscalProviderVerifacti");
 const {
   markQueueAccepted,
   markQueuePending,
@@ -14,14 +14,16 @@ function makeSimulatedReference(prefix) {
 }
 
 async function processSingleQueueItem(client, item, config, actorUserId) {
-  await client.query(
+  const claimed = await client.query(
     `UPDATE factura_envios_fiscales
         SET estado='procesando',
             intento=intento+1,
             updated_at=NOW()
-      WHERE id=$1`,
-    [item.id]
+      WHERE id=$1 AND updated_at=$2 AND estado IN ('pendiente','error')
+      RETURNING id`,
+    [item.id,item.claim_version]
   );
+  if(!claimed.rows.length) return {status:"deferred",reason:"claimed_elsewhere"};
 
   if (config.modo === "ninguno") {
     await markQueueError(client, item, "La empresa no tiene modo fiscal activo.", actorUserId, false);
@@ -30,10 +32,24 @@ async function processSingleQueueItem(client, item, config, actorUserId) {
 
   if (item.sistema === "verifactu" && config?.verifactu?.proveedor === "verifacti") {
     try {
-      const providerUuid = item?.response?.provider_uuid || item?.response?.uuid || null;
-      const providerResult = providerUuid
-        ? await getVerifactiRecordStatus(config, providerUuid)
-        : await createVerifactiRecord(config, item);
+      require("./fiscalEmission").assertRepresentation(config);
+      if(item.payload?.emisor?.nif!==config.nif_declarante || item.entorno!==config.entorno)throw Object.assign(new Error("La empresa o el entorno del envío no coincide con la configuración actual."),{retryable:false});
+      const request=mapInternalPayloadToVerifacti(item.payload || {});
+      const hash=require('./fiscalIdentity').digest(request);
+      if(item.request_hash && item.request_hash!==hash) throw Object.assign(new Error('La misma identidad fiscal contiene datos distintos. Revisa la factura; no se ha reenviado.'),{retryable:false});
+      const hadIdentity=!!item.idempotency_key;
+      item.idempotency_key=item.idempotency_key || `transgest:${item.empresa_id}:${item.factura_id}:${item.registro_id}`;
+      item.request_payload=item.request_payload || request;
+      await client.query(`UPDATE factura_envios_fiscales SET idempotency_key=$1,request_payload=$2::jsonb,request_hash=$3,first_attempt_at=COALESCE(first_attempt_at,NOW()) WHERE id=$4 AND empresa_id=$5`,[item.idempotency_key,JSON.stringify(item.request_payload),hash,item.id,item.empresa_id]);
+      let providerUuid = item.provider_uuid || item?.response?.provider_uuid || item?.response?.uuid || null;
+      let providerResult;
+      if(!providerUuid && (!hadIdentity || Number(item.intento)>0 || (item.first_attempt_at && Date.now()-new Date(item.first_attempt_at).getTime()>23*60*60*1000))) {
+        try {const found=await findVerifactiInvoice(config,item.request_payload);providerUuid=found.provider_uuid;}catch { /* An ambiguous lookup is not proof of absence. */ }
+        if(!providerUuid && (!hadIdentity || !item.first_attempt_at || Date.now()-new Date(item.first_attempt_at).getTime()>23*60*60*1000)) {
+          throw Object.assign(new Error('Resultado fiscal desconocido. Conciliar en Verifacti antes de reenviar: la ventana de idempotencia no está disponible.'),{retryable:false});
+        }
+      }
+      providerResult=providerUuid ? await getVerifactiRecordStatus(config,providerUuid) : await createVerifactiRecord(config,item);
 
       if (providerResult.provider_status === "accepted") {
         await markQueueAccepted(client, item, providerResult, actorUserId);
@@ -55,14 +71,15 @@ async function processSingleQueueItem(client, item, config, actorUserId) {
       await markQueueError(
         client,
         item,
-        providerResult?.response?.error || providerResult?.response?.message || "Error devuelto por Verifacti.",
+        providerResult.provider_status==='accepted_with_errors' ? "Aceptada con errores por AEAT: requiere subsanación antes de contabilizar." : providerResult?.response?.mensaje_error || providerResult?.response?.error || providerResult?.response?.message || "Error devuelto por Verifacti.",
         actorUserId,
         false,
         providerResult
       );
       return { status: "error", reason: "verifacti_provider_error" };
     } catch (error) {
-      await markQueueError(client, item, `Verifacti: ${error.message}`, actorUserId, true, error?.data || null);
+      const retryable=error.retryable!==false && (!error.status || error.status===409 || error.status===429 || error.status>=500);
+      await markQueueError(client, item, `Verifacti: ${error.message}`, actorUserId, retryable, error?.data ? {error_response:error.data} : null);
       return { status: "error", reason: "verifacti_transport_error" };
     }
   }
@@ -115,10 +132,11 @@ async function processSingleQueueItem(client, item, config, actorUserId) {
 }
 
 async function processPendingFiscalQueue({ empresaId, actorUserId = null, limit = 10, facturaId = null, client = db }) {
+  if(client===db)return db.transaction(tx=>processPendingFiscalQueue({empresaId,actorUserId,limit,facturaId,client:tx}));
   const normalizedLimit = Math.max(1, Math.min(Number(limit) || 10, 50));
   const config = await getEmpresaFiscalConfig(empresaId, client);
   const params = [empresaId];
-  let where = `empresa_id=$1 AND estado IN ('pendiente','error') AND (next_retry_at IS NULL OR next_retry_at <= NOW())`;
+  let where = `empresa_id=$1`;
   if (facturaId) {
     params.push(facturaId);
     where += ` AND factura_id=$${params.length}`;
@@ -129,11 +147,13 @@ async function processPendingFiscalQueue({ empresaId, actorUserId = null, limit 
     `SELECT *
        FROM (
          SELECT DISTINCT ON (factura_id, sistema)
-                id, registro_id, factura_id, empresa_id, sistema, entorno, estado, intento, payload, response, created_at
+                id, registro_id, factura_id, empresa_id, sistema, entorno, estado, intento, payload, response, created_at, updated_at, updated_at::text AS claim_version, idempotency_key, request_payload, request_hash, provider_uuid, first_attempt_at, retryable, next_retry_at
            FROM factura_envios_fiscales
           WHERE ${where}
           ORDER BY factura_id, sistema, created_at DESC
        ) cola
+      WHERE (estado='pendiente' OR (estado='error' AND retryable=true AND next_retry_at IS NOT NULL))
+        AND (next_retry_at IS NULL OR next_retry_at <= NOW())
       ORDER BY
         CASE estado WHEN 'error' THEN 0 ELSE 1 END,
         created_at ASC
@@ -149,6 +169,11 @@ async function processPendingFiscalQueue({ empresaId, actorUserId = null, limit 
     deferred: 0,
     items: [],
   };
+
+  if(rows.length && config.modo==='verifactu' && config.verifactu.proveedor==='verifacti') {
+    const health=await require('./fiscalProviderVerifacti').probeVerifactiConnection(config);
+    if(!health.ok)throw Object.assign(new Error(health.message),{status:503});
+  }
 
   for (const item of rows) {
     const out = await processSingleQueueItem(client, item, config, actorUserId);

@@ -1,3 +1,5 @@
+import FiscalRepresentation from '../components/FiscalRepresentation';
+import ClaveiconAdminSummary from '../components/ClaveiconAdminSummary';
 import SupportInbox from "../components/SupportInbox";
 import CompanyProducts from "../planner/CompanyProducts";
 import { getBrandDisplayName } from "../branding";
@@ -2004,6 +2006,8 @@ function IntegracionesAdmin({ saFetchFn }) {
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Fiscal por empresa</div>
+              {empresaId&&<ClaveiconAdminSummary empresaId={empresaId} request={saFetchFn}/>}
+              {empresaId&&<FiscalRepresentation key={`${empresaId}:${fiscalCfgEmpresa?.representacion?.updated_at || ""}`} value={fiscalCfgEmpresa?.representacion} canEdit save={body=>saFetchFn(`/integraciones/fiscal/${empresaId}/representacion`,{method:'PUT',body})}/>}
               <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,maxWidth:780}}>
                 VERIFACTU y SII se revisan siempre a nivel de empresa. La API o certificado fiscal no se comparte globalmente entre clientes.
               </div>

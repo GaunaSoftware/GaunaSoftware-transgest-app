@@ -110,7 +110,7 @@ app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), str
 app.use(express.json({
   limit: process.env.REQUEST_BODY_LIMIT || "12mb",
   verify: (req, _res, buf) => {
-    if (req.originalUrl && req.originalUrl.startsWith("/api/v1/whatsapp/webhook")) {
+    if (req.originalUrl && (req.originalUrl.startsWith("/api/v1/whatsapp/webhook") || req.originalUrl.startsWith("/api/v1/fiscal/webhook/"))) {
       req.rawBody = Buffer.from(buf);
     }
   },
@@ -683,6 +683,7 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
       )
     `).catch(captureStartupMigrationError);
     await db.query("CREATE INDEX IF NOT EXISTS idx_factura_eventos_fiscales_registro ON factura_eventos_fiscales(registro_id, created_at DESC)").catch(captureStartupMigrationError);
+    await require('./services/fiscalSchema').ensureFiscalDeliverySchema(db).catch(captureStartupMigrationError);
     // Schema additions
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS email_admin VARCHAR(200)").catch(captureStartupMigrationError);
     // Nombre fiscal (razon social). Lo usan login-brand y la facturacion; faltaba
@@ -1105,7 +1106,7 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
     // Some old code sends facturado in payload — ensure it's handled gracefully
     await db.query(`
       DO $$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
           WHERE table_name='pedidos' AND column_name='facturado') THEN
           ALTER TABLE pedidos ADD COLUMN facturado BOOLEAN GENERATED ALWAYS AS (factura_id IS NOT NULL) STORED;
         END IF;

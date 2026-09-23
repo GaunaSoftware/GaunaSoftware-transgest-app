@@ -1,6 +1,8 @@
 const PDFDocument = require('pdfkit');
 
-function buildFacturaPdfBuffer(factura = {}, lineas = [], empresa = {}) {
+async function buildFacturaPdfBuffer(factura = {}, lineas = [], empresa = {}) {
+  const qrUrl=require('./fiscalProviderVerifacti').officialQrUrl(factura.fiscal?.official_qr_url);
+  const qr=qrUrl && factura.estado!=='borrador' ? await require('./fiscalQr').officialQrImage(qrUrl,factura.fiscal?.official_qr_base64) : null;
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margins: { top: 84, bottom: 48, left: 48, right: 48 }, autoFirstPage: false });
     const chunks = [];
@@ -23,10 +25,18 @@ function buildFacturaPdfBuffer(factura = {}, lineas = [], empresa = {}) {
     });
     try {
       doc.addPage();
+      if(qr) {
+        const y=doc.y;
+        doc.font('Helvetica-Bold').fontSize(10).text('QR tributario',48,y,{width:110});
+        doc.image(qr,48,y+16,{width:99.21,height:99.21});
+        doc.font('Helvetica-Bold').fontSize(11).text('VERI*FACTU',160,y+40,{width:380});
+        doc.font('Helvetica').fontSize(10).text('Factura verificable en la sede electrónica de la AEAT',160,y+60,{width:340});
+        doc.y=y+130;
+      }
       doc.font('Helvetica-Bold').fontSize(16);
       text(empresa.razon_social || empresa.nombre || 'TransGest');
       doc.fontSize(13);
-      text(`FACTURA ${factura.numero || ''}`);
+      text(`${factura.estado==='borrador'?'BORRADOR — NO VÁLIDO COMO FACTURA':'FACTURA'} ${factura.numero || ''}`);
       doc.font('Helvetica').fontSize(10);
       if (empresa.cif) text(`CIF/NIF emisor: ${empresa.cif}`);
       if (empresa.domicilio) text(`Domicilio emisor: ${empresa.domicilio}`);

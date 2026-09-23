@@ -21,7 +21,7 @@ function ensureSchema() {
   return schema;
 }
 async function snapshot(client,id,empresaId) {
-  const invoice=await client.query(`SELECT id,cliente_id,numero,fecha,fecha_vencimiento,base_imponible,total,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,observaciones,referencia_cliente,factura_original_id,factura_original_numero,motivo_rectificacion,tipo_rectificacion,to_jsonb(facturas)->>'planner_preparacion_id' AS planner_preparacion_id FROM facturas WHERE id=$1 AND empresa_id=$2`,[id,empresaId]);
+  const invoice=await client.query(`SELECT id,cliente_id,numero,fecha,fecha_vencimiento,base_imponible,total,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,observaciones,referencia_cliente,factura_original_id,factura_original_numero,motivo_rectificacion,tipo_rectificacion,to_jsonb(facturas)->'fiscal_metadata' AS fiscal_metadata,to_jsonb(facturas)->>'planner_preparacion_id' AS planner_preparacion_id FROM facturas WHERE id=$1 AND empresa_id=$2`,[id,empresaId]);
   if(!invoice.rows[0])throw Object.assign(new Error('Factura no encontrada'),{status:404});
   const originalId=invoice.rows[0].factura_original_id;
   let original=null;

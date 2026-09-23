@@ -30,8 +30,11 @@ async function cargarFacturaEmailContext(facturaId, empresaId) {
       WHERE f.id=$1 AND f.empresa_id=$2`,
     [facturaId, empresaId]
   );
-  const factura = rows[0];
+  let factura = rows[0];
   if (!factura) return null;
+  const fiscal=await db.query('SELECT modo,official_qr_url,official_qr_base64,payload FROM factura_registros_fiscales WHERE factura_id=$1 AND empresa_id=$2',[facturaId,empresaId]);
+  factura.fiscal=fiscal.rows[0] || null;
+  factura=require('../services/fiscalInvoiceSnapshot').applyFiscalInvoiceSnapshot(factura,factura.fiscal);
   const [lineas, facturaDocs, pedidos, pedidoDocs, empresa] = await Promise.all([
     db.query("SELECT concepto,cantidad,precio_unit FROM factura_lineas WHERE factura_id=$1 ORDER BY orden,id", [factura.id]),
     db.query(`SELECT fd.pedido_doc_id,fd.pedido_id,fd.nombre,fd.file_base64,fd.file_mime
@@ -82,7 +85,7 @@ async function cargarFacturaEmailContext(facturaId, empresaId) {
     seen.add(key);
     return true;
   });
-  return { factura, lineas: lineas.rows || [], docs, pedidos: pedidos.rows || [], empresa };
+  return { factura, lineas: lineas.rows || [], docs, pedidos: pedidos.rows || [], empresa:{...empresa,...factura.emisor_fiscal} };
 }
 
 function buildFacturaEmailPreflight(ctx, destinatario = "") {
@@ -93,6 +96,7 @@ function buildFacturaEmailPreflight(ctx, destinatario = "") {
   const issues = [];
   const warnings = [];
   if (!ESTADOS_ENVIO_FACTURA.includes(factura.estado)) issues.push('El estado de la factura no permite enviarla.');
+  if(factura.fiscal?.modo==='verifactu' && !factura.fiscal.official_qr_url) issues.push('La factura todavía no dispone del QR oficial de Verifacti.');
   if (!String(destinatario || "").trim()) issues.push("El cliente no tiene email de facturacion configurado.");
   if (!String(factura.numero || "").trim()) issues.push("La factura no tiene numero.");
   if (!lineas.length) issues.push("La factura no tiene lineas.");

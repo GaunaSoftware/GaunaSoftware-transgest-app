@@ -6,7 +6,7 @@ const { authenticate, GERENTE_O_CONTABLE, SOLO_GERENTE, PUEDE_CAMBIAR_ESTADO_FAC
 const { pushFacturaToAccounting } = require("../services/accountingSync");
 const webhooks = require("../services/webhooks");
 const invoiceReview = require('../services/invoiceReview');
-const { ensureFacturaFiscalRecord, getEmpresaFiscalConfig, buildFiscalStatus, sanitizeFiscalConfigForClient, buildFiscalXml } = require("../services/fiscal");
+const { ensureFacturaFiscalRecord, getEmpresaFiscalConfig, buildFiscalStatus, sanitizeFiscalConfigForClient } = require("../services/fiscal");
 const { processPendingFiscalQueue } = require("../services/fiscalProcessor");
 const { getVerifactiRecordStatus } = require("../services/fiscalProviderVerifacti");
 const { markQueueAccepted, markQueuePending, markQueueError, logFiscalEvent } = require("../services/fiscalQueueState");
@@ -17,6 +17,11 @@ const { unbilledOptions, readUnbilledTrips } = require("../services/unbilledTrip
 
 const router = express.Router();
 router.use(authenticate);
+router.use("/contabilidad/claveicon",require("./claveicon"));
+router.put('/fiscal/representacion',SOLO_GERENTE,async(req,res,next)=>{
+ try {res.json(await db.transaction(c=>require('../services/fiscalRepresentation').recordRepresentation(c,req.empresaId || req.user.empresa_id,req.user.id,req.body || {})));}
+ catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
 const collections = require('../services/collectionScheduler');
 
 // Redondeo a 2 decimales para importes de factura. Elimina restos de coma
@@ -350,7 +355,7 @@ router.get("/bloqueos-documentales", GERENTE_O_CONTABLE, async (req, res) => {
            AND p.estado::text IN ('entregado','facturado')
            AND (p.factura_id IS NULL OR EXISTS (
              SELECT 1 FROM facturas f
-              WHERE f.id=p.factura_id AND f.empresa_id=p.empresa_id AND f.estado='borrador'
+              WHERE f.id=p.factura_id AND f.empresa_id=p.empresa_id AND f.estado='borrador' AND NOT EXISTS (SELECT 1 FROM factura_registros_fiscales fr WHERE fr.factura_id=f.id)
            ))
            AND COALESCE(docs.soportes,0)=0
          ORDER BY COALESCE(p.fecha_descarga,p.fecha_carga,p.fecha_pedido) DESC NULLS LAST, p.numero DESC
@@ -598,28 +603,8 @@ router.post("/fiscal/procesar-cola", GERENTE_O_CONTABLE, async (req, res) => {
 });
 
 router.get("/fiscal/export-lote.xml", GERENTE_O_CONTABLE, async (req, res) => {
-  const empresaId = req.empresaId || req.user.empresa_id;
-  const { desde, hasta, estado = "todos", modo = "todos" } = req.query;
-  const params = [empresaId];
-  const where = ["frf.empresa_id=$1"];
-  if (desde) { params.push(desde); where.push(`f.fecha >= $${params.length}`); }
-  if (hasta) { params.push(hasta); where.push(`f.fecha <= $${params.length}`); }
-  if (estado !== "todos") { params.push(estado); where.push(`frf.estado_envio = $${params.length}`); }
-  if (modo !== "todos") { params.push(modo); where.push(`frf.modo = $${params.length}`); }
-  const { rows } = await db.query(
-    `SELECT frf.*, f.numero, f.fecha
-       FROM factura_registros_fiscales frf
-       JOIN facturas f ON f.id=frf.factura_id
-      WHERE ${where.join(" AND ")}
-      ORDER BY f.fecha ASC, f.numero ASC
-      LIMIT 500`,
-    params
-  );
-  const body = rows.map(r => buildFiscalXml(r).replace(/^<\?xml[^>]*>\s*/i, "")).join("\n");
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<TransGestLoteFiscal generated_at="${new Date().toISOString()}" total="${rows.length}">\n${body}\n</TransGestLoteFiscal>`;
-  res.setHeader("Content-Type", "application/xml; charset=utf-8");
-  res.setHeader("Content-Disposition", `attachment; filename="lote-fiscal-transgest-${new Date().toISOString().slice(0,10)}.xml"`);
-  res.send(xml);
+  // An internal reconstruction is not the XML registered by Verifacti.
+  res.status(409).json({error:'Descarga el XML oficial desde cada factura. El antiguo lote interno no acredita el registro en AEAT.'});
 });
 
 // ── Traspaso a contabilidad externa (Contasol/Factusol, a3ASESOR) ─────────
@@ -863,14 +848,14 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
            c.direccion AS cliente_dir, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, c.pais AS cliente_pais,
            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion,
            c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
-           c.tipo_iva, c.iva_regimen AS cliente_iva_regimen, c.tipo_irpf, c.forma_pago, c.vencimiento
+           c.iva_regimen AS cliente_iva_regimen, c.forma_pago, c.vencimiento
     FROM facturas f JOIN clientes c ON c.id = f.cliente_id
     WHERE f.id = $1 AND f.empresa_id = $2
   `, [req.params.id, empresaId]);
 
   if (!rows[0]) return res.status(404).json({ error: "Factura no encontrada" });
 
-  const [lineas, extras, pedidos, docs, fiscal, fiscalEventos, fiscalEnvios, auditRows, emailRows] = await Promise.all([
+  const [lineas, extras, pedidos, docs, fiscal, fiscalEventos, fiscalEnvios, auditRows, emailRows, accountingRows] = await Promise.all([
     db.query(`SELECT fl.*
                 FROM factura_lineas fl
                 JOIN facturas f ON f.id=fl.factura_id
@@ -923,10 +908,11 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
                  AND (meta->>'factura_id'=$1 OR meta->>'factura_numero'=(SELECT numero FROM facturas WHERE id=$1 AND empresa_id=$2))
                ORDER BY sent_at DESC
                LIMIT 20`, [req.params.id, empresaId]).catch(() => ({ rows: [] })),
+    db.query('SELECT id,provider,entity_type,status,last_error,attempts FROM accounting_invoice_outbox WHERE factura_id=$1 AND empresa_id=$2 ORDER BY created_at',[req.params.id,empresaId]),
   ]);
 
   res.json({
-    ...rows[0],
+    ...require('../services/fiscalInvoiceSnapshot').applyFiscalInvoiceSnapshot(rows[0],fiscal.rows[0]),
     lineas: lineas.rows,
     extracostes: extras.rows,
     pedidos: pedidos.rows,
@@ -936,6 +922,7 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
     fiscal_envios: fiscalEnvios.rows,
     audit_log: auditRows.rows,
     email_log: emailRows.rows,
+    contabilidad_envios: accountingRows.rows,
   });
 });
 
@@ -966,21 +953,31 @@ router.get("/:id/fiscal", GERENTE_O_CONTABLE, async (req, res) => {
   });
 });
 
-router.get("/:id/fiscal/xml", GERENTE_O_CONTABLE, async (req, res) => {
+router.put('/:id/fiscal/datos',GERENTE_O_CONTABLE,async(req,res,next)=>{
+ try {res.json(await db.transaction(client=>require('../services/fiscalMetadata').saveFiscalMetadata(client,req.params.id,req.empresaId || req.user.empresa_id,req.user.id,req.body)));}
+ catch(error){if(error.status)return res.status(error.status).json({error:error.message});next(error);}
+});
+
+router.get("/:id/fiscal/xml", GERENTE_O_CONTABLE, async (req, res, next) => {
+ try {
   const empresaId = req.empresaId || req.user.empresa_id;
   const { rows } = await db.query(
-    `SELECT frf.*, f.numero
+    `SELECT frf.*, f.numero,
+       (SELECT COALESCE(q.provider_uuid,q.response->>'provider_uuid',q.response->>'uuid',q.response->'response'->>'uuid',q.response->'response'->'data'->>'uuid',q.response->'response'->'registro'->>'uuid') FROM factura_envios_fiscales q WHERE q.registro_id=frf.id AND q.empresa_id=frf.empresa_id ORDER BY q.created_at DESC LIMIT 1) AS provider_uuid
        FROM factura_registros_fiscales frf
        JOIN facturas f ON f.id=frf.factura_id
       WHERE frf.factura_id=$1 AND frf.empresa_id=$2`,
     [req.params.id, empresaId]
   );
   if (!rows[0]) return res.status(404).json({ error: "La factura no tiene registro fiscal." });
-  const xml = buildFiscalXml(rows[0]);
+  const config=await getEmpresaFiscalConfig(empresaId);
+  if(config.modo!=='verifactu' || config.verifactu.proveedor!=='verifacti')return res.status(409).json({error:'El conector activo no ofrece un XML oficial descargable.'});
+  const xml = await require('../services/fiscalProviderVerifacti').downloadVerifactiXml(config,rows[0]);
   const safeNumero = String(rows[0].numero || req.params.id).replace(/[^a-zA-Z0-9._-]+/g, "-");
   res.setHeader("Content-Type", "application/xml; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="fiscal-${safeNumero}.xml"`);
   res.send(xml);
+ } catch(error){if(error.status)return res.status(error.status).json({error:error.message});next(error);}
 });
 
 router.post("/:id/fiscal/requeue", SOLO_GERENTE, async (req, res) => {
@@ -1054,7 +1051,7 @@ router.post("/:id/fiscal/sincronizar", GERENTE_O_CONTABLE, async (req, res) => {
     return res.status(404).json({ error: "La factura aun no tiene un envio fiscal VERIFACTU para sincronizar." });
   }
 
-  const providerUuid = extractProviderUuid(item.response || {});
+  const providerUuid = item.provider_uuid || extractProviderUuid(item.response || {});
   if (!providerUuid) {
     return res.status(409).json({ error: "Esta factura aun no tiene UUID de proveedor en Verifacti." });
   }
@@ -1069,7 +1066,7 @@ router.post("/:id/fiscal/sincronizar", GERENTE_O_CONTABLE, async (req, res) => {
       await markQueueError(
         client,
         item,
-        providerResult?.response?.error || providerResult?.response?.message || "Error devuelto por Verifacti al sincronizar.",
+        providerResult?.response?.mensaje_error || providerResult?.response?.error || providerResult?.response?.message || "Verifacti requiere revisar el registro fiscal antes de contabilizarlo.",
         req.user.id,
         false,
         providerResult
@@ -1173,6 +1170,8 @@ router.post("/", GERENTE_O_CONTABLE,
       const cobrosConfig = await getCobrosConfig(empresaId, client);
       const borradoresPreviosArr = [...borradoresPrevios];
       if (borradoresPreviosArr.length) {
+        const frozen=await client.query('SELECT id FROM factura_registros_fiscales WHERE factura_id=ANY($1::uuid[]) AND empresa_id=$2',[borradoresPreviosArr,empresaId]);
+        if(frozen.rows.length)throw Object.assign(new Error('Hay un borrador con emisión fiscal iniciada. No se puede reagrupar.'),{status:409});
         await client.query(
           `DELETE FROM factura_pedidos
             WHERE pedido_id = ANY($1::uuid[])
@@ -1298,7 +1297,7 @@ router.post("/", GERENTE_O_CONTABLE,
           `DELETE FROM facturas f
             WHERE f.id = ANY($1::uuid[])
               AND f.empresa_id=$2
-              AND f.estado='borrador'
+              AND f.estado='borrador' AND NOT EXISTS (SELECT 1 FROM factura_registros_fiscales fr WHERE fr.factura_id=f.id)
               AND NOT EXISTS (
                 SELECT 1 FROM factura_pedidos fp WHERE fp.factura_id=f.id
               )`,
@@ -1367,6 +1366,10 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
       }
     }
 
+    if(estadoAntes==='borrador') {
+      try {await require('../services/fiscalEmission').prepareFiscalEmission({facturaId:factura.id,empresaId,actorUserId:req.user.id});}
+      catch(e){return res.status(e.status || 503).json({error:e.message,code:e.code || 'FISCAL_PENDING'});}
+    }
     let pedidosAfectados = [];
     try { await db.transaction(async (client) => {
       const current=await client.query('SELECT estado FROM facturas WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[factura.id,empresaId]);
@@ -1396,7 +1399,7 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
       );
 
       // Email automático si pasa a "cobrada" o "vencida"
-      if (estado !== "borrador") {
+      if (estadoAntes === "borrador") {
         await ensureFacturaFiscalRecord({
           facturaId: factura.id,
           empresaId,
@@ -1407,6 +1410,10 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
     });
 
     }catch(error){if(error.status)return res.status(error.status).json({error:error.message,code:error.code});throw error;}
+    if(estadoAntes==='borrador')await db.transaction(async client=>{
+      const fiscal=await client.query("SELECT * FROM factura_registros_fiscales WHERE factura_id=$1 AND empresa_id=$2 AND estado_envio='aceptado'",[factura.id,empresaId]);
+      if(fiscal.rows[0])await require('../services/claveicon/outbox').enqueueAcceptedInvoice(client,{factura_id:factura.id,empresa_id:empresaId});
+    }).catch(error=>logger.warn(`[Fiscal] Emisión guardada; contabilidad pendiente de recuperación: ${error.message}`));
     logger.info(`Estado factura ${factura.numero}: ${estadoAntes} → ${estado} por ${req.user.email}`);
     if ((estado || "").toLowerCase() !== "borrador") {
       pushFacturaToAccounting({ empresaId, factura:{...factura,estado}, clienteId: factura.cliente_id }).catch(() => {});
@@ -1439,6 +1446,8 @@ router.delete("/:id", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const { rows } = await db.query("SELECT estado, numero FROM facturas WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
   if (!rows[0]) return res.status(404).json({ error: "Factura no encontrada" });
+  const fiscalIntent=await db.query('SELECT id FROM factura_registros_fiscales WHERE factura_id=$1 AND empresa_id=$2',[req.params.id,empresaId]);
+  if(fiscalIntent.rows.length)return res.status(409).json({error:'La emisión fiscal ya se ha solicitado. No se puede eliminar ni reutilizar su numeración.'});
   if (rows[0].estado !== "borrador") {
     return res.status(400).json({ error: "Solo se pueden eliminar facturas en estado borrador" });
   }

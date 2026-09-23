@@ -1,3 +1,5 @@
+import ClaveiconPanel from '../components/ClaveiconPanel';
+import InvoiceFiscalData from '../components/InvoiceFiscalData';
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import { guardarControlCobrosConfig, getReclamacionesEnvios } from '../services/api';
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
@@ -10,7 +12,7 @@ import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
 import { registrarRevisionFactura } from '../services/api';
-import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
+import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -568,8 +570,9 @@ function getFacturaFiscalRowMeta(factura) {
   };
 }
 
-export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
-  const empresa = useEmpresaPerfil();
+export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onExportEvidence, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
+  const empresaActual = useEmpresaPerfil();
+  const empresa = {...empresaActual,...factura?.emisor_fiscal};
   const [revisionConfirmada,setRevisionConfirmada]=useState(false);
   const [motivoSinReferencia,setMotivoSinReferencia]=useState('');
   const [revisionRegistrada,setRevisionRegistrada]=useState(false);
@@ -692,6 +695,7 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
   td{padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:12px}
   .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid #1d4ed8}
   .total-row{font-weight:800;font-size:14px;background:#f0f9ff}
+  .official-fiscal-qr{display:flex;align-items:center;gap:16px;break-inside:avoid;margin-top:18px}.official-fiscal-qr img{width:35mm!important;height:35mm!important;max-width:none!important;max-height:none!important}
   .fiscal-box{margin-top:18px;padding:14px 16px;border-radius:10px;border:1px solid #d1d5db;background:#f8fafc}
   .fiscal-summary{margin-bottom:10px;padding:10px 12px;border-radius:8px}
   .fiscal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
@@ -738,6 +742,8 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
         </div>
 
         {/* Contenido */}
+        <InvoiceFiscalData key={factura.id} invoice={factura} onSaved={()=>{setRevisionConfirmada(false);setRevisionRegistrada(false);}}/>
+        {!!factura.contabilidad_envios?.length && <details className="fiscal-flow"><summary>Estado contable</summary>{factura.contabilidad_envios.map(item=><p key={item.id}><strong>{item.provider==='claveicon'?'ClaveiCon':'Contabilidad'} · {({account:'Cuenta',invoice:'Factura IVA',receivable:'Previsión'})[item.entity_type]}</strong>: {({pending:'Pendiente',processing:'Pendiente de confirmación',synced:'Contabilizada',failed:'Error',unknown:'Resultado desconocido'})[item.status]}{item.last_error && ` — ${item.last_error}`}</p>)}<p>Los reintentos contables se gestionan en el apartado de contabilidad y no vuelven a emitir la factura fiscal.</p></details>}
         {factura.estado==='borrador'&&<section className="finance-review" aria-label="Revisión antes de emitir">
           <h3>Revisión antes de emitir</h3>
           <p>Comprueba referencias, importes y archivos de entrega. La revisión queda registrada con tu usuario; cualquier cambio posterior requiere revisarla de nuevo.</p>
@@ -747,6 +753,7 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
           {onCambiarEstado&&<button className="tgui-button" disabled={revisionBusy||!revisionRegistrada} onClick={()=>onCambiarEstado(factura.id,'emitida')}>Emitir factura</button>}
         </section>}
         <div style={{padding:"28px 32px"}} id="factura-print-wrapper">
+          {factura.estado!=='borrador' && fiscal?.official_qr_url && fiscal?.official_qr_base64 && <div className="official-fiscal-qr"><img alt="QR tributario" src={`data:image/png;base64,${fiscal.official_qr_base64.replace(/^data:image\/png;base64,/, '')}`}/><div><strong>QR tributario · VERI*FACTU</strong><p>Factura verificable en la sede electrónica de la AEAT</p></div></div>}
           {/* Cabecera */}
           <div style={{display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
             <div>
@@ -765,7 +772,7 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:22,color:esRect?"#f97316":"var(--accent-xl)",marginBottom:6}}>
-                {esRect?"FACTURA RECTIFICATIVA":"FACTURA"}
+                {factura.estado==='borrador'?"BORRADOR · NO VÁLIDO COMO FACTURA":esRect?"FACTURA RECTIFICATIVA":"FACTURA"}
               </div>
               <div style={{fontSize:14,color:"var(--text2)",fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{factura.numero}</div>
               {factura.referencia_cliente&&<div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>Referencia: {factura.referencia_cliente}</div>}
@@ -976,8 +983,9 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
             </div>
           </div>
 
+
           {fiscal && (
-            <div className="fiscal-box" style={{marginTop:18,paddingTop:14,borderTop:"1px solid var(--border)"}}>
+            <div data-internal="true" className="fiscal-box" style={{marginTop:18,paddingTop:14,borderTop:"1px solid var(--border)"}}>
               <div
                 className="fiscal-summary"
                 style={{
@@ -999,9 +1007,10 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
                         onClick={()=>onExportFiscal(factura.id)}
                         style={{...S.btn,background:"rgba(148,163,184,.10)",color:"var(--text3)",border:"1px solid rgba(148,163,184,.24)",padding:"5px 8px"}}
                       >
-                        Descargar justificante fiscal
+                        Descargar XML oficial
                       </button>
                     )}
+                    {onExportEvidence&&<button style={S.btn} onClick={()=>onExportEvidence(factura.id)}>Resumen de auditoría</button>}
                     {onSyncFiscal && fiscal?.modo === "verifactu" && fiscalProviderUuid && (
                       <button
                         onClick={()=>onSyncFiscal(factura.id)}
@@ -2331,7 +2340,7 @@ export default function Facturacion() {
     try {
       const token = localStorage.getItem("tms_token") || "";
       const res = await fetch(facturaFiscalXmlUrl(facturaId), { headers:{ Authorization:`Bearer ${token}` } });
-      if (!res.ok) throw new Error("No se pudo descargar el XML fiscal.");
+      if (!res.ok){const error=await res.json().catch(()=>({}));throw new Error(error.error || "No se pudo descargar el XML fiscal.");}
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2344,32 +2353,6 @@ export default function Facturacion() {
       notify("XML fiscal descargado.", "success");
     } catch (e) {
       notify(e.message || "No se pudo descargar el XML fiscal.", "error");
-    }
-  }
-
-  async function descargarLoteXmlFiscal() {
-    try {
-      const token = localStorage.getItem("tms_token") || "";
-      const params = {
-        desde: fechaDesde || "",
-        hasta: fechaHasta || "",
-        estado: fiscalEstadoFiltro || "todos",
-        modo: fiscalModoFiltro || "todos",
-      };
-      const res = await fetch(facturasFiscalLoteXmlUrl(params), { headers:{ Authorization:`Bearer ${token}` } });
-      if (!res.ok) throw new Error("No se pudo descargar el lote XML fiscal.");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `lote-fiscal-${new Date().toISOString().slice(0,10)}.xml`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      notify("Lote XML fiscal descargado.", "success");
-    } catch (e) {
-      notify(e.message || "No se pudo descargar el lote XML fiscal.", "error");
     }
   }
 
@@ -2827,9 +2810,7 @@ export default function Facturacion() {
               Procesar cola fiscal
             </button>
           )}
-          <button onClick={descargarLoteXmlFiscal} style={{...S.btn,background:"rgba(59,130,246,.08)",color:"#2563eb",border:"1px solid rgba(59,130,246,.24)"}}>
-            Descargar lote XML
-          </button>
+          <p style={{fontSize:12,color:"var(--text3)"}}>El XML oficial se descarga desde el detalle de cada factura.</p>
           {[
             ["Aceptados", fiscalInfo.aceptados, "var(--green)"],
             ["Pendientes", fiscalInfo.pendientes, "#f59e0b"],
@@ -3222,7 +3203,7 @@ export default function Facturacion() {
       </Drawer>
 
       {renderInvoiceList()}
-      {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /></details>}
+      {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /><ClaveiconPanel canConfigure={esGerenteFacturacion}/></details>}
       </Card>
 
       </>
@@ -3241,13 +3222,13 @@ export default function Facturacion() {
         });
         const facturaEnriquecida = {
           ...vistaFact,
-          cliente_cif:      vistaFact.cliente_cif     || cli?.cif        || "",
-          cliente_direccion: vistaFact.cliente_direccion || direccionApi || formatDireccion(cli||{}) || "",
-          cliente_dir_fiscal: cli?.dir_fiscal_distinta
+          cliente_cif: vistaFact.fiscal_identity_frozen ? (vistaFact.cliente_cif || "") : (vistaFact.cliente_cif || cli?.cif || ""),
+          cliente_direccion: vistaFact.fiscal_identity_frozen ? direccionApi : (direccionApi || vistaFact.cliente_direccion || formatDireccion(cli||{}) || ""),
+          cliente_dir_fiscal: !vistaFact.fiscal_identity_frozen && cli?.dir_fiscal_distinta
             ? formatDireccion(cli||{}, "fiscal_")
             : null,
           cliente_dir_envio:vistaFact.cliente_dir_envio|| cli?.dir_envio_facturas || "",
-          cliente_dir_fiscal_distinta: cli?.dir_fiscal_distinta || false,
+          cliente_dir_fiscal_distinta: !vistaFact.fiscal_identity_frozen && (cli?.dir_fiscal_distinta || false),
           cliente_email:    vistaFact.cliente_email    || cli?.email || "",
           cliente_email_facturacion: vistaFact.cliente_email_facturacion || cli?.email_facturacion || cli?.email_facturas || "",
           cliente_telefono: vistaFact.cliente_telefono || cli?.telefono || "",
@@ -3257,7 +3238,8 @@ export default function Facturacion() {
           factura={facturaEnriquecida}
           onClose={()=>setVistaFact(null)}
           onSyncFiscal={sincronizarFacturaVerifactiAhora}
-          onExportFiscal={descargarJustificanteFiscal}
+          onExportFiscal={descargarXmlFiscal}
+          onExportEvidence={descargarJustificanteFiscal}
           onCambiarEstado={canEdit ? cambiarEstado : null}
           onCorregirPedido={canEdit ? setPedidoCorreccion : null}
           onAnalizarPedido={canEdit && aiDisponible ? analizarSoportesPedidoFactura : null}

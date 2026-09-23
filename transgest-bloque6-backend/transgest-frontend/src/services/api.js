@@ -1220,3 +1220,12 @@ export const getDriverExpenses = () => apiFetch('/choferes/app/gastos');
 export const createDriverExpense = body => apiFetch('/choferes/app/gastos',{method:'POST',body});
 export const getVehicleDriverExpenses = (vehiculo_id,desde,hasta) => apiFetch(`/choferes/gastos?${new URLSearchParams({vehiculo_id,desde,hasta})}`);
 export const completeBaseExpense = (id,body) => apiFetch(`/choferes/gastos/${id}/base`,{method:'PATCH',body});
+
+export const fiscalFlowRequest=(path,options={})=>apiFetch(`/facturas${path}`,options);
+export async function downloadClaveicon(id) {
+ const token=getToken();
+ const response=await fetch(apiUrl(`/facturas/contabilidad/claveicon/${encodeURIComponent(id)}/exportar`),{method:'POST',headers:{Authorization:`Bearer ${token}`}});
+ if(token!==getToken())throw new Error('La sesión ha cambiado. Abre la información con la cuenta actual.');
+ if(!response.ok){const data=await parseApiResponse(response);throw new Error(data.error || 'No se pudo exportar');}
+ const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filenameFromDisposition(response.headers.get('content-disposition')) || 'claveicon.xml';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}

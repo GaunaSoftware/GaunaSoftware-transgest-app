@@ -22,6 +22,19 @@ const ACCOUNTING_MAPPING_ITEM_LABELS = {
 
 const accountingIntegrationCatalog = [
   {
+    id: "claveicon",
+    name: "ClaveiCon",
+    vendor: "Clavei",
+    priority: 0,
+    category: "desktop_cloud_hybrid",
+    status: "pilot",
+    recommended_mode: "manual_file",
+    connector: "XML: cuenta, registro IVA y previsión tras aceptación AEAT",
+    flows: ["cuentas de clientes", "facturas emitidas", "previsiones de cobro"],
+    source_url: "",
+    risk: "Validar signos e importación en ClaveiCon. API HTTP y formato de rectificativas pendientes de confirmación del proveedor.",
+  },
+  {
     id: "sage-50-contaplus",
     name: "Sage 50 / ContaPlus",
     vendor: "Sage",

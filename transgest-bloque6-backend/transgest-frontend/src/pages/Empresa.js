@@ -1,3 +1,4 @@
+import FiscalRepresentation from '../components/FiscalRepresentation';
 import DriverLocationsSettings from "../components/DriverLocationsSettings";
 import { PAYMENT_METHODS, validateCompanyPaymentSettings, formatCompanyPaymentTerms } from "../utils/companyPayment";
 import { useState, useEffect, useCallback } from "react";
@@ -1840,6 +1841,7 @@ export default function Empresa() {
                         <label style={S.lbl}>API key Verifacti</label>
                         <input style={{...S.inp,fontFamily:"'JetBrains Mono',monospace"}} value={fiscalCfg.verifactu?.provider_api_key || ""} onChange={ffv("provider_api_key")} placeholder={fiscalCfg.verifactu?.provider_api_key_masked ? `Guardada (${fiscalCfg.verifactu.provider_api_key_masked})` : "vf_test_..."} disabled={!esGerente}/>
                       </div>
+                      <div style={{gridColumn:'1 / -1'}}><FiscalRepresentation key={fiscalCfg.nif_declarante} value={fiscalCfg.verifactu?.representacion} canEdit={esGerente} onSaved={v=>setFiscalCfg(p=>({...p,verifactu:{...p.verifactu,representacion:v}}))}/></div>
                       <div>
                         <label style={S.lbl}>Webhook secret</label>
                         <input style={{...S.inp,fontFamily:"'JetBrains Mono',monospace"}} value={fiscalCfg.verifactu?.provider_webhook_secret || ""} onChange={ffv("provider_webhook_secret")} placeholder={fiscalCfg.verifactu?.provider_webhook_secret_masked ? `Guardado (${fiscalCfg.verifactu.provider_webhook_secret_masked})` : "Clave secreta para validar webhooks"} disabled={!esGerente}/>

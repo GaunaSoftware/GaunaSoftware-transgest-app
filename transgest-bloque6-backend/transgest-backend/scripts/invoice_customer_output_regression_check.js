@@ -46,6 +46,7 @@ async function main() {
   }
   try {
     await pg.exec(`CREATE TABLE empresas(id UUID PRIMARY KEY,nombre TEXT,cfg_precios JSONB);
+      CREATE TABLE factura_registros_fiscales(factura_id UUID,empresa_id UUID,modo TEXT,official_qr_url TEXT,official_qr_base64 TEXT,payload JSONB);
       CREATE TABLE clientes(id UUID PRIMARY KEY,empresa_id UUID,nombre TEXT,cif TEXT,direccion TEXT,cp TEXT,ciudad TEXT,pais TEXT,
         email TEXT,email_facturacion TEXT,telefono TEXT,contacto TEXT,forma_pago TEXT,vencimiento INTEGER);
       CREATE TABLE facturas(id UUID PRIMARY KEY,empresa_id UUID,cliente_id UUID,numero TEXT,serie TEXT,fecha DATE,

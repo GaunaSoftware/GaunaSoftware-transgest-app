@@ -21,6 +21,8 @@ async function main() {
       coste_gasoil NUMERIC, coste_peajes NUMERIC, coste_dietas NUMERIC, coste_otros NUMERIC
     );
     CREATE TABLE facturas (id TEXT, empresa_id TEXT, cliente_id TEXT DEFAULT 'cliente-qa', estado estado_factura, total NUMERIC, fecha DATE, base_imponible NUMERIC);
+    CREATE TABLE factura_pedidos (pedido_id TEXT, factura_id TEXT);
+    CREATE TABLE pedido_extracostes (pedido_id TEXT, importe NUMERIC);
     CREATE TABLE clientes (id TEXT, empresa_id TEXT, nombre TEXT);
     CREATE TABLE portal_solicitudes_cliente (empresa_id TEXT, estado TEXT, created_at TIMESTAMP);
     CREATE TABLE factura_registros_fiscales (empresa_id TEXT, estado_envio TEXT);
@@ -63,6 +65,7 @@ async function main() {
     assert.equal(result.rutas[0].margen,150);
     await pg.exec("UPDATE facturas SET estado='cobrada'");
     assert.equal((await read()).kpis.cobro_pct,100);
+    assert.equal((await read()).clientes_top_facturacion[0].cobro_pct,100, 'El porcentaje del cliente debe usar total con IVA');
     await pg.exec("UPDATE facturas SET estado='anulada'");
     assert.equal((await read()).kpis.pendiente_facturar_realizado,300);
     await pg.exec("UPDATE pedidos SET facturacion_mes='2025-12-01' WHERE empresa_id='qa'");

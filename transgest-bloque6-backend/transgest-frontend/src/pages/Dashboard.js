@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos, getBiResumen } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
@@ -20,53 +20,9 @@ const ESTADO_PEDIDO = {
   cancelado: { label:"Cancelado", color:"#ef4444" },
   incidencia: { label:"Incidencia", color:"#f97316" },
 };
-const ESTADO_PEDIDO_ORDEN = ["pendiente", "confirmado", "espera_carga", "cargando", "en_curso", "espera_descarga", "descarga", "entregado", "facturado", "incidencia", "cancelado"];
-
 function estadoPedidoMeta(estado) {
   const key = String(estado || "").toLowerCase();
   return ESTADO_PEDIDO[key] || { label: key ? key.replace(/_/g, " ") : "-", color:"var(--text4)" };
-}
-
-function estadoPedidoKey(p) {
-  return String(p?.estado || "").toLowerCase();
-}
-
-function pedidoRealizado(p) {
-  return ["entregado", "facturado"].includes(estadoPedidoKey(p));
-}
-
-function pedidoTieneFactura(p) {
-  // Una factura en BORRADOR no cuenta como facturada: su importe no entra en
-  // "facturado" (ahi solo van emitidas/enviadas/cobradas/vencidas), asi que el
-  // viaje tiene que seguir contando como PENDIENTE de facturar. Si no, el viaje
-  // se caia de los dos lados y el ingreso gestionado salia corto.
-  if (["borrador", "cancelada", "anulada"].includes(String(p?.factura_estado || "").toLowerCase())) return false;
-  return Boolean(p?.factura_id || p?.factura_numero || p?.facturado === true);
-}
-
-function importePedido(p) {
-  return Number(p?.importe || p?.precio || p?.precio_cliente_col || 0);
-}
-
-function costeOperativoPedido(p) {
-  return Number(p?.precio_colaborador || 0)
-    + Number(p?.coste_gasoil || 0)
-    + Number(p?.coste_peajes || 0)
-    + Number(p?.coste_dietas || 0)
-    + Number(p?.coste_otros || 0);
-}
-
-function fechaKpiPedido(p) {
-  // Los viajes realizados (entregado/facturado) se atribuyen por su fecha REAL de
-  // entrega (cuando se marcaron entregados / firma), no por la descarga
-  // planificada: esta puede caer en otro mes (p. ej. programada a futuro) y dejar
-  // el viaje fuera del periodo, aunque se haya entregado hoy.
-  const estado = String(p?.estado || "").toLowerCase();
-  if (estado === "entregado" || estado === "facturado") {
-    // facturacion_mes: mes elegido al entregar fuera de su mes (manda sobre todo).
-    return p?.facturacion_mes || p?.entregado_at || p?.firma_fecha || p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
-  }
-  return p?.fecha_descarga || p?.fecha_carga || p?.fecha_pedido || p?.created_at;
 }
 
 function dashboardPeriodToBi(value) {
@@ -218,146 +174,7 @@ export default function Dashboard() {
     return () => { active = false; };
   }, [period, user?.id, user?.rol]);
 
-  // ── Filter by period ──
-  const filterByPeriod = useCallback((items, dateKey="fecha") => {
-    const now  = new Date();
-    if (period === "all") return items;
-    if (period === "mes") {
-      // Calendar month: current month only
-      const y = now.getFullYear(), m = now.getMonth();
-      const start = new Date(y, m, 1);
-      const end   = new Date(y, m+1, 0, 23, 59, 59);
-      return items.filter(x => {
-        if (!x[dateKey]) return false;
-        const d2 = new Date(x[dateKey]);
-        return d2 >= start && d2 <= end;
-      });
-    }
-    const cuts = { "7d":7, "3m":90, "6m":180, "1y":365 };
-    if (!cuts[period]) return items;
-    const cut = new Date(now); cut.setDate(cut.getDate() - cuts[period]);
-    return items.filter(x => x[dateKey] && new Date(x[dateKey]) >= cut);
-  }, [period]);
-
-  const {
-    totalFacturado, cobrado, pendiente,
-    nFacturas, ingresoGestionado, pendienteFacturarRealizado, pedidosRealizados, eurKmRealizado,
-    margenTotal, margenPct,
-    facMensual, topClientes, alertas, today,
-  } = useMemo(() => {
-    const pedidosKpiPeriodo = pedidos.map(p => ({ ...p, _fecha_kpi: fechaKpiPedido(p) }));
-    const pedFilt = filterByPeriod(pedidosKpiPeriodo, "_fecha_kpi");
-    const pedKpi = pedFilt.filter(p => ["confirmado","en_curso","descarga","entregado","facturado"].includes(estadoPedidoKey(p)));
-    const pedidosRealizados = pedFilt.filter(pedidoRealizado);
-    const pedidosRealizadosSinFactura = pedidosRealizados.filter(p => !pedidoTieneFactura(p));
-    const facFilt = filterByPeriod(facturas, "fecha");
-  
-    // ── KPIs ──
-    // Solo facturas emitidas/enviadas/cobradas - no borradores
-    const facEmitidas    = facFilt.filter(f=>!["borrador","cancelada","anulada"].includes(f.estado));
-    const totalFacturado = facEmitidas.reduce((s,f)=>s+Number(f.base_imponible||0),0);
-    const cobrado        = facEmitidas.filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0),0);
-    const pendiente      = facEmitidas.filter(f=>["emitida","enviada"].includes(f.estado)).reduce((s,f)=>s+Number(f.total||0),0);
-    const nFacturas      = facEmitidas.length;
-    const pendienteFacturarRealizado = pedidosRealizadosSinFactura.reduce((s,p)=>s+importePedido(p),0);
-    const ingresoGestionado = totalFacturado + pendienteFacturarRealizado;
-    const costeTotal = pedidosRealizados.reduce((s,p)=>s+costeOperativoPedido(p),0);
-    const ventaRealizada = pedidosRealizados.reduce((sum,p)=>sum+importePedido(p),0);
-    const margenTotal = ventaRealizada - costeTotal;
-    const margenPct   = ventaRealizada>0 ? (margenTotal/ventaRealizada*100).toFixed(1) : null;
-    const kmRealizados = pedidosRealizados.reduce((s,p)=>s+Number(p.km_ruta||0)+Number(p.km_vacio||0),0);
-    const eurKmRealizado = kmRealizados>0 ? ventaRealizada/kmRealizados : 0;
-    // Fleet stats: tractoras for operational KPIs, all vehicles for taller
-    const _remIds2 = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
-    const esTractora = v => {
-      const cl=(v.clase||v.tipo||"").toLowerCase();
-      const mat=(v.matricula||"").toUpperCase();
-      return !cl.includes("remolque")&&!cl.includes("semirremolque")&&!cl.includes("dolly")&&
-             !_remIds2.has(v.id)&&!mat.startsWith("R-")&&!mat.endsWith("-R");
-    };
-    const vDisp      = vehiculos.filter(v=>v.estado==="disponible" && esTractora(v)).length;
-    const vRuta      = vehiculos.filter(v=>v.estado==="en_ruta"    && esTractora(v)).length;
-    const vTaller    = vehiculos.filter(v=>v.estado==="taller").length; // ALL vehicles (remolques también)
-    const cDisp          = choferes.filter(c=>c.activo!==false&&c.estado!=="baja").length;
-  
-    // ── Estado de pedidos ──
-    const estadoCounts = pedFilt.filter(p => String(p.estado || "").toLowerCase() !== "cancelado").reduce((acc, p) => {
-      const key = String(p.estado || "sin_estado").toLowerCase();
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
-    const estadosOrdenados = [
-      ...ESTADO_PEDIDO_ORDEN.filter(e => estadoCounts[e]),
-      ...Object.keys(estadoCounts).filter(e => !ESTADO_PEDIDO_ORDEN.includes(e)).sort(),
-    ];
-    const estadosPed = estadosOrdenados.map(e=>({
-      key: e,
-      name: estadoPedidoMeta(e).label,
-      count: estadoCounts[e],
-      color: estadoPedidoMeta(e).color,
-    })).filter(x=>x.count>0);
-    const enCarga = pedFilt.filter(p => {
-      const estado = String(p.estado || "").toLowerCase();
-      const fecha = String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10);
-      const hoyIso = new Date().toISOString().slice(0, 10);
-      return estado === "confirmado" && Boolean(fecha) && fecha <= hoyIso;
-    });
-    const enDescarga = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "descarga");
-    const enRuta = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "en_curso");
-    const conIncidencia = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "incidencia");
-    const operativos = [
-      { key:"carga", estado:"confirmado", label:"En carga", value:enCarga.length, color:"#f59e0b", sub:"Confirmados con carga ya prevista" },
-      { key:"ruta", estado:"en_curso", label:"En ruta", value:enRuta.length, color:"#3b82f6", sub:"Viajes circulando" },
-      { key:"descarga", estado:"descarga", label:"En descarga", value:enDescarga.length, color:"#a78bfa", sub:"En destino o descargando" },
-      { key:"incidencia", estado:"incidencia", label:"Incidencia", value:conIncidencia.length, color:"#ef4444", sub:"Requieren revisión" },
-    ];
-  
-    // ── Facturación mensual ──
-    const facMensual = (() => {
-      const meses = {};
-      facEmitidas.forEach(f => {
-        if (!f.fecha) return;
-        const k = f.fecha.slice(0,7); // YYYY-MM
-        if (!meses[k]) meses[k] = { facturado:0, pendiente:0 };
-        meses[k].facturado += Number(f.base_imponible||0);
-      });
-      pedidosRealizadosSinFactura.forEach(p => {
-        const fecha = fechaKpiPedido(p);
-        if (!fecha) return;
-        const k = String(fecha).slice(0,7);
-        if (!meses[k]) meses[k] = { facturado:0, pendiente:0 };
-        meses[k].pendiente += importePedido(p);
-      });
-      return Object.entries(meses).sort(([a],[b])=>a.localeCompare(b))
-        .map(([k,v])=>({ name: new Date(k+"-01").toLocaleDateString("es-ES",{month:"short",year:"2-digit"}), ...v, total:(v.facturado||0)+(v.pendiente||0) }));
-    })();
-  
-    // ── Top clientes ──
-    const topClientes = (() => {
-      const map = {};
-      const ensure = name => {
-        const key = name || "Desconocido";
-        if (!map[key]) map[key] = { total:0, facturado:0, pendiente:0, cobrado:0, nfact:0, viajes_realizados:0 };
-        return map[key];
-      };
-      facEmitidas.forEach(f => {
-        const row = ensure(f.cliente_nombre);
-        const total = Number(f.base_imponible||0);
-        row.total += total;
-        row.facturado += total;
-        row.nfact += 1;
-        if (f.estado === "cobrada") row.cobrado += Number(f.total||0);
-      });
-      pedidosRealizadosSinFactura.forEach(p => {
-        const row = ensure(p.cliente_nombre || p.cliente);
-        const importe = importePedido(p);
-        row.total += importe;
-        row.pendiente += importe;
-        row.viajes_realizados += 1;
-      });
-      return Object.entries(map).filter(([,v])=>v.total>0).sort(([,a],[,b])=>b.total-a.total).slice(0,5).map(([name,v])=>({ name, ...v }));
-    })();
-  
+  const { alertas, today } = useMemo(() => {
     // ── Alertas activas ──
     const alertas = [];
     vehiculos.forEach(v => {
@@ -416,7 +233,7 @@ export default function Dashboard() {
   
     // ── Facturas vencidas sin cobrar ──
     facturas.forEach(f => {
-      if (f.estado === "cobrada" || f.estado === "rectificada") return;
+      if (["cobrada","borrador","cancelada","anulada"].includes(f.estado)) return;
       if (!f.fecha_vencimiento) return;
       const dias = Math.ceil((new Date(f.fecha_vencimiento) - new Date()) / 86400000);
       if (dias <= 0) {
@@ -473,64 +290,36 @@ export default function Dashboard() {
       alertas.push({ texto: a.descripcion||a.tipo, color:"#818cf8", bg:"rgba(99,102,241,.07)", icon:"", view:"avisos", actionLabel:"Abrir" });
     });
   
-    // ── Últimas actividades ──
-    const ultPedidos = [...pedidos].sort((a,b)=>new Date(b.fecha_pedido||0)-new Date(a.fecha_pedido||0)).slice(0,5);
-    const estadoColor = Object.fromEntries(Object.entries(ESTADO_PEDIDO).map(([key, value]) => [key, value.color]));
-  
     const today = new Date().toLocaleDateString("es-ES",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
   
 
-    return {
-      pedKpi, facFilt, facEmitidas, totalFacturado, cobrado, pendiente,
-      nFacturas, ingresoGestionado, pendienteFacturarRealizado, pedidosRealizados, eurKmRealizado,
-      costeTotal, margenTotal, margenPct,
-      vDisp, vRuta, vTaller, cDisp,
-      estadosPed, facMensual, topClientes, alertas,
-      operativos,
-      today, ultPedidos, estadoColor,
-    };
-  }, [pedidos, facturas, vehiculos, choferes, filterByPeriod, empresaCfg, tallerEstado, paletMovimientos]);
+    return { alertas, today };
+  }, [facturas, vehiculos, choferes, empresaCfg, tallerEstado, paletMovimientos]);
 
   const biKpis = biResumen?.kpis || {};
-  const biNumber = (key, fallback = 0) => {
-    if (biKpis[key] == null) return fallback;
-    const n = Number(biKpis?.[key]);
-    return Number.isFinite(n) ? n : fallback;
-  };
-  const kpiIngresoGestionado = biNumber("ingreso_gestionado", ingresoGestionado);
-  const kpiFacturado = biNumber("facturado", totalFacturado);
-  const kpiCobrado = biNumber("cobrado", cobrado);
-  const kpiPendienteCobro = biNumber("pendiente_cobro", pendiente);
-  const kpiPendienteFacturar = biNumber("pendiente_facturar_realizado", pendienteFacturarRealizado);
-  const kpiPendientesFacturarCount = biNumber("pendientes_facturar_count", pedidosRealizados.filter(p => !pedidoTieneFactura(p)).length);
-  const kpiRealizados = biNumber("realizados", pedidosRealizados.length);
-  const kpiMargen = biNumber("margen", margenTotal);
-  const kpiMargenPct = biNumber("margen_pct", Number(margenPct || 0));
-  const kpiEurKm = biNumber("eur_km", eurKmRealizado);
-  const kpiKmRealizados = biNumber("km_realizados", 0);
-  const kpiTicket = biNumber("ticket_medio_realizado", 0);
-  const kpiIncidencias = biNumber("incidencias", 0);
-  const kpiSinPrecio = biNumber("sin_precio", 0);
-  const kpiSinKm = biNumber("sin_km", 0);
-  const kpiPodPendiente = biNumber("pod_pendiente_realizados", 0);
-  const kpiFacturas = biNumber("facturas", nFacturas);
-  const facturadoConImpuestos = biNumber("facturado_total", filterByPeriod(facturas,"fecha").filter(f=>!["borrador","cancelada","anulada"].includes(f.estado)).reduce((sum,f)=>sum+Number(f.total||0),0));
-  const kpiCobroPct = facturadoConImpuestos > 0 ? (kpiCobrado / facturadoConImpuestos) * 100 : 0;
-  const clientesRanking = Array.isArray(biResumen?.clientes) && biResumen.clientes.length
-    ? biResumen.clientes.slice(0, 5).map(c => ({
-        name: c.nombre || c.cliente_nombre || c.razon_social || c.cliente || "Cliente",
-        total: Number(c.ingreso_gestionado || c.venta || c.facturado || 0),
-        facturado: Number(c.facturado || 0),
-        pendiente: Number(c.pendiente_facturar_realizado || 0),
-        viajes_realizados: Number(c.realizados || c.viajes || 0),
-        margen: Number(c.margen || 0),
-        margen_pct: Number(c.margen_pct || 0),
-      }))
-    : topClientes;
-
+  const biNumber = key => biKpis[key] == null || !Number.isFinite(Number(biKpis[key])) ? null : Number(biKpis[key]);
+  const kpiIngresoGestionado = biNumber('ingreso_gestionado');
+  const kpiFacturado = biNumber('facturado');
+  const kpiCobrado = biNumber('cobrado');
+  const kpiPendienteCobro = biNumber('saldo_al_corte');
+  const kpiPendienteFacturar = biNumber('pendiente_facturar_realizado');
+  const kpiPendientesFacturarCount = biNumber('pendientes_facturar_count');
+  const kpiRealizados = biNumber('realizados');
+  const kpiMargen = biNumber('margen');
+  const kpiMargenPct = biNumber('margen_pct');
+  const kpiEurKm = biNumber('eur_km');
+  const kpiKmRealizados = biNumber('km_realizados');
+  const kpiTicket = biNumber('ticket_medio_realizado');
+  const kpiIncidencias = biNumber('incidencias');
+  const kpiSinPrecio = biNumber('sin_precio');
+  const kpiSinKm = biNumber('sin_km');
+  const kpiPodPendiente = biNumber('pod_pendiente_realizados');
+  const kpiFacturas = biNumber('facturas');
+  const kpiCobroPct = biNumber('cobro_pct');
+  const clientesRanking = (biResumen?.clientes || []).map(c=>({id:c.id,name:c.nombre,total:c.ingreso_gestionado,facturado:c.facturado,pendiente:c.pendiente_facturar_realizado,share:c.participacion_pct}));
   const metrics={ingreso:kpiIngresoGestionado,facturado:kpiFacturado,cobrado:kpiCobrado,pendiente:kpiPendienteCobro,sinFactura:kpiPendienteFacturar,pendientesCount:kpiPendientesFacturarCount,realizados:kpiRealizados,margen:kpiMargen,margenPct:kpiMargenPct,eurKm:kpiEurKm,km:kpiKmRealizados,ticket:kpiTicket,incidencias:kpiIncidencias,sinPrecio:kpiSinPrecio,sinKm:kpiSinKm,pod:kpiPodPendiente,facturas:kpiFacturas,cobroPct:kpiCobroPct};
   const canBI=puedeVer("informes")||puedeVer("facturacion");
   return <><DashboardWorkspace pedidos={pedidos} facturas={facturas} vehiculos={vehiculos} choferes={choferes} alertas={alertas} tareas={misTareas} loadErrors={loadErrors} reload={() => setReloadKey(k => k+1)} loading={loading} today={today} navigate={navegar} openOrder={enfocarPedidos} openAlert={abrirAlerta} advanced={() => setBiOpen(true)} showBI={canBI} onSnapshot={setPedidos} stateMeta={estadoPedidoMeta}/>
-    {biOpen&&canBI&&<DashboardBI onClose={()=>setBiOpen(false)} period={period} setPeriod={setPeriod} metrics={metrics} clients={clientesRanking} series={facMensual} loading={biLoading} error={biError}/>}
+    {biOpen&&canBI&&<DashboardBI onClose={()=>setBiOpen(false)} period={period} setPeriod={setPeriod} metrics={metrics} clients={clientesRanking} series={biResumen?.series || []} clientSummary={biResumen?.clientes_resumen} metadata={biResumen?.metadata} loading={biLoading} error={biError}/>}
   </>;
 }

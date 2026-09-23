@@ -323,6 +323,14 @@ safeUse(`${api}/grupajes`,      authenticate, requireModulePermission("grupajes"
 safeUse(`${api}/choferes`,      authenticate, choferesPermissionUnlessApp, choferesRoutes);
 safeUse(`${api}/colaboradores`, colaboradoresAuthUnlessPublic, colaboradoresRoutes);
 safeUse(`${api}/informes`,      authenticate, requireModulePermission("informes"), requirePlanFeature("kpis_avanzados"), informesRoutes);
+app.get(`${api}/hojas-ruta/bi`, authenticate, requireModulePermission("hojas_ruta"), async (req, res) => {
+  try {
+    const data = await require('./services/financialRouteSheet').readRouteSheet(req.empresaId || req.user?.empresa_id, req.query);
+    res.json(data);
+  } catch (e) {
+    res.status(e.status || 500).json({ estado:'error', error:'No se pudo calcular la hoja de ruta' });
+  }
+});
 safeUse(`${api}/docs`,          authenticate, requireModulePermission("documentos"), docsRoutes);
 safeUse(`${api}/pedidos`,       authenticate, requireModulePermission("pedidos"), cartaPorteRoutes);
 safeUse(`${api}/adr`,           authenticate, requireModulePermission("pedidos"), adrRoutes);

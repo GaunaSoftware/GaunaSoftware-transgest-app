@@ -1,5 +1,6 @@
+import useBiAnalytics from "../services/useBiAnalytics";
 import { useState, useEffect } from "react";
-import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getTallerEstado, getInformeGestion, getBiResumen, getRentabilidadOperativa, getCargasRetorno, prepararSolicitudRetornoCarrier, enviarSolicitudRetornoCarrier, actualizarSolicitudRetornoCarrier, getScoringOperativo, getEmisionesOperativas, getDatosMaestrosReadiness, getCumplimientoEuropeo, getObjetivos, setObjetivo, getEmpresaConfig, setConfigPrecios } from "../services/api";
+import { getFacturasTodas, getPedidosTodos, getTallerEstado, getInformeGestion, getBiResumen, getRentabilidadOperativa, getCargasRetorno, prepararSolicitudRetornoCarrier, enviarSolicitudRetornoCarrier, actualizarSolicitudRetornoCarrier, getScoringOperativo, getEmisionesOperativas, getDatosMaestrosReadiness, getCumplimientoEuropeo, getObjetivos, setObjetivo, getEmpresaConfig, setConfigPrecios } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
@@ -9,8 +10,8 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
 
-const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtN = n => Number(n||0).toLocaleString("es-ES");
+const fmt2 = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtN = n => n == null ? "—" : Number(n).toLocaleString("es-ES");
 const COLORS = ["#3b82f6","#10b981","#f59e0b","#ef4444","#8b5cf6","#f97316","#06b6d4","#84cc16","#ec4899","#14b8a6"];
 
 const S = {
@@ -29,10 +30,10 @@ const S = {
 
 const PERIOD_OPTS = [
   { k:"7d",   l:"7 días",    days:7   },
-  { k:"30d",  l:"Este mes",  days:30  },
+  { k:"mes",  l:"Este mes", days:0 },
   { k:"90d",  l:"3 meses",   days:90  },
   { k:"180d", l:"6 meses",   days:180 },
-  { k:"365d", l:"Este año",  days:365 },
+  { k:"anual", l:"Este año", days:0 },
   { k:"all",  l:"Todo",      days:0   },
 ];
 
@@ -55,11 +56,14 @@ const TABS = [
 ];
 
 function filterItems(items, dateKey, period) {
-  if (period === "all") return items;
-  const opt = PERIOD_OPTS.find(o=>o.k===period);
-  if (!opt || opt.days===0) return items;
-  const cut = new Date(); cut.setDate(cut.getDate()-opt.days);
-  return items.filter(x => x[dateKey] && new Date(x[dateKey]) >= cut);
+  const parts = new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const part = type => parts.find(x=>x.type===type).value;
+  const local = `${part('year')}-${part('month')}-${part('day')}`;
+  let start = '1970-01-01';
+  if (period === 'mes') start = local.slice(0,7) + '-01';
+  else if (period === 'anual') start = local.slice(0,4) + '-01-01';
+  else if (period !== 'all') { const n = PERIOD_OPTS.find(o=>o.k===period)?.days || 30; const d = new Date(local+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-n+1); start=d.toISOString().slice(0,10); }
+  return items.filter(x=>String(x[dateKey] || '').slice(0,10)>=start && String(x[dateKey] || '').slice(0,10)<=local);
 }
 
 function asArray(data) {
@@ -182,11 +186,9 @@ export default function Informes() {
   const kpisAvanzadosDisponibles = planHasFeature(empresaPlan, "kpis_avanzados");
 
   const [tab,      setTab]      = useState("resumen");
-  const [period,   setPeriod]   = useState("30d");
+  const [period,   setPeriod]   = useState("mes");
   const [pedidos,  setPedidos]  = useState([]);
   const [facturas, setFacturas] = useState([]);
-  const [vehiculos,setVehiculos]= useState([]);
-  const [choferes, setChoferes] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [objetivos,setObjetivos]= useState({});
   const [editObj,  setEditObj]  = useState(false);
@@ -194,6 +196,7 @@ export default function Informes() {
   const [taller, setTaller] = useState({ stock:[], reparaciones:[] });
   const [kpisBackend, setKpisBackend] = useState(null);
   const [biResumen, setBiResumen] = useState(null);
+  const [reportErrors, setReportErrors] = useState([]);
   const [rentabilidadOperativa, setRentabilidadOperativa] = useState(null);
   const [cargasRetorno, setCargasRetorno] = useState(null);
   const [scoringOperativo, setScoringOperativo] = useState(null);
@@ -211,9 +214,8 @@ export default function Informes() {
       setLoading(true);
       try {
         const _tout = (pr, ms=8000) => Promise.race([pr, new Promise(r=>setTimeout(()=>r([]),ms))]);
-          const [p,f,v,c,t,obj,cfgEmpresa,dm] = await Promise.all([
+          const [p,f,t,obj,cfgEmpresa,dm] = await Promise.all([
             _tout(getPedidosTodos({}, { silentError: true }).catch(()=>[])), getFacturasTodas({}, { silentError: true }).catch(()=>[]),
-            getVehiculos().catch(()=>[]), getChoferes().catch(()=>[]),
             getTallerEstado().catch(()=>null),
             getObjetivos().catch(()=>({})),
             getEmpresaConfig().catch(()=>({})),
@@ -221,8 +223,6 @@ export default function Informes() {
           ]);
         setPedidos(asArray(p));
         setFacturas(asArray(f));
-        setVehiculos(asArray(v));
-        setChoferes(asArray(c));
         if (t && typeof t === "object") {
           setTaller({ stock:t.stock||[], reparaciones:t.reparaciones||[] });
         }
@@ -257,13 +257,16 @@ export default function Informes() {
 
   useEffect(() => {
     let alive = true;
+    setReportErrors([]);
+    setBiResumen(null); setRentabilidadOperativa(null); setKpisBackend(null);
+    const failed = name => () => { if (alive) setReportErrors(x=>[...x,name]); return null; };
     Promise.all([
-      getInformeGestion(period).catch(() => null),
-      getBiResumen(period).catch(() => null),
-      getRentabilidadOperativa(period).catch(() => null),
-      getCargasRetorno(period).catch(() => null),
-      getScoringOperativo(period).catch(() => null),
-      getEmisionesOperativas(period).catch(() => null),
+      getInformeGestion(period).catch(failed("getInformeGestion")),
+      getBiResumen(period).catch(failed("getBiResumen")),
+      getRentabilidadOperativa(period).catch(failed("getRentabilidadOperativa")),
+      getCargasRetorno(period).catch(failed("getCargasRetorno")),
+      getScoringOperativo(period).catch(failed("getScoringOperativo")),
+      getEmisionesOperativas(period).catch(failed("getEmisionesOperativas")),
       getCumplimientoEuropeo(period === "7d" ? 15 : period === "30d" ? 45 : period === "90d" ? 90 : 120).catch(() => null),
     ]).then(([k, bi, rent, retornos, scoring, emisiones, cumplimiento]) => {
       if (!alive) return;
@@ -278,172 +281,40 @@ export default function Informes() {
     return () => { alive = false; };
   }, [period]);
 
-  // Filtered data
-  const pedFilt  = filterItems(pedidos,  "fecha_pedido", period);
-  const facFilt  = filterItems(facturas, "fecha",        period);
-  const repFilt  = filterItems(taller.reparaciones, "fecha", period);
-  const pedKpi = pedFilt.filter(p => ["confirmado","en_curso","descarga","entregado","facturado"].includes(String(p.estado || "").toLowerCase()));
-  const pedCancelados = pedFilt.filter(p => String(p.estado || "").toLowerCase() === "cancelado");
-
-  // KPIs base
-  const kpisPeriodo = kpisBackend?.period === period ? kpisBackend : null;
-  const totalFact   = kpisPeriodo?.facturacion?.total ?? facFilt.reduce((s,f)=>s+Number(f.total||0), 0);
-  const cobrado     = kpisPeriodo?.facturacion?.cobrado ?? facFilt.filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0), 0);
-  const pendiente   = kpisPeriodo?.facturacion?.pendiente ?? (totalFact - cobrado);
-  const costeTaller = kpisPeriodo?.taller?.coste ?? repFilt.reduce((s,r)=>s+Number(r.coste_total||0), 0);
-  const saludGestion = Array.isArray(kpisPeriodo?.salud) ? kpisPeriodo.salud : [];
-
-  // Facturación mensual
-  const facMensual = (() => {
-    const meses = {};
-    facFilt.forEach(f => {
-      if (!f.fecha) return;
-      const k = f.fecha.slice(0,7);
-      meses[k] = { fact:(meses[k]?.fact||0)+Number(f.total||0), cobr:(meses[k]?.cobr||0)+(f.estado==="cobrada"?Number(f.total||0):0) };
-    });
-    return Object.entries(meses).sort(([a],[b])=>a.localeCompare(b))
-      .map(([k,v])=>({ name:new Date(k+"-01").toLocaleDateString("es-ES",{month:"short",year:"2-digit"}), ...v }));
-  })();
-
-  // Top clientes
-  const topClientes = (() => {
-    const map = {};
-    facFilt.forEach(f => {
-      const k = f.cliente_nombre||"Desconocido";
-      if (!map[k]) map[k]={total:0,nfact:0,cobrado:0};
-      map[k].total += Number(f.total||0);
-      map[k].nfact++;
-      if (f.estado==="cobrada") map[k].cobrado += Number(f.total||0);
-    });
-    return Object.entries(map).sort(([,a],[,b])=>b.total-a.total).slice(0,10)
-      .map(([name,v])=>({ name, ...v }));
-  })();
-
-  // Rutas más rentables
-  const topRutas = (() => {
-    const map = {};
-    pedKpi.forEach(p => {
-      if (!p.origen || !p.destino) return;
-      const k = `${p.origen} - ${p.destino}`;
-      if (!map[k]) map[k]={viajes:0,importe:0};
-      map[k].viajes++;
-      map[k].importe += Number(p.importe||p.precio||0);
-    });
-    return Object.entries(map).sort(([,a],[,b])=>b.importe-a.importe).slice(0,8)
-      .map(([name,v])=>({ name:name.length>35?name.slice(0,35)+"...":name, ...v, rentabilidad: v.viajes>0?v.importe/v.viajes:0 }));
-  })();
-
-  // Flota rentabilidad: solo tractoras/cabezas (no remolques)
-  // esTractora: clase + matrícula patrón + no es remolque_id de nadie
-  const _remIds = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
-  const esTractora = v => {
-    const clase = (v.clase||v.tipo||"").toLowerCase();
-    const mat = (v.matricula||"").toUpperCase();
-    return !clase.includes("remolque") && !clase.includes("semirremolque") && !clase.includes("dolly") &&
-           !_remIds.has(v.id) && !mat.startsWith("R-") && !mat.endsWith("-R");
-  };
-  const flotaStats = vehiculos.filter(esTractora).map(v => {
-    const pedVeh  = pedKpi.filter(p=>p.vehiculo_id===v.id||p.matricula===v.matricula);
-    const facVeh  = facFilt.filter(f=>f.vehiculo_id===v.id||pedVeh.find(p=>p.id===f.pedido_id));
-    const repVeh  = repFilt.filter(r=>r.vehiculo_id===v.id);
-    const ingresos= facVeh.reduce((s,f)=>s+Number(f.total||0),0);
-    const costes  = repVeh.reduce((s,r)=>s+Number(r.coste_total||0),0);
-    const viajes  = pedVeh.length;
-    const kmTot   = pedVeh.reduce((s,p)=>s+Number(p.km_ruta||p.km||0),0);
-    const kmVac   = pedVeh.reduce((s,p)=>s+Number(p.km_vacio||0),0);
-    return { id:v.id, matricula:v.matricula, marca:v.marca||"", modelo:v.modelo||"", clase:v.clase||"",
-             ingresos, costes, margen:ingresos-costes, viajes, km:v.km_actuales||0, kmTot, kmVac };
-  }).sort((a,b)=>b.margen-a.margen);
-
-  // Chóferes stats: incluye pedidos como chofer1 Y chofer2
-  const choferesStats = choferes.map(c => {
-    const pedCh = pedKpi.filter(p=>p.chofer_id===c.id || p.chofer2_id===c.id);
-    // Para pedidos compartidos, prorratear el ingreso según reparto
-    const ingresos = pedCh.reduce((s,p)=>{
-      const pct = p.chofer2_id && p.chofer_id !== c.id
-        ? (100 - Number(p.reparto_chofer1||50)) / 100
-        : p.chofer2_id ? Number(p.reparto_chofer1||50) / 100 : 1;
-      return s + Number(p.importe||0) * pct;
-    }, 0);
-    const entregas = pedCh.filter(p=>p.estado==="entregado"||p.estado==="facturado").length;
-    const kmTotal  = pedCh.reduce((s,p)=>s+Number(p.km_ruta||p.km||0),0);
-    const kmVacio  = pedCh.reduce((s,p)=>s+Number(p.km_vacio||0),0);
-    const eurosKm  = kmTotal>0?ingresos/kmTotal:0;
-    const pctVacio = (kmTotal+kmVacio)>0?(kmVacio/(kmTotal+kmVacio))*100:0;
-    return { nombre:`${c.nombre||""} ${c.apellidos||""}`.trim()||"N/A", viajes:pedCh.length, entregas, ingresos, kmTotal, kmVacio, eurosKm, pctVacio };
-  }).sort((a,b)=>b.ingresos-a.ingresos);
-
-  // Advanced KPIs
-  // Taller visits per vehicle - incluye TODOS los vehículos (tractoras Y remolques)
-  const tallerVisitas = vehiculos.map(v => {
-    const repsVeh = taller.reparaciones.filter(r=>r.vehiculo_id===v.id);
-    const coste   = repsVeh.reduce((s,r)=>s+Number(r.coste_total||0),0);
-    const tipos   = {};
-    repsVeh.forEach(r=>{ tipos[r.tipo]=(tipos[r.tipo]||0)+1; });
-    const topTipo = Object.entries(tipos).sort(([,a],[,b])=>b-a)[0];
-    return { matricula:v.matricula, marca:v.marca||"", modelo:v.modelo||"", visitas:repsVeh.length, coste, topTipo:topTipo?.[0]||"-" };
-  }).sort((a,b)=>b.visitas-a.visitas);
-
-  // Taller visits by brand
-  const tallerPorMarca = (() => {
-    const m = {};
-    vehiculos.forEach(v=>{
-      const marca = v.marca||"Desconocida";
-      const repsVeh = taller.reparaciones.filter(r=>r.vehiculo_id===v.id);
-      if(!m[marca]) m[marca]={marca,visitas:0,coste:0,vehiculos:0};
-      m[marca].vehiculos++;
-      m[marca].visitas += repsVeh.length;
-      m[marca].coste   += repsVeh.reduce((s,r)=>s+Number(r.coste_total||0),0);
-    });
-    return Object.values(m).sort((a,b)=>b.visitas-a.visitas);
-  })();
-
-  // €/km by vehicle
-  const eurosKmFlota = flotaStats.map(v => {
-    const eKm    = v.kmTot>0?v.ingresos/v.kmTot:0;
-    const pVac   = (v.kmTot+v.kmVac)>0?(v.kmVac/(v.kmTot+v.kmVac))*100:0;
-    return { ...v, eKm, pVac };
-  }).sort((a,b)=>b.eKm-a.eKm);
-
-  // Costes por categoría
-  const costesCat = (() => {
-    const map = {};
-    repFilt.forEach(r => {
-      const k = r.tipo||"Otros";
-      map[k] = (map[k]||0) + Number(r.coste_total||0);
-    });
-    taller.stock.forEach(s => {
-      if ((s.stock_actual||0) < (s.stock_minimo||0)) return;
-      // no añadir valor de stock como gasto
-    });
-    return Object.entries(map).sort(([,a],[,b])=>b-a).map(([name,v])=>({ name:name.length>20?name.slice(0,20)+"...":name, value:v }));
-  })();
-
-  const costeMensualTaller = (() => {
-    const meses = {};
-    taller.reparaciones.forEach(r => {
-      if (!r.fecha) return;
-      const k = r.fecha.slice(0,7);
-      meses[k] = (meses[k]||0) + Number(r.coste_total||0);
-    });
-    return Object.entries(meses).sort(([a],[b])=>a.localeCompare(b)).slice(-12)
-      .map(([k,v])=>({ name:new Date(k+"-01").toLocaleDateString("es-ES",{month:"short",year:"2-digit"}), coste:v }));
-  })();
-
+  const analytics = useBiAnalytics(period);
+  const monthAnalytics = useBiAnalytics('mes');
+  const yearAnalytics = useBiAnalytics('anual');
+  const report = analytics.data;
+  const stats = report?.totals || {};
+  const pedFilt = filterItems(pedidos, 'fecha_pedido', period);
+  const pedCancelados = pedFilt.filter(p => p.estado === 'cancelado');
+  const facFilt = filterItems(facturas, 'fecha', period).filter(f=>!['borrador','cancelada','anulada'].includes(f.estado));
+  const repFilt = filterItems(taller.reparaciones, 'fecha', period);
+  const totalFact = stats.facturado_total;
+  const cobrado = stats.cobrado;
+  const pendiente = stats.saldo_al_corte;
+  const costeTaller = stats.coste_taller;
+  const saludGestion = kpisBackend?.period === period ? kpisBackend.salud || [] : [];
+  const facMensual = report?.facMensual || [];
+  const topClientes = (report?.topClientes || []).slice(0,10);
+  const topRutas = (report?.topRutas || []).slice(0,8);
+  const flotaStats = report?.flotaStats || [];
+  const choferesStats = report?.choferesStats || [];
+  const tallerVisitas = report?.tallerVisitas || [];
+  const tallerPorMarca = report?.tallerPorMarca || [];
+  const eurosKmFlota = flotaStats;
+  const costesCat = report?.costesCat || [];
+  const costeMensualTaller = report?.costeMensualTaller || [];
   const visionGerencia = {
-    viajesOperativos: pedKpi.length,
-    viajesCancelados: pedCancelados.length,
-    cancelacionPct: pedFilt.length ? (pedCancelados.length / pedFilt.length) * 100 : 0,
-    ticketMedio: pedKpi.length ? totalFact / pedKpi.length : 0,
-    cobroPct: totalFact > 0 ? (cobrado / totalFact) * 100 : 0,
-    pendientePct: totalFact > 0 ? (pendiente / totalFact) * 100 : 0,
-    facturacionPorCamion: flotaStats.length ? totalFact / Math.max(1, flotaStats.length) : 0,
-    costeTallerPorCamion: flotaStats.length ? costeTaller / Math.max(1, flotaStats.length) : 0,
+    cancelacionPct:biResumen?.kpis?.cancelacion_pct,
+    viajesOperativos: stats.viajes, viajesCancelados: pedCancelados.length,
+    ticketMedio: stats.ticket_medio, cobroPct: stats.cobro_pct,
+    facturacionPorCamion: stats.facturacion_por_camion, costeTallerPorCamion: stats.coste_taller_por_camion,
   };
   const panelesGerencia = [
     { l:"Viajes KPI", v:fmtN(visionGerencia.viajesOperativos), c:"var(--accent-xl)", d:`${fmtN(visionGerencia.viajesCancelados)} cancelados excluidos` },
-    { l:"Ticket medio", v:`${fmt2(visionGerencia.ticketMedio)} EUR`, c:"var(--text)", d:"Facturacion / viajes KPI" },
-    { l:"Cobro efectivo", v:`${fmt2(visionGerencia.cobroPct)}%`, c:visionGerencia.cobroPct >= 80 ? "var(--green)" : "#f59e0b", d:`Pendiente ${fmt2(visionGerencia.pendientePct)}%` },
+    { l:"Ticket medio", v:`${fmt2(visionGerencia.ticketMedio)} EUR`, c:"var(--text)", d:"Ingreso neto realizado / viajes realizados" },
+    { l:"Cobro estimado", v:`${fmt2(visionGerencia.cobroPct)}%`, c:visionGerencia.cobroPct >= 80 ? "var(--green)" : "#f59e0b", d:"Según estado actual de las facturas" },
     { l:"Fact. por camion", v:`${fmt2(visionGerencia.facturacionPorCamion)} EUR`, c:"var(--green)", d:`Taller/camion ${fmt2(visionGerencia.costeTallerPorCamion)} EUR` },
   ];
 
@@ -625,6 +496,10 @@ export default function Informes() {
 
   return (
     <div className="tg-responsive-page" style={S.page}>
+      {reportErrors.length > 0 && <p role="alert">No se han podido consultar: {reportErrors.join(", ")}. Esos informes no están disponibles.</p>}
+      {analytics.error && <p role="alert">{analytics.error}</p>}
+      {analytics.loading && <p role="status">Calculando indicadores del periodo…</p>}
+      {report && <p style={{color:'var(--text4)',fontSize:12}}>Periodo {report.metadata.periodo.desde} — {report.metadata.fecha_corte}. Ingresos de servicios realizados sin impuestos. Cobros y saldo estimados por estado de factura, con impuestos. Márgenes parciales sobre costes registrados; “—” indica que no se puede calcular.</p>}
       {/* Header + period */}
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:10 }}>
         <div style={S.title}>Informes de gerencia</div>
@@ -743,7 +618,7 @@ export default function Informes() {
                       { l:"Pend. facturar", v:fmtN(biResumen.kpis?.pendientes_facturar_count), c:Number(biResumen.kpis?.pendientes_facturar_count || 0) > 0 ? "#f59e0b" : "var(--green)" },
                       { l:"Margen", v:`${fmt2(biResumen.kpis?.margen)} EUR`, c:Number(biResumen.kpis?.margen || 0) >= 0 ? "var(--green)" : "var(--red)" },
                       { l:"Margen %", v:`${fmt2(biResumen.kpis?.margen_pct)}%`, c:Number(biResumen.kpis?.margen_pct || 0) >= 0 ? "var(--green)" : "var(--red)" },
-                      { l:"EUR/km", v:fmt2(biResumen.kpis?.eur_km), c:"var(--accent-xl)" },
+                      { l:"EUR/km total", v:fmt2(biResumen.kpis?.eur_km), c:"var(--accent-xl)" },
                       { l:"Ticket medio", v:`${fmt2(biResumen.kpis?.ticket_medio_realizado)} EUR`, c:"var(--text)" },
                       { l:"KM vacio", v:`${fmt2(biResumen.kpis?.pct_km_vacio)}%`, c:Number(biResumen.kpis?.pct_km_vacio || 0) > 20 ? "#f59e0b" : "var(--green)" },
                       { l:"Vencido", v:`${fmt2(biResumen.kpis?.vencido)} EUR`, c:Number(biResumen.kpis?.vencido || 0) > 0 ? "#ef4444" : "var(--green)" },
@@ -876,8 +751,8 @@ export default function Informes() {
               <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
                 {[
                   { l:"Total facturado",  v:`${fmt2(totalFact)} €`,  c:"var(--text)" },
-                  { l:"Cobrado",          v:`${fmt2(cobrado)} €`,    c:"var(--green)", pct:totalFact>0?((cobrado/totalFact)*100).toFixed(1)+"% del total":null },
-                  { l:"Pendiente cobro",  v:`${fmt2(pendiente)} €`,  c:"#f59e0b" },
+                  { l:"Cobrado estimado", v:`${fmt2(cobrado)} €`, c:"var(--green)", pct:stats.cobro_pct==null?null:`${fmt2(stats.cobro_pct)}% del total` },
+                  { l:"Saldo estimado al corte",  v:`${fmt2(pendiente)} €`,  c:"#f59e0b" },
                 ].map((k,i)=>(
                   <div key={i} style={S.card}>
                     <div style={{ fontFamily:"'JetBrains Mono',monospace", fontSize:18, fontWeight:800, color:k.c }}>{k.v}</div>
@@ -952,8 +827,8 @@ export default function Informes() {
                             <td style={{ padding:"9px 10px", fontSize:13, fontWeight:700, color:"var(--text)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(c.total)} €</td>
                             <td style={{ padding:"9px 10px", fontSize:13, color:"var(--green)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(c.cobrado)} €</td>
                             <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
-                              <span style={{ fontSize:12, color:c.total>0&&c.cobrado/c.total>=0.9?"var(--green)":"#f59e0b", fontWeight:700 }}>
-                                {c.total>0?((c.cobrado/c.total)*100).toFixed(0):0}%
+                              <span style={{ fontSize:12, color:c.cobro_pct!=null&&c.cobro_pct>=90?"var(--green)":"#f59e0b", fontWeight:700 }}>
+                                {c.cobro_pct == null ? "—" : fmt2(c.cobro_pct)+"%"}
                               </span>
                             </td>
                           </tr>
@@ -1606,7 +1481,7 @@ export default function Informes() {
                         { l:"Coste previsto", v:`${fmt2(resumen.coste)} EUR`, c:"var(--red)" },
                         { l:"Margen", v:`${fmt2(resumen.margen)} EUR`, c:Number(resumen.margen||0)>=0?"var(--green)":"var(--red)" },
                         { l:"Margen %", v:resumen.margen_pct==null?"-":`${fmt2(resumen.margen_pct)}%`, c:saludColor },
-                        { l:"EUR/km", v:resumen.eur_km==null?"-":`${fmt2(resumen.eur_km)} EUR/km`, c:"var(--accent-xl)" },
+                        { l:"EUR/km total", v:resumen.eur_km==null?"-":`${fmt2(resumen.eur_km)} EUR/km`, c:"var(--accent-xl)" },
                         { l:"Realizados", v:fmtN(resumen.realizados), c:"var(--text)" },
                         { l:"Ticket medio", v:`${fmt2(resumen.ticket_medio_realizado)} EUR`, c:"var(--text)" },
                         { l:"Sin facturar", v:`${fmtN(resumen.pendientes_facturar_count)} / ${fmt2(resumen.pendiente_facturar_realizado)} EUR`, c:Number(resumen.pendientes_facturar_count||0)>0?"#f59e0b":"var(--green)" },
@@ -2022,7 +1897,7 @@ export default function Informes() {
           {tab==="rutas" && (
             <div>
               <div style={S.card}>
-                <div style={S.sec}>RUTAS MÁS RENTABLES</div>
+                <div style={S.sec}>RUTAS POR INGRESO REALIZADO</div>
                 {topRutas.length===0
                   ? <div style={{ color:"var(--text5)", fontSize:12, padding:"16px 0", textAlign:"center" }}>Sin datos de rutas en el período</div>
                   : <>
@@ -2037,7 +1912,7 @@ export default function Informes() {
                       </BarChart>
                     </ResponsiveContainer>
                     <table style={{ width:"100%", borderCollapse:"collapse", marginTop:12 }}>
-                      <thead><tr>{["Ruta","Viajes","Importe total","Rentabilidad/viaje"].map(h=>(
+                      <thead><tr>{["Ruta","Viajes","Importe total","Ingreso medio/viaje"].map(h=>(
                         <th key={h} style={{ textAlign:"left", padding:"7px 10px", fontSize:10, fontWeight:700, textTransform:"uppercase", color:"var(--text5)", borderBottom:"1px solid var(--border)" }}>{h}</th>
                       ))}</tr></thead>
                       <tbody>
@@ -2046,7 +1921,7 @@ export default function Informes() {
                             <td style={{ padding:"8px 10px", fontSize:12, fontWeight:600, color:"var(--text)", borderBottom:"1px solid var(--border)" }}>{r.name}</td>
                             <td style={{ padding:"8px 10px", fontSize:12, color:"var(--text3)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{r.viajes}</td>
                             <td style={{ padding:"8px 10px", fontSize:13, fontWeight:700, color:"var(--text)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(r.importe)} €</td>
-                            <td style={{ padding:"8px 10px", fontSize:12, color:"var(--green)", fontWeight:700, borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(r.rentabilidad)} €</td>
+                            <td style={{ padding:"8px 10px", fontSize:12, color:"var(--green)", fontWeight:700, borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(r.ingreso_medio)} €</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2203,7 +2078,7 @@ export default function Informes() {
                 {eurosKmFlota.length===0
                   ? <div style={{ color:"var(--text5)", fontSize:12, padding:"12px 0", textAlign:"center" }}>Sin datos de KM registrados en pedidos</div>
                   : <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                      <thead><tr>{["Matrícula","KM cargado","KM vacío","% Vacío","€/km","Ingresos"].map(h=>(
+                      <thead><tr>{["Matrícula","KM cargado","KM vacío","% Vacío","€/km total","Ingresos"].map(h=>(
                         <th key={h} style={{ textAlign:"left", padding:"8px 10px", fontSize:10, fontWeight:700, textTransform:"uppercase", color:"var(--text5)", borderBottom:"1px solid var(--border)" }}>{h}</th>
                       ))}</tr></thead>
                       <tbody>
@@ -2213,9 +2088,9 @@ export default function Informes() {
                             <td style={{ padding:"9px 10px", fontSize:12, color:"var(--text3)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmtN(v.kmTot)} km</td>
                             <td style={{ padding:"9px 10px", fontSize:12, color:"var(--text4)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmtN(v.kmVac)} km</td>
                             <td style={{ padding:"9px 10px", borderBottom:"1px solid var(--border)" }}>
-                              <span style={{ fontSize:12, fontWeight:700, color:v.pVac>30?"var(--red)":v.pVac>15?"#f59e0b":"var(--green)" }}>{v.pVac.toFixed(1)}%</span>
+                              <span style={{ fontSize:12, fontWeight:700, color:v.pVac>30?"var(--red)":v.pVac>15?"#f59e0b":"var(--green)" }}>{v.pVac == null ? "—" : fmt2(v.pVac)+"%"}</span>
                             </td>
-                            <td style={{ padding:"9px 10px", fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:14, color:v.eKm>1.5?"var(--green)":v.eKm>0.8?"#f59e0b":"var(--red)", borderBottom:"1px solid var(--border)" }}>{fmt2(v.eKm)} €/km</td>
+                            <td style={{ padding:"9px 10px", fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:14, color:v.eKm>1.5?"var(--green)":v.eKm>0.8?"#f59e0b":"var(--red)", borderBottom:"1px solid var(--border)" }}>{fmt2(v.eKm)} €/km total</td>
                             <td style={{ padding:"9px 10px", fontSize:13, fontWeight:700, color:"var(--text)", borderBottom:"1px solid var(--border)", fontFamily:"'JetBrains Mono',monospace" }}>{fmt2(v.ingresos)} €</td>
                           </tr>
                         ))}
@@ -2228,7 +2103,7 @@ export default function Informes() {
               <div style={S.card}>
                 <div style={S.sec}>CHÓFERES - KM VACÍO Y EFICIENCIA</div>
                 <table style={{ width:"100%", borderCollapse:"collapse" }}>
-                  <thead><tr>{["Chófer","Viajes","KM cargado","KM vacío","% Vacío","€/km","Ingresos"].map(h=>(
+                  <thead><tr>{["Chófer","Viajes","KM cargado","KM vacío","% Vacío","€/km total","Ingresos"].map(h=>(
                     <th key={h} style={{ textAlign:"left", padding:"7px 10px", fontSize:10, fontWeight:700, textTransform:"uppercase", color:"var(--text5)", borderBottom:"1px solid var(--border)" }}>{h}</th>
                   ))}</tr></thead>
                   <tbody>
@@ -2239,9 +2114,9 @@ export default function Informes() {
                         <td style={{ padding:"8px 10px", fontFamily:"'JetBrains Mono',monospace", fontSize:11, color:"var(--text4)", borderBottom:"1px solid var(--border)" }}>{fmtN(c.kmTotal)} km</td>
                         <td style={{ padding:"8px 10px", fontFamily:"'JetBrains Mono',monospace", fontSize:11, color:"var(--text4)", borderBottom:"1px solid var(--border)" }}>{fmtN(c.kmVacio)} km</td>
                         <td style={{ padding:"8px 10px", borderBottom:"1px solid var(--border)" }}>
-                          <span style={{ fontSize:12, fontWeight:700, color:c.pctVacio>30?"var(--red)":c.pctVacio>15?"#f59e0b":"var(--green)" }}>{c.pctVacio.toFixed(1)}%</span>
+                          <span style={{ fontSize:12, fontWeight:700, color:c.pctVacio>30?"var(--red)":c.pctVacio>15?"#f59e0b":"var(--green)" }}>{c.pctVacio == null ? "—" : fmt2(c.pctVacio)+"%"}</span>
                         </td>
-                        <td style={{ padding:"8px 10px", fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:12, borderBottom:"1px solid var(--border)", color:c.eurosKm>1.5?"var(--green)":c.eurosKm>0?"#f59e0b":"var(--text4)" }}>{fmt2(c.eurosKm)} €/km</td>
+                        <td style={{ padding:"8px 10px", fontFamily:"'JetBrains Mono',monospace", fontWeight:700, fontSize:12, borderBottom:"1px solid var(--border)", color:c.eurosKm>1.5?"var(--green)":c.eurosKm>0?"#f59e0b":"var(--text4)" }}>{fmt2(c.eurosKm)} €/km total</td>
                         <td style={{ padding:"8px 10px", fontFamily:"'JetBrains Mono',monospace", fontWeight:700, color:"var(--green)", borderBottom:"1px solid var(--border)" }}>{fmt2(c.ingresos)} €</td>
                       </tr>
                     ))}
@@ -2348,10 +2223,10 @@ export default function Informes() {
                       );
                       // Pick actual value based on period/key
                       const actuals = {
-                        facturacion_mes:   filterItems(facturas,"fecha","30d").reduce((s,f)=>s+Number(f.total||0),0),
-                        facturacion_anual: filterItems(facturas,"fecha","365d").reduce((s,f)=>s+Number(f.total||0),0),
-                        cobros_mes:        filterItems(facturas,"fecha","30d").filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0),0),
-                        viajes_mes:        filterItems(pedidos,"fecha_pedido","30d").length,
+                        facturacion_mes:   monthAnalytics.data?.totals?.facturado_total,
+                        facturacion_anual: yearAnalytics.data?.totals?.facturado_total,
+                        cobros_mes:        monthAnalytics.data?.totals?.cobrado,
+                        viajes_mes:        monthAnalytics.data?.totals?.viajes,
                       };
                       return <ObjetivoBar key={o.k} label={o.l} actual={actuals[o.k]||0} objetivo={val}/>;
                     })}

@@ -1220,3 +1220,24 @@ export const getDriverExpenses = () => apiFetch('/choferes/app/gastos');
 export const createDriverExpense = body => apiFetch('/choferes/app/gastos',{method:'POST',body});
 export const getVehicleDriverExpenses = (vehiculo_id,desde,hasta) => apiFetch(`/choferes/gastos?${new URLSearchParams({vehiculo_id,desde,hasta})}`);
 export const completeBaseExpense = (id,body) => apiFetch(`/choferes/gastos/${id}/base`,{method:'PATCH',body});
+
+export const getBiAnalitica = (params={}) => apiFetch(`/informes/bi/analitica?${new URLSearchParams(typeof params === "string" ? {periodo:params} : params)}`, { silentSuccess:true, silentError:true });
+export const getBiWorkspace = (params={}, signal) => apiFetch(`/informes/bi/workspace?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true, signal });
+export const getBiReportCatalog = () => apiFetch('/informes/bi/reportes/catalogo', {silentSuccess:true});
+export const getBiReportViews = () => apiFetch('/informes/bi/reportes/vistas', {silentSuccess:true});
+export const saveBiReportView = data => apiFetch('/informes/bi/reportes/vistas', {method:'POST',body:data});
+export const updateBiReportView = (id,data) => apiFetch(`/informes/bi/reportes/vistas/${encodeURIComponent(id)}`, {method:'PUT',body:data});
+export const deleteBiReportView = id => apiFetch(`/informes/bi/reportes/vistas/${encodeURIComponent(id)}`, {method:'DELETE'});
+export const runBiReport = data => apiFetch('/informes/bi/reportes/ejecutar', {method:'POST',body:data,timeoutMs:120000});
+export const getBiReportPage = (id,pagina) => apiFetch(`/informes/bi/reportes/ejecuciones/${encodeURIComponent(id)}?pagina=${encodeURIComponent(pagina)}`, {silentSuccess:true});
+export const exportBiReport = (id,formato) => apiFetch(`/informes/bi/reportes/ejecuciones/${encodeURIComponent(id)}/exportar`, {method:'POST',body:{formato},timeoutMs:120000});
+export async function downloadBiReport(id) {
+  const token=getToken();
+  const response=await fetch(`${BASE}/api/v1/informes/bi/reportes/descargas/${encodeURIComponent(id)}`,{
+    headers:{...(token?{Authorization:`Bearer ${token}`}:{})},cache:'no-store'});
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar el informe');
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a generar el informe.');
+  return response.blob();
+}
+
+export const getBiHoja = params => apiFetch(`/hojas-ruta/bi?${new URLSearchParams(params)}`, {silentSuccess:true,silentError:true});

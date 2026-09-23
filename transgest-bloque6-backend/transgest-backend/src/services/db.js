@@ -53,10 +53,12 @@ async function query(text, params) {
 }
 
 // Helper: transacción
-async function transaction(fn) {
+async function transaction(fn, options = {}) {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    await client.query(options.readOnlyRepeatableRead
+      ? "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+      : "BEGIN");
     // SET LOCAL dentro de la transaccion: a diferencia del SET de sesion, esto SI
     // se aplica aunque la conexion pase por un pooler en modo transaccion (Render).
     // Evita que la transaccion se quede esperando un lock indefinidamente (crear

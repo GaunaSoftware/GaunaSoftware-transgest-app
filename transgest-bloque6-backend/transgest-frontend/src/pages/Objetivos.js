@@ -1,10 +1,10 @@
+import useBiAnalytics from "../services/useBiAnalytics";
 import { useState, useEffect, useCallback } from "react";
 import { getObjetivos, setObjetivo } from "../services/api";
-import { getPedidosTodos, getVehiculos, getChoferes, getFacturas } from "../services/api";
 import { notify } from "../services/notify";
 
-const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
+const fmt2 = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtN = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{maximumFractionDigits:0});
 
 // Objetivos migrados a BD
 
@@ -14,28 +14,9 @@ const PERIODOS = [
   { k:"anual",     l:"Este año" },
 ];
 
-function getMesRango(){
-  const now=new Date(); const y=now.getFullYear(),m=now.getMonth();
-  return { desde:new Date(y,m,1).toISOString().slice(0,10), hasta:new Date(y,m+1,0).toISOString().slice(0,10) };
-}
-function getTrimestreRango(){
-  const now=new Date(); const y=now.getFullYear(),m=now.getMonth();
-  const q=Math.floor(m/3); const mI=q*3;
-  return { desde:new Date(y,mI,1).toISOString().slice(0,10), hasta:new Date(y,mI+3,0).toISOString().slice(0,10) };
-}
-function getAnualRango(){
-  const y=new Date().getFullYear();
-  return { desde:`${y}-01-01`, hasta:`${y}-12-31` };
-}
-function getRango(p){ return p==="mes"?getMesRango():p==="trimestre"?getTrimestreRango():getAnualRango(); }
-
-function filtrarPorRango(arr, campo, desde, hasta){
-  return arr.filter(x=>{ const f=(x[campo]||"").slice(0,10); return f>=desde&&f<=hasta; });
-}
-
 // ── Barra de progreso de objetivo ─────────────────────────────────────────
 function ObjBar({ label, actual, objetivo, unidad="€", color="#3b82f6", sublabel="" }){
-  const pct = objetivo>0 ? Math.min((actual/objetivo)*100,100) : 0;
+  const pct = actual != null && objetivo>0 ? Math.min((actual/objetivo)*100,100) : null;
   const over = objetivo>0 && actual>objetivo;
   const c = over?"#10b981":pct>=80?"#f59e0b":pct>=50?"#3b82f6":"#ef4444";
   return(
@@ -50,11 +31,11 @@ function ObjBar({ label, actual, objetivo, unidad="€", color="#3b82f6", sublab
             {unidad==="€"?fmt2(actual):fmtN(actual)}{unidad==="€"?" €":unidad==="#"?"":" "+unidad}
           </span>
           <span style={{fontSize:11,color:"var(--text5)"}}>/ {unidad==="€"?fmt2(objetivo):fmtN(objetivo)}{unidad==="€"?" €":""}</span>
-          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,color:c}}>{pct.toFixed(1)}%</span>
+          <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,color:c}}>{pct == null ? "—" : pct.toFixed(1)+"%"}</span>
         </div>
       </div>
       <div style={{height:8,background:"var(--bg4)",borderRadius:4,overflow:"hidden"}}>
-        <div style={{height:"100%",width:pct+"%",background:c,borderRadius:4,transition:"width .4s"}}/>
+        <div style={{height:"100%",width:(pct ?? 0)+"%",background:c,borderRadius:4,transition:"width .4s"}}/>
       </div>
       {over&&<div style={{fontSize:10,color:"#10b981",marginTop:2,fontWeight:700}}>✅ Objetivo superado</div>}
     </div>
@@ -90,11 +71,7 @@ function ModalEditarObjetivo({ objetivo, onClose, onSave }){
 // ══════════════════════════════════════════════════════════════════════════
 export default function Objetivos(){
   const [periodo, setPeriodo] = useState("mes");
-  const [pedidos, setPedidos] = useState([]);
-  const [facturas,setFacturas]= useState([]);
-  const [vehiculos,setVehiculos]=useState([]);
-  const [choferes,setChoferes]=useState([]);
-  const [loading, setLoading] = useState(true);
+  const loading = false;
   const [config,  setConfig]  = useState({});
   const cargar = useCallback(async()=>{
     try{ const d=await getObjetivos(); setConfig(d||{}); }catch(e){}
@@ -102,63 +79,18 @@ export default function Objetivos(){
   useEffect(()=>{ cargar(); },[cargar]);
   const [editando,setEditando]= useState(null);
 
-  useEffect(()=>{
-    setLoading(true);
-    Promise.all([
-      getPedidosTodos({}, { silentError: true }).catch(()=>[]),
-      getFacturas().catch(()=>[]),
-      getVehiculos().catch(()=>[]),
-      getChoferes().catch(()=>[]),
-    ]).then(([p,f,v,c])=>{
-      setPedidos(Array.isArray(p)?p:[]);
-      setFacturas(Array.isArray(f)?f:Array.isArray(f?.data)?f.data:[]);
-      setVehiculos(Array.isArray(v)?v:[]);
-      setChoferes(Array.isArray(c)?c:[]);
-    }).finally(()=>setLoading(false));
-  },[]);
-
-  const {desde,hasta} = getRango(periodo);
-  const pedFilt = filtrarPorRango(pedidos,"fecha_carga",desde,hasta);
-  const facFilt = filtrarPorRango(facturas,"fecha",desde,hasta);
-
-  // ── Métricas reales ──────────────────────────────────────────────────
-  const facturacionTotal = facFilt.reduce((s,f)=>s+Number(f.total||0),0);
-  const cobrado          = facFilt.filter(f=>f.estado==="cobrada").reduce((s,f)=>s+Number(f.total||0),0);
-  const viajesTotal      = pedFilt.filter(p=>p.estado!=="cancelado").length;
-  const kmTotal          = pedFilt.reduce((s,p)=>s+Number(p.km_ruta||p.km||0),0);
-  const kmVacio          = pedFilt.reduce((s,p)=>s+Number(p.km_vacio||0),0);
-  const pctVacio         = (kmTotal+kmVacio)>0?(kmVacio/(kmTotal+kmVacio))*100:0;
-  const eurosKm          = (kmTotal+kmVacio)>0?facturacionTotal/(kmTotal+kmVacio):0;
-  const ticketMedio      = viajesTotal>0?facturacionTotal/viajesTotal:0;
-  const facturasVencidas = facFilt.filter(f=>f.estado==="vencida").length;
-
-  // Por camión
-  // Objetivos por vehículo: solo tractoras/cabezas (no remolques)
-  const _remIdsObj = new Set(vehiculos.map(v=>v.remolque_id).filter(Boolean));
-  const esTractora = v => {
-    const cl=(v.clase||v.tipo||"").toLowerCase();
-    const mat=(v.matricula||"").toUpperCase();
-    return !cl.includes("remolque")&&!cl.includes("semirremolque")&&!cl.includes("dolly")&&
-           !_remIdsObj.has(v.id)&&!mat.startsWith("R-")&&!mat.endsWith("-R");
-  };
-  const porCamion = vehiculos.filter(esTractora).map(v=>{
-    const pedV=pedFilt.filter(p=>p.vehiculo_id===v.id&&p.estado!=="cancelado");
-    const facV=facFilt.filter(f=>f.vehiculo_id===v.id||pedV.find(p=>p.id===f.pedido_id));
-    const ingresos=facV.reduce((s,f)=>s+Number(f.total||0),0);
-    const viajes=pedV.length;
-    const km=pedV.reduce((s,p)=>s+Number(p.km_ruta||p.km||0),0);
-    return{id:v.id,matricula:v.matricula,marca:v.marca,modelo:v.modelo,ingresos,viajes,km};
-  }).filter(v=>v.ingresos>0||v.viajes>0);
-
-  // Por chófer
-  const porChofer = choferes.map(c=>{
-    const pedC=pedFilt.filter(p=>(p.chofer_id===c.id||p.chofer2_id===c.id)&&p.estado!=="cancelado");
-    const facC=facFilt.filter(f=>pedC.find(p=>p.id===f.pedido_id));
-    const ingresos=facC.reduce((s,f)=>s+Number(f.total||0),0);
-    const viajes=pedC.length;
-    return{id:c.id,nombre:c.nombre+" "+(c.apellidos||""),ingresos,viajes};
-  }).filter(c=>c.ingresos>0||c.viajes>0);
-
+  const analytics = useBiAnalytics(periodo);
+  const stats = analytics.data?.totals || {};
+  const facturacionTotal = stats.facturado_total;
+  const cobrado = stats.cobrado;
+  const viajesTotal = stats.viajes;
+  const kmTotal = stats.kmTotal;
+  const pctVacio = stats.pctVacio;
+  const eurosKm = stats.eurosKm;
+  const ticketMedio = stats.ticket_medio;
+  const facturasVencidas = stats.facturas_vencidas;
+  const porCamion = analytics.data?.flotaStats || [];
+  const porChofer = analytics.data?.choferesStats || [];
   // ── Obtener objetivo de un indicador para el período ─────────────────
   const obj = (key) => Number(config[key]?.[periodo] || 0);
 
@@ -174,9 +106,9 @@ export default function Objetivos(){
 
   // Alertas: objetivos no alcanzados
   const alertas = [];
-  if(obj("facturacion")>0&&facturacionTotal<obj("facturacion")*0.8) alertas.push(`Facturación al ${((facturacionTotal/obj("facturacion"))*100).toFixed(0)}% del objetivo`);
-  if(obj("cobro")>0&&cobrado<obj("cobro")*0.8) alertas.push(`Cobros al ${((cobrado/obj("cobro"))*100).toFixed(0)}% del objetivo`);
-  if(obj("viajes")>0&&viajesTotal<obj("viajes")*0.8) alertas.push(`Viajes al ${((viajesTotal/obj("viajes"))*100).toFixed(0)}% del objetivo`);
+  if(facturacionTotal != null && obj("facturacion")>0&&facturacionTotal<obj("facturacion")*0.8) alertas.push(`Facturación al ${((facturacionTotal/obj("facturacion"))*100).toFixed(0)}% del objetivo`);
+  if(cobrado != null && obj("cobro")>0&&cobrado<obj("cobro")*0.8) alertas.push(`Cobros al ${((cobrado/obj("cobro"))*100).toFixed(0)}% del objetivo`);
+  if(viajesTotal != null && obj("viajes")>0&&viajesTotal<obj("viajes")*0.8) alertas.push(`Viajes al ${((viajesTotal/obj("viajes"))*100).toFixed(0)}% del objetivo`);
   if(pctVacio>25) alertas.push(`KM en vacío alto: ${pctVacio.toFixed(1)}%`);
   if(facturasVencidas>0) alertas.push(`${facturasVencidas} factura${facturasVencidas!==1?"s":""} vencida${facturasVencidas!==1?"s":""} sin cobrar`);
 
@@ -186,7 +118,7 @@ export default function Objetivos(){
     { id:"viajes",      nombre:"Viajes completados",actual:viajesTotal,      unidad:"#" },
     { id:"km",          nombre:"Kilómetros totales",actual:kmTotal,          unidad:"km"},
     { id:"ticket",      nombre:"Ticket medio por viaje",actual:ticketMedio,  unidad:"€" },
-    { id:"euros_km",    nombre:"€/km medio",        actual:eurosKm,          unidad:"€/km"},
+    { id:"euros_km",    nombre:"€/km total medio",        actual:eurosKm,          unidad:"€/km total"},
     { id:"pct_vacio",   nombre:"% km en vacío",     actual:pctVacio,         unidad:"%" },
   ];
 
@@ -198,6 +130,9 @@ export default function Objetivos(){
 
   return(
     <div style={{flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif",minHeight:"100vh"}}>
+      {analytics.error && <p role="alert">{analytics.error}</p>}
+      {analytics.loading && <p role="status">Calculando indicadores…</p>}
+      <p>Viajes e ingresos de servicios realizados, sin impuestos. Facturación y cobro estimado con impuestos. Saldo incluye deuda anterior al corte.</p>
       {/* Header */}
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:900,color:"var(--text)"}}>🎯 Objetivos</div>
@@ -210,7 +145,7 @@ export default function Objetivos(){
             </button>
           ))}
         </div>
-        <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>{desde} — {hasta}</span>
+        <span style={{marginLeft:"auto",fontSize:11,color:"var(--text5)"}}>{analytics.data?.metadata?.periodo?.desde || "—"} — {analytics.data?.metadata?.periodo?.hasta || "—"}</span>
       </div>
 
       {/* Alertas */}
@@ -245,7 +180,7 @@ export default function Objetivos(){
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--border2)"}}>
                         <span style={{fontSize:13,color:"var(--text)"}}>{ind.nombre}</span>
                         <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:14,color:"var(--text2)"}}>
-                          {ind.unidad==="€"?fmt2(ind.actual):ind.unidad==="%"?ind.actual.toFixed(1)+"%":fmtN(ind.actual)}{ind.unidad==="km"?" km":""}
+                          {ind.unidad==="€"?fmt2(ind.actual):ind.unidad==="%"?(ind.actual == null ? "—" : ind.actual.toFixed(1)+"%"):fmtN(ind.actual)}{ind.unidad==="km"?" km":""}
                         </span>
                       </div>
                     )}

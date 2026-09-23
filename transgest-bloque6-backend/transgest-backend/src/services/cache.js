@@ -21,7 +21,7 @@ function clear() { store.clear(); }
 // Middleware factory: cache a route response
 function cacheMiddleware(ttlSeconds = 30, keyFn = null) {
   return (req, res, next) => {
-    const key = keyFn ? keyFn(req) : `${req.method}:${req.originalUrl}:${req.user?.empresa_id}`;
+    const key = keyFn ? keyFn(req) : `${req.method}:${req.originalUrl}:${req.empresaId || req.user?.empresa_id}:${req.user?.id || ""}:${req.user?.rol || ""}`;
     const cached = get(key);
     if (cached) {
       res.setHeader("X-Cache", "HIT");
@@ -29,7 +29,7 @@ function cacheMiddleware(ttlSeconds = 30, keyFn = null) {
     }
     const origJson = res.json.bind(res);
     res.json = (data) => {
-      set(key, data, ttlSeconds);
+      if (res.statusCode >= 200 && res.statusCode < 300) set(key, data, ttlSeconds);
       res.setHeader("X-Cache", "MISS");
       return origJson(data);
     };

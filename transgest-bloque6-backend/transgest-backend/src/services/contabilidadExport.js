@@ -316,6 +316,11 @@ function hojaXml(filas) {
     const celdas = fila.map((valor, c) => {
       const ref = `${columnaExcel(c)}${r + 1}`;
       if (valor === "" || valor === null || valor === undefined) return "";
+      if (valor instanceof Date && Number.isFinite(valor.getTime())) {
+        // OOXML serial date; style 1 uses the built-in yyyy-mm-dd display format.
+        const serial = (valor.getTime() - Date.UTC(1899, 11, 30)) / 86400000;
+        return `<c r="${ref}" s="1"><v>${serial}</v></c>`;
+      }
       if (typeof valor === "number" && Number.isFinite(valor)) {
         return `<c r="${ref}"><v>${valor}</v></c>`;
       }
@@ -337,6 +342,7 @@ function buildXlsx(filas = [], nombreHoja = "APU") {
       + `<Default Extension="xml" ContentType="application/xml"/>`
       + `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`
       + `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+      + `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`
       + `</Types>`],
     ["_rels/.rels",
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
@@ -352,7 +358,9 @@ function buildXlsx(filas = [], nombreHoja = "APU") {
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
       + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
       + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`
+      + `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`
       + `</Relationships>`],
+    ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>`],
     ["xl/worksheets/sheet1.xml", hojaXml(filas)],
   ];
 

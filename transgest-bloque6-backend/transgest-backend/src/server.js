@@ -1461,6 +1461,7 @@ async function startServer() {
   await ensureApiKeyTables();
   await ensureNotificacionesSchema();
   await applyMigrations();
+  await require('./services/biSchema').ensureSchema().catch(captureStartupMigrationError);
   await authRoutes.initializeSchema?.();
   await choferesRoutes.initializeSchema?.();
   await geocodingRoutes.initializeSchema?.();

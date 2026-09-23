@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { PGlite } = require('@electric-sql/pglite');
 const db = require('../src/services/db');
+const biSchema = require('../src/services/biSchema');
 const weekly = require('../src/services/weeklyBiReports');
 const routes = require('../src/routes/biReportCenter');
 const { PLANTILLAS } = require('../src/services/email');
@@ -38,17 +40,25 @@ async function main() {
   try {
     await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY,nombre text,plan text,estado text);
       CREATE TABLE usuarios(id uuid PRIMARY KEY,empresa_id uuid REFERENCES empresas(id),nombre text,email text,rol text,activo boolean,permisos jsonb);
-      CREATE TABLE bi_report_runs(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,owner_id uuid,snapshot jsonb);
       INSERT INTO empresas VALUES ('${A}','Empresa A','profesional','activo'),('${B}','Empresa B','profesional','activo');
       INSERT INTO usuarios VALUES
         ('${MANAGER}','${A}','Gerente A','manager-a@example.test','gerente',true,'{}'),
         ('${SECOND}','${A}','Gerente B','manager-b@example.test','gerente',true,'{}'),
         ('${OTHER}','${B}','Gerente C','manager-c@example.test','gerente',true,'{}'),
         ('${TRAFFIC}','${A}','Tráfico','traffic@example.test','trafico',true,'{}');`);
-    await pg.exec(fs.readFileSync(path.join(__dirname, 'migrations', '20260923_bi_weekly_delivery.sql'), 'utf8'));
     db.query = (sql, params) => pg.query(sql, params);
-    db.transaction = async fn => { await pg.exec('BEGIN'); try { const result = await fn({ query: db.query }); await pg.exec('COMMIT'); return result; }
+    db.transaction = async fn => { await pg.exec('BEGIN'); try { const result = await fn({ query: (sql, params) => params ? pg.query(sql, params) : pg.exec(sql) }); await pg.exec('COMMIT'); return result; }
       catch (error) { await pg.exec('ROLLBACK'); throw error; } };
+    await biSchema.ensureSchema({ query: db.query, transaction: db.transaction });
+    await biSchema.ensureSchema({ query: db.query, transaction: db.transaction });
+    assert.equal((await pg.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE id LIKE '20260923_bi_%'")).rows[0].count, 2,
+      'Startup applies and records both BI migrations exactly once');
+    await pg.query("UPDATE schema_migrations SET checksum='changed' WHERE id='20260923_bi_weekly_delivery'");
+    await assert.rejects(biSchema.ensureSchema({ query: db.query, transaction: db.transaction }), /checksum distinto/);
+    await pg.query("UPDATE schema_migrations SET checksum=$1 WHERE id='20260923_bi_weekly_delivery'", [
+      crypto.createHash('sha256').update(fs.readFileSync(
+        path.join(__dirname, 'migrations', '20260923_bi_weekly_delivery.sql'), 'utf8')).digest('hex'),
+    ]);
 
     assert.equal((await call('/semanal/configuracion', 'GET', A, TRAFFIC, 'trafico')).status, 403);
     assert.equal((await call('/semanal/configuracion', 'PUT', A, TRAFFIC, 'trafico', { destinatarios: [MANAGER] })).status, 403);
@@ -70,8 +80,8 @@ async function main() {
       generate: async (company, user, config) => {
         assert.equal(company, A); assert.ok([MANAGER, SECOND].includes(user));
         assert.equal(config.template, 'vehiculo'); assert.equal(config.desde, '2026-09-21');
-        const saved = await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot) VALUES($1,$2,$3) RETURNING id',
-          [company, user, JSON.stringify({ title: 'Informe sintético', metadata: { periodo: { desde: config.desde, hasta: config.hasta } } })]);
+        const saved = await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot,contract_version) VALUES($1,$2,$3,$4) RETURNING id',
+          [company, user, JSON.stringify({ title: 'Informe sintético', metadata: { periodo: { desde: config.desde, hasta: config.hasta } } }), 'bi-v1']);
         return { id: saved.rows[0].id };
       },
       renderPdf: async () => Buffer.from('%PDF-1.4 synthetic test'),
@@ -105,8 +115,8 @@ async function main() {
       'Planner-only cannot receive TransGest internal report');
     const simulated = await weekly.tick(new Date('2026-10-05T07:00:00Z'), { ...deps,
       generate: async (company, user, config) => {
-        const saved = await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot) VALUES($1,$2,$3) RETURNING id',
-          [company, user, JSON.stringify({ title: 'Test', metadata: { periodo: config } })]);
+        const saved = await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot,contract_version) VALUES($1,$2,$3,$4) RETURNING id',
+          [company, user, JSON.stringify({ title: 'Test', metadata: { periodo: config } }), 'bi-v1']);
         return { id: saved.rows[0].id };
       },
       send: async () => ({ simulado: true }),
@@ -125,8 +135,8 @@ async function main() {
     const ambiguous = await weekly.tick(new Date('2026-10-26T08:00:00Z'), {
       ...deps,
       generate: async (company, user, config) => {
-        const saved = await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot) VALUES($1,$2,$3) RETURNING id',
-          [company, user, JSON.stringify({ title: 'Test', metadata: { periodo: config } })]);
+        const saved = await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot,contract_version) VALUES($1,$2,$3,$4) RETURNING id',
+          [company, user, JSON.stringify({ title: 'Test', metadata: { periodo: config } }), 'bi-v1']);
         return { id: saved.rows[0].id };
       },
       send: async () => { throw new Error('Timeout sintético tras entregar a SMTP'); },

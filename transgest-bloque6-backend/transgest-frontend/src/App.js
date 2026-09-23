@@ -31,7 +31,7 @@ const Choferes     = lazy(() => import("./pages/Choferes"));
 const Colaboradores= lazy(() => import("./pages/Colaboradores"));
 const Facturacion  = lazy(() => import("./pages/Facturacion"));
 const Contabilidad = lazy(() => import("./pages/Contabilidad"));
-const Informes     = lazy(() => import("./pages/Informes"));
+const Informes     = lazy(() => import("./pages/bi/BiWorkspace"));
 const Excepciones  = lazy(() => import("./pages/Excepciones"));
 const Documentos   = lazy(() => import("./pages/Documentos"));
 const Avisos       = lazy(() => import("./pages/Avisos"));

@@ -1,10 +1,10 @@
+import useBiAnalytics from "../services/useBiAnalytics";
 import { useState, useEffect, useCallback } from "react";
-import { getVehiculos, getFacturas,
-  getGastosEstructura, crearGastoEstructura, editarGastoEstructura, borrarGastoEstructura,
+import { getGastosEstructura, crearGastoEstructura, editarGastoEstructura, borrarGastoEstructura,
   getMesesCerrados, cerrarMes as cerrarMesApi, abrirMes as abrirMesApi } from "../services/api";
 import { confirmDialog, notify } from "../services/notify";
 
-const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt2 = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 // Funciones migradas a BD — ver api.js
 function primerDiaMes(d){ const x=new Date(d); x.setDate(1); return x.toISOString().slice(0,10); }
 
@@ -74,8 +74,7 @@ function ModalGastoEstr({editando,onClose}){
 
 export default function GastosEstructura(){
   const hoy=new Date();
-  const [vehiculos,setVehiculos]=useState([]);
-  const [facturas,setFacturas]=useState([]);
+  const [reload,setReload]=useState(0);
   const [gastos,setGastos]=useState([]);
   const [modalGasto,setModalGasto]=useState(false);
   const [editGasto,setEditGasto]=useState(null);
@@ -84,17 +83,13 @@ export default function GastosEstructura(){
   const [mesesCerrados,setMesesCerrados]=useState([]);
   const mesCerrado = mesesCerrados.includes(periodo);
 
-  useEffect(()=>{
-    getVehiculos().then(v=>setVehiculos(Array.isArray(v)?v:[])).catch(()=>{});
-    getFacturas().then(f=>setFacturas(Array.isArray(f)?f:Array.isArray(f?.data)?f.data:[])).catch(()=>{});
-  },[]);
-
   const cargar = useCallback(async () => {
     try {
       const [g, m] = await Promise.all([getGastosEstructura(), getMesesCerrados()]);
       setGastos(Array.isArray(g) ? g : []);
       setMesesCerrados(Array.isArray(m) ? m : []);
-    } catch(e) { console.error(e); }
+      setReload(n=>n+1);
+    } catch(e) { notify("No se pudieron cargar los gastos: " + e.message, "error"); }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
   function recargar(){ cargar(); setModalGasto(false); setEditGasto(null); }
@@ -107,7 +102,7 @@ export default function GastosEstructura(){
       tone: "warning",
     });
     if(!ok) return;
-    try { await cerrarMesApi(primerDiaMes(periodo)); await cargar(); } catch(e){notify(e.message, "error");}
+    try { await cerrarMesApi(primerDiaMes(periodo)); await cargar(); } catch(e){notify(e.message, "error"); return;}
     notify("Mes "+periodo+" cerrado correctamente. Ya no se puede editar.", "success");
   }
   async function reabrirMes(){
@@ -135,43 +130,19 @@ export default function GastosEstructura(){
     reader.readAsDataURL(file);
   }
 
-  // Gastos del período seleccionado
-  const gastosPeriodo = gastos.filter(g=>{
-    if(g.periodo==="unico") return g.fecha?.slice(0,7)===periodo;
-    if(g.periodo==="mensual") return g.fecha?.slice(0,7)===periodo;
-    if(g.periodo==="trimestral"){
-      const [ay,am]=periodo.split("-").map(Number);
-      const [gy,gm]=g.fecha.split("-").map(Number);
-      return ay===gy && Math.ceil(am/3)===Math.ceil(gm/3);
-    }
-    if(g.periodo==="anual") return g.fecha?.slice(0,4)===periodo.slice(0,4);
-    return false;
-  });
-
-  const totalEstructura=gastosPeriodo.reduce((s,g)=>s+Number(g.importe||0),0);
-  // Excluir remolques y semirremolques del reparto
-  const esRemolque = v => { const cl=(v.clase||v.tipo||"").toLowerCase(); const mat=(v.matricula||"").toUpperCase(); return cl.includes("remolque")||cl.includes("semirremolque")||cl.includes("dolly")||mat.startsWith("R-")||mat.endsWith("-R"); };
-  const vActivos=vehiculos.filter(v=>v.activo&&v.estado!=="baja"&&v.estado!=="inactivo"&&!esRemolque(v));
-
-  // Facturación del mes por camión
-  const facPeriodo=facturas.filter(f=>f.fecha?.slice(0,7)===periodo);
-  const facTotalMes=facPeriodo.reduce((s,f)=>s+Number(f.total||0),0);
-
-  // Reparto por camión
-  const repartoPorCamion=vActivos.map(v=>{
-    let peso=1;
-    if(reparto==="facturacion"){
-      const facVeh=facPeriodo.filter(f=>f.vehiculo_id===v.id);
-      const facVehTotal=facVeh.reduce((s,f)=>s+Number(f.total||0),0);
-      peso=facTotalMes>0?(facVehTotal/facTotalMes):1/Math.max(vActivos.length,1);
-    }else{
-      peso=1/Math.max(vActivos.length,1);
-    }
-    return{ v, peso, coste:totalEstructura*peso };
-  });
+  const last = new Date(Date.UTC(Number(periodo.slice(0,4)),Number(periodo.slice(5,7)),0)).toISOString().slice(0,10);
+  const analytics = useBiAnalytics({desde:periodo+'-01',hasta:last},reload);
+  const gastosPeriodo = analytics.data?.estructura?.gastos || [];
+  const totalEstructura = analytics.data?.estructura?.total;
+  const allocation = analytics.data?.estructura?.reparto || [];
+  const vActivos = allocation.map(x=>x.v);
+  const repartoPorCamion = allocation.map(x=>({v:x.v,peso:reparto==='facturacion'?x.peso_ingresos:x.peso_igual,coste:reparto==='facturacion'?x.coste_ingresos:x.coste_igual}));
 
   return(
     <div className="tg-responsive-page" style={S.page}>
+      {analytics.error && <p role="alert">{analytics.error}</p>}
+      {analytics.loading && <p role="status">Calculando imputación mensual…</p>}
+      <p>Imputación mensual estimada: gastos anuales / 12 y trimestrales / 3. El reparto por ingresos usa servicios realizados netos asignados a cada tractora; no modifica facturas.</p>
       <div style={S.title}>Gastos de Estructura</div>
 
       {/* Controls */}
@@ -212,7 +183,7 @@ export default function GastosEstructura(){
         {[
           {l:"Total estructura período",v:`${fmt2(totalEstructura)} €`,c:"var(--red)"},
           {l:"Camiones activos",v:vActivos.length,c:"var(--text)"},
-          {l:"Coste medio por camión",v:`${fmt2(vActivos.length>0?totalEstructura/vActivos.length:0)} €`,c:"#f59e0b"},
+          {l:"Coste medio por camión",v:`${fmt2(analytics.data?.estructura?.coste_medio_camion)} €`,c:"#f59e0b"},
         ].map((k,i)=>(
           <div key={i} style={S.card}>
             <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:18,fontWeight:800,color:k.c}}>{k.v}</div>
@@ -234,7 +205,7 @@ export default function GastosEstructura(){
                     <td style={{...S.td,fontWeight:600,color:"var(--text)"}}>{g.nombre}</td>
                     <td style={{...S.td,fontSize:11}}><span style={{background:"var(--bg4)",padding:"2px 8px",borderRadius:4}}>{g.tipo}</span></td>
                     <td style={{...S.td,fontSize:11,color:"var(--text4)",textTransform:"capitalize"}}>{g.periodo}</td>
-                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--red)"}}>{fmt2(g.importe)} €</td>
+                    <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:"var(--red)"}}>{fmt2(g.importe_periodo)} €</td>
                     <td style={S.td}>
                       <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
                         {/* Factura adjunta */}
@@ -301,7 +272,7 @@ export default function GastosEstructura(){
                   <div key={v.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:11}}>
                     <span style={{width:10,height:10,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0,display:"inline-block"}}/>
                     <span style={{color:"var(--text3)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.matricula}</span>
-                    <span style={{fontWeight:700,color:"var(--text)",fontFamily:"monospace"}}>{(peso*100).toFixed(0)}%</span>
+                    <span style={{fontWeight:700,color:"var(--text)",fontFamily:"monospace"}}>{peso == null ? "—" : (peso*100).toFixed(0)+"%"}</span>
                   </div>
                 );
               })}
@@ -327,11 +298,11 @@ export default function GastosEstructura(){
                         </div>
                         <div style={{textAlign:"right"}}>
                           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:14,color:col}}>{fmt2(coste)} €</span>
-                          <span style={{fontSize:11,color:"var(--text5)",marginLeft:6}}>{(peso*100).toFixed(1)}%</span>
+                          <span style={{fontSize:11,color:"var(--text5)",marginLeft:6}}>{(peso == null ? "—" : (peso*100).toFixed(1))}%</span>
                         </div>
                       </div>
                       <div style={{background:"var(--bg4)",borderRadius:4,height:8,overflow:"hidden"}}>
-                        <div style={{width:`${(peso*100).toFixed(1)}%`,height:"100%",background:col,borderRadius:4,transition:"width .4s ease"}}/>
+                        <div style={{width:`${(peso == null ? "—" : (peso*100).toFixed(1))}%`,height:"100%",background:col,borderRadius:4,transition:"width .4s ease"}}/>
                       </div>
                     </div>
                   );

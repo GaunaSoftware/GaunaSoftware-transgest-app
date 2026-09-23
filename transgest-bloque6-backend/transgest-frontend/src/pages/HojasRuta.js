@@ -1,14 +1,15 @@
+import useBiAnalytics from "../services/useBiAnalytics";
 import DriverExpenseReview from "./personnel/DriverExpenseReview";
 import { getVehicleDriverExpenses } from "../services/api";
 import { PersonnelHeader, RouteSheetsOverview } from "./personnel/PersonnelWorkspace";
 import { getLogoDataUrl } from "../services/logoHelper";
 import { useState, useEffect, useCallback } from "react";
-import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidosTodos, getRepostajes, getVehiculos, getTallerEstado, setChoferConfig, setGasoilConfig } from "../services/api";
+import { borrarNoche, borrarRepostaje, crearNoche, crearRepostaje, getNominasEmitidas, getChoferes, getChoferConfig, getGasoilConfig, getNochesVehiculo, getPedidosTodos, getRepostajes, getVehiculos, setChoferConfig, setGasoilConfig } from "../services/api";
 import { getChoferConfigSync, useChoferConfig } from "../hooks/useChoferConfig";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
 
-const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt2 = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
 const fmtFecha = v => v ? new Date(String(v).slice(0,10)).toLocaleDateString("es-ES") : "";
 const num = v => Number(v || 0) || 0;
@@ -377,18 +378,16 @@ export default function HojasRuta(){
   const [modalChofer,setModalChofer]=useState(false);
   const [cfgV,setCfgV]=useState(0);
   const [nominaEmitida,setNominaEmitida]=useState(null);
-  const [taller,setTaller]=useState({ stock: [], reparaciones: [] });
   const recargar=useCallback(()=>setCfgV(v=>v+1),[]);
 
   useEffect(()=>{
     async function load(){
       setLoading(true);
       try{
-        const[v,p,c,t]=await Promise.all([getVehiculos().catch(()=>[]),getPedidosTodos({}, { silentError: true }).catch(()=>[]),getChoferes().catch(()=>[]),getTallerEstado().catch(()=>null)]);
+        const[v,p,c]=await Promise.all([getVehiculos().catch(()=>[]),getPedidosTodos({}, { silentError: true }).catch(()=>[]),getChoferes().catch(()=>[])]);
         const vArr=Array.isArray(v)?v:[];
         const pArr=Array.isArray(p)?p:(Array.isArray(p?.data)?p.data:[]);
         setVehiculos(vArr);setPedidos(pArr);setChoferes(Array.isArray(c)?c:[]);
-        setTaller(t && typeof t === "object" ? t : { stock: [], reparaciones: [] });
         if(vArr.length>0) setVehiculoSel(prev => prev || vArr[0].id);
       }finally{setLoading(false);}
     }
@@ -452,49 +451,8 @@ export default function HojasRuta(){
   },[vehiculoSel,cfgV]);
   const gasoilCfg=vehiculoSel?gasoilCfgData:{tipo:"fijo",precio_fijo:1.65};
 
-  const hoja=(()=>{
-    if(!vehiculo) return null;
-    const pedVeh=pedidos.filter(p=>{
-      const f=(p.fecha_carga||p.fecha_pedido||"").slice(0,10);
-      return p.vehiculo_id===vehiculo.id&&f>=fechaDesde&&f<=fechaHasta&&p.estado!=="cancelado";
-    });
-    const kmCargado=pedVeh.reduce((s,p)=>s+Number(p.km_ruta||p.km||0),0);
-    const kmVacio=pedVeh.reduce((s,p)=>s+Number(p.km_vacio||0),0);
-    const kmTotal = kmCargado+kmVacio;
-    const ingresos=pedVeh.reduce((s,p)=>s+Number(p.importe||0),0);
-    const viajes=pedVeh.length;
-    const precioLitro=precioCombDia(fechaDesde,gasoilCfg);
-    const costeGasoilReal=repostajesPeriodo.reduce((s,x)=>{
-      const importe=Number(x.importe||0);
-      if(importe>0) return s+importe;
-      const precio=Number(x.precio_litro||0);
-      return s+Number(x.litros||0)*(precio>0?precio:precioLitro);
-    },0);
-    const costeGasoil=(costeGasoilReal>0?costeGasoilReal:litrosSel*precioLitro)+gastosCombustible.reduce((t,x)=>t+Number(x.importe||0),0);
-    const costeTaller=taller.reparaciones.filter(r=>r.vehiculo_id===vehiculo.id&&r.fecha>=fechaDesde&&r.fecha<=fechaHasta).reduce((s,r)=>s+Number(r.coste_total||0),0);
-    const costeNoches=nochesSel+gastosDietas.reduce((t,x)=>t+Number(x.importe||0),0);
-    const salarioBase=nominaEmitida?Number(nominaEmitida.salario_base||0):Number(choferExt.salario_base||0);
-    const ssTrabajador=nominaEmitida?Number(nominaEmitida.ss_trabajador||0):salarioBase*0.0655;
-    const ssEmpresa=nominaEmitida?Number(nominaEmitida.ss_empresa||0):salarioBase*0.2940;
-    const retencionIRPF=nominaEmitida?Number(nominaEmitida.irpf||0):0;
-    const liquidoNeto=nominaEmitida?Number(nominaEmitida.liquido||0):(salarioBase-ssTrabajador-retencionIRPF);
-    const incentivoPct=Number(choferExt.incentivo_pct||0);
-    const incentivo=ingresos>0?(ingresos*incentivoPct/100):0;
-    const kmPagoTipo=choferExt.km_pago_tipo||"todos";
-    const kmRetribuidos=kmPagoTipo==="cargado"?kmCargado:(kmPagoTipo==="vacio"?kmVacio:kmTotal);
-    const pagoKm=kmRetribuidos*Number(choferExt.precio_km||0);
-    const diasActivos=new Set([...pedVeh.map(p=>String(p.fecha_carga||p.fecha_pedido||"").slice(0,10)),...nochesPeriodo.map(n=>String(n.fecha||"").slice(0,10))].filter(Boolean)).size;
-    const disponibilidad=Number(choferExt.disponibilidad_mensual||0)+(Number(choferExt.disponibilidad_diaria||0)*diasActivos);
-    const totalChofer=salarioBase+incentivo+costeNoches+pagoKm+disponibilidad;
-    const costeEmpresaTotal=salarioBase+ssEmpresa+incentivo+costeNoches+pagoKm+disponibilidad;
-    const totalCostes=costeGasoil+costeTaller+costeEmpresaTotal;
-    const margen=ingresos-totalCostes;
-    const eurosKmIngresos=(kmTotal)>0?ingresos/kmTotal:0;     // ingresos/km total
-    const eurosKmMargen=(kmTotal)>0?margen/kmTotal:0;          // margen bruto/km
-    const eurosKmCostes=(kmTotal)>0?totalCostes/kmTotal:0;     // coste/km
-    const eurosKm=eurosKmIngresos; // backward compat
-    return{pedVeh,kmCargado,kmVacio,kmTotal,kmPagoTipo,kmRetribuidos,pagoKm,diasActivos,disponibilidad,ingresos,viajes,costeGasoil,precioLitro,costeTaller,costeNoches,salarioBase,ssTrabajador,ssEmpresa,retencionIRPF,liquidoNeto,incentivoPct,incentivo,totalChofer,costeEmpresaTotal,totalCostes,margen,eurosKm,eurosKmIngresos,eurosKmMargen,eurosKmCostes};
-  })();
+  const sheetAnalytics = useBiAnalytics({desde:fechaDesde,hasta:fechaHasta,vehiculo_id:vehiculoSel},cfgV,'hoja');
+  const hoja = sheetAnalytics.data;
 
   function imprimir(){
     if(!vehiculo||!hoja) return;
@@ -527,6 +485,9 @@ export default function HojasRuta(){
 
   return(
     <div className="tg-responsive-page personnel-page" style={S.page}>
+      {vehiculoSel && sheetAnalytics.error && <p role="alert">{sheetAnalytics.error}</p>}
+      {sheetAnalytics.loading && <p role="status">Calculando hoja de ruta…</p>}
+      <p>Resultado estimado de flota con costes registrados. No incluye estructura, seguros ni amortización. La nómina se imputa por días del mes.</p>
       <PersonnelHeader active="hojas_ruta"/>
       <div className="personnel-responsive-flex" style={{display:"flex",alignItems:"center",gap:18,marginBottom:24,flexWrap:"wrap"}}>
         {detalleAbierto&&<button onClick={()=>setDetalleAbierto(false)}>← Todas las hojas</button>}

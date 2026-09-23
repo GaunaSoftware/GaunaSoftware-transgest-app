@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
-import { getVehiculos, getPedidosTodos, getTallerEstado, getKmVacioVehiculo, crearKmVacioVehiculo } from "../services/api";
+import useBiAnalytics from "../services/useBiAnalytics";
+import { useState } from "react";
+import { crearKmVacioVehiculo } from "../services/api";
 import { notify } from "../services/notify";
 
-const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
+const fmt2 = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtN = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{maximumFractionDigits:0});
 
 const S = {
   page: {flex:1, padding:"22px 26px",fontFamily:"'DM Sans',sans-serif"},
@@ -62,125 +63,20 @@ function ModalKmVacio({vehiculo, onClose, onSaved}) {
 }
 
 export default function Explotacion() {
-  const [vehiculos,   setVehiculos]   = useState([]);
-  const [pedidos,     setPedidos]     = useState([]);
-  const [taller,      setTaller]      = useState({ stock: [], reparaciones: [] });
-  const [kmVacioMap,  setKmVacioMap]  = useState({});
-  const [loading,     setLoading]     = useState(true);
-  const [periodo,     setPeriodo]     = useState("mes");
-  const [modalKm,     setModalKm]     = useState(null);
+  const [periodo, setPeriodo] = useState('mes');
+  const [modalKm, setModalKm] = useState(null);
   const [selVehiculo, setSelVehiculo] = useState(null);
-
-  async function cargarKmVacioVehiculos(listaVehiculos) {
-    const base = Array.isArray(listaVehiculos) ? listaVehiculos : [];
-    if (!base.length) {
-      setKmVacioMap({});
-      return;
-    }
-    const pairs = await Promise.all(
-      base.map(async (vehiculo) => {
-        try {
-          const rows = await getKmVacioVehiculo(vehiculo.id);
-          return [vehiculo.id, Array.isArray(rows) ? rows : []];
-        } catch {
-          return [vehiculo.id, []];
-        }
-      })
-    );
-    setKmVacioMap(Object.fromEntries(pairs));
-  }
-
-  useEffect(() => {
-    Promise.all([getVehiculos(), getPedidosTodos({}, { silentError: true }).catch(()=>[]), getTallerEstado().catch(()=>null)])
-      .then(async ([v,p,t])=>{
-        const vehiculosArr = Array.isArray(v)?v:[];
-        setVehiculos(vehiculosArr);
-        setPedidos(Array.isArray(p)?p:[]);
-        setTaller(t && typeof t === "object" ? t : { stock: [], reparaciones: [] });
-        await cargarKmVacioVehiculos(vehiculosArr);
-      }).catch(()=>{}).finally(()=>setLoading(false));
-  }, []);
-
-  // Calcular rango de fechas según período
-  function getRango() {
-    const ahora = new Date();
-    if (periodo==="mes") {
-      const ini = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
-      return { desde: ini, hasta: ahora };
-    }
-    if (periodo==="trimestre") {
-      const ini = new Date(ahora); ini.setMonth(ahora.getMonth()-3);
-      return { desde: ini, hasta: ahora };
-    }
-    if (periodo==="año") {
-      const ini = new Date(ahora.getFullYear(), 0, 1);
-      return { desde: ini, hasta: ahora };
-    }
-    return { desde: new Date(0), hasta: ahora };
-  }
-
-  function getKmVacio(vehiculoId) {
-    return Array.isArray(kmVacioMap?.[vehiculoId]) ? kmVacioMap[vehiculoId] : [];
-  }
-
-  const { desde, hasta } = getRango();
-
-  // Construir análisis por vehículo
-  // Explotación: solo tractoras y camiones (no remolques)
-  // Los remolques se analizan siempre junto a su tractora
-  const vehiculosFiltrados = vehiculos.filter(v => {
-    const clase = (v.clase || v.tipo || "").toLowerCase();
-    const mat = (v.matricula||"").toUpperCase();
-    const isRemolqueDeAlguien = vehiculos.some(t=>t.remolque_id===v.id);
-    return !clase.includes("remolque") && !clase.includes("semirremolque") && 
-           !clase.includes("dolly") && !clase.includes("lowboy") &&
-           !isRemolqueDeAlguien && !mat.startsWith("R-") && !mat.endsWith("-R");
-  });
-
-  const analisis = vehiculosFiltrados.map(v => {
-    // Pedidos asignados a este vehículo en el período
-    const pedidosVh = pedidos.filter(p => {
-      if (p.vehiculo_id !== v.id) return false;
-      if (!p.fecha_carga) return true;
-      const fc = new Date(p.fecha_carga);
-      return fc >= desde && fc <= hasta;
-    });
-
-    const ingresos     = pedidosVh.reduce((s,p)=>s+Number(p.importe||0),0);
-    const kmCargados   = pedidosVh.reduce((s,p)=>s+Number(p.km||0),0);
-
-    // Km en vacío registrados
-    const kmVacioReg = getKmVacio(v.id)
-      .filter(kv=>{ const f=new Date(kv.fecha); return f>=desde&&f<=hasta; })
-      .reduce((s,kv)=>s+kv.km_vacio,0);
-
-    // Costos de taller en período
-    const costosTaller = taller.reparaciones
-      .filter(r=>r.vehiculo_id===v.id && new Date(r.fecha)>=desde && new Date(r.fecha)<=hasta)
-      .reduce((s,r)=>s+(r.coste_total||0),0);
-
-    const kmTotales = kmCargados + kmVacioReg;
-    const pctVacio  = kmTotales > 0 ? (kmVacioReg/kmTotales*100) : 0;
-    const margen    = ingresos - costosTaller;
-    const costoKm   = kmTotales > 0 ? costosTaller/kmTotales : 0;
-    const ingresoKm = kmCargados > 0 ? ingresos/kmCargados : 0;
-
-    return { vehiculo:v, pedidosVh, ingresos, kmCargados, kmVacioReg, kmTotales, pctVacio, costosTaller, margen, costoKm, ingresoKm };
-  });
-
-  // Totales globales
-  const totales = analisis.reduce((acc,a)=>({
-    ingresos:     acc.ingresos+a.ingresos,
-    kmCargados:   acc.kmCargados+a.kmCargados,
-    kmVacioReg:   acc.kmVacioReg+a.kmVacioReg,
-    costosTaller: acc.costosTaller+a.costosTaller,
-    margen:       acc.margen+a.margen,
-  }), {ingresos:0,kmCargados:0,kmVacioReg:0,costosTaller:0,margen:0});
-
+  const [reload, setReload] = useState(0);
+  const analytics = useBiAnalytics(periodo, reload);
+  const loading = analytics.loading;
+  const analisis = analytics.data?.flotaStats || [];
+  const totales = analytics.data?.explotacionTotales || {};
   const vehiculoDetalle = selVehiculo ? analisis.find(a=>a.vehiculo.id===selVehiculo) : null;
 
   return (
     <div className="tg-responsive-page" style={S.page}>
+      {analytics.error && <p role="alert">{analytics.error}</p>}
+      <p>Ingresos netos realizados. Resultado parcial tras costes directos registrados y taller; no incluye estructura ni nóminas. Km vacíos incluyen registros manuales, que deben ser trayectos adicionales.</p>
       <div style={S.title}>Explotación</div>
       <div style={S.sub}>Rentabilidad por vehículo - Km en vacío - Costes de taller</div>
 
@@ -243,14 +139,14 @@ export default function Explotacion() {
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"#f97316"}}>{fmtN(a.kmVacioReg)} km</td>
                       <td style={S.td}>
                         <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:pctColor}}>
-                          {a.pctVacio.toFixed(1)}%
+                          {a.pctVacio == null ? "—" : a.pctVacio.toFixed(1)+"%"}
                         </span>
                       </td>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",color:"#ef4444"}}>{fmt2(a.costosTaller)} EUR</td>
                       <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)"}}>{fmt2(a.ingresoKm)} EUR</td>
                       <td style={S.td}>
                         <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:a.margen>=0?"var(--green)":"#ef4444"}}>
-                          {fmt2(a.margen)} EUR
+                          {fmt2(a.resultado_con_taller)} EUR
                         </span>
                       </td>
                       <td style={S.td} onClick={e=>e.stopPropagation()}>
@@ -296,9 +192,9 @@ export default function Explotacion() {
                 <button style={{...S.btn,background:"transparent",color:"var(--accent-xl)",border:"1px solid #1e2d45",padding:"2px 8px",fontSize:11}}
                   onClick={()=>setModalKm(vehiculoDetalle.vehiculo)}>+ Añadir</button>
               </div>
-              {getKmVacio(vehiculoDetalle.vehiculo.id).length===0
+              {vehiculoDetalle.kmVacioRecords.length===0
                 ? <div style={{fontSize:12,color:"var(--text5)"}}>Sin km en vacío registrados</div>
-                : getKmVacio(vehiculoDetalle.vehiculo.id).slice(0,8).map((kv,i)=>(
+                : vehiculoDetalle.kmVacioRecords.slice(0,8).map((kv,i)=>(
                   <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #0f1520",fontSize:12}}>
                     <span style={{color:"var(--text3)"}}>{kv.fecha} {kv.origen&&kv.destino?`- ${kv.origen}->${kv.destino}`:""} <span style={{color:"var(--text5)"}}>({kv.motivo})</span></span>
                     <span style={{fontFamily:"'JetBrains Mono',monospace",color:"#f97316"}}>{fmtN(kv.km_vacio)} km</span>
@@ -311,9 +207,9 @@ export default function Explotacion() {
           {/* Costes taller */}
           <div style={{marginTop:14}}>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:8}}>Intervenciones de taller</div>
-            {taller.reparaciones.filter(r=>r.vehiculo_id===vehiculoDetalle.vehiculo.id).length===0
+            {vehiculoDetalle.reparaciones.length===0
               ? <div style={{fontSize:12,color:"var(--text5)"}}>Sin intervenciones registradas en Taller</div>
-              : taller.reparaciones.filter(r=>r.vehiculo_id===vehiculoDetalle.vehiculo.id).slice(0,5).map(r=>(
+              : vehiculoDetalle.reparaciones.slice(0,5).map(r=>(
                 <div key={r.id} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #0f1520",fontSize:12}}>
                   <span style={{color:"var(--text3)"}}>{r.fecha} - {r.tipo} - {r.descripcion.slice(0,50)}{r.descripcion.length>50?"...":""}</span>
                   <span style={{fontFamily:"'JetBrains Mono',monospace",color:"#ef4444"}}>{fmt2(r.coste_total)} EUR</span>
@@ -331,10 +227,7 @@ export default function Explotacion() {
           onSaved={(created)=>{
             setModalKm(null);
             if (!created?.id) return;
-            setKmVacioMap(prev => ({
-              ...prev,
-              [modalKm.id]: [created, ...(Array.isArray(prev?.[modalKm.id]) ? prev[modalKm.id] : [])],
-            }));
+            setReload(n=>n+1);
           }}
         />
       )}

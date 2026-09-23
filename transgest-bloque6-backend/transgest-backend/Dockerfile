@@ -13,6 +13,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY assets/fonts/ ./assets/fonts/
+COPY assets/transgest-email.png ./assets/transgest-email.png
 
 # Create required directories
 RUN mkdir -p /app/backups /app/logs

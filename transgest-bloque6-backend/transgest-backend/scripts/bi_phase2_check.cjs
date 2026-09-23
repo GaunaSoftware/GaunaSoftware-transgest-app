@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { buildEconomics, physicalKm, structureInPeriod } = require('../src/services/financialEconomics');
-const { buildAnalytics } = require('../src/services/financialAnalytics');
+const { buildAnalytics, loadAnalyticsSources } = require('../src/services/financialAnalytics');
 const { buildRouteSheet } = require('../src/services/financialRouteSheet');
 const { equivalentPrevious, waterfall, evolution, matches } = require('../src/services/financialWorkspace');
 const range = { desde: '2026-09-01', hasta: '2026-09-30' };
@@ -80,3 +80,28 @@ const route = buildRouteSheet({range,orders:[order('one',{km_ruta:100,km_vacio:2
   emptyKm:[{km_vacio:20,notas:'app_chofer:pedido:one'},{km_vacio:5,notas:'manual'}]});
 assert.equal(route.kmTotal,125,'Hoja de ruta evita el doble vacío');
 console.log('OK BI fase 2: reconciliación, duplicados, grupaje, vehículo histórico, estructura, abono y aislamiento');
+
+// Producción puede no haber creado aún la tabla de gastos de estructura.
+// El panel debe cargar y declarar la fuente ausente, también al crear un
+// snapshot de informe en una transacción de solo lectura.
+(async () => {
+  const missing = Object.assign(new Error('relation "gastos_estructura" does not exist'), {code:'42P01'});
+  const db = require('../src/services/db');
+  const originalQuery = db.query;
+  const query = async (sql, params = []) => {
+    if (sql.includes('to_regclass')) return {rows:[{relation:params[0] === 'gastos_estructura' ? null : 'present'}]};
+    if (sql.includes('FROM gastos_estructura')) throw missing;
+    return {rows:[]};
+  };
+  try {
+    db.query = query;
+    const normal = await loadAnalyticsSources('a',range,range.desde,query);
+    assert.deepEqual(normal.structure,[]);
+    assert.ok(normal.missingSources.includes('gastos_estructura'));
+  } finally { db.query = originalQuery; }
+  const snapshot = await loadAnalyticsSources('a',range,range.desde,query);
+  assert.deepEqual(snapshot.structure,[]);
+  assert.ok(snapshot.missingSources.includes('gastos_estructura'));
+  assert.equal(buildEconomics({...snapshot,empresaId:'a',range}).resultado_categorias.importes.estructura,null);
+  console.log('OK BI: fuente de estructura ausente no impide analítica ni informa coste cero');
+})().catch(error => { console.error(error); process.exitCode=1; });

@@ -133,14 +133,14 @@ async function loadAnalyticsSources(empresaId, range, ordersFrom = range.desde, 
     queryDb("SELECT id,empresa_id,nombre,to_jsonb(choferes)->>'apellidos' AS apellidos FROM choferes WHERE empresa_id=$1",[empresaId]),
     queryDb('SELECT data FROM taller_estado WHERE empresa_id=$1',[empresaId]),
     queryDb('SELECT * FROM vehiculo_km_vacio WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3',[empresaId,range.desde,range.hasta]),
-    queryDb('SELECT * FROM gastos_estructura WHERE empresa_id=$1 AND activo=true',[empresaId]),
+    optional('gastos_estructura','SELECT * FROM gastos_estructura WHERE empresa_id=$1 AND activo=true',[empresaId]),
     queryDb('SELECT id,empresa_id,nombre FROM clientes WHERE empresa_id=$1',[empresaId]),
     optional('vehiculo_repostajes','SELECT * FROM vehiculo_repostajes WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3',[empresaId,range.desde,range.hasta]),
     optional('chofer_gastos','SELECT * FROM chofer_gastos WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3',[empresaId,range.desde,range.hasta]),
     optional('nominas_emitidas','SELECT * FROM nominas_emitidas WHERE empresa_id=$1 AND LEFT(periodo::text,7) BETWEEN $2 AND $3',[empresaId,range.desde.slice(0,7),range.hasta.slice(0,7)]),
     optional('vehiculo_noches','SELECT * FROM vehiculo_noches WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3',[empresaId,range.desde,range.hasta])
   ]);
-  const missingSources=[fuel,driverExpenses,payroll,nights].map(r=>r.missingSource).filter(Boolean);
+  const missingSources=[structure,fuel,driverExpenses,payroll,nights].map(r=>r.missingSource).filter(Boolean);
   return {empresaId,range,orders:orders.rows,invoices:invoices.rows,vehicles:vehicles.rows,drivers:drivers.rows,
     repairs:workshop.rows[0]?.data?.reparaciones || [],emptyKm:emptyKm.rows,structure:structure.rows,clients:clients.rows,
     fuel:fuel.rows,driverExpenses:driverExpenses.rows,payroll:payroll.rows,nights:nights.rows,missingSources};

@@ -112,7 +112,8 @@ local. No se han registrado facturas reales ni enviado datos de clientes a AEAT/
   borrador bloqueado sin QR, HMAC real por HTTP, duplicados, NIF ajeno,
   eventos desordenados, persistencia de aceptación y recuperación contable.
 - XML: ceros iniciales, año factura/vencimiento distinto, caracteres españoles,
-  control de signos pendientes, dependencias y aislamiento de empresa.
+  ventas positivas, abonos negativos con retención, referencia a la original,
+  bloqueo de segundas descargas, dependencias y aislamiento de empresa.
 - Interfaz: envío de metadatos como objeto, invalidación de revisión, bloqueo de
   edición fiscal, booleano `0` y conciliación de resultados desconocidos.
 - PDF: texto/multipágina y render visual del QR en primera página, con recargo
@@ -139,21 +140,41 @@ prueba simulada no certifica que esos servicios externos estén operativos.
   requieren revisión/subsanación con Verifacti y posterior consulta del estado.
   No se implementa un editor de subsanaciones fiscales ni se modifica el registro original.
 
+## Respuesta de Clavei incorporada
+
+Confirmación trasladada por el usuario en esta conversación:
+
+- Los XML negativos corresponden a un abono. Las ventas normales se importan en
+  positivo. Se conservan los signos de la factura y se elimina el selector de
+  inversión global; los porcentajes de IVA/retención no se invierten.
+- `ivafrarectifi` sigue `Ser/Eje/Fac` y debe coincidir con `ivaserieges`,
+  `ivaejerges` e `ivanumfacges` de la original. Los tres campos se rellenan en cada
+  factura a partir de su serie, ejercicio y secuencia. Ejemplo: `A-2026-0001`
+  → `A`, `2026`, `1`; referencia del abono: `A/2026/1`.
+- La rectificativa usa la identidad conservada en la cola de su original, dentro
+  de la misma empresa, y exige que la importación original esté confirmada.
+  Numeraciones ajenas al patrón de TransGest o series que excedan los dos
+  caracteres admitidos por `ivaserieges` se bloquean sin truncar ni inventar datos.
+- Clavei NO deduplica las importaciones. TransGest bloquea registros ya
+  confirmados, pendientes de confirmación o con resultado desconocido. Una segunda
+  descarga exige verificar y registrar que la primera no se importó. Esto no
+  impide que un usuario copie e importe dos veces un archivo fuera de TransGest.
+- Clavei dispone de consulta de asientos por fecha, cuenta y/o documento. Se
+  utilizará para conciliar resultados cuando llegue el contrato de la API del
+  cliente; todavía no se implementan ni suponen sus endpoints/respuestas.
+
+La conexión se configurará únicamente para la empresa del cliente que dispone de
+Clavei. No se activa ni se comparte su configuración con otras empresas.
+
 ## NECESITA CONFIRMACIÓN DEL PROVEEDOR
 
-1. **Clavei: convenio de signos**. Los ejemplos contienen importes negativos;
-   no prueban que toda venta deba ser negativa. Configurar signo solo tras confirmar
-   con Clavei y registrar la referencia. Este punto bloquea factura/previsión XML,
-   no la emisión fiscal ni el resto del flujo.
-2. **Clavei: rectificativas**. Se documenta `ivafrarectifi` como `Ser/Eje/Fac`,
-   sin concretar el formato aplicable a las series de esta instalación. No se inventa.
-3. **Clavei: API**. Faltan URL, autenticación, operaciones, respuesta, consulta de
+1. **Clavei: API**. Faltan URL, autenticación, operaciones, respuesta, consulta de
    duplicados e idempotencia. El manual documenta procedimientos SQL `ProcXMLCuentas`,
    `ProcXMLIVA` y `ProcXMLPrevisiones`, no un contrato HTTP. El modo API queda bloqueado.
-4. **Clavei: configuración de la instalación**. Confirmar operaciones IVA,
+2. **Clavei: configuración de la instalación**. Confirmar operaciones IVA,
    diario, concepto, usuario, bancos, tipos de previsión/retención y las opciones
    de importación de cuentas antes de cargar ficheros en la contabilidad real.
-5. **GaunaSoftware**: aportar/publicar la declaración responsable real y validar
+3. **GaunaSoftware**: aportar/publicar la declaración responsable real y validar
    la representación de cada NIF. No se ha redactado ni supuesto una declaración legal.
 
 ## Fuentes contrastadas

@@ -8,8 +8,6 @@ router.use(GERENTE_O_CONTABLE);
 router.get('/config',wrap(async(req,res)=>res.json(await service.settings(db,company(req)))));
 router.put('/config',SOLO_GERENTE,wrap(async(req,res)=>{
  const cfg={...require('../services/claveicon/xml').config(req.body),enabled:req.body.enabled===true};
- if(cfg.sign_confirmed && !String(req.body.confirmation_reference||'').trim())throw Object.assign(new Error('Indica la referencia de la confirmación de Clavei sobre los signos.'),{status:422});
- cfg.confirmation_reference=String(req.body.confirmation_reference||'').slice(0,500);
  await db.transaction(async c=>{
   await c.query("UPDATE empresas SET configuracion=jsonb_set(COALESCE(configuracion,'{}'::jsonb),'{claveicon}',$1::jsonb,true) WHERE id=$2",[JSON.stringify(cfg),company(req)]);
   await c.query("INSERT INTO audit_log(tabla,registro_id,campo,valor_nuevo,usuario_id,empresa_id) VALUES('empresas',$1,'claveicon_config',$2,$3,$1)",[company(req),JSON.stringify(cfg),req.user.id]);

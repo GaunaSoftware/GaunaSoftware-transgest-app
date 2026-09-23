@@ -37,8 +37,6 @@ function config(input={}) {
   for (const key of ['sales_account','vat_account','withholding_account','customer_root']) c[key]=field(input[key],15,key);
   c.ivagenast=bit(input.ivagenast ?? false);
   c.mode=input.mode === 'api' ? 'api' : 'manual_file';
-  c.sign_confirmed=input.sign_confirmed === true;
-  c.amount_sign=Number(input.amount_sign) === -1 ? -1 : 1;
   c.ivbtret=field(input.ivbtret,1,'ivbtret');
   if (!c.codemp) fail('ClaveiCon: falta el código de empresa');
   return c;
@@ -56,16 +54,30 @@ function buildAccountXml(party, code, settings) {
   if(!row.dnifis || !row.razonsocial)fail('Faltan NIF o nombre fiscal del cliente');
   return document(`<c ${attributes(row)}/>`);
 }
-function requireConfirmed(c) {
-  if(!c.sign_confirmed) fail('NECESITA CONFIRMACIÓN DEL PROVEEDOR: convenio de signos de facturas y previsiones de ClaveiCon');
+function managementIdentity(invoice) {
+  const serie=field(invoice.serie,2,'ivaserieges');
+  const exercise=year(invoice.fecha);
+  const prefix=`${serie}-${exercise}-`;
+  const full=String(invoice.numero || '');
+  const sequence=full.startsWith(prefix) ? full.slice(prefix.length) : '';
+  if(!serie || !/^\d{1,18}$/.test(sequence) || BigInt(sequence)===0n)fail('No se puede relacionar la numeración de esta factura con Ser/Eje/Fac de ClaveiCon. Revisa la serie, fecha y número.');
+  return {serie,exercise,number:BigInt(sequence).toString()};
 }
 function buildInvoiceXml(invoice, party, code, settings) {
-  const c=config(settings); requireConfirmed(c);
-  if (invoice.factura_original_id || invoice.factura_original_numero) fail('NECESITA CONFIRMACIÓN DEL PROVEEDOR: formato Ser/Eje/Fac de ivafrarectifi para rectificativas');
+  const c=config(settings);
+  const identity=managementIdentity(invoice);
+  let corrected='';
+  if(invoice.factura_original_id || invoice.factura_original_numero) {
+    if(!invoice.original_invoice)fail('Falta la identidad de la factura original importada en ClaveiCon.');
+    const original=managementIdentity(invoice.original_invoice);
+    corrected=field(`${original.serie}/${original.exercise}/${original.number}`,20,'ivafrarectifi');
+  }
   for(const key of ['ivaope','ivadia','ivacon','codusu','sales_account'])if(!c[key])fail(`ClaveiCon: falta ${key}`);
-  const sign=c.amount_sign;
-  const amount=v=>money(Number(v)*sign);
+  // Vendor confirmation: sales keep positive amounts; credit notes keep negative amounts.
+  // Tax percentages are not signed amounts and must not be inverted.
+  const amount=v=>money(v);
   const h={...emptyFields('codemp codeje:n ivatip ivaser ivaord:n ivacta ivades ivacif ivafac ivafas ivaope ivadoc ivacon ivadescon ivaampcon ivagenast:n ivadia ivaobs iva347:n iva349:n ivatbas:n ivativa:n ivatirpt:n ivatfra:n ivaserieges ivaejerges:n ivanumfacges:n ivaproyecto codusu ivctadto ivafdireccion ivafpoblacion ivafprovincia ivafpais ivafcodpostal ivafclavefiscal:n ivabcreacuenta:n ivadesproyecto coddivisa impcambio:n ivagenprev:n ivafecval ivafrarectifi ivacrjcaja:n baseimpdua:n impivadua:n referenciadua fecexpediciondua siidescope primerafac340:n ultimafac340:n serresfac claveoperacion303 siifecregcon iddoc tributades:n'),codemp:c.codemp,codeje:year(invoice.fecha),ivatip:'R',ivaser:field(invoice.serie,5,'serie'),ivaord:'0',ivacta:accountCode(code),ivades:field(party.nombre,35,'ivades'),ivacif:field(party.cif,28,'ivacif'),ivafac:date(invoice.fecha),ivafas:date(invoice.fecha),ivaope:c.ivaope,ivadoc:field(invoice.numero,60,'ivadoc'),ivacon:c.ivacon,ivaampcon:field(invoice.numero,30,'ivaampcon'),ivagenast:c.ivagenast,ivadia:c.ivadia,ivatbas:amount(invoice.base_imponible),ivativa:amount(invoice.cuota_iva),ivatirpt:amount(invoice.cuota_irpf || 0),ivatfra:amount(invoice.total),codusu:c.codusu};
+  Object.assign(h,{ivaserieges:identity.serie,ivaejerges:identity.exercise,ivanumfacges:identity.number,ivafrarectifi:corrected});
   const taxes=invoice.tax_lines || [{base:invoice.base_imponible,vat_rate:invoice.tipo_iva,vat:invoice.cuota_iva,irpf_rate:invoice.tipo_irpf || 0,irpf:invoice.cuota_irpf || 0,non_taxable:invoice.iva_regimen==='no_sujeto'}];
   const sum=k=>taxes.reduce((total,l)=>total+Number(l[k]||0),0);
   if(money(sum('base'))!==money(invoice.base_imponible) || money(sum('vat'))!==money(invoice.cuota_iva) || money(sum('irpf'))!==money(invoice.cuota_irpf || 0) || money(sum('base')+sum('vat')-sum('irpf'))!==money(invoice.total))fail('El desglose fiscal no coincide con los totales de la factura');
@@ -78,9 +90,9 @@ function buildInvoiceXml(invoice, party, code, settings) {
   return document(`<c ${attributes(h)}>\n${lines}\n</c>`);
 }
 function buildReceivableXml(invoice, code, settings) {
-  const c=config(settings);requireConfirmed(c);
+  const c=config(settings);
   if(!c.codtipopre || !c.codban || !c.codusu)fail('Configura tipo de previsión, banco y usuario ClaveiCon');
-  const row={...emptyFields('codemp pretip ejeemp:n prefra preord:n precta codtipopre prefecfra prevto codban pretipiva preejeiva:n preseriva preordiva:n preimporte:n codusu precifpro precccpro preibaniso preibancontrol preamp proyecto coddivisa impcambio:n impdivisa:n'),codemp:c.codemp,pretip:'C',ejeemp:year(invoice.fecha),prefra:field(invoice.numero,60,'prefra'),preord:'1',precta:accountCode(code),codtipopre:c.codtipopre,prefecfra:date(invoice.fecha),prevto:date(invoice.fecha_vencimiento),codban:c.codban,pretipiva:'R',preejeiva:year(invoice.fecha),preseriva:field(invoice.serie,5,'serie'),preordiva:'0',preimporte:money(Number(invoice.total)*c.amount_sign),codusu:c.codusu};
+  const row={...emptyFields('codemp pretip ejeemp:n prefra preord:n precta codtipopre prefecfra prevto codban pretipiva preejeiva:n preseriva preordiva:n preimporte:n codusu precifpro precccpro preibaniso preibancontrol preamp proyecto coddivisa impcambio:n impdivisa:n'),codemp:c.codemp,pretip:'C',ejeemp:year(invoice.fecha),prefra:field(invoice.numero,60,'prefra'),preord:'1',precta:accountCode(code),codtipopre:c.codtipopre,prefecfra:date(invoice.fecha),prevto:date(invoice.fecha_vencimiento),codban:c.codban,pretipiva:'R',preejeiva:year(invoice.fecha),preseriva:field(invoice.serie,5,'serie'),preordiva:'0',preimporte:money(invoice.total),codusu:c.codusu};
   return document(`<c ${attributes(row)}/>`);
 }
 module.exports={config,buildAccountXml,buildInvoiceXml,buildReceivableXml,date,year,money,escape,bit};

@@ -25,11 +25,13 @@ test.each([{estado:'emitida'},{estado:'borrador',fiscal:{id:'frozen'}}])('regist
  expect(container.querySelector('button')).toBeNull();
 });
 
-test('Clavei does not treat numeric string zero as enabled and unknown results cannot be downloaded',async()=>{
- fiscalFlowRequest.mockImplementation(path=>Promise.resolve(path.endsWith('/config')?{codemp:'005',ivagenast:'0'}:path.endsWith('/envios')?[{id:'unknown',numero:'QA',entity_type:'invoice',status:'unknown'}]:[]));
+test.each(['unknown','processing'])('Clavei preserves zero booleans and blocks repeat downloads for %s',async status=>{
+ fiscalFlowRequest.mockImplementation(path=>Promise.resolve(path.endsWith('/config')?{codemp:'005',ivagenast:'0'}:path.endsWith('/envios')?[{id:'job',numero:'QA',entity_type:'invoice',status}]:[]));
  await act(async()=>root.render(<ClaveiconPanel canConfigure/>));
  const label=[...container.querySelectorAll('label')].find(el=>el.textContent.includes('Generar asiento'));
  expect(label.querySelector('input').checked).toBe(false);
  expect([...container.querySelectorAll('button')].find(el=>el.textContent==='Descargar XML').disabled).toBe(true);
  expect(container.textContent).toContain('Verificado: no importado');
+ expect(container.textContent).toContain('Clavei no detecta duplicados');
+ expect(container.textContent).not.toContain('Invertir importe');
 });

@@ -50,6 +50,7 @@ async function exportEntity(client,empresaId,id) {
  const item=rows[0];if(!item)throw Object.assign(new Error('Envío no encontrado'),{status:404});
  if(item.status==='synced')throw Object.assign(new Error('Este registro ya está contabilizado.'),{status:409});
  if(item.status==='unknown')throw Object.assign(new Error('Concilia el resultado desconocido en Clavei antes de reexportar.'),{status:409});
+ if(item.status==='processing')throw Object.assign(new Error('Este fichero ya se descargó. Clavei no detecta duplicados: confirma la importación o verifica que no se importó antes de repetir.'),{status:409});
  const fiscal=await client.query("SELECT estado_envio FROM factura_registros_fiscales WHERE factura_id=$1 AND empresa_id=$2",[item.factura_id,empresaId]);
  if(fiscal.rows[0]?.estado_envio!=='aceptado')throw Object.assign(new Error('La factura todavía no está aceptada por AEAT.'),{status:409});
  if(digest(item.payload)!==item.payload_hash)throw new Error('El contenido contable ha cambiado: integridad no válida');
@@ -59,7 +60,15 @@ async function exportEntity(client,empresaId,id) {
  if(cfg.mode==='api')return require('./transport').send();
  const code=await accountMapping(client,empresaId,item.payload.source_party_id,cfg);
  const {invoice,party}=item.payload;
- const buffer=item.entity_type==='account'?xml.buildAccountXml(party,code,cfg):item.entity_type==='invoice'?xml.buildInvoiceXml(invoice,party,code,cfg):xml.buildReceivableXml(invoice,code,cfg);
+ let exportInvoice=invoice;
+ if(item.entity_type==='invoice' && (invoice.factura_original_id || invoice.factura_original_numero)) {
+  const original=await client.query("SELECT payload,payload_hash,status FROM accounting_invoice_outbox WHERE empresa_id=$1 AND factura_id=$2 AND provider='claveicon' AND entity_type='invoice'",[empresaId,invoice.factura_original_id]);
+  const originalJob=original.rows[0];
+  if(!originalJob || originalJob.status!=='synced')throw Object.assign(new Error('Importa y confirma primero la factura original en ClaveiCon para vincular su rectificativa.'),{status:409});
+  if(digest(originalJob.payload)!==originalJob.payload_hash)throw new Error('La identidad contable de la factura original ha cambiado.');
+  exportInvoice={...invoice,original_invoice:originalJob.payload.invoice};
+ }
+ const buffer=item.entity_type==='account'?xml.buildAccountXml(party,code,cfg):item.entity_type==='invoice'?xml.buildInvoiceXml(exportInvoice,party,code,cfg):xml.buildReceivableXml(invoice,code,cfg);
  const fileHash=crypto.createHash('sha256').update(buffer).digest('hex');
  // Download does not mean imported. Freeze the delivered bytes until an operator reconciles the result.
  if(item.external_ref && item.external_ref!==fileHash)throw Object.assign(new Error('La configuración cambió después de exportar. Concilia el fichero anterior antes de generar otro.'),{status:409});

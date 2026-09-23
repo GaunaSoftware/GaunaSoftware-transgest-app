@@ -27,8 +27,14 @@ async function main(){
  const sale=xml.buildInvoiceXml(invoice,party,'430000000000001',cfg).toString('latin1');assert.match(sale,/codeje="2026"/);assert.match(sale,/ivagenprev="0"/);assert.match(sale,/ivagenast="1"/);assert.match(sale,/ivatfra="106.00"/);
  const receivable=xml.buildReceivableXml(invoice,'430000000000001',cfg).toString('latin1');assert.match(receivable,/ejeemp="2026"/);assert.match(receivable,/prevto="2027-01-30 00:00:00"/);assert.match(receivable,/pretip="C"/);
  assert.throws(()=>xml.buildReceivableXml({...invoice,fecha_vencimiento:null},'430',cfg),/Fecha/);
- assert.throws(()=>xml.buildInvoiceXml(invoice,party,'430',{...cfg,sign_confirmed:false}),/CONFIRMACIÓN/);
- assert.throws(()=>xml.buildInvoiceXml({...invoice,factura_original_id:'original'},party,'430',cfg),/CONFIRMACIÓN/);
+ assert.match(xml.buildInvoiceXml(invoice,party,'430',{...cfg,sign_confirmed:false,amount_sign:-1}).toString(),/ivatfra="106.00"/,'Legacy sign settings cannot invert a normal sale');
+ assert.match(sale,/ivaserieges="A"/);assert.match(sale,/ivaejerges="2026"/);assert.match(sale,/ivanumfacges="1"/);
+ const credit={...invoice,numero:'R-2027-0002',serie:'R',fecha:'2027-01-01',base_imponible:-100,cuota_iva:-21,cuota_irpf:-15,total:-106,factura_original_id:'original',original_invoice:invoice};
+ const creditXml=xml.buildInvoiceXml(credit,party,'430',cfg).toString();
+ assert.match(creditXml,/ivafrarectifi="A\/2026\/1"/);assert.match(creditXml,/ivatfra="-106.00"/);assert.match(creditXml,/ivatirpt="-15.00"/);assert.match(creditXml,/ivbpirpf="15.00"/);assert.match(creditXml,/codeje="2027"/);
+ assert.match(xml.buildReceivableXml(credit,'430',cfg).toString(),/preimporte="-106.00"/);
+ assert.throws(()=>xml.buildInvoiceXml({...invoice,factura_original_id:'original'},party,'430',cfg),/identidad de la factura original/);
+ assert.throws(()=>xml.buildInvoiceXml({...invoice,numero:'IMPORTED-INVALID'},party,'430',cfg),/numeración/);
  const pg=new PGlite();const db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(c=>fn(c))};require.cache[require.resolve('../src/services/db')]={exports:db};
  await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY,nombre text,configuracion jsonb,cfg_precios jsonb);CREATE TABLE usuarios(id uuid PRIMARY KEY);CREATE TABLE clientes(id uuid PRIMARY KEY,empresa_id uuid,nombre text,cif text,email text,email_facturacion text,direccion text,cp text,ciudad text,pais text);CREATE TABLE facturas(id uuid PRIMARY KEY,empresa_id uuid,cliente_id uuid,numero text,serie text,fecha date,fecha_vencimiento date,estado text,base_imponible numeric,tipo_iva numeric,cuota_iva numeric,tipo_irpf numeric,cuota_irpf numeric,total numeric,iva_regimen text,factura_original_id uuid,factura_original_numero text);CREATE TABLE factura_lineas(id uuid, factura_id uuid,concepto text,cantidad numeric,precio_unit numeric,orden int);`);
  const migration=fs.readFileSync(path.join(__dirname,'migrations/022_fiscal_accounting_delivery.sql'),'utf8');await pg.exec(migration);await pg.exec(migration);
@@ -62,8 +68,10 @@ async function main(){
   const accountJob=entries.find(r=>r.entity_type==='account'),invoiceJob=entries.find(r=>r.entity_type==='invoice');
   await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,eid,invoiceJob.id)),/Confirma primero/);
   const file=await db.transaction(c=>outbox.exportEntity(c,eid,accountJob.id));assert.match(file.buffer.toString(),/cuecod="430000000000001"/);
+  await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,eid,accountJob.id)),/ya se descargó/);
   await pg.query("UPDATE accounting_invoice_outbox SET status='synced' WHERE id=$1",[accountJob.id]);
   const exported=await db.transaction(c=>outbox.exportEntity(c,eid,invoiceJob.id));assert.match(exported.buffer.toString(),/ivatfra="106.00"/);
+  await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,eid,invoiceJob.id)),/ya se descargó/);
   const receivableJob=entries.find(r=>r.entity_type==='receivable');
   await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,eid,receivableJob.id)),/Confirma primero/);
   await pg.query("UPDATE accounting_invoice_outbox SET status='synced' WHERE id=$1",[invoiceJob.id]);
@@ -71,6 +79,18 @@ async function main(){
   assert.match(exportedReceivable.buffer.toString(),/preimporte="106.00"/);
   await pg.query("UPDATE accounting_invoice_outbox SET status='synced' WHERE id=$1",[receivableJob.id]);
   assert.equal((await pg.query("SELECT count(*)::int AS n FROM accounting_invoice_outbox WHERE factura_id=$1 AND status='synced'",[fid])).rows[0].n,3);
+  await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,eid,invoiceJob.id)),/ya está contabilizado/);
+  const creditId=crypto.randomUUID();
+  await pg.query(`INSERT INTO facturas(id,empresa_id,cliente_id,numero,serie,fecha,fecha_vencimiento,estado,base_imponible,tipo_iva,cuota_iva,tipo_irpf,cuota_irpf,total,factura_original_id) VALUES($1,$2,$3,'R-2027-0002','R','2027-01-01','2027-01-30','emitida',-100,21,-21,15,-15,-106,$4)`,[creditId,eid,cid,fid]);
+  await pg.query("INSERT INTO factura_registros_fiscales(empresa_id,factura_id,modo,huella,payload,estado_envio) VALUES($1,$2,'verifactu','credit-hash',$3,'aceptado')",[eid,creditId,JSON.stringify(payload())]);
+  await db.transaction(c=>outbox.enqueueAcceptedInvoice(c,{empresa_id:eid,factura_id:creditId}));
+  await pg.query("UPDATE accounting_invoice_outbox SET status='synced' WHERE factura_id=$1 AND entity_type='account'",[creditId]);
+  const creditJob=(await pg.query("SELECT id FROM accounting_invoice_outbox WHERE factura_id=$1 AND entity_type='invoice'",[creditId])).rows[0];
+  await pg.query("UPDATE accounting_invoice_outbox SET status='unknown' WHERE id=$1",[invoiceJob.id]);
+  await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,eid,creditJob.id)),/confirma primero la factura original/);
+  await pg.query("UPDATE accounting_invoice_outbox SET status='synced' WHERE id=$1",[invoiceJob.id]);
+  const creditFile=await db.transaction(c=>outbox.exportEntity(c,eid,creditJob.id));
+  assert.match(creditFile.buffer.toString(),/ivafrarectifi="A\/2026\/1"/);assert.match(creditFile.buffer.toString(),/ivatfra="-106.00"/);
   await assert.rejects(()=>db.transaction(c=>outbox.exportEntity(c,crypto.randomUUID(),invoiceJob.id)),/no encontrado/);
   const {validSignature}=require('../src/services/verifactiWebhook');const raw=Buffer.from('[{"uuid":"qa"}]');const signature=crypto.createHmac('sha256','qa-secret').update(raw).digest('hex');assert.ok(validSignature(raw,signature,'qa-secret'));assert.equal(validSignature(Buffer.from('[]'),signature,'qa-secret'),false);
   // Real review + emission services, including a response lost after registration.

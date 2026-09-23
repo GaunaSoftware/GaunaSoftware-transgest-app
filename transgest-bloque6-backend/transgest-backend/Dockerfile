@@ -12,6 +12,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # Copy source code
 COPY src/ ./src/
 COPY scripts/ ./scripts/
+COPY assets/fonts/ ./assets/fonts/
 
 # Create required directories
 RUN mkdir -p /app/backups /app/logs

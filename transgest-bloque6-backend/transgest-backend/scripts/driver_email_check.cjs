@@ -2,6 +2,11 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {emailBrand,transportEmail}=require('../src/services/transportEmail');
 const nodemailer=require('nodemailer');
 async function main(){
+ const dockerfile=fs.readFileSync(path.join(__dirname,'../Dockerfile'),'utf8');
+ assert.match(dockerfile,/^COPY\s+assets\/transgest-email\.png\s+\.\/assets\/transgest-email\.png\s*$/m,
+   'The production image must include the email logo attachment');
+ const emailLogo=path.join(__dirname,'../assets/transgest-email.png');
+ assert(fs.existsSync(emailLogo),'The email logo attachment must exist');
  const platform={smtp_host:'platform.test',smtp_from:'noreply@platform.test',smtp_from_nombre:'Gauna'},company={activo:true,smtp_host:'company.test',smtp_from:'trafico@company.test',smtp_from_nombre:'Empresa',reply_to:'reply@company.test'};
  let activeCompany=company,sent,lastConfig;
  const logo='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNlsAAAAASUVORK5CYII=';

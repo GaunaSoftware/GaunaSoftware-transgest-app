@@ -158,3 +158,9 @@ La lectura real de `/bi/workspace` y `/bi/analitica` devolvió 500, mientras `/b
 ## Corrección del PDF en la imagen de producción (23/09/2026)
 
 Tras el despliegue, la vista previa del informe semanal de Asensi funcionó, pero `POST /bi/reportes/ejecuciones/:id/exportar` con formato PDF devolvió 500. El generador usa Liberation Sans desde `assets/fonts/`; las pruebas locales encontraban esos archivos, mientras el `Dockerfile` del backend solo copiaba `src/` y `scripts/`. La imagen ahora copia las fuentes con su licencia, y la regresión comprueba el contrato de empaquetado. La generación local sigue comprobando el PDF real. El daemon Docker no estaba disponible en esta máquina; la comprobación definitiva requiere repetir la exportación PDF en Render. No se modificaron datos fiscales ni importes para este ajuste.
+
+## Corrección del logo del correo en la imagen de producción (23/09/2026)
+
+La exportación PDF semanal se verificó en la cuenta de Asensi tras el despliegue anterior. Una prueba de correo desde SuperAdmin hacia `trafico@transportesasensi.com` devolvió `ENOENT: no such file or directory, open '/app/assets/transgest-email.png'`: el mensaje requiere ese logo CID y el `Dockerfile` todavía no lo copiaba. Se añadió el archivo a la imagen sin cambiar credenciales ni plantillas. `driver_email_check.cjs` verifica ahora el archivo fuente y la instrucción `COPY`; el envío real debe repetirse tras desplegar esta corrección. El SMTP figura como «Envío verificado» en la configuración, pero ese estado no equivale a comprobar recepción en el buzón.
+
+Después del cambio, `npm run driver:regression` y `npm run bi:regression` terminaron con código 0. La prueba local de correo utiliza un transporte de flujo y no hace una entrega externa. El Docker daemon no está disponible en esta máquina, de modo que la validación definitiva del empaquetado es la repetición de la prueba en Render.

@@ -394,6 +394,11 @@ function htmlEscape(value) {
 }
 
 const PLANTILLAS = {
+  correo_gauna_test: () => ({
+    asunto: 'TransGest · prueba de correo',
+    text: 'Este es un mensaje de prueba de TransGest para comprobar la configuración del correo saliente. No contiene enlaces ni requiere ninguna acción.',
+    html: '<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;color:#16332e"><h1 style="font-size:20px">Prueba de correo de TransGest</h1><p>Este mensaje comprueba la configuración del correo saliente.</p><p>No contiene enlaces ni requiere ninguna acción.</p></div>',
+  }),
   bi_rentabilidad_semanal: (data = {}) => ({
     asunto: `TransGest · Informe semanal de rentabilidad · ${String(data.desde || '').replace(/[\r\n]/g, '')} a ${String(data.hasta || '').replace(/[\r\n]/g, '')}`,
     html: `<div style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#15201d;background:#fff;border:1px solid #d9e4e1;border-radius:14px;overflow:hidden">
@@ -814,6 +819,7 @@ async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id
       replyTo: source === "empresa" ? (cfg.reply_to || fromAddress) : (brand?.replyTo || cfg.reply_to || fromAddress),
       to:      destinatario,
       subject: tmpl.asunto,
+      text:    tmpl.text || undefined,
       html:    tmpl.html,
       attachments: [...(Array.isArray(attachments) ? attachments : []), ...(brand?.attachments || [])],
     });
@@ -827,7 +833,7 @@ async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id
     );
 
     logger.info(`Email enviado: ${tmpl.asunto} → ${destinatario}`);
-    return { messageId: info.messageId };
+    return { messageId: info.messageId, accepted: Array.isArray(info.accepted) ? info.accepted : null };
 
   } catch (err) {
     logger.error(`Error enviando email a ${destinatario}:`, err.message);

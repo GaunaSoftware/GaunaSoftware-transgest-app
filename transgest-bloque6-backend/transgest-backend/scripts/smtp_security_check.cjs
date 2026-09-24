@@ -2,7 +2,15 @@
 const net=require('node:net');
 const assert=require('node:assert/strict');
 const nodemailer=require('nodemailer');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
 async function main() {
+  const source=fs.readFileSync(path.join(__dirname,'../src/services/email.js'),'utf8');
+  const templateSource=source.slice(source.indexOf('const PLANTILLAS = {'),source.indexOf('// ── Función principal de envío'));
+  const testMail=vm.runInNewContext(`${templateSource}\nPLANTILLAS.correo_gauna_test()`,{});
+  assert(testMail.text && testMail.html && !/href=|cid:|contraseña/i.test(testMail.html),
+    'The SMTP diagnostic must be a simple message, not an account invitation');
   const messages=[];const sockets=new Set();
   const server=net.createServer(socket=>{
     sockets.add(socket);socket.on('close',()=>sockets.delete(socket));
@@ -33,10 +41,13 @@ async function main() {
       const result=await transport.sendMail({from:'TransGest <no-reply@example.test>',to:'Receiver <receiver@example.test>',subject:kind,text:'Local test',html:'<p>Local test</p>',attachments:kind==='invoice'?[{filename:'invoice.pdf',content:Buffer.from('%PDF-1.4 local fixture')}]:[]});
       assert.deepEqual(result.accepted,['receiver@example.test']);
     }
-    assert.equal(messages.length,4);
+    const diagnostic=await transport.sendMail({from:'TransGest <no-reply@example.test>',to:'Receiver <receiver@example.test>',subject:testMail.asunto,text:testMail.text,html:testMail.html});
+    assert.deepEqual(diagnostic.accepted,['receiver@example.test']);
+    assert.equal(messages.length,5);
     assert.ok(messages.every(message=>message.includes('multipart/alternative')));
     assert.ok(messages[2].includes('invoice.pdf'));
-    console.log('PASS local SMTP: authentication, reset/invitation/invoice/notification MIME payloads and attachment. No external delivery.');
+    assert.ok(messages[4].includes('text/plain') && messages[4].includes('text/html'));
+    console.log('PASS local SMTP: authentication, reset/invitation/invoice/notification and simple diagnostic MIME payloads. No external delivery.');
   } finally {transport.close();for(const socket of sockets) socket.destroy();await new Promise(resolve=>server.close(resolve));}
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1;});

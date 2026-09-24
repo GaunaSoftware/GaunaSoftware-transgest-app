@@ -932,8 +932,8 @@ router.post("/correo/test", superAuth, async (req, res) => {
     const mail = await enviarEmail({
       trigger: "correo_gauna_test",
       destinatario,
-      plantilla: "invitacion_usuario",
-      datos: { nombre: "Test", empresa: "Gauna / TransGest", url: `${appUrl()}/superadmin` },
+      plantilla: "correo_gauna_test",
+      datos: {},
       force_platform: true,
       meta: { test: true, superadmin: req.superadmin?.email || "" },
     });

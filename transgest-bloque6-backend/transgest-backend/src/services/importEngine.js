@@ -1,10 +1,12 @@
 const defaultDb = require('./db');
 const { evaluateMaster, createMaster, TABLES, compact } = require('./importMasterData');
 const { evaluateCost, createCost, TABLES: COST_TABLES } = require('./importCosts');
+const { evaluateHistory, createHistory, TABLES: HISTORY_TABLES } = require('./importHistory');
 
 const ORDER = ['Clientes','Conductores','Vehiculos','Colaboradores','Tarifas','Docs_Conductores','Docs_Vehiculos',
-  'Gastos_Operativos','Repostajes','Gastos_Estructura'];
-const ALL_TABLES = { ...TABLES, ...COST_TABLES };
+  'Gastos_Operativos','Repostajes','Gastos_Estructura',
+  'Facturas_Historicas','Facturas_Lineas','Facturas_Pendientes'];
+const ALL_TABLES = { ...TABLES, ...COST_TABLES, ...HISTORY_TABLES };
 const activeWorkers = new Set();
 const activeSimulations = new Set();
 function error(message, status = 409, code = 'IMPORT_STATE') { return Object.assign(new Error(message), { status, code }); }
@@ -21,12 +23,15 @@ function stagedDependency(row, planned) {
   if (row.entity_type === 'Docs_Vehiculos' && d.matricula && planned.Vehiculos.has(compact(d.matricula))) return true;
   if (row.entity_type === 'Tarifas' && d.cliente_cif && planned.Clientes.has(compact(d.cliente_cif))) return true;
   if (['Gastos_Operativos','Repostajes'].includes(row.entity_type) && d.matricula && planned.Vehiculos.has(compact(d.matricula))) return true;
+  if (['Facturas_Historicas','Facturas_Pendientes'].includes(row.entity_type) && d.cliente_cif && planned.Clientes.has(compact(d.cliente_cif))) return true;
+  if (row.entity_type === 'Facturas_Lineas' && d.factura_source_id && planned.Facturas_Historicas.has(String(d.factura_source_id))) return true;
   return false;
 }
 function createImportEngine(db = defaultDb) {
   function evaluate(client,empresaId,sourceSystem,row) {
     const args=[client,empresaId,sourceSystem,row.entity_type,row.normalized_data,row.source_id,row.fingerprint];
-    return COST_TABLES[row.entity_type] ? evaluateCost(...args) : evaluateMaster(...args);
+    return COST_TABLES[row.entity_type] ? evaluateCost(...args)
+      : HISTORY_TABLES[row.entity_type] ? evaluateHistory(...args) : evaluateMaster(...args);
   }
   async function getBatch(empresaId, batchId, client = db, lock = false) {
     const { rows } = await client.query(`SELECT * FROM import_batches WHERE id=$1 AND empresa_id=$2${lock ? ' FOR UPDATE' : ''}`, [batchId, empresaId]);
@@ -47,7 +52,7 @@ function createImportEngine(db = defaultDb) {
     });
     const rows = await readRows(batchId);
     const counts = new Map(), naturalCounts = new Map();
-    const planned = { Clientes:new Set(), Conductores:new Set(), Vehiculos:new Set() };
+    const planned = { Clientes:new Set(), Conductores:new Set(), Vehiculos:new Set(), Facturas_Historicas:new Set() };
     for (const row of rows) {
       if (!['valid','warning'].includes(row.status)) continue;
       const key = identityKey(row);
@@ -58,6 +63,7 @@ function createImportEngine(db = defaultDb) {
       if (row.status === 'valid' && row.entity_type === 'Clientes' && d.cif) planned.Clientes.add(compact(d.cif));
       if (row.status === 'valid' && row.entity_type === 'Conductores' && d.dni) planned.Conductores.add(compact(d.dni));
       if (row.status === 'valid' && row.entity_type === 'Vehiculos' && d.matricula) planned.Vehiculos.add(compact(d.matricula));
+      if (row.status === 'valid' && row.entity_type === 'Facturas_Historicas' && row.source_id) planned.Facturas_Historicas.add(String(row.source_id));
     }
     const totals = { new:0, existing:0, review:0, invalid:0, unsupported:0, by_type:{} };
     const updates = [];
@@ -69,7 +75,7 @@ function createImportEngine(db = defaultDb) {
       else if (counts.get(identityKey(row)) > 1 || (natural && naturalCounts.get(natural) > 1)) decision = { action:'review', reason:'Identidad duplicada dentro del archivo' };
       else {
         decision = await evaluate(db, empresaId, batch.source_system, row);
-        if (decision.action === 'review' && stagedDependency(row, planned) && /no localizado/i.test(decision.reason || '')) {
+        if (decision.action === 'review' && stagedDependency(row, planned) && /no localizad[oa]/i.test(decision.reason || '')) {
           decision = { action:'create', reason:'El maestro se creará antes dentro de este lote' };
         }
       }
@@ -144,7 +150,9 @@ function createImportEngine(db = defaultDb) {
           const target = decision.action === 'create'
             ? (COST_TABLES[currentRow.entity_type]
               ? await createCost(client,empresaId,batchId,batch.source_system,currentRow.entity_type,currentRow.normalized_data,decision)
-              : await createMaster(client,empresaId,batchId,currentRow.entity_type,currentRow.normalized_data,decision))
+              : HISTORY_TABLES[currentRow.entity_type]
+                ? await createHistory(client,empresaId,batchId,batch.source_system,currentRow.entity_type,currentRow.normalized_data,decision)
+                : await createMaster(client,empresaId,batchId,currentRow.entity_type,currentRow.normalized_data,decision))
             : { table:ALL_TABLES[currentRow.entity_type], id:decision.targetId };
           if (!target.id) throw error('No se pudo verificar el destino de la fila',409,'TARGET_NOT_FOUND');
           if (!decision.identityExisting) {

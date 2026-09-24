@@ -20,7 +20,7 @@ async function main() {
       CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);
       CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);`);
     const migrations=path.join(__dirname,'migrations');
-    for(const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_simulations.sql','20260924_import_tenant_keys.sql','20260924_import_costs.sql']) await pg.exec(fs.readFileSync(path.join(migrations,name),'utf8'));
+    for(const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_simulations.sql','20260924_import_tenant_keys.sql','20260924_import_costs.sql','20260924_import_history.sql']) await pg.exec(fs.readFileSync(path.join(migrations,name),'utf8'));
     await pg.query('INSERT INTO empresas(id) VALUES($1),($2)',[a,b]);
     const db={query:(...args)=>pg.query(...args),transaction:async fn=>{
       await pg.exec('BEGIN');try{const result=await fn(pg);await pg.exec('COMMIT');return result;}catch(cause){await pg.exec('ROLLBACK');throw cause;}
@@ -80,6 +80,21 @@ async function main() {
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM gastos_operativos')).rows[0].n,1);
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM vehiculo_repostajes')).rows[0].n,1);
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM gastos_estructura_movimientos')).rows[0].n,1);
+    const historyRows=[
+      {entity_type:'Facturas_Historicas',row_number:2,source_data:{source_id:'f1',numero_origen:'OLD-1',fecha:'2024-03-01',cliente_nombre:'Cliente A',cliente_cif:'B12345678',total:1210},normalized_data:{source_id:'f1',numero_origen:'OLD-1',fecha:'2024-03-01',cliente_nombre:'Cliente A',cliente_cif:'B12345678',total:1210},status:'valid'},
+      {entity_type:'Facturas_Lineas',row_number:2,source_data:{source_id:'l1',factura_source_id:'f1',linea:1,importe:1000},normalized_data:{source_id:'l1',factura_source_id:'f1',linea:1,importe:1000},status:'valid'},
+      {entity_type:'Facturas_Pendientes',row_number:2,source_data:{source_id:'p1',numero_origen:'OLD-OPEN',cliente_nombre:'Cliente A',total:1210,cobrado:605},normalized_data:{source_id:'p1',numero_origen:'OLD-OPEN',cliente_nombre:'Cliente A',total:1210,cobrado:605},status:'valid'},
+    ];
+    const history=await upload(a,historyRows);
+    assert.equal((await engine.simulate(a,history)).new,3);
+    await engine.confirm(a,history,null);
+    for(let i=0;i<100;i++){
+      if(['completed','completed_with_errors','failed'].includes((await batches.getBatch(a,history)).status))break;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    assert.equal((await batches.getBatch(a,history)).status,'completed');
+    assert.equal((await pg.query('SELECT count(*)::int AS n FROM import_factura_lineas_historicas')).rows[0].n,1);
+    assert.equal(Number((await pg.query('SELECT saldo_pendiente FROM import_saldos_pendientes')).rows[0].saldo_pendiente),605);
     await assert.rejects(engine.simulate(b,id),{status:404});
     console.log('PASS: mandatory dry-run without target writes, deferred document match, asynchronous confirmation, repeated batch idempotence, company isolation. Synthetic PGlite only.');
   } finally { await pg.close(); }

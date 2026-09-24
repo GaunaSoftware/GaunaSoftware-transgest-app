@@ -150,7 +150,7 @@ function createImportBatches(db = defaultDb) {
       params.push(status);
       filter = 'AND status=$4';
     }
-    const { rows } = await db.query(`SELECT id,entity_type,row_number,source_data,normalized_data,
+    const { rows } = await db.query(`SELECT id,entity_type,row_number,source_data,normalized_data,simulation,
       status,target_id,error_code,error_message,source_id,created_at,updated_at
       FROM import_rows WHERE batch_id=$1 ${filter} ORDER BY entity_type,row_number LIMIT $2 OFFSET $3`, params);
     return rows;

@@ -1,4 +1,5 @@
 import DriverLocationsSettings from "../components/DriverLocationsSettings";
+import DataQuality from "../components/DataQuality";
 import { PAYMENT_METHODS, validateCompanyPaymentSettings, formatCompanyPaymentTerms } from "../utils/companyPayment";
 import { useState, useEffect, useCallback } from "react";
 import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
@@ -756,6 +757,7 @@ export default function Empresa() {
     { id:"factura", l:"Configuración facturas" },
     ...(esSuperadmin ? [{ id:"email", l:"Email / Notificaciones" }, { id:"whatsapp", l:"WhatsApp" }] : []),
     { id:"trafico_cfg", l:"Config. Tráfico" },
+    { id:"calidad_datos", l:"Calidad de datos" },
   ];
   useEffect(() => {
     if (!TABS.some(t => t.id === tab)) setTab("empresa");
@@ -995,6 +997,7 @@ export default function Empresa() {
       </div>
 
       {/* ── Datos fiscales ── */}
+      {tab==="calidad_datos" && <DataQuality/>}
       {tab==="puesta_marcha" && (
         <div>
           <div style={S.info}>

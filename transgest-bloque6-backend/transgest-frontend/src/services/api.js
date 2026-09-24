@@ -1243,3 +1243,39 @@ export async function downloadBiReport(id) {
 }
 
 export const getBiHoja = params => apiFetch(`/hojas-ruta/bi?${new URLSearchParams(params)}`, {silentSuccess:true,silentError:true});
+
+// Migración canónica: el archivo viaja una vez al backend. La sesión se
+// comprueba al volver para evitar mostrar resultados de otra empresa.
+export const getImportCatalog = () => apiFetch('/importacion/catalog', {silentSuccess:true});
+export const getImportBatches = () => apiFetch('/importacion/batches', {silentSuccess:true});
+export const getImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}`, {silentSuccess:true});
+export const getImportRows = (id, params={}) => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rows?${new URLSearchParams(params)}`, {silentSuccess:true});
+export const simulateImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/simulate`, {method:'POST',silentSuccess:true});
+export const confirmImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/confirm`, {method:'POST',silentSuccess:true});
+export async function uploadImportFile(file, type, sourceSystem, mapping={}) {
+  const token=getToken();
+  if (!token) throw new Error('Inicia sesión para importar datos');
+  const response=await fetch(`${BASE}/api/v1/importacion/upload`,{
+    method:'POST',cache:'no-store',headers:{
+      Authorization:`Bearer ${token}`,
+      'Content-Type':'application/octet-stream',
+      'X-Import-Filename':encodeURIComponent(file.name),
+      'X-Import-Type':type,
+      'X-Import-Source-System':sourceSystem,
+      'X-Import-Mapping':JSON.stringify(mapping),
+    },body:file,
+  });
+  if (getToken()!==token) throw new Error('La sesión ha cambiado. Vuelve a cargar el archivo.');
+  const data=await response.json().catch(()=>({}));
+  if (!response.ok) throw Object.assign(new Error(data.error||'No se pudo validar el archivo'),{code:data.code||'IMPORT_ERROR'});
+  return data;
+}
+export async function downloadImportTemplate(type) {
+  const token=getToken();
+  if (!token) throw new Error('Inicia sesión para descargar la plantilla');
+  const url=type==='Pack_TransGest'?'/importacion/templates/pack.xlsx':`/importacion/templates/${encodeURIComponent(type)}.csv`;
+  const response=await fetch(`${BASE}/api/v1${url}`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if (getToken()!==token) throw new Error('La sesión ha cambiado. Vuelve a descargar la plantilla.');
+  if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar la plantilla');
+  return {blob:await response.blob(),filename:type==='Pack_TransGest'?'Pack_TransGest_v1.xlsx':`${type}_v1.csv`};
+}

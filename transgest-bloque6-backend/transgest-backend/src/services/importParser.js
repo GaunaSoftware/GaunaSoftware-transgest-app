@@ -182,7 +182,7 @@ async function parseFile(buffer, filename, type, mapping = {}) {
     const sheets = type === 'Pack_TransGest' ? workbook.worksheets : [workbook.getWorksheet(type)];
     if (!sheets.length || sheets.length > Object.keys(HEADERS).length) reject('Hojas no válidas', 'SHEET_LIMIT');
     let total = 0;
-    return sheets.map(sheet => {
+    const parsed = sheets.map(sheet => {
       if (!sheet) reject(`Falta la hoja oficial: ${type}`, 'SHEET_UNKNOWN');
       const sheetType = type === 'Pack_TransGest' ? sheet.name : type;
       if (!HEADERS[sheetType]) reject(`Hoja no reconocida: ${sheetType}`, 'SHEET_UNKNOWN');
@@ -194,8 +194,13 @@ async function parseFile(buffer, filename, type, mapping = {}) {
         total++;
         if (total > MAX_ROWS + Object.keys(HEADERS).length) reject('Más de 100.000 filas', 'ROW_LIMIT');
       });
+      // El pack descargable contiene todas las cabeceras; se rellenan solo las
+      // hojas necesarias. Una hoja vacía no es un error ni crea un lote ficticio.
+      if (type === 'Pack_TransGest' && records.length <= 1) return null;
       return buildSheet(sheetType, records, mapping[sheetType] || mapping, Boolean(workbook.properties.date1904));
-    });
+    }).filter(Boolean);
+    if (!parsed.length) reject('El pack no contiene filas de datos', 'EMPTY_PACK');
+    return parsed;
   }
   const text = buffer.toString('utf8');
   if (text.includes('\uFFFD')) reject('Texto no UTF-8 válido', 'ENCODING');

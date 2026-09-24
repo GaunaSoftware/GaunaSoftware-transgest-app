@@ -12,6 +12,7 @@ async function main() {
     await pg.exec('CREATE TABLE empresas(id uuid PRIMARY KEY); CREATE TABLE usuarios(id uuid PRIMARY KEY);');
     await pg.query('INSERT INTO empresas(id) VALUES ($1),($2)', [companyA, companyB]);
     await pg.exec(fs.readFileSync(path.join(__dirname, 'migrations/20260924_import_batches.sql'), 'utf8'));
+    await pg.exec(fs.readFileSync(path.join(__dirname, 'migrations/20260924_import_simulations.sql'), 'utf8'));
     const db = {
       query: (...args) => pg.query(...args),
       transaction: async (fn) => {

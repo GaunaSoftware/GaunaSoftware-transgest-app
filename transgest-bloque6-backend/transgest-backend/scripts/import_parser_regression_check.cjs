@@ -34,6 +34,7 @@ async function main() {
   docs.addRow(['source_id','chofer_dni','tipo_doc','fecha_vencimiento','estado_vencimiento']);
   docs.addRow(['doc-1','12345678Z','contrato_laboral','PERMANENTE','']);
   docs.addRow(['doc-2','12345678Z','cap','AÑO QUE VIENE','']);
+  workbook.addWorksheet('Vehiculos').addRow(['source_id','matricula']);
   const xlsx = Buffer.from(await workbook.xlsx.writeBuffer());
   const suspicious = Buffer.from(xlsx);
   let directory = -1;

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const express = require('express');
+const ExcelJS = require('exceljs');
 const { PGlite } = require('@electric-sql/pglite');
 const { createImportBatches } = require('../src/services/importBatches');
 const { createImportRouter } = require('../src/routes/importacion');
@@ -16,6 +17,7 @@ async function main() {
     await pg.exec('CREATE TABLE empresas(id uuid PRIMARY KEY); CREATE TABLE usuarios(id uuid PRIMARY KEY);');
     await pg.query('INSERT INTO empresas(id) VALUES ($1),($2)', [companyA, companyB]);
     await pg.exec(fs.readFileSync(path.join(__dirname, 'migrations/20260924_import_batches.sql'), 'utf8'));
+    await pg.exec(fs.readFileSync(path.join(__dirname, 'migrations/20260924_import_simulations.sql'), 'utf8'));
     const db = { query: (...args) => pg.query(...args), transaction: async fn => {
       await pg.exec('BEGIN');
       try { const result = await fn(pg); await pg.exec('COMMIT'); return result; }
@@ -29,8 +31,12 @@ async function main() {
     const packResponse = await fetch(`${base}/templates/pack.xlsx`, { headers: { 'x-test-company': companyA } });
     assert.equal(packResponse.status, 200);
     const packBuffer = Buffer.from(await packResponse.arrayBuffer());
-    const pack = await parseFile(packBuffer, 'pack.xlsx', 'Pack_TransGest');
-    assert.equal(pack.length, 15);
+    await assert.rejects(parseFile(packBuffer, 'pack.xlsx', 'Pack_TransGest'),{code:'EMPTY_PACK'});
+    const populatedPack = new ExcelJS.Workbook();
+    await populatedPack.xlsx.load(packBuffer);
+    populatedPack.getWorksheet('Clientes').addRow(['c1','Cliente sintético','A12345678']);
+    const pack = await parseFile(Buffer.from(await populatedPack.xlsx.writeBuffer()), 'pack.xlsx', 'Pack_TransGest');
+    assert.equal(pack.length, 1);
     const csvResponse = await fetch(`${base}/templates/Conductores.csv`, { headers: { 'x-test-company': companyA } });
     assert.equal(csvResponse.status, 200);
     assert.match(await csvResponse.text(), /source_id,nombre,apellidos/);

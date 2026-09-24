@@ -59,7 +59,7 @@ const Invitacion          = lazy(() => import("./pages/Invitacion"));
 const SuperAdmin          = lazy(() => import("./pages/SuperAdmin"));
 const Tarifas             = lazy(() => import("./pages/Tarifas"));
 const Objetivos           = lazy(() => import("./pages/Objetivos"));
-const Importacion         = lazy(() => import("./pages/Importacion"));
+const Importacion         = lazy(() => import("./pages/ImportacionWizard"));
 const Palets              = lazy(() => import("./pages/Palets"));
 const WebPublica          = lazy(() => import("./pages/WebPublica"));
 const Agenda             = lazy(() => import("./pages/Agenda"));

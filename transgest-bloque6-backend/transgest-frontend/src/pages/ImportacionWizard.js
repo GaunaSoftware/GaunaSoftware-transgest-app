@@ -1,0 +1,152 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getImportCatalog, getImportBatches, getImportBatch, getImportRows,
+  simulateImportBatch, confirmImportBatch, uploadImportFile, downloadImportTemplate } from '../services/api';
+import './ImportacionWizard.css';
+
+const GROUPS=[
+  {title:'Datos maestros',items:[['Clientes','Clientes'],['Conductores','Conductores'],['Vehiculos','Vehículos'],['Colaboradores','Colaboradores'],['Tarifas','Tarifas']]},
+  {title:'Operativa',items:[['Viajes_Historicos','Viajes históricos'],['Viajes_Pendientes','Viajes pendientes']]},
+  {title:'Finanzas',items:[['Facturas_Historicas','Facturas históricas'],['Facturas_Lineas','Líneas de factura'],['Facturas_Pendientes','Saldos / facturas pendientes'],['Gastos_Operativos','Gastos operativos'],['Repostajes','Repostajes'],['Gastos_Estructura','Gastos de estructura']]},
+  {title:'Documentación',items:[['Docs_Conductores','Documentos de conductores'],['Docs_Vehiculos','Documentos de vehículos']]},
+];
+const STEPS=['Archivo','Validación','Revisión','Importación','Resultado'];
+const SUPPORTED=new Set(GROUPS.flatMap(group=>group.items.map(([key])=>key)).filter(key=>!key.startsWith('Viajes_')));
+const fmt=value=>Number(value||0).toLocaleString('es-ES');
+const STATUS={review:'Revisión',ready:'Simulación lista',validating:'Simulando',running:'Importando',completed:'Completado',completed_with_errors:'Completado con incidencias',failed:'Fallido',cancelled:'Cancelado'};
+function saveBlob(blob,filename){
+  const link=document.createElement('a');
+  link.href=URL.createObjectURL(blob);link.download=filename;document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+}
+function currentStep(batch){
+  if (!batch) return 1;
+  if (['completed','completed_with_errors','failed','cancelled'].includes(batch.status)) return 5;
+  if (batch.status==='running') return 4;
+  if (batch.status==='ready') return 3;
+  return 2;
+}
+function ErrorBox({message}){return message?<div className="mig-error" role="alert">{message}</div>:null;}
+
+export default function ImportacionWizard(){
+  const [catalog,setCatalog]=useState(null);
+  const [history,setHistory]=useState([]);
+  const [type,setType]=useState(null);
+  const [sourceSystem,setSourceSystem]=useState('software-anterior');
+  const [file,setFile]=useState(null);
+  const [batch,setBatch]=useState(null);
+  const [rows,setRows]=useState([]);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const [mapping,setMapping]=useState({});
+  const [unknownHeader,setUnknownHeader]=useState(null);
+  const [rowPage,setRowPage]=useState(0);
+
+  const loadHistory=useCallback(()=>getImportBatches().then(data=>setHistory(data.batches||[])).catch(cause=>setError(cause.message)),[]);
+  useEffect(()=>{getImportCatalog().then(setCatalog).catch(cause=>setError(cause.message));loadHistory();},[loadHistory]);
+  const refresh=useCallback(async id=>{
+    const result=await getImportBatch(id);setBatch(result);
+    return result;
+  },[]);
+  useEffect(()=>{
+    if (!batch?.id || !['validating','running'].includes(batch.status)) return undefined;
+    const id=batch.id;
+    const timer=setInterval(()=>refresh(id).catch(cause=>setError(cause.message)),1500);
+    return ()=>clearInterval(timer);
+  },[batch?.id,batch?.status,refresh]);
+  useEffect(()=>{
+    if (!batch?.id) return;
+    getImportRows(batch.id,{limit:50,offset:rowPage*50}).then(data=>setRows(data.rows||[])).catch(cause=>setError(cause.message));
+  },[batch?.id,batch?.status,rowPage]);
+
+  const definition=useMemo(()=>catalog?.templates?.find(item=>item.type===type),[catalog,type]);
+  const dryRun=batch?.config?.dry_run;
+  const step=currentStep(batch);
+  function selectType(next){setType(next);setBatch(null);setRows([]);setFile(null);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);}
+  async function download(typeName){
+    try{const result=await downloadImportTemplate(typeName);saveBlob(result.blob,result.filename);}
+    catch(cause){setError(cause.message);}
+  }
+  async function upload(){
+    if (!file || !type) return;
+    if (!sourceSystem.trim()){setError('Indica el sistema de origen para identificar futuras cargas.');return;}
+    setBusy(true);setError('');
+    try{
+      const result=await uploadImportFile(file,type,sourceSystem.trim(),mapping);
+      setBatch(result.batch);setRows(result.preview?.flatMap(sheet=>sheet.rows)||[]);setUnknownHeader(null);setRowPage(0);
+      await loadHistory();
+    }catch(cause){
+      const match=/Columna no reconocida: ([^;]+)/.exec(cause.message||'');
+      setUnknownHeader(match?.[1]||null);setError(cause.message);
+    }finally{setBusy(false);}
+  }
+  async function simulate(){
+    setBusy(true);setError('');
+    try{await simulateImportBatch(batch.id);await refresh(batch.id);}
+    catch(cause){setError(cause.message);}finally{setBusy(false);}
+  }
+  async function confirm(){
+    setBusy(true);setError('');
+    try{await confirmImportBatch(batch.id);await refresh(batch.id);}
+    catch(cause){setError(cause.message);}finally{setBusy(false);}
+  }
+  async function openBatch(item){
+    setType(item.tipo);setFile(null);setRowPage(0);setError('');
+    try{await refresh(item.id);}catch(cause){setError(cause.message);}
+  }
+  const processed=Number(batch?.created_rows||0)+Number(batch?.skipped_rows||0)+Number(batch?.failed_rows||0);
+  const selectedLabel=type==='Pack_TransGest'?'Migración completa':GROUPS.flatMap(group=>group.items).find(([key])=>key===type)?.[1];
+
+  return <main className="mig-page">
+    <header className="mig-header">
+      <div><span className="mig-eyebrow">TransGest · Implantación</span><h1>Migración de datos</h1>
+        <p>Importa a TransGest información procedente de tu software anterior utilizando nuestras plantillas oficiales.</p></div>
+      <button className="mig-button mig-button-secondary" onClick={()=>download('Pack_TransGest')}>Descargar pack de plantillas</button>
+    </header>
+    <ErrorBox message={error}/>
+    {!type ? <>
+      <div className="mig-groups">{GROUPS.map(group=><section className="mig-panel" key={group.title}>
+        <h2>{group.title}</h2><div className="mig-options">{group.items.map(([key,label])=><button key={key} className="mig-option" disabled={!SUPPORTED.has(key)} onClick={()=>selectType(key)}>
+          <span>{label}</span><small>{SUPPORTED.has(key)?'Seleccionar →':'En preparación'}</small>
+        </button>)}</div>
+      </section>)}</div>
+      <button className="mig-full" onClick={()=>selectType('Pack_TransGest')}><strong>Migración completa</strong><span>Un libro XLSX con varias hojas oficiales</span><b>Comenzar →</b></button>
+      <section className="mig-panel"><h2>Lotes anteriores</h2>
+        {history.length?<div className="mig-history">{history.map(item=><button key={item.id} onClick={()=>openBatch(item)}>
+          <strong>{item.filename}</strong><span>{item.tipo} · {STATUS[item.status]||item.status} · {fmt(item.total_rows)} filas</span>
+          <time>{new Date(item.created_at).toLocaleString('es-ES')}</time>
+        </button>)}</div>:<p className="mig-muted">Todavía no hay migraciones en esta empresa.</p>}
+      </section>
+    </>:<>
+      <div className="mig-back"><button className="mig-link" onClick={()=>selectType(null)}>← Tipos de importación</button><strong>{selectedLabel}</strong></div>
+      <ol className="mig-steps" aria-label="Progreso de importación">{STEPS.map((name,index)=><li key={name} className={step===index+1?'current':step>index+1?'done':''} aria-current={step===index+1?'step':undefined}><span>{index+1}</span>{name}</li>)}</ol>
+      {!batch?<section className="mig-panel mig-form">
+        <h2>1. Prepara el archivo</h2><p>Usa las cabeceras del formato TransGest. No se importarán columnas desconocidas sin una asignación explícita.</p>
+        <div className="mig-form-grid"><label>Origen de los datos<input value={sourceSystem} maxLength={80} onChange={event=>setSourceSystem(event.target.value)} placeholder="Nombre del software anterior"/></label>
+          <label>Archivo CSV, TSV o XLSX<input type="file" accept=".csv,.tsv,.xlsx" onChange={event=>setFile(event.target.files?.[0]||null)}/></label></div>
+        <div className="mig-actions"><button className="mig-button mig-button-secondary" onClick={()=>download(type)}>Descargar plantilla</button>
+          <button className="mig-button" disabled={!file||busy} onClick={upload}>{busy?'Validando…':'Validar archivo'}</button></div>
+        {unknownHeader&&definition&&<div className="mig-mapping"><strong>Columna sin reconocer: {unknownHeader}</strong><p>Asóciala solo para este lote, ignórala o corrige el archivo.</p>
+          <select value={mapping[unknownHeader]??''} onChange={event=>setMapping(value=>({...value,[unknownHeader]:event.target.value||null}))}>
+            <option value="">Ignorar esta columna</option>{definition.columns.map(column=><option key={column} value={column}>{column}</option>)}
+          </select><button className="mig-button mig-button-secondary" onClick={upload} disabled={busy}>Revalidar</button></div>}
+      </section>:<>
+        <section className="mig-panel"><div className="mig-panel-head"><div><h2>{batch.filename}</h2><p>{batch.tipo} · {fmt(batch.total_rows)} filas · {STATUS[batch.status]||batch.status}</p></div><span className="mig-status">{STATUS[batch.status]||batch.status}</span></div>
+          <div className="mig-stats"><div><strong>{fmt(batch.valid_rows)}</strong><span>Válidas o con aviso</span></div><div><strong>{fmt(batch.invalid_rows)}</strong><span>No válidas</span></div><div><strong>{fmt(batch.created_rows)}</strong><span>Creadas</span></div><div><strong>{fmt(batch.skipped_rows)}</strong><span>Omitidas</span></div><div><strong>{fmt(batch.failed_rows)}</strong><span>Errores</span></div></div>
+          {batch.status==='review'&&<div className="mig-actions"><button className="mig-button" onClick={simulate} disabled={busy}>Simular importación</button><span>La simulación no modifica datos.</span></div>}
+          {batch.status==='ready'&&<><div className="mig-simulation"><strong>Resultado de la simulación</strong><div className="mig-stats"><div><strong>{fmt(dryRun?.new)}</strong><span>Nuevos</span></div><div><strong>{fmt(dryRun?.existing)}</strong><span>Existentes</span></div><div><strong>{fmt(dryRun?.review)}</strong><span>A revisar</span></div><div><strong>{fmt(dryRun?.invalid)}</strong><span>Inválidos</span></div><div><strong>{fmt(dryRun?.unsupported)}</strong><span>Sin importador</span></div></div></div>
+            <div className="mig-actions"><button className="mig-button" disabled={busy||(!dryRun?.new&&!dryRun?.existing)} onClick={confirm}>Importar filas válidas</button><span>Los registros que requieren revisión no se importarán.</span></div></>}
+          {batch.status==='running'&&<div className="mig-progress" role="progressbar" aria-valuenow={processed} aria-valuemin={0} aria-valuemax={batch.total_rows}>
+            <div style={{width:`${Math.min(100,100*processed/Math.max(1,batch.total_rows))}%`}}/><span>{fmt(processed)} / {fmt(batch.total_rows)} procesadas. Puedes cerrar esta página.</span></div>}
+          {['completed','completed_with_errors'].includes(batch.status)&&<p className="mig-complete">Migración terminada. Revisa las filas con incidencias antes de volver a subir el archivo.</p>}
+        </section>
+        <section className="mig-panel"><div className="mig-panel-head"><h2>Filas del lote</h2><span className="mig-muted">Página {rowPage+1}</span></div>
+          <div className="mig-table-wrap"><table><thead><tr><th>Hoja</th><th>Fila</th><th>ID origen</th><th>Estado</th><th>Simulación / incidencia</th></tr></thead><tbody>
+            {rows.map(row=><tr key={row.id||`${row.entity_type}-${row.row_number}`}><td>{row.entity_type}</td><td>{row.row_number}</td><td>{row.source_id||'—'}</td><td>{row.status}</td><td>{row.error_message||row.simulation?.reason||'—'}</td></tr>)}
+            {!rows.length&&<tr><td colSpan={5}>Sin filas en esta página.</td></tr>}
+          </tbody></table></div><div className="mig-actions"><button className="mig-button mig-button-secondary" disabled={!rowPage} onClick={()=>setRowPage(page=>page-1)}>Anterior</button>
+            <button className="mig-button mig-button-secondary" disabled={rows.length<50} onClick={()=>setRowPage(page=>page+1)}>Siguiente</button></div>
+        </section>
+      </>}
+    </>}
+  </main>;
+}

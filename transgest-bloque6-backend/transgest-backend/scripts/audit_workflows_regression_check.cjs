@@ -39,6 +39,7 @@ async function main(){
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
+ app.use('/api/v1/importacion',req('./middleware/auth').authenticate,req('./middleware/auth').requireModulePermission('importacion'),req('./routes/importacion'));
  app.use((err,request,res,next)=>res.status(err.status||500).json({error:err.message}));
  const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
  const base='http://127.0.0.1:'+server.address().port+'/api/v1';let token;
@@ -54,13 +55,18 @@ async function main(){
  if(ticket.id){await call('Recargar conversación','GET','/soporte/'+ticket.id);await call('Responder conversación','POST','/soporte/'+ticket.id+'/mensajes',{mensaje:'Segunda intervención de prueba'});}
  if(client.id)await call('Marcar cliente revisado','PATCH','/clientes/'+client.id+'/revision',{});
  if(client.id){
-  const importSource=fs.readFileSync(path.resolve(root,'../transgest-frontend/src/pages/Importacion.js'),'utf8');
-  const imports={console,crearCliente:data=>call('Importar cliente CSV','POST','/clientes',data),crearVehiculo:data=>call('Importar vehículo CSV','POST','/vehiculos',data),crearChofer:data=>call('Importar chófer CSV','POST','/choferes',data),crearPedido:data=>call('Importar pedido pendiente con nombre cliente','POST','/pedidos',data),crearColaborador:()=>{},crearFactura:()=>{},getClientes:async()=>[client],editarCliente:()=>{},crearRutaCliente:()=>{}};
-  vm.runInNewContext(importSource.slice(importSource.indexOf('let clientesImportCachePromise'),importSource.indexOf('export default'))+'\nthis.templates=TEMPLATES;this.parse=parseCSV;',imports);
-  evidence.csvSemicolon=imports.parse('nombre;cif\nAlfa;B12345678');
-  await imports.templates.clientes.apiFn({nombre:'Cliente importado',cif:'B87654321',email:'import@example.invalid'});
-  await imports.templates.choferes.apiFn({nombre:'Chofer importado',apellidos:'Audit',dni:'00000001R',email:'import-driver@example.invalid'});
-  await imports.templates.viajes_pendientes.apiFn({origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-20',cliente_nombre:client.nombre,cliente_cif:client.cif,importe:'500,00',peso_kg:'24.200',bultos:'20'});
+  const catalog=await call('Catálogo de importación','GET','/importacion/catalog');
+  require('node:assert/strict').ok(catalog.templates.some(template=>template.type==='Clientes'));
+  const staged=await actualFetch(base+'/importacion/upload',{
+   method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'text/csv','x-import-filename':'clientes-auditoria.csv','x-import-type':'Clientes','x-import-source-system':'audit-isolated'},
+   body:Buffer.from('source_id,nombre,cif\naudit-client-1,Cliente importado,B87654321\n'),signal:AbortSignal.timeout(15000),
+  });
+  const stagedBody=await staged.json();
+  evidence.checks.push({label:'Preparar lote CSV aislado',method:'POST',url:'/importacion/upload',status:staged.status});
+  require('node:assert/strict').equal(staged.status,201,JSON.stringify(stagedBody));
+  require('node:assert/strict').ok(stagedBody.batch.id);
+  const batch=await call('Revisar lote CSV','GET','/importacion/batches/'+stagedBody.batch.id);
+  require('node:assert/strict').equal(batch.id,stagedBody.batch.id);
   await call('Importar tarifa CSV','POST','/rutas/importar',{cliente_id:client.id,texto:'Origen;Destino;Precio;Km\nValencia;Madrid;500;350'});
   evidence.routesAfterFailedImport=(await db.query('SELECT COUNT(*)::int AS n FROM rutas WHERE empresa_id=$1',[company])).rows[0];
   // Fuel is already part of the order total: persist separate lines in both invoice paths.

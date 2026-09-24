@@ -7,6 +7,7 @@ const TYPES = new Set([
   'Docs_Conductores','Docs_Vehiculos','Viajes_Historicos','Viajes_Pendientes',
   'Facturas_Historicas','Facturas_Lineas','Facturas_Pendientes',
   'Gastos_Operativos','Repostajes','Gastos_Estructura','Pack_TransGest',
+  'Docs_PDF',
 ]);
 
 function fail(message, status = 400, code = 'IMPORT_INVALID') {

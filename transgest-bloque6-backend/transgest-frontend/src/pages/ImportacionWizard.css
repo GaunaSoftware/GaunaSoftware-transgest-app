@@ -30,6 +30,7 @@
 .mig-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px}.mig-actions span{color:var(--text4);font-size:12px}
 .mig-error{background:rgba(239,68,68,.09);border:1px solid rgba(239,68,68,.3);border-radius:9px;color:var(--red);padding:11px 14px;font-size:12px;line-height:1.5;margin-bottom:15px}
 .mig-mapping{display:grid;gap:9px;max-width:470px;border:1px solid var(--border);border-radius:9px;padding:14px;margin-top:15px;font-size:12px}
+.mig-drop{border:2px dashed var(--border2);border-radius:10px;background:var(--bg2);padding:18px;margin-top:15px;display:grid;gap:8px;color:var(--text4);font-size:12px}
 .mig-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.mig-panel-head h2{margin-bottom:4px}
 .mig-status{color:var(--accent);background:var(--bg3);border-radius:99px;padding:6px 10px;font-size:11px;font-weight:800}
 .mig-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:17px}

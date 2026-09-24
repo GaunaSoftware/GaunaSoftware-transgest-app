@@ -4,6 +4,7 @@ const { createImportBatches } = require('../services/importBatches');
 const { parseFile } = require('../services/importParser');
 const { HEADERS, REQUIRED, ALIASES, columnsFor } = require('../services/importCatalog');
 const { createImportEngine } = require('../services/importEngine');
+const { createImportDocuments } = require('../services/importDocuments');
 
 const rawFile = express.raw({ type: () => true, limit: '20mb' });
 function handle(res, error) {
@@ -12,7 +13,7 @@ function handle(res, error) {
     code: error.code || 'IMPORT_ERROR',
   });
 }
-function createImportRouter(batches = createImportBatches(), engine = createImportEngine()) {
+function createImportRouter(batches = createImportBatches(), engine = createImportEngine(), documents = createImportDocuments()) {
   const router = express.Router();
   router.get('/catalog', (_req, res) => res.json({ version: 1, templates: Object.entries(HEADERS).map(([type, header]) => ({ type, columns: header.split(','), required: REQUIRED[type] || [] })), aliases: ALIASES }));
   router.get('/templates/pack.xlsx', async (_req, res) => {
@@ -71,6 +72,20 @@ function createImportRouter(batches = createImportBatches(), engine = createImpo
   router.post('/batches/:id/confirm', async (req, res) => {
     try { res.status(202).json(await engine.confirm(req.empresaId,req.params.id,req.user.id)); }
     catch (cause) { handle(res,cause); }
+  });
+  router.post('/documents/preview', rawFile, async (req,res)=>{
+    try{
+      let filename;
+      try{filename=decodeURIComponent(req.get('x-import-filename')||'');}catch{throw Object.assign(new Error('Nombre de archivo no válido'),{status:400});}
+      const batchId=await documents.stage({empresaId:req.empresaId,actorId:req.user.id,filename,buffer:req.body});
+      res.status(201).json({batch:await batches.getBatch(req.empresaId,batchId)});
+    }catch(cause){handle(res,cause);}
+  });
+  router.post('/documents/:id/simulate', async(req,res)=>{
+    try{res.json({summary:await documents.simulate(req.empresaId,req.params.id),batch:await batches.getBatch(req.empresaId,req.params.id)});}catch(cause){handle(res,cause);}
+  });
+  router.post('/documents/:id/confirm', async(req,res)=>{
+    try{res.status(202).json(await documents.confirm(req.empresaId,req.params.id,req.user.id));}catch(cause){handle(res,cause);}
   });
   router.get('/batches', async (req, res) => {
     try { res.json({ batches: await batches.listBatches(req.empresaId, req.query) }); }

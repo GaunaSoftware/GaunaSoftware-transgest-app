@@ -1481,6 +1481,10 @@ async function startServer() {
     try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
     require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
+    require('./services/importDocuments').createImportDocuments().resume().catch(e => logger.warn('Documentos pendientes: ' + e.message));
+    const documentStorage = new (require('./services/DocumentStorageProvider').DatabaseDocumentStorageProvider)();
+    documentStorage.cleanupExpired().catch(e => logger.warn('Limpieza documental: ' + e.message));
+    setInterval(() => documentStorage.cleanupExpired().catch(e => logger.warn('Limpieza documental: ' + e.message)), 24 * 60 * 60 * 1000).unref();
   });
   } catch (e) {
     logger.error("Startup abortado: " + e.message);

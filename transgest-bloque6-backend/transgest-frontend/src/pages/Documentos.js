@@ -5,6 +5,7 @@ import {
   crearDocVehiculo, crearDocChofer,
   borrarDocVehiculo, borrarDocChofer,
   getDocsProximosVencer,
+  downloadStoredDocument,
   chatIA,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -117,12 +118,16 @@ function Badge({ fecha }) {
 }
 
 function DocRow({ doc, entidad, tipo, canEdit, onDeleted }) {
-  function descargar() {
-    if (!doc.file_url && !doc.url) { notify("Este documento no tiene archivo adjunto.", "warning"); return; }
-    const url = doc.file_url || doc.url;
+  async function descargar() {
+    if (!doc.file_url && !doc.url && !doc.storage_key) { notify("Este documento no tiene archivo adjunto.", "warning"); return; }
+    let url = doc.file_url || doc.url;
+    try {
+      if (doc.storage_key) url = URL.createObjectURL(await downloadStoredDocument(tipo,doc.id));
+    } catch (error) { notify(error.message,"error"); return; }
     const a   = document.createElement("a");
-    a.href = url; a.target = "_blank"; a.download = doc.file_nombre || `${doc.tipo_doc}_${entidad.matricula||entidad.nombre||"doc"}.pdf`;
+    a.href = url; a.target = "_blank"; a.download = doc.file_name || doc.file_nombre || `${doc.tipo_doc}_${entidad.matricula||entidad.nombre||"doc"}.pdf`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    if (doc.storage_key) setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
 
   function enviarEmail() {
@@ -157,7 +162,7 @@ TransGest TMS`);
     <tr>
       <td style={{...S.td,fontWeight:600,fontSize:12}}>
         <div>{labelDocType(doc.tipo_doc)}</div>
-        {(doc.file_nombre || doc.file_url || doc.url) && (
+        {(doc.storage_key || doc.file_nombre || doc.file_url || doc.url) && (
           <div style={{fontSize:10,color:"var(--green)",marginTop:3,fontWeight:700}}>
             Archivo registrado
           </div>
@@ -172,7 +177,7 @@ TransGest TMS`);
       <td style={{...S.td,whiteSpace:"nowrap"}}>
         <div style={{display:"flex",gap:5}}>
           <button title="Descargar documento" onClick={descargar}
-            style={{...S.btn,padding:"3px 8px",fontSize:11,background:(doc.file_url||doc.url)?"var(--bg4)":"var(--bg3)",color:(doc.file_url||doc.url)?"var(--accent-xl)":"var(--text5)",border:"1px solid #1e2d45",cursor:(doc.file_url||doc.url)?"pointer":"not-allowed"}}>
+            style={{...S.btn,padding:"3px 8px",fontSize:11,background:(doc.storage_key||doc.file_url||doc.url)?"var(--bg4)":"var(--bg3)",color:(doc.storage_key||doc.file_url||doc.url)?"var(--accent-xl)":"var(--text5)",border:"1px solid #1e2d45",cursor:(doc.storage_key||doc.file_url||doc.url)?"pointer":"not-allowed"}}>
             Descargar
           </button>
           <button title="Enviar por email" onClick={enviarEmail}

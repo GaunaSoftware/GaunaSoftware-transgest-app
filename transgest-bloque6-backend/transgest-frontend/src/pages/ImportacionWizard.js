@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getImportCatalog, getImportBatches, getImportBatch, getImportRows,
-  simulateImportBatch, confirmImportBatch, uploadImportFile, downloadImportTemplate } from '../services/api';
+  simulateImportBatch, confirmImportBatch, uploadImportFile, downloadImportTemplate,
+  uploadDocumentPackage, simulateDocumentBatch, confirmDocumentBatch } from '../services/api';
 import './ImportacionWizard.css';
 
 const GROUPS=[
@@ -33,6 +34,7 @@ export default function ImportacionWizard(){
   const [type,setType]=useState(null);
   const [sourceSystem,setSourceSystem]=useState('software-anterior');
   const [file,setFile]=useState(null);
+  const [documentFiles,setDocumentFiles]=useState([]);
   const [batch,setBatch]=useState(null);
   const [rows,setRows]=useState([]);
   const [busy,setBusy]=useState(false);
@@ -61,17 +63,17 @@ export default function ImportacionWizard(){
   const definition=useMemo(()=>catalog?.templates?.find(item=>item.type===type),[catalog,type]);
   const dryRun=batch?.config?.dry_run;
   const step=currentStep(batch);
-  function selectType(next){setType(next);setBatch(null);setRows([]);setFile(null);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);}
+  function selectType(next){setType(next);setBatch(null);setRows([]);setFile(null);setDocumentFiles([]);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);}
   async function download(typeName){
     try{const result=await downloadImportTemplate(typeName);saveBlob(result.blob,result.filename);}
     catch(cause){setError(cause.message);}
   }
   async function upload(){
-    if (!file || !type) return;
-    if (!sourceSystem.trim()){setError('Indica el sistema de origen para identificar futuras cargas.');return;}
+    if (!type || (type==='Docs_PDF'?!documentFiles.length:!file)) return;
+    if (type!=='Docs_PDF'&&!sourceSystem.trim()){setError('Indica el sistema de origen para identificar futuras cargas.');return;}
     setBusy(true);setError('');
     try{
-      const result=await uploadImportFile(file,type,sourceSystem.trim(),mapping);
+      const result=type==='Docs_PDF'?await uploadDocumentPackage(documentFiles):await uploadImportFile(file,type,sourceSystem.trim(),mapping);
       setBatch(result.batch);setRows(result.preview?.flatMap(sheet=>sheet.rows)||[]);setUnknownHeader(null);setRowPage(0);
       await loadHistory();
     }catch(cause){
@@ -81,20 +83,20 @@ export default function ImportacionWizard(){
   }
   async function simulate(){
     setBusy(true);setError('');
-    try{await simulateImportBatch(batch.id);await refresh(batch.id);}
+    try{if(type==='Docs_PDF')await simulateDocumentBatch(batch.id);else await simulateImportBatch(batch.id);await refresh(batch.id);}
     catch(cause){setError(cause.message);}finally{setBusy(false);}
   }
   async function confirm(){
     setBusy(true);setError('');
-    try{await confirmImportBatch(batch.id);await refresh(batch.id);}
+    try{if(type==='Docs_PDF')await confirmDocumentBatch(batch.id);else await confirmImportBatch(batch.id);await refresh(batch.id);}
     catch(cause){setError(cause.message);}finally{setBusy(false);}
   }
   async function openBatch(item){
     setType(item.tipo);setFile(null);setRowPage(0);setError('');
     try{await refresh(item.id);}catch(cause){setError(cause.message);}
   }
-  const processed=Number(batch?.created_rows||0)+Number(batch?.skipped_rows||0)+Number(batch?.failed_rows||0);
-  const selectedLabel=type==='Pack_TransGest'?'Migración completa':GROUPS.flatMap(group=>group.items).find(([key])=>key===type)?.[1];
+  const processed=Number(batch?.created_rows||0)+Number(batch?.updated_rows||0)+Number(batch?.skipped_rows||0)+Number(batch?.failed_rows||0);
+  const selectedLabel=type==='Pack_TransGest'?'Migración completa':type==='Docs_PDF'?'Carga documental masiva':GROUPS.flatMap(group=>group.items).find(([key])=>key===type)?.[1];
 
   return <main className="mig-page">
     <header className="mig-header">
@@ -110,6 +112,7 @@ export default function ImportacionWizard(){
         </button>)}</div>
       </section>)}</div>
       <button className="mig-full" onClick={()=>selectType('Pack_TransGest')}><strong>Migración completa</strong><span>Un libro XLSX con varias hojas oficiales</span><b>Comenzar →</b></button>
+      <button className="mig-full" onClick={()=>selectType('Docs_PDF')}><strong>Carga documental masiva</strong><span>Varios PDF o un ZIP, con revisión de DNI y matrícula</span><b>Comenzar →</b></button>
       <section className="mig-panel"><h2>Lotes anteriores</h2>
         {history.length?<div className="mig-history">{history.map(item=><button key={item.id} onClick={()=>openBatch(item)}>
           <strong>{item.filename}</strong><span>{item.tipo} · {STATUS[item.status]||item.status} · {fmt(item.total_rows)} filas</span>
@@ -121,20 +124,24 @@ export default function ImportacionWizard(){
       <ol className="mig-steps" aria-label="Progreso de importación">{STEPS.map((name,index)=><li key={name} className={step===index+1?'current':step>index+1?'done':''} aria-current={step===index+1?'step':undefined}><span>{index+1}</span>{name}</li>)}</ol>
       {!batch?<section className="mig-panel mig-form">
         <h2>1. Prepara el archivo</h2><p>Usa las cabeceras del formato TransGest. No se importarán columnas desconocidas sin una asignación explícita.</p>
-        <div className="mig-form-grid"><label>Origen de los datos<input value={sourceSystem} maxLength={80} onChange={event=>setSourceSystem(event.target.value)} placeholder="Nombre del software anterior"/></label>
-          <label>Archivo CSV, TSV o XLSX<input type="file" accept=".csv,.tsv,.xlsx" onChange={event=>setFile(event.target.files?.[0]||null)}/></label></div>
-        <div className="mig-actions"><button className="mig-button mig-button-secondary" onClick={()=>download(type)}>Descargar plantilla</button>
-          <button className="mig-button" disabled={!file||busy} onClick={upload}>{busy?'Validando…':'Validar archivo'}</button></div>
+        {type==='Docs_PDF'?<><p>Nombra los archivos <strong>CHOFER_DNI_TIPO.pdf</strong> o <strong>VEH_MATRICULA_TIPO.pdf</strong>. Los documentos ambiguos quedarán pendientes de revisión.</p>
+          <div className="mig-drop" onDragOver={event=>event.preventDefault()} onDrop={event=>{event.preventDefault();setDocumentFiles(Array.from(event.dataTransfer.files||[]));}}>
+            <label>PDFs o ZIP (máximo 20 MB por lote)<input type="file" accept=".pdf,.zip" multiple onChange={event=>setDocumentFiles(Array.from(event.target.files||[]))}/></label>
+            <span>{documentFiles.length?`${documentFiles.length} archivo(s) seleccionado(s)`:'También puedes arrastrarlos aquí'}</span></div></>
+          :<div className="mig-form-grid"><label>Origen de los datos<input value={sourceSystem} maxLength={80} onChange={event=>setSourceSystem(event.target.value)} placeholder="Nombre del software anterior"/></label>
+            <label>Archivo CSV, TSV o XLSX<input type="file" accept=".csv,.tsv,.xlsx" onChange={event=>setFile(event.target.files?.[0]||null)}/></label></div>}
+        <div className="mig-actions">{type!=='Docs_PDF'&&<button className="mig-button mig-button-secondary" onClick={()=>download(type)}>Descargar plantilla</button>}
+          <button className="mig-button" disabled={type==='Docs_PDF'?!documentFiles.length||busy:!file||busy} onClick={upload}>{busy?'Validando…':'Validar archivo'}</button></div>
         {unknownHeader&&definition&&<div className="mig-mapping"><strong>Columna sin reconocer: {unknownHeader}</strong><p>Asóciala solo para este lote, ignórala o corrige el archivo.</p>
           <select value={mapping[unknownHeader]??''} onChange={event=>setMapping(value=>({...value,[unknownHeader]:event.target.value||null}))}>
             <option value="">Ignorar esta columna</option>{definition.columns.map(column=><option key={column} value={column}>{column}</option>)}
           </select><button className="mig-button mig-button-secondary" onClick={upload} disabled={busy}>Revalidar</button></div>}
       </section>:<>
         <section className="mig-panel"><div className="mig-panel-head"><div><h2>{batch.filename}</h2><p>{batch.tipo} · {fmt(batch.total_rows)} filas · {STATUS[batch.status]||batch.status}</p></div><span className="mig-status">{STATUS[batch.status]||batch.status}</span></div>
-          <div className="mig-stats"><div><strong>{fmt(batch.valid_rows)}</strong><span>Válidas o con aviso</span></div><div><strong>{fmt(batch.invalid_rows)}</strong><span>No válidas</span></div><div><strong>{fmt(batch.created_rows)}</strong><span>Creadas</span></div><div><strong>{fmt(batch.skipped_rows)}</strong><span>Omitidas</span></div><div><strong>{fmt(batch.failed_rows)}</strong><span>Errores</span></div></div>
+          <div className="mig-stats"><div><strong>{fmt(batch.valid_rows)}</strong><span>Válidas o con aviso</span></div><div><strong>{fmt(batch.invalid_rows)}</strong><span>No válidas</span></div><div><strong>{fmt(batch.created_rows)}</strong><span>Creadas</span></div><div><strong>{fmt(batch.updated_rows)}</strong><span>Asociadas</span></div><div><strong>{fmt(batch.skipped_rows)}</strong><span>Omitidas</span></div><div><strong>{fmt(batch.failed_rows)}</strong><span>Errores</span></div></div>
           {batch.status==='review'&&<div className="mig-actions"><button className="mig-button" onClick={simulate} disabled={busy}>Simular importación</button><span>La simulación no modifica datos.</span></div>}
-          {batch.status==='ready'&&<><div className="mig-simulation"><strong>Resultado de la simulación</strong><div className="mig-stats"><div><strong>{fmt(dryRun?.new)}</strong><span>Nuevos</span></div><div><strong>{fmt(dryRun?.existing)}</strong><span>Existentes</span></div><div><strong>{fmt(dryRun?.review)}</strong><span>A revisar</span></div><div><strong>{fmt(dryRun?.invalid)}</strong><span>Inválidos</span></div><div><strong>{fmt(dryRun?.unsupported)}</strong><span>Sin importador</span></div></div></div>
-            <div className="mig-actions"><button className="mig-button" disabled={busy||(!dryRun?.new&&!dryRun?.existing)} onClick={confirm}>Importar filas válidas</button><span>Los registros que requieren revisión no se importarán.</span></div></>}
+          {batch.status==='ready'&&<><div className="mig-simulation"><strong>Resultado de la simulación</strong><div className="mig-stats"><div><strong>{fmt(dryRun?.new)}</strong><span>Nuevos</span></div><div><strong>{fmt(dryRun?.associated??dryRun?.existing)}</strong><span>{type==='Docs_PDF'?'Asociables':'Existentes'}</span></div><div><strong>{fmt(dryRun?.review)}</strong><span>A revisar</span></div><div><strong>{fmt(dryRun?.unidentified??dryRun?.invalid)}</strong><span>{type==='Docs_PDF'?'Sin identificar':'Inválidos'}</span></div><div><strong>{fmt(type==='Docs_PDF'?dryRun?.existing:dryRun?.unsupported)}</strong><span>{type==='Docs_PDF'?'Ya asociados':'Sin importador'}</span></div></div></div>
+            <div className="mig-actions"><button className="mig-button" disabled={busy||!(dryRun?.new||dryRun?.existing||dryRun?.associated)} onClick={confirm}>Importar filas válidas</button><span>Los registros que requieren revisión no se importarán.</span></div></>}
           {batch.status==='running'&&<div className="mig-progress" role="progressbar" aria-valuenow={processed} aria-valuemin={0} aria-valuemax={batch.total_rows}>
             <div style={{width:`${Math.min(100,100*processed/Math.max(1,batch.total_rows))}%`}}/><span>{fmt(processed)} / {fmt(batch.total_rows)} procesadas. Puedes cerrar esta página.</span></div>}
           {['completed','completed_with_errors'].includes(batch.status)&&<p className="mig-complete">Migración terminada. Revisa las filas con incidencias antes de volver a subir el archivo.</p>}

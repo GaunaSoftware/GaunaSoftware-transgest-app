@@ -1279,3 +1279,39 @@ export async function downloadImportTemplate(type) {
   if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar la plantilla');
   return {blob:await response.blob(),filename:type==='Pack_TransGest'?'Pack_TransGest_v1.xlsx':`${type}_v1.csv`};
 }
+export async function downloadStoredDocument(scope,id){
+  const token=getToken();
+  const response=await fetch(`${BASE}/api/v1/docs/archivo/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,{
+    headers:token?{Authorization:`Bearer ${token}`}:{},cache:'no-store'});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a descargar el documento.');
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar el documento');
+  return response.blob();
+}
+export const simulateDocumentBatch=id=>apiFetch(`/importacion/documents/${encodeURIComponent(id)}/simulate`,{method:'POST',silentSuccess:true});
+export const confirmDocumentBatch=id=>apiFetch(`/importacion/documents/${encodeURIComponent(id)}/confirm`,{method:'POST',silentSuccess:true});
+export async function uploadDocumentPackage(files){
+  const items=Array.from(files||[]);
+  if(!items.length)throw new Error('Selecciona archivos PDF o un ZIP');
+  if(items.length>256)throw new Error('Selecciona como máximo 256 archivos por lote');
+  let body,filename;
+  if(items.length===1&&/\.(pdf|zip)$/i.test(items[0].name)){
+    body=items[0];filename=items[0].name;
+  }else{
+    if(items.some(file=>!/\.pdf$/i.test(file.name)))throw new Error('La selección múltiple solo admite PDFs. Usa un ZIP para carpetas.');
+    const manifestBytes=new TextEncoder().encode(JSON.stringify({files:items.map(file=>({name:file.name,size:file.size}))}));
+    const header=new Uint8Array(10);header.set(new TextEncoder().encode('TGDP1\n'));
+    new DataView(header.buffer).setUint32(6,manifestBytes.length,false);
+    body=new Blob([header,manifestBytes,...items],{type:'application/octet-stream'});
+    filename='documentos-masivos.tgdp';
+  }
+  if(body.size>20*1024*1024)throw new Error('El lote supera 20 MB. Divide la carga en varios lotes.');
+  const token=getToken();
+  if(!token)throw new Error('Inicia sesión para subir documentos');
+  const response=await fetch(`${BASE}/api/v1/importacion/documents/preview`,{method:'POST',cache:'no-store',headers:{
+    Authorization:`Bearer ${token}`,'Content-Type':'application/octet-stream','X-Import-Filename':encodeURIComponent(filename),
+  },body});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a subir los documentos.');
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.error||'No se pudieron revisar los documentos');
+  return data;
+}

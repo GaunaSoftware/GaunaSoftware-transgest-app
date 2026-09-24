@@ -46,6 +46,7 @@ function createImportEngine(db = defaultDb) {
   async function simulate(empresaId, batchId) {
     const batch = await db.transaction(async client => {
       const current = await getBatch(empresaId, batchId, client, true);
+      if (current.tipo === 'Docs_PDF') throw error('Usa la simulación documental para este lote');
       if (!['review','ready','validating'].includes(current.status)) throw error('El lote no está preparado para simular');
       await client.query("UPDATE import_batches SET status='validating',dry_run_at=NULL WHERE id=$1 AND empresa_id=$2", [batchId, empresaId]);
       return current;
@@ -101,6 +102,7 @@ function createImportEngine(db = defaultDb) {
     if (activeSimulations.has(batchId)) return { id:batchId,status:'validating' };
     await db.transaction(async client => {
       const batch=await getBatch(empresaId,batchId,client,true);
+      if (batch.tipo === 'Docs_PDF') throw error('Usa la simulación documental para este lote');
       if (!['review','ready','validating'].includes(batch.status)) throw error('El lote no está disponible para simular');
       await client.query("UPDATE import_batches SET status='validating',dry_run_at=NULL WHERE id=$1 AND empresa_id=$2",[batchId,empresaId]);
     });
@@ -114,6 +116,7 @@ function createImportEngine(db = defaultDb) {
   async function confirm(empresaId, batchId, actorId) {
     const batch = await db.transaction(async client => {
       const current = await getBatch(empresaId, batchId, client, true);
+      if (current.tipo === 'Docs_PDF') throw error('Usa la confirmación documental para este lote');
       if (current.status !== 'ready' || !current.dry_run_at) throw error('Simula y revisa el lote antes de confirmar');
       await client.query("UPDATE import_batches SET status='running',started_at=NOW() WHERE id=$1 AND empresa_id=$2", [batchId, empresaId]);
       await client.query('INSERT INTO import_events(batch_id,actor_id,action) VALUES ($1,$2,$3)', [batchId,actorId||null,'confirmed']);
@@ -184,7 +187,7 @@ function createImportEngine(db = defaultDb) {
       WHERE id=$1 AND empresa_id=$2 AND status='running'`,[batchId,empresaId]);
   }
   async function resume() {
-    const { rows } = await db.query("SELECT id,empresa_id,status FROM import_batches WHERE status IN ('running','validating') ORDER BY created_at LIMIT 100");
+    const { rows } = await db.query("SELECT id,empresa_id,status FROM import_batches WHERE tipo<>'Docs_PDF' AND status IN ('running','validating') ORDER BY created_at LIMIT 100");
     for (const row of rows) row.status === 'running' ? schedule(row.empresa_id,row.id) : await startSimulation(row.empresa_id,row.id);
   }
   return { simulate, startSimulation, confirm, run, resume };

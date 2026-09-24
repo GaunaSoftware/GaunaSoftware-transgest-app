@@ -1480,6 +1480,7 @@ async function startServer() {
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
     try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
+    require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
   });
   } catch (e) {
     logger.error("Startup abortado: " + e.message);

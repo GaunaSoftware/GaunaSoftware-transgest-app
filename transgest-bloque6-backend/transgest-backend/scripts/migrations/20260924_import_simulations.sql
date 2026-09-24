@@ -1,0 +1,2 @@
+ALTER TABLE import_rows ADD COLUMN IF NOT EXISTS simulation JSONB;
+ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS dry_run_at TIMESTAMPTZ;

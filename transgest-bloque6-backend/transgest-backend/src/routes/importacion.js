@@ -3,6 +3,7 @@ const ExcelJS = require('exceljs');
 const { createImportBatches } = require('../services/importBatches');
 const { parseFile } = require('../services/importParser');
 const { HEADERS, REQUIRED, ALIASES, columnsFor } = require('../services/importCatalog');
+const { createImportEngine } = require('../services/importEngine');
 
 const rawFile = express.raw({ type: () => true, limit: '20mb' });
 function handle(res, error) {
@@ -11,7 +12,7 @@ function handle(res, error) {
     code: error.code || 'IMPORT_ERROR',
   });
 }
-function createImportRouter(batches = createImportBatches()) {
+function createImportRouter(batches = createImportBatches(), engine = createImportEngine()) {
   const router = express.Router();
   router.get('/catalog', (_req, res) => res.json({ version: 1, templates: Object.entries(HEADERS).map(([type, header]) => ({ type, columns: header.split(','), required: REQUIRED[type] || [] })), aliases: ALIASES }));
   router.get('/templates/pack.xlsx', async (_req, res) => {
@@ -62,6 +63,14 @@ function createImportRouter(batches = createImportBatches()) {
       if (batchId) await batches.failBatch(req.empresaId, batchId, req.user.id, error.code || 'STAGING_FAILED').catch(() => {});
       handle(res, error);
     }
+  });
+  router.post('/batches/:id/simulate', async (req, res) => {
+    try { res.status(202).json(await engine.startSimulation(req.empresaId,req.params.id)); }
+    catch (cause) { handle(res,cause); }
+  });
+  router.post('/batches/:id/confirm', async (req, res) => {
+    try { res.status(202).json(await engine.confirm(req.empresaId,req.params.id,req.user.id)); }
+    catch (cause) { handle(res,cause); }
   });
   router.get('/batches', async (req, res) => {
     try { res.json({ batches: await batches.listBatches(req.empresaId, req.query) }); }

@@ -3,7 +3,7 @@ const HEADERS = Object.freeze({
   Conductores: 'source_id,nombre,apellidos,dni,telefono,movil_empresa,fecha_nacimiento,fecha_alta,estado,categoria_carnet,notas',
   Vehiculos: 'source_id,matricula,tipo,marca,modelo,estado,notas',
   Colaboradores: 'source_id,nombre,cif,telefono,email,direccion,poblacion,provincia,codigo_postal,notas',
-  Tarifas: 'source_id,cliente_cif,nombre,origen,destino,precio,unidad,fecha_desde,fecha_hasta,notas',
+  Tarifas: 'source_id,cliente_cif,nombre,origen,destino,km,precio,unidad,fecha_desde,fecha_hasta,notas',
   Docs_Conductores: 'source_id,chofer_dni,chofer_nombre,tipo_doc,fecha_emision,fecha_vencimiento,estado_vencimiento,numero_doc,organismo,archivo_nombre,notas',
   Docs_Vehiculos: 'source_id,matricula,tipo_doc,fecha_emision,fecha_vencimiento,estado_vencimiento,numero_doc,organismo,archivo_nombre,notas',
   Viajes_Historicos: 'source_id,numero_origen,cliente_cif,cliente_nombre,referencia_cliente,origen,destino,fecha_carga,hora_carga,fecha_descarga,hora_descarga,matricula_tractora,matricula_remolque,chofer_dni,colaborador_cif,mercancia,peso_kg,bultos,km_ruta,km_vacio,importe,precio_colaborador,coste_gasoil,coste_peajes,coste_dietas,coste_otros,estado,notas',
@@ -16,7 +16,7 @@ const HEADERS = Object.freeze({
   Gastos_Estructura: 'source_id,nombre,tipo,importe,periodo,fecha,notas',
 });
 const REQUIRED = Object.freeze({
-  Clientes: ['nombre'], Conductores: ['nombre'], Vehiculos: ['matricula'],
+  Clientes: ['nombre','cif'], Conductores: ['nombre'], Vehiculos: ['matricula'],
   Colaboradores: ['nombre'], Tarifas: ['cliente_cif','origen','destino','precio'],
   Docs_Conductores: ['tipo_doc'], Docs_Vehiculos: ['matricula','tipo_doc'],
   Viajes_Historicos: ['cliente_nombre','origen','destino','fecha_carga'],

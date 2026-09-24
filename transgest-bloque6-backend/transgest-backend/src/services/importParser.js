@@ -1,11 +1,11 @@
 const ExcelJS = require('exceljs');
-const { HEADERS, mapHeaders } = require('./importCatalog');
+const { HEADERS, REQUIRED, mapHeaders } = require('./importCatalog');
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_UNCOMPRESSED = 100 * 1024 * 1024;
 const MAX_ROWS = 100000;
 const MAX_COLUMNS = 70;
-const NUMERIC = new Set('precio,peso_kg,bultos,km_ruta,km_vacio,importe,precio_colaborador,coste_gasoil,coste_peajes,coste_dietas,coste_otros,total,cobrado,saldo_pendiente,linea,coste_proveedor,beneficio_origen,iva_pct,litros,precio_litro,km_odometro'.split(','));
+const NUMERIC = new Set('precio,km,peso_kg,bultos,km_ruta,km_vacio,importe,precio_colaborador,coste_gasoil,coste_peajes,coste_dietas,coste_otros,total,cobrado,saldo_pendiente,linea,coste_proveedor,beneficio_origen,iva_pct,litros,precio_litro,km_odometro'.split(','));
 const DATES = new Set('fecha,fecha_nacimiento,fecha_alta,fecha_emision,fecha_vencimiento,fecha_carga,fecha_descarga,fecha_factura_proveedor,periodo_desde,periodo_hasta,fecha_desde,fecha_hasta'.split(','));
 const COST_TYPES = new Set('peaje,combustible_agregado,parking,ferry,adblue,dieta,lavado,recambios,mantenimiento,renting_leasing,itv,otros_costes_flota'.split(','));
 
@@ -143,6 +143,9 @@ function normalizeRow(type, mapped, values, date1904 = false) {
     } else normalized[field] = typeof value === 'string' ? value.trim() : String(value);
   }
   if (String(source.fecha_vencimiento || '').trim().toUpperCase() === 'PERMANENTE') normalized.estado_vencimiento = 'PERMANENTE';
+  for (const field of REQUIRED[type] || []) {
+    if (normalized[field] == null || normalized[field] === '') errors.push(`${field}: obligatorio`);
+  }
   if (!normalized.source_id) warnings.push('Sin source_id: requiere revisar fingerprint');
   if (type === 'Conductores' && normalized.estado && !['activo','inactivo'].includes(String(normalized.estado).toLowerCase())) errors.push('estado: solo activo o inactivo');
   if (type === 'Gastos_Operativos' && normalized.tipo && !COST_TYPES.has(String(normalized.tipo).toLowerCase())) errors.push('tipo: coste operativo no reconocido');

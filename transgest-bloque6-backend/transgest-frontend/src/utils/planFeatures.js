@@ -9,11 +9,19 @@ const PLAN_ALIAS = {
   basico: "basico",
   profesional: "profesional",
   professional: "profesional",
+  pro: "profesional",
+  transgest_pro: "profesional",
+  control: "basico",
+  transgest_control: "basico",
+  go: "lite",
+  transgest_go: "lite",
+  pro_intelligence: "enterprise",
+  transgest_pro_intelligence: "enterprise",
   enterprise: "enterprise",
 };
 
 export function normalizePlan(plan) {
-  return PLAN_ALIAS[String(plan || "").trim().toLowerCase()] || "enterprise";
+  return PLAN_ALIAS[String(plan || "").trim().toLowerCase()] || "unknown";
 }
 
 export function getEmpresaPlanLocal() {
@@ -32,7 +40,7 @@ export function getEmpresaPlanLocal() {
       : JSON.parse(localStorage.getItem("tms_suscripcion") || "null");
     if (sub?.plan) return normalizePlan(sub.plan);
   } catch {}
-  return "enterprise";
+  return "unknown";
 }
 
 const PLAN_FEATURES = {
@@ -44,7 +52,7 @@ const PLAN_FEATURES = {
     gestion_rutas: true,
     contabilidad: false,
     taller: false,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   basico: {
@@ -55,7 +63,7 @@ const PLAN_FEATURES = {
     gestion_rutas: true,
     contabilidad: false,
     taller: false,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   profesional: {
@@ -66,7 +74,7 @@ const PLAN_FEATURES = {
     gestion_rutas: true,
     contabilidad: true,
     taller: true,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   enterprise: {
@@ -84,5 +92,5 @@ const PLAN_FEATURES = {
 
 export function planHasFeature(plan, feature) {
   const normalized = normalizePlan(plan);
-  return Boolean((PLAN_FEATURES[normalized] || PLAN_FEATURES.enterprise)[feature]);
+  return Boolean(PLAN_FEATURES[normalized]?.[feature]);
 }

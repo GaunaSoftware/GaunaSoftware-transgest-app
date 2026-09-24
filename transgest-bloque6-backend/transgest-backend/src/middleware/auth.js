@@ -19,6 +19,14 @@ const PLAN_ALIAS = {
   basico: "basico",
   profesional: "profesional",
   professional: "profesional",
+  pro: "profesional",
+  transgest_pro: "profesional",
+  control: "basico",
+  transgest_control: "basico",
+  go: "lite",
+  transgest_go: "lite",
+  pro_intelligence: "enterprise",
+  transgest_pro_intelligence: "enterprise",
   enterprise: "enterprise",
 };
 
@@ -31,7 +39,7 @@ const PLAN_FEATURES = {
     gestion_rutas: true,
     contabilidad: false,
     taller: false,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   basico: {
@@ -42,7 +50,7 @@ const PLAN_FEATURES = {
     gestion_rutas: true,
     contabilidad: false,
     taller: false,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   profesional: {
@@ -53,7 +61,7 @@ const PLAN_FEATURES = {
     gestion_rutas: true,
     contabilidad: true,
     taller: true,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   enterprise: {
@@ -75,15 +83,15 @@ const PLAN_DISABLED_MODULES = {
     "palets", "colaboradores", "vehiculos", "choferes", "taller", "grupajes", "solicitudes",
     "hojas_ruta", "nominas", "control_horario", "documentos", "facturacion",
     "contabilidad", "informes", "excepciones", "objetivos", "ia", "rutas_recomendadas",
-    "rutas_recomendadas_chofer", "importacion", "actividad", "usuarios",
+    "rutas_recomendadas_chofer", "actividad", "usuarios",
   ]),
   basico: new Set([
     "ia", "informes", "excepciones", "objetivos", "rutas_recomendadas", "rutas_recomendadas_chofer",
-    "taller", "contabilidad", "nominas", "explotacion", "gastos_estructura", "importacion",
+    "taller", "contabilidad", "nominas", "explotacion", "gastos_estructura",
     "actividad", "colaboradores",
   ]),
   profesional: new Set([
-    "ia", "objetivos", "importacion",
+    "ia", "objetivos",
   ]),
 };
 
@@ -106,6 +114,7 @@ const MODULE_IDS = [
   "hojas_ruta",
   "facturacion",
   "contabilidad",
+  "gastos_estructura",
   "nominas",
   "control_horario",
   "informes",
@@ -129,8 +138,8 @@ const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "conta
 const ROLE_PERMISSION_PRESETS = {
   gerente: { ver: MODULE_IDS, editar: MODULE_IDS },
   contable: {
-    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
-    editar: ["agenda","clientes","facturacion","contabilidad","nominas","control_horario","documentos","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
+    editar: ["agenda","clientes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","documentos","avisos","mi_cuenta"],
   },
   trafico: {
     ver: ["agenda","dashboard","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
@@ -257,12 +266,12 @@ function normalizePermissionsForRole(permisos, rol) {
 }
 
 function normalizePlan(plan) {
-  return PLAN_ALIAS[String(plan || "").trim().toLowerCase()] || "enterprise";
+  return PLAN_ALIAS[String(plan || "").trim().toLowerCase()] || "unknown";
 }
 
 function planHasFeature(plan, feature) {
   const normalized = normalizePlan(plan);
-  return Boolean((PLAN_FEATURES[normalized] || PLAN_FEATURES.enterprise)[feature]);
+  return Boolean(PLAN_FEATURES[normalized]?.[feature]);
 }
 
 function getSubscriptionState(empresa) {
@@ -585,10 +594,16 @@ function requireRole(...roles) {
 function requireModulePermission(modulo) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "No autenticado" });
+    if (modulo === "empresa" && /^\/gastos-estructura(?:\/|$)/.test(String(req.path || ""))) {
+      return requireModulePermission("gastos_estructura")(req, res, next);
+    }
     if (!companyProducts.moduleAvailable(req.user.productos, modulo)) {
       return res.status(403).json({error:"Este módulo no está incluido en los productos habilitados para tu empresa.",modulo,code:"PRODUCT_NOT_ENABLED"});
     }
     const plan = normalizePlan(req.user?.plan || req.suscripcion?.plan);
+    if (plan === "unknown") {
+      return res.status(403).json({ error: "Plan de empresa no reconocido. Contacta con soporte.", code: "UNKNOWN_PLAN", modulo });
+    }
     if (PLAN_DISABLED_MODULES[plan]?.has(modulo)) {
       return res.status(403).json({
         error: "Tu plan actual no incluye este modulo.",

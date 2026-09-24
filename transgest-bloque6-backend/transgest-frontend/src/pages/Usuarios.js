@@ -61,6 +61,7 @@ const MODULOS_PERM = [
   ["hojas_ruta", "Hojas de ruta"],
   ["facturacion", "Facturación"],
   ["contabilidad", "Contabilidad"],
+  ["gastos_estructura", "Gastos de estructura"],
   ["nominas", "Nóminas"],
   ["control_horario", "Control horario"],
   ["informes", "Informes KPI"],
@@ -84,8 +85,8 @@ const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "conta
 const ROLE_PRESETS = {
   gerente: { ver: ALL_MODULE_IDS, editar: ALL_MODULE_IDS },
   contable: {
-    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","nominas","control_horario","informes","avisos","empresa","mi_cuenta"],
-    editar: ["agenda","clientes","facturacion","contabilidad","nominas","control_horario","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","informes","avisos","empresa","mi_cuenta"],
+    editar: ["agenda","clientes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","avisos","mi_cuenta"],
   },
   trafico: {
     ver: ["agenda","dashboard","control_tower","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","control_horario","avisos","mi_cuenta"],

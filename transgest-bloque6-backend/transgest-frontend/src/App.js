@@ -194,13 +194,14 @@ const MODULOS_POR_PLAN = {
       "clientes",
       "rutas",
       "pedidos",
+      "importacion",
       "mi_cuenta"
     ],
     basico: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
       "clientes","rutas","vehiculos","choferes","grupajes","solicitudes",
       "hojas_ruta","control_horario","documentos","avisos","facturacion","empresa",
-      "usuarios","mi_cuenta",
+      "usuarios","importacion","mi_cuenta",
       "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
       "facturacion_grupo"
     ],
@@ -209,7 +210,7 @@ const MODULOS_POR_PLAN = {
       "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
       "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
       "documentos","avisos","facturacion","contabilidad","informes","excepciones",
-    "empresa","usuarios","actividad","mi_cuenta",
+    "empresa","usuarios","actividad","importacion","mi_cuenta",
     "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
     "facturacion_grupo","informes_grupo","rutas_recomendadas_chofer"
   ],
@@ -219,13 +220,14 @@ const MODULOS_POR_PLAN = {
 function planPermite(plan, moduloId) {
   if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
   if (moduloId === "app_mecanico") return planPermite(plan, "taller");
-  const permitidos = MODULOS_POR_PLAN[plan] || MODULOS_POR_PLAN.profesional;
+  if (!Object.prototype.hasOwnProperty.call(MODULOS_POR_PLAN, plan)) return false;
+  const permitidos = MODULOS_POR_PLAN[plan];
   if (permitidos === null) return true; // enterprise: todo
   return permitidos.includes(moduloId);
 }
 
 function filtrarModulosPorPlan(modulos, plan) {
-  if (!plan || plan === "enterprise") return modulos;
+  if (plan === "enterprise") return modulos;
   const filtrar = (items) => items
     .filter(item => planPermite(plan, item.id))
     .map(item => ({

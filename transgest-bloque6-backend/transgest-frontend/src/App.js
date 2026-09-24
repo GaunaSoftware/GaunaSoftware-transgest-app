@@ -13,7 +13,7 @@ import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
 import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
-import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
+import { getEmpresaPlanLocal, normalizePlan, planHasFeature } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
 
 // Carga perezosa de todos los mÃƒÂ³dulos
@@ -189,14 +189,7 @@ const IC = {
 // enterprise: incluye todo
 // Matriz efectiva: Lite=minimo DCD, Basico=trafico core, Profesional=avanzado sin IA, Enterprise=todo.
 const MODULOS_POR_PLAN = {
-    lite: [
-      "app_chofer",
-      "clientes",
-      "rutas",
-      "pedidos",
-      "importacion",
-      "mi_cuenta"
-    ],
+    lite: null,
     basico: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
       "clientes","rutas","vehiculos","choferes","grupajes","solicitudes",
@@ -205,22 +198,21 @@ const MODULOS_POR_PLAN = {
       "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
       "facturacion_grupo"
     ],
-    profesional: [
-      "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
-      "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
-      "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
-      "documentos","avisos","facturacion","contabilidad","informes","excepciones",
-    "empresa","usuarios","actividad","importacion","mi_cuenta",
-    "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
-    "facturacion_grupo","informes_grupo","rutas_recomendadas_chofer"
-  ],
+    profesional: null,
   enterprise: null,
 };
+
+const GO_EXCLUDED_MODULES = new Set([
+  "dashboard", "control_tower", "explotacion", "informes", "objetivos", "ia",
+  "app_chofer", "rutas_recomendadas", "rutas_recomendadas_chofer",
+]);
 
 function planPermite(plan, moduloId) {
   if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
   if (moduloId === "app_mecanico") return planPermite(plan, "taller");
   if (!Object.prototype.hasOwnProperty.call(MODULOS_POR_PLAN, plan)) return false;
+  if (plan === "lite") return !GO_EXCLUDED_MODULES.has(moduloId);
+  if (plan === "profesional") return moduloId !== "ia";
   const permitidos = MODULOS_POR_PLAN[plan];
   if (permitidos === null) return true; // enterprise: todo
   return permitidos.includes(moduloId);
@@ -1221,7 +1213,7 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
 const DEMO_PLAN_META = {
   lite: {
     label: "TransGest Go",
-    detail: "DCD, app chofer, pedidos, clientes, rutas/tarifas y tacografo. Sin IA ni modulos avanzados.",
+    detail: "Operativa completa de oficina, conductores, vehículos y facturación. Sin app del chófer, KPI ni IA.",
   },
   basico: {
     label: "TransGest Control",
@@ -1894,6 +1886,13 @@ function AppInner() {
     }
   }
 
+  if (user?.rol === "chofer" && !user?.colaborador_id && !planHasFeature(empresaPlan, "app_chofer")) {
+    return <main style={{maxWidth:560,margin:"8vh auto",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+      <h1>App del chófer no incluida</h1>
+      <p>La empresa puede gestionar conductores desde la oficina. El acceso del chófer a la app está disponible desde TransGest Pro.</p>
+      <button type="button" onClick={logout}>Cerrar sesión</button>
+    </main>;
+  }
   if (user?.rol === "colaborador" || (user?.rol === "chofer" && user?.colaborador_id)) return <Suspense fallback={<p>Cargando…</p>}><SupplierApp/></Suspense>;
 
   return (

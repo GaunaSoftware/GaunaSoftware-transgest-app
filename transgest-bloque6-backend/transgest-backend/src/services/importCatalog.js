@@ -38,7 +38,15 @@ const ALIASES = Object.freeze({
   tipo_doc: ['tipo documento'],
   source_id: ['id origen','identificador origen'],
 });
-const PROVENANCE_HEADERS = new Set(['source_sheet', 'source_row']);
+// Metadata from source exports is retained in source_data, not mapped to a
+// business field. `importar` is additionally validated per row by the parser.
+const PROVENANCE_HEADERS = new Set(['source_sheet', 'source_row', 'periodo_origen', 'importar']);
+const COST_TYPES = new Set('peaje,combustible_agregado,parking,ferry,adblue,dieta,lavado,recambios,mantenimiento,renting_leasing,itv,otros_costes_flota'.split(','));
+function canonicalCostType(type, subtype) {
+  const normalizedType = String(type || '').trim().toLowerCase();
+  const candidate = normalizedType === 'coste_flota' ? String(subtype || '').trim().toLowerCase() : normalizedType;
+  return COST_TYPES.has(candidate) ? candidate : null;
+}
 
 function normalizeHeader(value) {
   return String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -60,7 +68,7 @@ function mapHeaders(type, headers, manual = {}) {
   for (const raw of headers) {
     const key = String(raw ?? '').trim();
     const hasManual = Object.prototype.hasOwnProperty.call(manual, key);
-    if (!hasManual && PROVENANCE_HEADERS.has(key)) { mapped.push(null); continue; }
+    if (!hasManual && [...PROVENANCE_HEADERS].some(name => normalizeHeader(name) === normalizeHeader(key))) { mapped.push(null); continue; }
     const target = hasManual ? manual[key] : byAlias.get(normalizeHeader(key));
     if (hasManual && target == null) { mapped.push(null); continue; }
     if (!target || !columns.includes(target)) errors.push(`Columna no reconocida: ${key || '(vacía)'}`);
@@ -71,4 +79,4 @@ function mapHeaders(type, headers, manual = {}) {
   for (const column of REQUIRED[type] || []) if (!used.has(column)) errors.push(`Falta columna obligatoria: ${column}`);
   return { mapped, errors };
 }
-module.exports = { HEADERS, REQUIRED, ALIASES, columnsFor, normalizeHeader, mapHeaders };
+module.exports = { HEADERS, REQUIRED, ALIASES, COST_TYPES, canonicalCostType, columnsFor, normalizeHeader, mapHeaders };

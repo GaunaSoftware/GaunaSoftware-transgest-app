@@ -17,6 +17,8 @@ async function main() {
   assert.equal(mapHeaders('Gastos_Operativos', ['source_id', 'COSTE AUTOPISTA', 'tipo', 'importe'], { 'COSTE AUTOPISTA': 'subtipo' }).errors.length, 0);
   assert.deepEqual(mapHeaders('Conductores', ['source_id', 'nombre', 'source_sheet', 'source_row']).mapped,
     ['source_id', 'nombre', null, null]);
+  assert.deepEqual(mapHeaders('Gastos_Operativos', ['source_id', 'tipo', 'importe', 'periodo_origen', 'importar']).mapped,
+    ['source_id', 'tipo', 'importe', null, null]);
 
   const csv = Buffer.from('\uFEFFsource_id,nombre,apellidos,dni,estado\nold-1,"Ana, María",López,12345678Z,activo\nold-2,José,Ruiz,87654321X,inactivo\n');
   const [drivers] = await parseFile(csv, 'conductores.csv', 'Conductores');
@@ -26,8 +28,27 @@ async function main() {
   const [repeated] = await parseFile(Buffer.from('source_id,nombre\nold-1,Ana\nold-1,Bea\n'), 'repetidos.csv', 'Conductores');
   assert.deepEqual(repeated.rows.map(row => row.status), ['invalid', 'invalid']);
   assert.deepEqual(repeated.rows.map(row => row.error_code), ['DUPLICATE_SOURCE_ID', 'DUPLICATE_SOURCE_ID']);
+  const [corrected] = await parseFile(Buffer.from('source_id,nombre,dni,estado,notas\nd-1,Ana,12345678Z,activo,corregida\nd-1,Ana,12345678Z,inactivo,Origen OBSOLETO\n'), 'conductores.csv', 'Conductores');
+  assert.deepEqual(corrected.rows.map(row => row.status), ['valid', 'invalid']);
+  assert.equal(corrected.rows[1].error_code, 'SUPERSEDED_DRIVER');
+  const [distinctLines] = await parseFile(Buffer.from('source_id,factura_source_id,linea,importe,vehiculo_matricula,source_sheet,source_row\nf-1:L1,f-1,1,100,1234ABC,JULIO,20\nf-1:L1,f-1,1,200,9999XYZ,JULIO,21\n'), 'facturas.csv', 'Facturas_Lineas');
+  assert.deepEqual(distinctLines.rows.map(row => row.status), ['valid', 'valid']);
+  assert.deepEqual(distinctLines.rows.map(row => row.normalized_data.linea), [1, 2]);
+  assert.equal(distinctLines.rows[0].source_data.source_id, 'f-1:L1');
+  assert.notEqual(distinctLines.rows[0].normalized_data.source_id, distinctLines.rows[1].normalized_data.source_id);
+  const [ambiguousLines] = await parseFile(Buffer.from('source_id,factura_source_id,linea,importe,vehiculo_matricula\nf-1:L1,f-1,1,100,1234ABC\nf-1:L1,f-1,1,200,9999XYZ\n'), 'facturas.csv', 'Facturas_Lineas');
+  assert.deepEqual(ambiguousLines.rows.map(row => row.status), ['invalid', 'invalid']);
   const [costs] = await parseFile(Buffer.from('source_id;tipo;importe\npeaje-1;peaje;-12,25\n'), 'gastos.csv', 'Gastos_Operativos');
   assert.equal(costs.rows[0].normalized_data.importe, -12.25);
+  const [markedCosts] = await parseFile(Buffer.from('source_id;tipo;importe;periodo_origen;importar\nc-1;peaje;12;2025;true\nc-2;peaje;13;2025;false\n'), 'gastos.csv', 'Gastos_Operativos');
+  assert.equal(markedCosts.rows[0].status, 'valid');
+  assert.equal(markedCosts.rows[0].source_data.periodo_origen, '2025');
+  assert.equal(markedCosts.rows[1].status, 'invalid');
+  assert.match(markedCosts.rows[1].error_message, /importar/);
+  const [fleetCosts] = await parseFile(Buffer.from('source_id;tipo;subtipo;importe;periodo_desde\nc-3;coste_flota;mantenimiento;45;2025-01-01\n'), 'mantenimiento.csv', 'Gastos_Operativos');
+  assert.equal(fleetCosts.rows[0].status, 'valid');
+  assert.equal(fleetCosts.rows[0].normalized_data.tipo, 'mantenimiento');
+  assert.equal(fleetCosts.rows[0].source_data.tipo, 'coste_flota');
   const [tsv] = await parseFile(Buffer.from('source_id\tmatricula\nveh-1\t0009-LCZ\n'), 'vehiculos.tsv', 'Vehiculos');
   assert.equal(tsv.rows[0].normalized_data.matricula, '0009-LCZ');
   await assert.rejects(parseFile(Buffer.from('source_id,COSTE AUTOPISTA,tipo,importe\na,12,peaje,12'), 'gastos.csv', 'Gastos_Operativos'), { code: 'HEADER_INVALID' });
@@ -41,6 +62,7 @@ async function main() {
   docs.addRow(['doc-1','12345678Z','contrato_laboral','PERMANENTE','']);
   docs.addRow(['doc-2','12345678Z','cap','AÑO QUE VIENE','']);
   workbook.addWorksheet('Vehiculos').addRow(['source_id','matricula']);
+  workbook.addWorksheet('RAW_exportador').addRow(['datos', 'del origen']);
   const xlsx = Buffer.from(await workbook.xlsx.writeBuffer());
   const suspicious = Buffer.from(xlsx);
   let directory = -1;
@@ -56,6 +78,10 @@ async function main() {
   assert.equal(parsed[1].rows[0].normalized_data.estado_vencimiento, 'PERMANENTE');
   assert.equal(parsed[1].rows[1].status, 'warning');
   assert.equal(parsed[1].rows[1].normalized_data.fecha_vencimiento, null);
+  const unknownBook = new ExcelJS.Workbook();
+  unknownBook.addWorksheet('Clientes').addRow(['source_id', 'nombre', 'cif']);
+  unknownBook.addWorksheet('Clietes').addRow(['source_id', 'nombre', 'cif']);
+  await assert.rejects(parseFile(Buffer.from(await unknownBook.xlsx.writeBuffer()), 'unknown.xlsx', 'Pack_TransGest'), { code: 'SHEET_UNKNOWN' });
   const prefixedBook = new ExcelJS.Workbook();
   const prefixedDrivers = prefixedBook.addWorksheet('Conductores');
   prefixedDrivers.addTable({ name: 'ConductoresTbl', ref: 'A1', headerRow: true,

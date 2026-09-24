@@ -26,6 +26,21 @@ for (const plan of ['lite', 'basico', 'profesional', 'enterprise']) {
   assert.equal(planHasFeature(plan, 'importacion'), true);
   assert.equal(request({ plan, method: 'POST' }).next, true, plan);
 }
+for (const module of ['pedidos', 'clientes', 'rutas', 'vehiculos', 'choferes', 'colaboradores', 'documentos', 'facturacion', 'empresa', 'usuarios']) {
+  assert.equal(request({ module, plan:'lite', method:'POST' }).next, true, `Go debe permitir ${module}`);
+}
+for (const module of ['dashboard', 'informes', 'explotacion', 'ia', 'app_chofer']) {
+  assert.equal(request({ module, plan:'lite' }).status, 403, `Go debe excluir ${module}`);
+}
+assert.equal(request({ module:'app_chofer', plan:'lite', role:'chofer' }).status, 403);
+assert.equal(request({ module:'app_chofer', plan:'profesional', role:'chofer' }).next, true);
+assert.equal(request({ module:'pedidos', plan:'lite', role:'chofer', path:'/' }).status, 403);
+assert.equal(request({ module:'pedidos', plan:'profesional', role:'chofer', path:'/' }).next, true);
+assert.equal(planHasFeature('lite', 'kpis_avanzados'), false);
+assert.equal(planHasFeature('profesional', 'kpis_avanzados'), true);
+assert.equal(planHasFeature('profesional', 'objetivos'), true);
+assert.equal(request({ module:'ia', plan:'profesional' }).status, 403);
+assert.equal(request({ module:'ia', plan:'enterprise' }).next, true);
 assert.equal(request({ plan: 'unexpected-plan' }).status, 403);
 assert.equal(request({ role: 'visualizador' }).status, 403);
 assert.equal(request({ products: ['planner'] }).status, 403);

@@ -33,6 +33,8 @@
     "security:regression": "node scripts/webhook_security_check.cjs && node scripts/security_data_check.cjs && node scripts/smtp_security_check.cjs && node scripts/access_hotfix_regression_check.js && node scripts/company_deletion_regression_check.js && node scripts/company_products_regression_check.js",
     "import:access:regression": "node scripts/import_access_regression_check.cjs",
     "import:batches:regression": "node scripts/import_batches_regression_check.cjs",
+    "import:parser:regression": "node scripts/import_parser_regression_check.cjs",
+    "import:http:regression": "node scripts/import_http_regression_check.cjs",
     "audit:regression": "node scripts/invoice_fuel_regression_check.js && node scripts/migration_history_check.cjs && node scripts/audit_connectors_check.cjs && node scripts/invoice_pdf_regression_check.js && node scripts/invoice_customer_output_regression_check.js && node scripts/unbilled_trips_regression_check.js && node scripts/collections_regression_check.js && node scripts/audit_workflows_regression_check.cjs",
     "planner:regression": "node scripts/planner_inventory_check.cjs && node scripts/planner_operational_check.cjs && node scripts/company_products_regression_check.js",
     "driver:regression": "node --check src/routes/choferes.js && node scripts/driver_workday_check.cjs && node scripts/driver_expenses_check.cjs && node scripts/driver_email_check.cjs && node scripts/driver_documents_access_check.js && node scripts/driver_stops_check.cjs"
@@ -42,6 +44,7 @@
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
     "express-validator": "^7.1.0",

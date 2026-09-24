@@ -71,8 +71,13 @@ function createImportBatches(db = defaultDb) {
       seen.add(key);
       if (!row.source_data || typeof row.source_data !== 'object' || Array.isArray(row.source_data)) throw fail('Datos de fila no válidos');
       if (JSON.stringify(row.source_data).length > 65536) throw fail('Fila demasiado grande', 413, 'ROW_TOO_LARGE');
-      const sourceId = row.source_data.source_id == null ? null : String(row.source_data.source_id).trim() || null;
-      return { entity_type: row.entity_type, row_number: row.row_number, source_data: row.source_data, source_id: sourceId, fingerprint: hashRow(row.entity_type, row.source_data) };
+      const sourceIdValue = row.normalized_data?.source_id ?? row.source_data.source_id;
+      const sourceId = sourceIdValue == null ? null : String(sourceIdValue).trim() || null;
+      const status = ['valid','warning','invalid'].includes(row.status) ? row.status : 'uploaded';
+      return { entity_type: row.entity_type, row_number: row.row_number, source_data: row.source_data,
+        normalized_data: row.normalized_data || null, source_id: sourceId,
+        fingerprint: hashRow(row.entity_type, row.normalized_data || row.source_data),
+        status, error_code: row.error_code || null, error_message: row.error_message || null };
     });
     return db.transaction(async (client) => {
       const batch = await getBatch(empresaId, batchId, client, true);
@@ -84,14 +89,41 @@ function createImportBatches(db = defaultDb) {
         WHERE existing.batch_id=$1 AND existing.fingerprint<>incoming.fingerprint LIMIT 1`, [batchId, JSON.stringify(values)]);
       if (conflicts.length) throw fail(`La fila ${conflicts[0].row_number} cambió al reintentar el mismo lote`, 409, 'ROW_CONFLICT');
       const { rows: inserted } = await client.query(`INSERT INTO import_rows
-        (batch_id,entity_type,row_number,source_data,source_id,fingerprint)
-        SELECT $1,r.entity_type,r.row_number,r.source_data,r.source_id,r.fingerprint
-        FROM jsonb_to_recordset($2::jsonb) AS r(entity_type text,row_number integer,source_data jsonb,source_id text,fingerprint char(64))
+        (batch_id,entity_type,row_number,source_data,normalized_data,source_id,fingerprint,status,error_code,error_message)
+        SELECT $1,r.entity_type,r.row_number,r.source_data,r.normalized_data,r.source_id,r.fingerprint,r.status,r.error_code,r.error_message
+        FROM jsonb_to_recordset($2::jsonb) AS r(entity_type text,row_number integer,source_data jsonb,normalized_data jsonb,source_id text,fingerprint char(64),status text,error_code text,error_message text)
         ON CONFLICT (batch_id,entity_type,row_number) DO NOTHING RETURNING id`,
       [batchId, JSON.stringify(values)]);
       await client.query(`UPDATE import_batches SET total_rows=(SELECT count(*) FROM import_rows WHERE batch_id=$1)
         WHERE id=$1 AND empresa_id=$2`, [batchId, empresaId]);
       return { inserted: inserted.length, duplicate_rows: values.length - inserted.length };
+    });
+  }
+
+  async function sealBatch(empresaId, batchId, actorId) {
+    requireCompany(empresaId);
+    return db.transaction(async (client) => {
+      const batch = await getBatch(empresaId, batchId, client, true);
+      if (batch.status !== 'uploaded') throw fail('Lote no disponible para revisión', 409, 'BATCH_LOCKED');
+      const { rows } = await client.query(`UPDATE import_batches SET
+        total_rows=(SELECT count(*) FROM import_rows WHERE batch_id=$1),
+        valid_rows=(SELECT count(*) FROM import_rows WHERE batch_id=$1 AND status IN ('valid','warning')),
+        invalid_rows=(SELECT count(*) FROM import_rows WHERE batch_id=$1 AND status='invalid'),
+        status='review' WHERE id=$1 AND empresa_id=$2 RETURNING *`, [batchId, empresaId]);
+      await client.query('INSERT INTO import_events(batch_id,actor_id,action,details) VALUES ($1,$2,$3,$4::jsonb)',
+        [batchId, actorId || null, 'validated', JSON.stringify({ total_rows: rows[0].total_rows, invalid_rows: rows[0].invalid_rows })]);
+      return rows[0];
+    });
+  }
+
+  async function failBatch(empresaId, batchId, actorId, code = 'STAGING_FAILED') {
+    requireCompany(empresaId);
+    await db.transaction(async (client) => {
+      const batch = await getBatch(empresaId, batchId, client, true);
+      if (!['uploaded','validating'].includes(batch.status)) return;
+      await client.query("UPDATE import_batches SET status='failed',finished_at=NOW() WHERE id=$1 AND empresa_id=$2", [batchId, empresaId]);
+      await client.query('INSERT INTO import_events(batch_id,actor_id,action,details) VALUES ($1,$2,$3,$4::jsonb)',
+        [batchId, actorId || null, 'staging_failed', JSON.stringify({ code })]);
     });
   }
 
@@ -124,7 +156,7 @@ function createImportBatches(db = defaultDb) {
     return rows;
   }
 
-  return { createBatch, stageRows, getBatch, listBatches, listRows };
+  return { createBatch, stageRows, sealBatch, failBatch, getBatch, listBatches, listRows };
 }
 
 module.exports = { TYPES, createImportBatches, normalizeFilename, normalizeSourceSystem, hashRow };

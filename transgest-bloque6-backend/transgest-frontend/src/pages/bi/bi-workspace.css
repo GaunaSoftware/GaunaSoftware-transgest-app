@@ -8,8 +8,8 @@
 .bi-head>div:first-child{min-width:0}.bi-head p:last-child{margin-top:5px}
 .bi-eyebrow{font-size:10px;font-weight:800;letter-spacing:.12em;color:var(--accent)!important;margin-bottom:5px!important}
 .bi-head-meta{display:grid;gap:3px;text-align:right;white-space:nowrap}.bi-head-meta>span{font-weight:700}
-.bi-view-tabs{display:flex;gap:6px;overflow-x:auto;border-bottom:1px solid var(--border)}
-.bi-view-tabs button{border:0;border-bottom:3px solid transparent;color:var(--text3);background:transparent;padding:10px 15px;white-space:nowrap;font:700 13px 'DM Sans',sans-serif;cursor:pointer}
+.bi-view-tabs{display:flex;width:100%;min-width:0;gap:6px;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border-bottom:1px solid var(--border)}
+.bi-view-tabs button{flex:0 0 auto;border:0;border-bottom:3px solid transparent;color:var(--text3);background:transparent;padding:10px 15px;white-space:nowrap;font:700 13px 'DM Sans',sans-serif;cursor:pointer}
 .bi-view-tabs button[aria-selected="true"]{border-bottom-color:var(--accent);color:var(--text)}
 .bi-filterbar,.bi-section,.bi-chart-panel,.bi-side-panel{padding:16px}
 .bi-filter-grid{display:grid;grid-template-columns:repeat(6,minmax(145px,1fr));gap:12px}
@@ -32,6 +32,9 @@
 .bi-main-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(270px,1fr);gap:12px}
 .bi-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.bi-section-head p{font-size:11px;margin-top:4px}.bi-section-head label{min-width:165px}
 .bi-chart-area{height:270px;min-width:0}.bi-chart-area--large{height:440px}.bi-empty{display:grid;place-items:center;height:100%;font-size:12px}
+.bi-chart-legend{display:flex;flex-wrap:wrap;gap:6px 18px;list-style:none;margin:0 0 12px!important;padding:0;color:var(--text2);font-size:11px;font-weight:600}
+.bi-chart-legend li{display:inline-flex;align-items:center;gap:7px;min-width:0}
+.bi-chart-legend-swatch{display:inline-block;width:18px;height:3px;flex:none;border-radius:3px;background:var(--legend-color)}
 .bi-chart-table{margin-top:12px}.bi-chart-table[open] summary{margin-bottom:8px}
 .bi-scroll{overflow:auto;max-width:100%;scrollbar-width:thin}.bi-table{width:100%;border-collapse:collapse;min-width:620px;font-size:11px;font-variant-numeric:tabular-nums}
 .bi-table th{text-align:left;white-space:nowrap;background:var(--table-head-bg);color:var(--text3);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:9px;border-bottom:1px solid var(--border)}
@@ -46,5 +49,5 @@
 .bi-dialog{max-height:calc(100dvh - 36px);background:var(--card-bg);color:var(--text)}
 @media(max-width:1200px){.bi-filter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.bi-three-grid{grid-template-columns:1fr 1fr}.bi-three-grid>*:last-child{grid-column:1/-1}}
 @media(max-width:900px){.bi-main-grid{grid-template-columns:1fr}.bi-kpi-grid,.bi-kpi-grid--four{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.bi-workspace{padding:12px;gap:12px}.bi-head{align-items:flex-start;flex-direction:column}.bi-head-meta{text-align:left;white-space:normal}.bi-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bi-filter-foot{align-items:flex-start;flex-direction:column}.bi-kpi-grid,.bi-kpi-grid--four,.bi-three-grid{grid-template-columns:1fr}.bi-three-grid>*:last-child{grid-column:auto}.bi-section-head{flex-wrap:wrap}.bi-section-head label{width:100%}.bi-chart-area{height:250px}.bi-chart-area--large{height:300px}.bi-dialog{padding:10px}.bi-pagination span{width:100%}}
+@media(max-width:600px){.bi-workspace{padding:12px;gap:12px}.bi-head{align-items:flex-start;flex-direction:column}.bi-head-meta{text-align:left;white-space:normal}.bi-view-tabs{scroll-snap-type:x proximity}.bi-view-tabs button{scroll-snap-align:start}.bi-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bi-filter-foot{align-items:flex-start;flex-direction:column}.bi-kpi-grid,.bi-kpi-grid--four,.bi-three-grid{grid-template-columns:1fr}.bi-three-grid>*:last-child{grid-column:auto}.bi-section-head{flex-wrap:wrap}.bi-section-head label{width:100%}.bi-chart-area{height:250px}.bi-chart-area--large{height:300px}.bi-dialog{padding:10px}.bi-pagination span{width:100%}}
 @media(max-width:420px){.bi-filter-grid{grid-template-columns:1fr}.bi-kpi{min-height:0}.bi-workspace h1{font-size:25px}}

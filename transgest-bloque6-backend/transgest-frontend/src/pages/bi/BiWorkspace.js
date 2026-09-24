@@ -1,4 +1,4 @@
-import {lazy, Suspense, useEffect, useState} from 'react';
+import {lazy, Suspense, useEffect, useRef, useState} from 'react';
 import {Bar, CartesianGrid, Cell, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {Badge, Button, Card, Modal} from '../../ui';
 import {useAuth} from '../../context/AuthContext';
@@ -43,17 +43,18 @@ function MetricCard({title,metric,period,extra,onClick}) {
     {onClick && <Button onClick={onClick}>Ver registros</Button>}
   </Card>;
 }
-function ChartPanel({title,subtitle,rows,columns,renderChart}) {
+function ChartPanel({title,subtitle,legend=[],rows,columns,renderChart}) {
   const [expanded,setExpanded]=useState(false);
+  const legendView=legend.length>0 && <ul className="bi-chart-legend" aria-label="Series del gráfico">{legend.map(item=><li key={item.label}><span className="bi-chart-legend-swatch" style={{'--legend-color':item.color}} aria-hidden="true"/>{item.label}</li>)}</ul>;
   const table=<div className="bi-scroll"><table className="bi-table"><thead><tr>{columns.map(c=><th key={c.key} scope="col">{c.label}</th>)}</tr></thead>
     <tbody>{rows.length ? rows.map((row,i)=><tr key={row.id || row.fecha || i}>{columns.map(c=><td key={c.key}>{c.render ? c.render(row) : row[c.key] ?? '—'}</td>)}</tr>) :
       <tr><td colSpan={columns.length}>Sin datos evaluables para este gráfico.</td></tr>}</tbody></table></div>;
   return <Card as="section" className="bi-chart-panel"><div className="bi-section-head"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>
     <Button onClick={()=>setExpanded(true)} aria-label={`Ampliar gráfico ${title}`}>Ampliar</Button></div>
-    <div className="bi-chart-area" role="img" aria-label={title}>{rows.length ? renderChart(270) : <p className="bi-empty">Sin datos evaluables.</p>}</div>
+    {legendView}<div className="bi-chart-area" role="img" aria-label={title}>{rows.length ? renderChart(270) : <p className="bi-empty">Sin datos evaluables.</p>}</div>
     <details className="bi-chart-table"><summary>Ver datos en tabla</summary>{table}</details>
     <Modal open={expanded} title={title} onClose={()=>setExpanded(false)} width={1100} className="bi-dialog">
-      <div className="bi-chart-area bi-chart-area--large">{rows.length ? renderChart(440) : <p className="bi-empty">Sin datos evaluables.</p>}</div>{table}
+      {legendView}<div className="bi-chart-area bi-chart-area--large">{rows.length ? renderChart(440) : <p className="bi-empty">Sin datos evaluables.</p>}</div>{table}
     </Modal>
   </Card>;
 }
@@ -74,6 +75,7 @@ function Trend({data,onDrill}) {
       onClick={payload=>payload?.payload?.fecha && onDrill(payload.payload.fecha)}/>
   </ComposedChart></ResponsiveContainer>;
   return <ChartPanel title="Evolución de servicios y margen" subtitle={`EUR netos · agrupación por ${data?.granularidad || 'día'}. Selecciona un punto para profundizar.`}
+    legend={[{label:'Ingreso de servicios realizados',color:'var(--accent)'},{label:'Margen directo registrado',color:'var(--orange)'}]}
     rows={rows} columns={[{key:'fecha',label:'Periodo',render:r=><button className="bi-link" onClick={()=>onDrill(r.fecha)} aria-label={`Profundizar en ${r.fecha}`}>{r.fecha}</button>},{key:'ingreso',label:'Ingreso',render:r=>money(r.ingreso)},
       {key:'margen',label:'Margen',render:r=>money(r.margen)},{key:'cobertura_costes',label:'Costes evaluables',render:r=>`${r.cobertura_costes.evaluables}/${r.cobertura_costes.total}`}]} renderChart={chart}/>;
 }
@@ -101,6 +103,14 @@ export default function BiWorkspace() {
   const [retry,setRetry]=useState(0);
   const [localSearch,setLocalSearch]=useState('');
   const [drillStack,setDrillStack]=useState([]);
+  const tabsRef=useRef(null);
+  useEffect(()=>{
+    const tabs=tabsRef.current, selected=tabs?.querySelector('[aria-selected="true"]');
+    if (!tabs || !selected || tabs.scrollWidth<=tabs.clientWidth) return;
+    const left=selected.offsetLeft-tabs.offsetLeft-(tabs.clientWidth-selected.clientWidth)/2;
+    if (typeof tabs.scrollTo==='function') tabs.scrollTo({left,behavior:'smooth'});
+    else tabs.scrollLeft=left;
+  },[state.vista]);
   useEffect(()=>{if(stateScope!==storageKey){try{setState(restoreBiState(sessionStorage.getItem(storageKey)));}catch{setState(initialBiState);}setStateScope(storageKey);setResult(blank);}},[stateScope,storageKey]);
   useEffect(()=>{if(stateScope===storageKey)try{sessionStorage.setItem(storageKey,JSON.stringify(state));}catch{}},[state,stateScope,storageKey]);
   const query=queryForBi(state);
@@ -166,7 +176,7 @@ export default function BiWorkspace() {
       <div className="bi-head-meta"><span>{data ? `${date(data.metadata.periodo.desde)} – ${date(data.metadata.periodo.hasta)}` : 'Periodo seleccionado'}</span>
         <small>Comparación: {data ? `${date(data.metadata.comparacion.desde)} – ${date(data.metadata.comparacion.hasta)}` : 'pendiente'}</small>
         <small>Actualizado: {moment(data?.metadata?.actualizado_en)}</small></div></div>
-    <div className="bi-view-tabs" role="tablist" aria-label="Vistas de informes">
+    <div className="bi-view-tabs" role="tablist" aria-label="Vistas de informes" ref={tabsRef}>
       {[['direccion','Dirección'],['rentabilidad','Rentabilidad'],['operaciones','Operaciones'],['flota','Flota'],['calidad','Calidad y sostenibilidad'],['centro','Centro de informes'],['anteriores','Informes anteriores']].map(([id,label],index,tabs)=><button key={id} role="tab" aria-selected={mode===id} tabIndex={mode===id?0:-1}
         onKeyDown={e=>{const next=e.key==='ArrowRight'?(index+1)%tabs.length:e.key==='ArrowLeft'?(index+tabs.length-1)%tabs.length:e.key==='Home'?0:e.key==='End'?tabs.length-1:null;if(next!==null){e.preventDefault();setState(old=>({...old,vista:tabs[next][0]}));e.currentTarget.parentElement.children[next]?.focus();}}}
         onClick={()=>setState(old=>({...old,vista:id}))}>{label}</button>)}
@@ -214,6 +224,7 @@ export default function BiWorkspace() {
             <MetricCard title="Margen directo" metric={metrics.margen_directo} period={data.metadata.periodo}/>
             <MetricCard title="Margen por km total" metric={metrics.margen_km_total} period={data.metadata.periodo}/></div>
           <ChartPanel title="De ingreso a resultado" subtitle="Impactos en EUR netos · el resultado es parcial y muestra solo las categorías reconciliadas."
+            legend={[{label:'Ingreso',color:'var(--accent)'},{label:'Coste',color:'var(--orange)'},{label:'Acumulado',color:'var(--link)'}]}
             rows={data.cascada} columns={[{key:'etiqueta',label:'Concepto'},{key:'impacto',label:'Impacto',render:r=>money(r.impacto)},
               {key:'acumulado',label:'Acumulado',render:r=>money(r.acumulado)}]}
             renderChart={height=><ResponsiveContainer width="100%" height={height}><ComposedChart data={data.cascada} margin={{top:14,right:14,bottom:12,left:8}}>

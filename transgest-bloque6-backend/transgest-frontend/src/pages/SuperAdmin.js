@@ -634,8 +634,11 @@ function CorreoGaunaAdmin({ saFetchFn }) {
     setLoading(true); setMsg("");
     try {
       const r = await saFetchFn("/correo/test", { method:"POST", body:{ destinatario } });
-      setMsg(r.email?.simulado ? "Email simulado. Faltan variables SMTP de Gauna." : "Email de prueba enviado.");
-      notify(r.email?.simulado ? "Email simulado: revisa variables SMTP." : "Email de prueba enviado.", r.email?.simulado ? "warning" : "success");
+      const accepted = r.email?.accepted?.join(', ') || destinatario || 'superadmin';
+      const result = r.email?.simulado ? "Email simulado. Falta configurar el SMTP de Gauna." :
+        `Servidor SMTP aceptó el mensaje para ${accepted}. La entrega al buzón no está confirmada.${r.email?.messageId ? ` ID: ${r.email.messageId}` : ''}`;
+      setMsg(result);
+      notify(result, r.email?.simulado ? "warning" : "success");
       cargar();
     } catch (e) {
       setMsg(e.message || "No se pudo enviar el test");
@@ -657,7 +660,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
         {[
-          ["Estado", status?.verified ? "Envio verificado" : status?.ok ? "Configurado, sin verificar" : "Sin configurar", status?.ok ? "#34d399" : "#fbbf24"],
+          ["Estado", status?.verified ? "SMTP aceptó prueba" : status?.ok ? "Configurado, sin verificar" : "Sin configurar", status?.ok ? "#34d399" : "#fbbf24"],
           ["Origen", status?.provider || "-", "#94a3b8"],
           ["Remitente", status?.config?.smtp_from || "-", "#94a3b8"],
           ["Servidor", status?.config?.smtp_host || "Falta", status?.config?.smtp_host ? "#34d399" : "#f87171"],
@@ -693,7 +696,7 @@ function CorreoGaunaAdmin({ saFetchFn }) {
           {loading ? "Enviando..." : "Probar correo"}
         </button>
       </div>
-      {msg && <div style={{fontSize:12,color:msg.includes("enviado")?"#34d399":"#fbbf24",marginTop:10}}>{msg}</div>}
+      {msg && <div role="status" style={{fontSize:12,color:msg.includes("aceptó")?"#34d399":"#fbbf24",marginTop:10,overflowWrap:"anywhere"}}>{msg}</div>}
     </div>
   );
 }

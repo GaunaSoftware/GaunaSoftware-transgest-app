@@ -343,6 +343,7 @@ safeUse(`${api}/mi-cuenta`,     authenticate, requireModulePermission("mi_cuenta
 safeUse(`${api}/superadmin`,    superadminRoutes);
 safeUse(`${api}/superadmin`,    exportacionRoutes);
 safeUse(`${api}/empresa`,       authenticate, requireModulePermission("empresa"), datosEmpresaRoutes);
+safeUse(`${api}/importacion`,   authenticate, requireModulePermission("importacion"), require("./routes/importacion"));
 safeUse(`${api}/palets`,        authenticate, requireModulePermission("palets"), paletsRoutes);
 safeUse(`${api}/puntos-interes`, authenticate, requireModulePermission("pedidos"), puntosInteresRoutes);
 safeUse(`${api}/geocoding`,     authenticate, requireModulePermission("pedidos"), geocodingRoutes);

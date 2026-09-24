@@ -108,7 +108,7 @@ async function main() {
     assert.equal((await call('/semanal/configuracion', 'GET', B, OTHER)).result.ultimos_envios.length, 0);
 
     assert.equal((await call('/semanal/configuracion', 'PUT', A, MANAGER, 'gerente', { destinatarios: [MANAGER] })).status, 200);
-    await pg.query('UPDATE empresas SET plan=$2 WHERE id=$1', [A, 'basico']);
+    await pg.query('UPDATE empresas SET plan=$2 WHERE id=$1', [A, 'lite']);
     assert.equal((await weekly.tick(new Date('2026-10-05T07:00:00Z'), deps)).results.length, 0, 'plan controls delivery');
     await pg.query('UPDATE empresas SET plan=$2 WHERE id=$1', [A, 'profesional']);
     assert.equal((await weekly.tick(new Date('2026-10-05T07:00:00Z'), { ...deps, products: async () => ({ productos: ['planner'] }) })).results.length, 0,

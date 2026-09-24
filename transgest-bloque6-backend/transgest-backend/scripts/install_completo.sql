@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS empresas (
   cif               VARCHAR(20),
   email_admin       VARCHAR(200) NOT NULL UNIQUE,
   dominio           VARCHAR(100) UNIQUE,
-  plan              VARCHAR(20)  NOT NULL DEFAULT 'basico',
+  plan              VARCHAR(20)  NOT NULL DEFAULT 'profesional',
   estado            VARCHAR(20)  NOT NULL DEFAULT 'activo',
   max_vehiculos     INTEGER      NOT NULL DEFAULT 5,
   max_usuarios      INTEGER      NOT NULL DEFAULT 3,

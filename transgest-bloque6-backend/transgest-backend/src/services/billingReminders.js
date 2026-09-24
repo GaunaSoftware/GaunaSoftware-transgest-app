@@ -2,6 +2,7 @@ const db = require("./db");
 const logger = require("./logger");
 const { enviarEmail } = require("./email");
 const stripe = require("./stripe");
+const { priceFor } = require('./commercialPricing');
 
 let started = false;
 
@@ -17,8 +18,11 @@ function billingEmail(empresa = {}) {
 }
 
 async function checkoutUrl(empresa) {
-  if (!stripe.configured() || !stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion)) return "";
+  if (!stripe.configured() || (['lite','profesional','enterprise'].includes(empresa.plan) && !empresa.origen_comercial) || !stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion, empresa.origen_comercial)) return "";
   try {
+    const priceId = stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion, empresa.origen_comercial);
+    const expectedPrice = priceFor(empresa.plan, empresa.ciclo_facturacion, empresa.origen_comercial);
+    if (expectedPrice !== null) await stripe.assertCatalogPrice(priceId, expectedPrice, empresa.ciclo_facturacion);
     let customerId = empresa.stripe_customer_id;
     if (!customerId) {
       const customer = await stripe.createCustomer({
@@ -31,7 +35,7 @@ async function checkoutUrl(empresa) {
     }
     const session = await stripe.createCheckoutSession({
       customerId,
-      priceId: stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion),
+      priceId,
       empresaId: empresa.id,
       plan: empresa.plan,
       ciclo: empresa.ciclo_facturacion,

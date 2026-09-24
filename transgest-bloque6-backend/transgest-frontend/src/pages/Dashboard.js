@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos, getBiResumen } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { planHasFeature } from "../utils/planFeatures";
 
 import DashboardWorkspace from "./dashboard/DashboardWorkspace";
 import DashboardBI from "./dashboard/DashboardBI";
@@ -108,6 +109,7 @@ function enfocarPedidos(focus) {
 
 export default function Dashboard() {
   const { user, puedeVer } = useAuth();
+  const biAllowed = planHasFeature(user?.plan, "kpis_avanzados") && (puedeVer("informes") || puedeVer("facturacion"));
   const [biOpen, setBiOpen] = useState(false);
   const [biLoading,setBiLoading]=useState(false);
   const [biError,setBiError]=useState("");
@@ -132,17 +134,19 @@ export default function Dashboard() {
       setLoadErrors([]);
       const failed = [];
       const unavailable = (name, fallback) => { failed.push(name); return fallback; };
+      const permitted = (module, name, loader, fallback) => puedeVer(module)
+        ? loader().catch(()=>unavailable(name,fallback)) : Promise.resolve(fallback);
       try {
       const _tout = (p, ms=8000) => { let timer; return Promise.race([p, new Promise(r=>{ timer=setTimeout(()=>r(unavailable("Pedidos", [])),ms); })]).finally(()=>clearTimeout(timer)); };
         const [p, f, v, c, ex, cfg, taller, palets] = await Promise.all([
-          _tout(getPedidosTodos({}, { timeoutMs: 45000, silentError: true }).catch(()=>unavailable("Pedidos", [])), 45000),
-          getFacturasTodas({}, { silentError: true }).catch(()=>unavailable("Facturación", [])),
-          getVehiculos().catch(()=>unavailable("Vehículos", [])),
-          getChoferes().catch(()=>unavailable("Conductores", [])),
-          getExcepcionesOperativas().catch(()=>unavailable("Tareas", null)),
-          getEmpresaConfig().catch(()=>unavailable("Configuración", null)),
-          getTallerEstado().catch(()=>unavailable("Taller", null)),
-          getPaletMovimientos().catch(()=>unavailable("Palets", [])),
+          puedeVer('pedidos') ? _tout(permitted('pedidos','Pedidos',()=>getPedidosTodos({}, { timeoutMs: 45000, silentError: true }),[]),45000) : Promise.resolve([]),
+          permitted('facturacion','Facturación',()=>getFacturasTodas({}, { silentError: true }),[]),
+          permitted('vehiculos','Vehículos',getVehiculos,[]),
+          permitted('choferes','Conductores',getChoferes,[]),
+          permitted('excepciones','Tareas',getExcepcionesOperativas,null),
+          permitted('empresa','Configuración',getEmpresaConfig,null),
+          permitted('taller','Taller',getTallerEstado,null),
+          permitted('palets','Palets',getPaletMovimientos,[]),
         ]);
         if (!active) return;
         setPedidos(Array.isArray(p)?p:Array.isArray(p?.data)?p.data:[]);
@@ -162,9 +166,10 @@ export default function Dashboard() {
     }
     load();
     return () => { active = false; };
-  }, [user?.id, user?.rol, reloadKey]);
+  }, [user?.id, user?.rol, reloadKey, puedeVer]);
 
   useEffect(() => {
+    if (!biAllowed) { setBiResumen(null); setBiLoading(false); return; }
     let active = true;
     setBiResumen(null);setBiLoading(true);setBiError("");
     getBiResumen(dashboardPeriodToBi(period)).then(bi => {
@@ -172,7 +177,7 @@ export default function Dashboard() {
       if (active) setBiResumen(data && typeof data === "object" ? data : null);
     }).catch(() => {if(active)setBiError("No se pudo consultar el resumen BI del servidor.");}).finally(()=>{if(active)setBiLoading(false);});
     return () => { active = false; };
-  }, [period, user?.id, user?.rol]);
+  }, [period, user?.id, user?.rol, biAllowed]);
 
   const { alertas, today } = useMemo(() => {
     // ── Alertas activas ──
@@ -318,7 +323,7 @@ export default function Dashboard() {
   const kpiCobroPct = biNumber('cobro_pct');
   const clientesRanking = (biResumen?.clientes || []).map(c=>({id:c.id,name:c.nombre,total:c.ingreso_gestionado,facturado:c.facturado,pendiente:c.pendiente_facturar_realizado,share:c.participacion_pct}));
   const metrics={ingreso:kpiIngresoGestionado,facturado:kpiFacturado,cobrado:kpiCobrado,pendiente:kpiPendienteCobro,sinFactura:kpiPendienteFacturar,pendientesCount:kpiPendientesFacturarCount,realizados:kpiRealizados,margen:kpiMargen,margenPct:kpiMargenPct,eurKm:kpiEurKm,km:kpiKmRealizados,ticket:kpiTicket,incidencias:kpiIncidencias,sinPrecio:kpiSinPrecio,sinKm:kpiSinKm,pod:kpiPodPendiente,facturas:kpiFacturas,cobroPct:kpiCobroPct};
-  const canBI=puedeVer("informes")||puedeVer("facturacion");
+  const canBI=biAllowed;
   return <><DashboardWorkspace pedidos={pedidos} facturas={facturas} vehiculos={vehiculos} choferes={choferes} alertas={alertas} tareas={misTareas} loadErrors={loadErrors} reload={() => setReloadKey(k => k+1)} loading={loading} today={today} navigate={navegar} openOrder={enfocarPedidos} openAlert={abrirAlerta} advanced={() => setBiOpen(true)} showBI={canBI} onSnapshot={setPedidos} stateMeta={estadoPedidoMeta}/>
     {biOpen&&canBI&&<DashboardBI onClose={()=>setBiOpen(false)} period={period} setPeriod={setPeriod} metrics={metrics} clients={clientesRanking} series={biResumen?.series || []} clientSummary={biResumen?.clientes_resumen} metadata={biResumen?.metadata} loading={biLoading} error={biError}/>}
   </>;

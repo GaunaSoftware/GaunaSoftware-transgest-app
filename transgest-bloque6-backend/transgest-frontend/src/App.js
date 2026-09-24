@@ -190,12 +190,10 @@ const IC = {
 // Matriz efectiva: Lite=minimo DCD, Basico=trafico core, Profesional=avanzado sin IA, Enterprise=todo.
 const MODULOS_POR_PLAN = {
     lite: [
-      "app_chofer",
-      "clientes",
-      "rutas",
-      "pedidos",
-      "importacion",
-      "mi_cuenta"
+      "dashboard","agenda","pedidos","plan_diario","gestion_trafico","app_chofer",
+      "clientes","rutas","colaboradores","vehiculos","choferes","solicitudes",
+      "documentos","avisos","facturacion","control_horario","empresa","usuarios",
+      "importacion","mi_cuenta","facturacion_grupo"
     ],
     basico: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
@@ -1221,11 +1219,11 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
 const DEMO_PLAN_META = {
   lite: {
     label: "TransGest Go",
-    detail: "DCD, app chofer, pedidos, clientes, rutas/tarifas y tacografo. Sin IA ni modulos avanzados.",
+    detail: "Pedidos, clientes, viajes, documentación y facturación esenciales. Sin KPIs ni IA.",
   },
   basico: {
-    label: "TransGest Control",
-    detail: "Trafico core con documentos y facturacion basica. Sin IA, KPIs avanzados, taller ni contabilidad.",
+    label: "TransGest Pro (antiguo Control)",
+    detail: "La antigua edición Control se migra a Pro; conserva sus datos y permisos.",
   },
   profesional: {
     label: "TransGest Pro",

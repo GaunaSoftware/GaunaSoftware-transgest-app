@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS empresas (
   cif             VARCHAR(20),
   email_admin     VARCHAR(200) NOT NULL UNIQUE,
   dominio         VARCHAR(100) UNIQUE,   -- ej: acme (para acme.transgest.com)
-  plan            VARCHAR(20)  NOT NULL DEFAULT 'basico', -- basico | profesional | enterprise
+  plan            VARCHAR(20)  NOT NULL DEFAULT 'profesional', -- lite | profesional | enterprise
   estado          VARCHAR(20)  NOT NULL DEFAULT 'activo', -- activo | suspendido | cancelado
   max_vehiculos   INTEGER      NOT NULL DEFAULT 5,
   max_usuarios    INTEGER      NOT NULL DEFAULT 3,

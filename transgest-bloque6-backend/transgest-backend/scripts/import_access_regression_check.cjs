@@ -14,7 +14,7 @@ function request({ module = 'importacion', plan = 'basico', role = 'gerente', me
 }
 
 for (const [source, normalized] of Object.entries({
-  go: 'lite', transgest_go: 'lite', control: 'basico', transgest_control: 'basico',
+  go: 'lite', transgest_go: 'lite', control: 'profesional', transgest_control: 'profesional',
   pro: 'profesional', transgest_pro: 'profesional', pro_intelligence: 'enterprise',
   planner: 'profesional', pro_planner: 'profesional',
 })) assert.equal(normalizePlan(source), normalized);
@@ -40,6 +40,6 @@ assert.equal(request({ module: 'empresa', role: 'contable', plan: 'profesional',
 const denied = { modulos: { gastos_estructura: { ver: false, editar: false } } };
 assert.equal(request({ module: 'empresa', plan: 'profesional', method: 'POST', path: '/gastos-estructura', permissions: denied }).status, 403);
 assert.equal(request({ module: 'importacion', plan: 'basico', method: 'POST', permissions: { modulos: { importacion: { ver: false, editar: false } } } }).status, 403);
-assert.equal(request({ module: 'empresa', role: 'contable', plan: 'basico', method: 'POST', path: '/gastos-estructura' }).status, 403);
+assert.equal(request({ module: 'empresa', role: 'contable', plan: 'basico', method: 'POST', path: '/gastos-estructura' }).next, true);
 
 console.log('PASS: import onboarding access, known/unknown plans, structure-cost permissions, explicit denials.');

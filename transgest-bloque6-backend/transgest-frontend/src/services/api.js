@@ -1030,6 +1030,9 @@ export const getObjetivos          = ()        => apiFetch("/empresa/objetivos")
 export const setObjetivo           = (periodo,d) => apiFetch(`/empresa/objetivos/${periodo}`, {method:"PUT",body:d});
 // Config empresa
 export const getEmpresaConfig      = ()        => apiFetch("/empresa/config");
+export const getFacturaPlantilla = () => apiFetch('/empresa/factura-plantilla');
+export const guardarFacturaPlantilla = data => apiFetch('/empresa/factura-plantilla',{method:'POST',body:data});
+export const eliminarFacturaPlantilla = () => apiFetch('/empresa/factura-plantilla',{method:'DELETE'});
 export const setConfigTrafico      = (data)    => apiFetch("/empresa/config/trafico", {method:"PUT",body:data});
 export const setConfigPrecios      = (data)    => apiFetch("/empresa/config/precios", {method:"PUT",body:data});
 export const actualizarCapitalTesoreria = (data) => apiFetch("/empresa/config/tesoreria/capital", {method:"PUT",body:data});

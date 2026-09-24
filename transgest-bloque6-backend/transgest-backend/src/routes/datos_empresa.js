@@ -6,7 +6,7 @@ const { cacheMiddleware } = require("../services/cache");
 const express = require("express");
 const bcrypt  = require("bcryptjs");
 const db      = require("../services/db");
-const { authenticate, SOLO_GERENTE, GERENTE_O_CONTABLE, requireRole } = require("../middleware/auth");
+const { authenticate, SOLO_GERENTE, GERENTE_O_CONTABLE, requireRole, requireModulePermission } = require("../middleware/auth");
 const { getEmpresaFiscalConfig, saveEmpresaFiscalConfig, buildFiscalStatus, testFiscalConnection, saveEmpresaFiscalTestResult, getEmpresaFiscalQueueSummary, sanitizeFiscalConfigForClient } = require("../services/fiscal");
 const { getGlobalSetting, publicStatusForProvider } = require("../services/apiKeys");
 const { getEmpresaEmailConfig } = require("../services/email");
@@ -1868,6 +1868,32 @@ module.exports = router;
 // ════════════════════════════════════════════════════════════
 // LOGO EMPRESA
 // ════════════════════════════════════════════════════════════
+router.get('/factura-plantilla', requireModulePermission('facturacion'), async (req,res) => {
+  try {
+    const {rows} = await db.query('SELECT nombre,mime,imagen_base64,updated_at FROM empresa_factura_plantillas WHERE empresa_id=$1',[EID(req)]);
+    res.json(rows[0] || null);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+router.post('/factura-plantilla', SOLO_GERENTE, requireModulePermission('facturacion'), async (req,res) => {
+  try {
+    const mime = req.body?.mime;
+    const nombre = String(req.body?.nombre || 'Plantilla de factura').trim().slice(0,120);
+    const upload = validateBase64Upload({data:req.body?.imagen_base64,mime,maxBytes:2*1024*1024,allowedMimes:new Set(['image/png','image/jpeg'])});
+    const probe = new (require('pdfkit'))({autoFirstPage:false});
+    probe.openImage(Buffer.from(upload.base64,'base64'));
+    probe.end();
+    await db.query(`INSERT INTO empresa_factura_plantillas(empresa_id,nombre,mime,imagen_base64)
+      VALUES($1,$2,$3,$4) ON CONFLICT(empresa_id) DO UPDATE SET nombre=EXCLUDED.nombre,mime=EXCLUDED.mime,imagen_base64=EXCLUDED.imagen_base64,updated_at=now()`,[EID(req),nombre,upload.mime,upload.base64]);
+    res.json({ok:true,nombre,mime:upload.mime});
+  } catch(e) { res.status(e.status||400).json({error:e.message}); }
+});
+
+router.delete('/factura-plantilla', SOLO_GERENTE, requireModulePermission('facturacion'), async (req,res) => {
+  try { await db.query('DELETE FROM empresa_factura_plantillas WHERE empresa_id=$1',[EID(req)]); res.json({ok:true}); }
+  catch(e) { res.status(500).json({error:e.message}); }
+});
+
 router.post("/logo", async (req,res) => {
   try {
     const { logo_base64, logo_mime } = req.body;

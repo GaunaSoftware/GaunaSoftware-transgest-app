@@ -5,7 +5,7 @@ const path = require('node:path');
 
 const BASE_TABLES = ['usuarios', 'clientes', 'pedidos'];
 
-async function bootstrapEmptyDatabase(client, sql = fs.readFileSync(path.join(__dirname, 'init.sql'), 'utf8')) {
+async function bootstrapEmptyDatabase(client, sql = fs.readFileSync(path.join(__dirname, 'install_completo.sql'), 'utf8')) {
   const { rows } = await client.query(
     `SELECT ${BASE_TABLES.map((table, index) => `to_regclass('public.${table}') AS t${index}`).join(', ')}`
   );
@@ -16,7 +16,10 @@ async function bootstrapEmptyDatabase(client, sql = fs.readFileSync(path.join(__
   }
   await client.query('BEGIN');
   try {
-    await client.query(sql);
+    // The installation file has its own BEGIN/COMMIT for psql; keep exactly
+    // one transaction here so a failed initial install remains reversible.
+    const body = sql.replace(/^\s*BEGIN;\s*/i, '').replace(/\s*COMMIT;\s*$/i, '');
+    await client.query(body);
     await client.query('COMMIT');
     return 'initialized';
   } catch (error) {

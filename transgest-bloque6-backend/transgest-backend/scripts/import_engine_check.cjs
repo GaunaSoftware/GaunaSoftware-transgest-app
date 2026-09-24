@@ -13,13 +13,14 @@ async function main() {
       CREATE TABLE clientes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,nombre text,cif text UNIQUE,direccion text,cp text,ciudad text,pais text,email text,telefono text,notas text);
       CREATE TABLE choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,nombre text,dni text UNIQUE,telefono text,categoria_carnet text,activo boolean,notas text);
       CREATE TABLE vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,matricula text UNIQUE,tipo text,marca text,modelo text,activo boolean,estado text,notas text);
+      CREATE TABLE pedidos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid);
       CREATE TABLE colaboradores(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,tipo text,nombre text,cif text UNIQUE,telefono text,email text,notas text);
       CREATE TABLE rutas(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),origen text,destino text,km integer);
       CREATE TABLE ruta_precios_cliente(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),ruta_id uuid,cliente_id uuid,precio numeric);
       CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);
       CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);`);
     const migrations=path.join(__dirname,'migrations');
-    for(const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_simulations.sql','20260924_import_tenant_keys.sql']) await pg.exec(fs.readFileSync(path.join(migrations,name),'utf8'));
+    for(const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_simulations.sql','20260924_import_tenant_keys.sql','20260924_import_costs.sql']) await pg.exec(fs.readFileSync(path.join(migrations,name),'utf8'));
     await pg.query('INSERT INTO empresas(id) VALUES($1),($2)',[a,b]);
     const db={query:(...args)=>pg.query(...args),transaction:async fn=>{
       await pg.exec('BEGIN');try{const result=await fn(pg);await pg.exec('COMMIT');return result;}catch(cause){await pg.exec('ROLLBACK');throw cause;}
@@ -30,9 +31,9 @@ async function main() {
       {entity_type:'Conductores',row_number:2,source_data:{source_id:'d1',nombre:'Ana',dni:'12345678Z',estado:'inactivo'},normalized_data:{source_id:'d1',nombre:'Ana',dni:'12345678Z',estado:'inactivo'},status:'valid'},
       {entity_type:'Docs_Conductores',row_number:2,source_data:{source_id:'doc1',chofer_dni:'12345678Z',tipo_doc:'contrato_laboral'},normalized_data:{source_id:'doc1',chofer_dni:'12345678Z',tipo_doc:'contrato_laboral',estado_vencimiento:'PERMANENTE'},status:'valid'},
     ];
-    async function upload(company) {
+    async function upload(company,rows=input) {
       const batch=await batches.createBatch({empresaId:company,tipo:'Pack_TransGest',filename:'test.xlsx',fileBuffer:Buffer.from('synthetic test'),sourceSystem:'old'});
-      await batches.stageRows(company,batch.id,input);
+      await batches.stageRows(company,batch.id,rows);
       await batches.sealBatch(company,batch.id,null);
       return batch.id;
     }
@@ -62,6 +63,23 @@ async function main() {
     }
     assert.equal((await batches.getBatch(a,second)).skipped_rows,3);
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM clientes')).rows[0].n,1);
+    const costRows=[
+      {entity_type:'Vehiculos',row_number:2,source_data:{source_id:'v1',matricula:'0009-LCZ'},normalized_data:{source_id:'v1',matricula:'0009-LCZ'},status:'valid'},
+      {entity_type:'Gastos_Operativos',row_number:2,source_data:{source_id:'g1',tipo:'combustible_agregado',matricula:'0009LCZ',periodo_desde:'2026-08-01',importe:300},normalized_data:{source_id:'g1',tipo:'combustible_agregado',matricula:'0009LCZ',periodo_desde:'2026-08-01',importe:300},status:'valid'},
+      {entity_type:'Repostajes',row_number:2,source_data:{source_id:'r1',matricula:'0009LCZ',fecha:'2026-08-03',litros:30,importe:45},normalized_data:{source_id:'r1',matricula:'0009LCZ',fecha:'2026-08-03',litros:30,importe:45},status:'valid'},
+      {entity_type:'Gastos_Estructura',row_number:2,source_data:{source_id:'s1',nombre:'Abono',fecha:'2026-08-31',importe:-20},normalized_data:{source_id:'s1',nombre:'Abono',fecha:'2026-08-31',importe:-20},status:'valid'},
+    ];
+    const costs=await upload(a,costRows);
+    assert.equal((await engine.simulate(a,costs)).new,4);
+    await engine.confirm(a,costs,null);
+    for(let i=0;i<100;i++){
+      if(['completed','completed_with_errors','failed'].includes((await batches.getBatch(a,costs)).status))break;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    assert.equal((await batches.getBatch(a,costs)).status,'completed');
+    assert.equal((await pg.query('SELECT count(*)::int AS n FROM gastos_operativos')).rows[0].n,1);
+    assert.equal((await pg.query('SELECT count(*)::int AS n FROM vehiculo_repostajes')).rows[0].n,1);
+    assert.equal((await pg.query('SELECT count(*)::int AS n FROM gastos_estructura_movimientos')).rows[0].n,1);
     await assert.rejects(engine.simulate(b,id),{status:404});
     console.log('PASS: mandatory dry-run without target writes, deferred document match, asynchronous confirmation, repeated batch idempotence, company isolation. Synthetic PGlite only.');
   } finally { await pg.close(); }

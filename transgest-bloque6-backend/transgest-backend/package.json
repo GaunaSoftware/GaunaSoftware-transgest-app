@@ -38,6 +38,7 @@
     "import:master:schema": "node scripts/import_master_schema_check.cjs",
     "import:master:data": "node scripts/import_master_data_check.cjs",
     "import:engine:regression": "node scripts/import_engine_check.cjs",
+    "import:costs:regression": "node scripts/import_costs_check.cjs",
     "audit:regression": "node scripts/invoice_fuel_regression_check.js && node scripts/migration_history_check.cjs && node scripts/audit_connectors_check.cjs && node scripts/invoice_pdf_regression_check.js && node scripts/invoice_customer_output_regression_check.js && node scripts/unbilled_trips_regression_check.js && node scripts/collections_regression_check.js && node scripts/audit_workflows_regression_check.cjs",
     "planner:regression": "node scripts/planner_inventory_check.cjs && node scripts/planner_operational_check.cjs && node scripts/company_products_regression_check.js",
     "driver:regression": "node --check src/routes/choferes.js && node scripts/driver_workday_check.cjs && node scripts/driver_expenses_check.cjs && node scripts/driver_email_check.cjs && node scripts/driver_documents_access_check.js && node scripts/driver_stops_check.cjs"

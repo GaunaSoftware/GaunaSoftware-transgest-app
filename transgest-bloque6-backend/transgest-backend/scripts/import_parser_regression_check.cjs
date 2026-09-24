@@ -51,11 +51,11 @@ async function main() {
   assert.equal(parsed[1].rows[1].normalized_data.fecha_vencimiento, null);
   const formulaBook = new ExcelJS.Workbook();
   const formulaSheet = formulaBook.addWorksheet('Clientes');
-  formulaSheet.addRow(['source_id','nombre']);
-  formulaSheet.addRow(['client-1',{ formula: '1+1', result: 2 }]);
+  formulaSheet.addRow(['source_id','nombre','cif']);
+  formulaSheet.addRow(['client-1',{ formula: '1+1', result: 2 },'A12345678']);
   await assert.rejects(parseFile(Buffer.from(await formulaBook.xlsx.writeBuffer()), 'formula.xlsx', 'Clientes'), { code: 'FORMULA_NOT_ALLOWED' });
 
-  const large = ['source_id,nombre', ...Array.from({ length: 10001 }, (_, index) => `client-${index},Cliente ${index}`)].join('\n');
+  const large = ['source_id,nombre,cif', ...Array.from({ length: 10001 }, (_, index) => `client-${index},Cliente ${index},A${String(index).padStart(8,'0')}`)].join('\n');
   assert.equal((await parseFile(Buffer.from(large), 'clientes.csv', 'Clientes'))[0].rows.length, 10001);
   console.log('PASS: CSV/TSV/XLSX, official pack, aliases, formula rejection, Excel dates, Spanish decimals, permanent documents and 10,001 rows. Synthetic data only.');
 }

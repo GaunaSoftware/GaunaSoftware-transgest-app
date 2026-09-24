@@ -1,7 +1,10 @@
 const defaultDb = require('./db');
 const { evaluateMaster, createMaster, TABLES, compact } = require('./importMasterData');
+const { evaluateCost, createCost, TABLES: COST_TABLES } = require('./importCosts');
 
-const ORDER = ['Clientes','Conductores','Vehiculos','Colaboradores','Tarifas','Docs_Conductores','Docs_Vehiculos'];
+const ORDER = ['Clientes','Conductores','Vehiculos','Colaboradores','Tarifas','Docs_Conductores','Docs_Vehiculos',
+  'Gastos_Operativos','Repostajes','Gastos_Estructura'];
+const ALL_TABLES = { ...TABLES, ...COST_TABLES };
 const activeWorkers = new Set();
 const activeSimulations = new Set();
 function error(message, status = 409, code = 'IMPORT_STATE') { return Object.assign(new Error(message), { status, code }); }
@@ -17,9 +20,14 @@ function stagedDependency(row, planned) {
   if (row.entity_type === 'Docs_Conductores' && d.chofer_dni && planned.Conductores.has(compact(d.chofer_dni))) return true;
   if (row.entity_type === 'Docs_Vehiculos' && d.matricula && planned.Vehiculos.has(compact(d.matricula))) return true;
   if (row.entity_type === 'Tarifas' && d.cliente_cif && planned.Clientes.has(compact(d.cliente_cif))) return true;
+  if (['Gastos_Operativos','Repostajes'].includes(row.entity_type) && d.matricula && planned.Vehiculos.has(compact(d.matricula))) return true;
   return false;
 }
 function createImportEngine(db = defaultDb) {
+  function evaluate(client,empresaId,sourceSystem,row) {
+    const args=[client,empresaId,sourceSystem,row.entity_type,row.normalized_data,row.source_id,row.fingerprint];
+    return COST_TABLES[row.entity_type] ? evaluateCost(...args) : evaluateMaster(...args);
+  }
   async function getBatch(empresaId, batchId, client = db, lock = false) {
     const { rows } = await client.query(`SELECT * FROM import_batches WHERE id=$1 AND empresa_id=$2${lock ? ' FOR UPDATE' : ''}`, [batchId, empresaId]);
     if (!rows[0]) throw error('Lote no encontrado', 404, 'BATCH_NOT_FOUND');
@@ -60,7 +68,7 @@ function createImportEngine(db = defaultDb) {
       else if (row.status === 'warning') decision = { action:'review', reason:'Advertencia pendiente de resolver' };
       else if (counts.get(identityKey(row)) > 1 || (natural && naturalCounts.get(natural) > 1)) decision = { action:'review', reason:'Identidad duplicada dentro del archivo' };
       else {
-        decision = await evaluateMaster(db, empresaId, batch.source_system, row.entity_type, row.normalized_data, row.source_id, row.fingerprint);
+        decision = await evaluate(db, empresaId, batch.source_system, row);
         if (decision.action === 'review' && stagedDependency(row, planned) && /no localizado/i.test(decision.reason || '')) {
           decision = { action:'create', reason:'El maestro se creará antes dentro de este lote' };
         }
@@ -130,12 +138,14 @@ function createImportEngine(db = defaultDb) {
           if (currentBatch.status !== 'running') return;
           const currentRow = (await client.query('SELECT * FROM import_rows WHERE id=$1 AND batch_id=$2 FOR UPDATE',[row.id,batchId])).rows[0];
           if (!currentRow || currentRow.status !== 'valid') return;
-          const decision = await evaluateMaster(client,empresaId,batch.source_system,currentRow.entity_type,currentRow.normalized_data,currentRow.source_id,currentRow.fingerprint);
+          const decision = await evaluate(client,empresaId,batch.source_system,currentRow);
           if (!['create','skip'].includes(decision.action)) throw error(decision.reason || 'La fila requiere revisión',409,'ROW_REVIEW');
           if (currentRow.simulation?.action === 'skip' && decision.action === 'create') throw error('El registro existente cambió tras la simulación',409,'DRY_RUN_CHANGED');
           const target = decision.action === 'create'
-            ? await createMaster(client,empresaId,batchId,currentRow.entity_type,currentRow.normalized_data,decision)
-            : { table:TABLES[currentRow.entity_type], id:decision.targetId };
+            ? (COST_TABLES[currentRow.entity_type]
+              ? await createCost(client,empresaId,batchId,batch.source_system,currentRow.entity_type,currentRow.normalized_data,decision)
+              : await createMaster(client,empresaId,batchId,currentRow.entity_type,currentRow.normalized_data,decision))
+            : { table:ALL_TABLES[currentRow.entity_type], id:decision.targetId };
           if (!target.id) throw error('No se pudo verificar el destino de la fila',409,'TARGET_NOT_FOUND');
           if (!decision.identityExisting) {
             await client.query(`INSERT INTO import_identities(empresa_id,entity_type,source_system,source_id,fingerprint,target_table,target_id,created_by_batch_id)

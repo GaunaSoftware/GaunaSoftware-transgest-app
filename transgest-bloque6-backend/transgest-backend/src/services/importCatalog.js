@@ -38,6 +38,7 @@ const ALIASES = Object.freeze({
   tipo_doc: ['tipo documento'],
   source_id: ['id origen','identificador origen'],
 });
+const PROVENANCE_HEADERS = new Set(['source_sheet', 'source_row']);
 
 function normalizeHeader(value) {
   return String(value ?? '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -59,6 +60,7 @@ function mapHeaders(type, headers, manual = {}) {
   for (const raw of headers) {
     const key = String(raw ?? '').trim();
     const hasManual = Object.prototype.hasOwnProperty.call(manual, key);
+    if (!hasManual && PROVENANCE_HEADERS.has(key)) { mapped.push(null); continue; }
     const target = hasManual ? manual[key] : byAlias.get(normalizeHeader(key));
     if (hasManual && target == null) { mapped.push(null); continue; }
     if (!target || !columns.includes(target)) errors.push(`Columna no reconocida: ${key || '(vacía)'}`);

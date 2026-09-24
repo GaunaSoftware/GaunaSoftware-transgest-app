@@ -1,4 +1,5 @@
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
 const { HEADERS, REQUIRED, mapHeaders } = require('./importCatalog');
 
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -43,6 +44,36 @@ function inspectZip(buffer) {
     cursor += 46 + nameLength + extraLength + commentLength;
   }
   if (cursor !== start + size) reject('Directorio ZIP inconsistente');
+}
+
+// Algunos exportadores OOXML usan <x:workbook>/<x:worksheet> en vez del
+// espacio de nombres por defecto. ExcelJS no interpreta ese prefijo. Se
+// normaliza solo la representación XML en memoria; las tablas de formato se
+// descartan porque la importación utiliza exclusivamente los valores.
+async function normalizeSpreadsheetNamespace(buffer) {
+  const zip = await JSZip.loadAsync(buffer);
+  const workbookXml = zip.file('xl/workbook.xml');
+  if (!workbookXml) return buffer;
+  const workbookText = await workbookXml.async('string');
+  const mainNamespace = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  const prefixedRoot = /<([A-Za-z][\w.-]*):workbook\b/.exec(workbookText);
+  if (!prefixedRoot || !workbookText.includes(`xmlns:${prefixedRoot[1]}="${mainNamespace}"`)) return buffer;
+  for (const name of Object.keys(zip.files)) {
+    if (name.startsWith('xl/tables/')) { zip.remove(name); continue; }
+    if (!name.endsWith('.xml')) continue;
+    const entry = zip.file(name);
+    if (!entry) continue;
+    let xml = await entry.async('string');
+    const prefix = /xmlns:([A-Za-z][\w.-]*)="http:\/\/schemas\.openxmlformats\.org\/spreadsheetml\/2006\/main"/.exec(xml)?.[1];
+    if (!prefix || /\sxmlns="http:\/\/schemas\.openxmlformats\.org\/spreadsheetml\/2006\/main"/.test(xml)) continue;
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    xml = xml.replace(new RegExp(`xmlns:${escaped}="${mainNamespace}"`, 'g'), `xmlns="${mainNamespace}"`)
+      .replace(new RegExp(`(<\\/?)${escaped}:`, 'g'), '$1')
+      .replace(new RegExp(`\\s${escaped}:`, 'g'), ' ')
+      .replace(/<tableParts\b[^>]*>[\s\S]*?<\/tableParts>/g, '');
+    zip.file(name, xml);
+  }
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
 function parseDelimited(text, delimiter) {
@@ -106,7 +137,7 @@ function dateValue(value, date1904 = false) {
   return check.toISOString().slice(0, 10) === text ? text : null;
 }
 function cellValue(cell) {
-  const value = cell?.value ?? cell;
+  const value = cell?.value;
   if (value && typeof value === 'object' && !(value instanceof Date)) {
     if ('formula' in value || 'sharedFormula' in value) reject('El archivo contiene fórmulas. Sustitúyelas por valores.', 'FORMULA_NOT_ALLOWED');
     if (Array.isArray(value.richText)) return value.richText.map(part => part.text || '').join('');
@@ -168,6 +199,20 @@ function buildSheet(type, records, mapping = {}, date1904 = false) {
       error_code: result.errors.length ? 'ROW_INVALID' : result.warnings.length ? 'ROW_WARNING' : null,
       error_message: [...result.errors, ...result.warnings].join('; ') || null });
   }
+  const bySourceId = new Map();
+  for (const row of rows) {
+    const sourceId = String(row.normalized_data.source_id || '').trim();
+    if (!sourceId) continue;
+    const first = bySourceId.get(sourceId);
+    if (!first) { bySourceId.set(sourceId, row); continue; }
+    for (const duplicate of [first, row]) {
+      duplicate.status = 'invalid';
+      duplicate.error_code = 'DUPLICATE_SOURCE_ID';
+      if (!String(duplicate.error_message || '').includes('source_id repetido en la hoja')) {
+        duplicate.error_message = [duplicate.error_message, 'source_id repetido en la hoja'].filter(Boolean).join('; ');
+      }
+    }
+  }
   return { type, headers, mapped: headerMap.mapped, rows };
 }
 async function parseFile(buffer, filename, type, mapping = {}) {
@@ -178,7 +223,7 @@ async function parseFile(buffer, filename, type, mapping = {}) {
   if (extension === '.xlsx') {
     inspectZip(buffer);
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer);
+    await workbook.xlsx.load(await normalizeSpreadsheetNamespace(buffer));
     const sheets = type === 'Pack_TransGest' ? workbook.worksheets : [workbook.getWorksheet(type)];
     if (!sheets.length || sheets.length > Object.keys(HEADERS).length) reject('Hojas no válidas', 'SHEET_LIMIT');
     let total = 0;

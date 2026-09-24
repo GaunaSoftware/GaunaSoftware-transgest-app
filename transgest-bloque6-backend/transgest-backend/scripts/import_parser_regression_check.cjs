@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
 const { parseFile, inspectZip, dateValue, numberValue } = require('../src/services/importParser');
 const { mapHeaders } = require('../src/services/importCatalog');
 
@@ -14,12 +15,17 @@ async function main() {
   assert.deepEqual(mapHeaders('Vehiculos', ['source_id', 'Matrícula vehículo', 'tipo']).mapped, ['source_id', 'matricula', 'tipo']);
   assert.match(mapHeaders('Gastos_Operativos', ['source_id', 'COSTE AUTOPISTA', 'tipo', 'importe']).errors.join(' '), /Columna no reconocida/);
   assert.equal(mapHeaders('Gastos_Operativos', ['source_id', 'COSTE AUTOPISTA', 'tipo', 'importe'], { 'COSTE AUTOPISTA': 'subtipo' }).errors.length, 0);
+  assert.deepEqual(mapHeaders('Conductores', ['source_id', 'nombre', 'source_sheet', 'source_row']).mapped,
+    ['source_id', 'nombre', null, null]);
 
   const csv = Buffer.from('\uFEFFsource_id,nombre,apellidos,dni,estado\nold-1,"Ana, María",López,12345678Z,activo\nold-2,José,Ruiz,87654321X,inactivo\n');
   const [drivers] = await parseFile(csv, 'conductores.csv', 'Conductores');
   assert.equal(drivers.rows.length, 2);
   assert.equal(drivers.rows[0].normalized_data.nombre, 'Ana, María');
   assert.equal(drivers.rows[1].normalized_data.estado, 'inactivo');
+  const [repeated] = await parseFile(Buffer.from('source_id,nombre\nold-1,Ana\nold-1,Bea\n'), 'repetidos.csv', 'Conductores');
+  assert.deepEqual(repeated.rows.map(row => row.status), ['invalid', 'invalid']);
+  assert.deepEqual(repeated.rows.map(row => row.error_code), ['DUPLICATE_SOURCE_ID', 'DUPLICATE_SOURCE_ID']);
   const [costs] = await parseFile(Buffer.from('source_id;tipo;importe\npeaje-1;peaje;-12,25\n'), 'gastos.csv', 'Gastos_Operativos');
   assert.equal(costs.rows[0].normalized_data.importe, -12.25);
   const [tsv] = await parseFile(Buffer.from('source_id\tmatricula\nveh-1\t0009-LCZ\n'), 'vehiculos.tsv', 'Vehiculos');
@@ -50,6 +56,29 @@ async function main() {
   assert.equal(parsed[1].rows[0].normalized_data.estado_vencimiento, 'PERMANENTE');
   assert.equal(parsed[1].rows[1].status, 'warning');
   assert.equal(parsed[1].rows[1].normalized_data.fecha_vencimiento, null);
+  const prefixedBook = new ExcelJS.Workbook();
+  const prefixedDrivers = prefixedBook.addWorksheet('Conductores');
+  prefixedDrivers.addTable({ name: 'ConductoresTbl', ref: 'A1', headerRow: true,
+    columns: ['source_id', 'nombre', 'apellidos', 'dni', 'source_sheet', 'source_row'].map(name => ({ name })),
+    rows: [['driver-1', 'Persona sintética', '', '', 'origen', 4]] });
+  const prefixedZip = await JSZip.loadAsync(Buffer.from(await prefixedBook.xlsx.writeBuffer()));
+  const mainNamespace = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+  for (const path of Object.keys(prefixedZip.files)) {
+    if (!path.endsWith('.xml')) continue;
+    const entry = prefixedZip.file(path);
+    if (!entry) continue;
+    let xml = await entry.async('string');
+    if (!xml.includes(`xmlns="${mainNamespace}"`)) continue;
+    xml = xml.replace(`xmlns="${mainNamespace}"`, `xmlns:x="${mainNamespace}"`)
+      .replace(/(<\/?)([A-Za-z][\w.-]*)(?=[\s/>])/g, '$1x:$2');
+    prefixedZip.file(path, xml);
+  }
+  const prefixed = await prefixedZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  const [prefixedResult] = await parseFile(prefixed, 'prefix.xlsx', 'Conductores');
+  assert.equal(prefixedResult.rows.length, 1);
+  assert.equal(prefixedResult.rows[0].status, 'valid');
+  assert.equal(prefixedResult.rows[0].source_data.source_sheet, 'origen');
+  assert.equal(prefixedResult.rows[0].normalized_data.apellidos, '');
   const formulaBook = new ExcelJS.Workbook();
   const formulaSheet = formulaBook.addWorksheet('Clientes');
   formulaSheet.addRow(['source_id','nombre','cif']);
@@ -58,6 +87,6 @@ async function main() {
 
   const large = ['source_id,nombre,cif', ...Array.from({ length: 10001 }, (_, index) => `client-${index},Cliente ${index},A${String(index).padStart(8,'0')}`)].join('\n');
   assert.equal((await parseFile(Buffer.from(large), 'clientes.csv', 'Clientes'))[0].rows.length, 10001);
-  console.log('PASS: CSV/TSV/XLSX, official pack, aliases, formula rejection, Excel dates, Spanish decimals, permanent documents and 10,001 rows. Synthetic data only.');
+  console.log('PASS: CSV/TSV/XLSX, prefixed OOXML with tables and blank cells, provenance columns, official pack, aliases, formula rejection, Excel dates, Spanish decimals, permanent documents and 10,001 rows. Synthetic data only.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -68,8 +68,8 @@ function Trend({data,onDrill}) {
   const chart=height=><ResponsiveContainer width="100%" height={height}><ComposedChart data={rows} margin={{top:12,right:12,bottom:10,left:4}}>
     <CartesianGrid stroke="var(--border)" strokeDasharray="3 3"/><XAxis dataKey="fecha" tick={{fontSize:11,fill:'var(--text3)'}}/>
     <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickFormatter={v=>`${decimal(v,0)} €`}/>
-    <Tooltip formatter={(v,name)=>[money(v),name==='ingreso'?'Ingreso realizado':'Margen directo registrado']}/>
-    <Line type="monotone" dataKey="ingreso" name="Ingreso realizado" stroke="var(--accent)" strokeWidth={2.5} dot={{r:3}} connectNulls={false}
+    <Tooltip formatter={(v,name)=>[money(v),name]}/>
+    <Line type="monotone" dataKey="ingreso" name="Ingreso de servicios realizados" stroke="var(--accent)" strokeWidth={2.5} dot={{r:3}} connectNulls={false}
       onClick={payload=>payload?.payload?.fecha && onDrill(payload.payload.fecha)}/>
     <Line type="monotone" dataKey="margen" name="Margen directo registrado" stroke="var(--orange)" strokeWidth={2} dot={{r:3}} connectNulls={false}
       onClick={payload=>payload?.payload?.fecha && onDrill(payload.payload.fecha)}/>

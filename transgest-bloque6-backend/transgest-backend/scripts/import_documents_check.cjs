@@ -5,6 +5,7 @@ const {PGlite}=require('@electric-sql/pglite');
 const {createImportBatches}=require('../src/services/importBatches');
 const {createImportDocuments,parsePackage,identityFromFilename}=require('../src/services/importDocuments');
 const {DatabaseDocumentStorageProvider}=require('../src/services/DocumentStorageProvider');
+const {createImportRollback}=require('../src/services/importRollback');
 
 const pdf=Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF');
 function zipSingle(name,content){
@@ -26,13 +27,14 @@ async function main(){
       CREATE TABLE vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,matricula text);
       CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text,file_url text);
       CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text,file_url text);
+      CREATE TABLE ruta_precios_cliente(id uuid PRIMARY KEY DEFAULT gen_random_uuid());
       INSERT INTO empresas VALUES('${a}'),('${b}');
       INSERT INTO choferes(empresa_id,dni,nombre) VALUES('${a}','12826758A','Ana'),('${b}','12826758A','Otra');
       INSERT INTO vehiculos(empresa_id,matricula) VALUES('${a}','0009-LCZ'),('${b}','0009-LCZ');`);
-    for(const name of ['20260924_import_batches.sql','20260924_import_simulations.sql','20260924_import_doc_metadata.sql','20260924_import_document_blobs.sql'])
+    for(const name of ['20260924_import_batches.sql','20260924_import_simulations.sql','20260924_import_doc_metadata.sql','20260924_import_document_blobs.sql','20260924_import_rollback.sql'])
       await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',name),'utf8'));
     const db={query:(...args)=>pg.query(...args),transaction:async fn=>{await pg.exec('BEGIN');try{const value=await fn(pg);await pg.exec('COMMIT');return value;}catch(cause){await pg.exec('ROLLBACK');throw cause;}}};
-    const batches=createImportBatches(db),storage=new DatabaseDocumentStorageProvider(db),documents=createImportDocuments(db,batches,storage);
+    const batches=createImportBatches(db),storage=new DatabaseDocumentStorageProvider(db),documents=createImportDocuments(db,batches,storage),rollback=createImportRollback(db);
     assert.equal(identityFromFilename('CHOFER_12826758A_CONTRATO.pdf').type,'contrato_laboral');
     assert.equal(identityFromFilename('VEH_0009LCZ_ITV.pdf').scope,'vehiculo');
     assert.ok(identityFromFilename('desconocido.pdf').error);
@@ -68,6 +70,22 @@ async function main(){
     assert.equal((await batches.getBatch(a,id2)).status,'completed');
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM docs_vehiculos WHERE empresa_id=$1',[a])).rows[0].n,1,'Existing metadata reused');
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM import_document_blobs WHERE committed_at IS NOT NULL')).rows[0].n,2);
+    assert.equal((await rollback.simulate(a,id2)).revertibles,1);
+    await rollback.confirm(a,id2,null);
+    assert.equal((await pg.query('SELECT storage_key FROM docs_vehiculos WHERE empresa_id=$1',[a])).rows[0].storage_key,null);
+    assert.equal((await rollback.simulate(a,id)).revertibles,1);
+    await rollback.confirm(a,id,null);
+    assert.equal((await pg.query('SELECT count(*)::int AS n FROM docs_choferes WHERE empresa_id=$1',[a])).rows[0].n,0);
+    assert.equal((await pg.query('SELECT count(*)::int AS n FROM import_document_blobs WHERE committed_at IS NOT NULL')).rows[0].n,0);
+    const resumed=await documents.stage({empresaId:a,filename:'CHOFER_12826758A_CAP.pdf',buffer:pdf});
+    assert.equal((await documents.simulate(a,resumed)).new,1);
+    assert.equal((await documents.cancel(a,resumed,null)).status,'cancelled');
+    assert.equal((await documents.continueBatch(a,resumed,null)).status,'running');
+    for(let i=0;i<100;i++){
+      if(['completed','completed_with_errors','failed'].includes((await batches.getBatch(a,resumed)).status))break;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    assert.equal((await batches.getBatch(a,resumed)).status,'completed');
     await assert.rejects(batches.getBatch(b,id),{status:404});
     console.log('PASS: bulk-document preview, private database storage, metadata attachment, single-file PDF validation, A/B isolation. Synthetic PGlite only.');
   }finally{await pg.close();}

@@ -6,6 +6,7 @@ const ExcelJS = require('exceljs');
 const { PGlite } = require('@electric-sql/pglite');
 const { createImportBatches } = require('../src/services/importBatches');
 const { createImportRouter } = require('../src/routes/importacion');
+const { createImportReports,safeCell } = require('../src/services/importReports');
 const { parseFile } = require('../src/services/importParser');
 
 async function main() {
@@ -25,7 +26,7 @@ async function main() {
     } };
     const app = express();
     app.use((req, _res, next) => { req.empresaId = req.get('x-test-company'); req.user = { id: null }; next(); });
-    app.use('/importacion', createImportRouter(createImportBatches(db)));
+    app.use('/importacion', createImportRouter(createImportBatches(db),undefined,undefined,undefined,createImportReports(db,createImportBatches(db))));
     server = await new Promise(resolve => { const instance = app.listen(0, '127.0.0.1', () => resolve(instance)); });
     const base = `http://127.0.0.1:${server.address().port}/importacion`;
     const packResponse = await fetch(`${base}/templates/pack.xlsx`, { headers: { 'x-test-company': companyA } });
@@ -54,6 +55,15 @@ async function main() {
     assert.equal((await rows.json()).rows[0].normalized_data.nombre, 'Ana');
     const forbidden = await fetch(`${base}/batches/${batch.id}`, { headers: { 'x-test-company': companyB } });
     assert.equal(forbidden.status, 404);
+    const report=await fetch(`${base}/batches/${batch.id}/report`,{headers:{'x-test-company':companyA}});
+    assert.equal(report.status,200);
+    assert.equal((await report.json()).batch.id,batch.id);
+    const deniedReport=await fetch(`${base}/batches/${batch.id}/report.xlsx`,{headers:{'x-test-company':companyB}});
+    assert.equal(deniedReport.status,404);
+    const exported=await fetch(`${base}/batches/${batch.id}/errors.xlsx`,{headers:{'x-test-company':companyA}});
+    assert.equal(exported.status,200);
+    assert.equal(Buffer.from(await exported.arrayBuffer()).toString('ascii',0,2),'PK');
+    assert.equal(safeCell('=HYPERLINK("evil")'),"'=HYPERLINK(\"evil\")");
     const bad = await fetch(`${base}/upload`, { method: 'POST', headers: {
       'x-test-company': companyA, 'x-import-filename': 'conductores.csv',
       'x-import-type': 'Conductores', 'x-import-source-system': 'legacy',

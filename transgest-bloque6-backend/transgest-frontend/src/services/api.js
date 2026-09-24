@@ -1252,6 +1252,22 @@ export const getImportBatch = id => apiFetch(`/importacion/batches/${encodeURICo
 export const getImportRows = (id, params={}) => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rows?${new URLSearchParams(params)}`, {silentSuccess:true});
 export const simulateImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/simulate`, {method:'POST',silentSuccess:true});
 export const confirmImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/confirm`, {method:'POST',silentSuccess:true});
+export const cancelImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/cancel`,{method:'POST',silentSuccess:true});
+export const continueImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/continue`,{method:'POST',silentSuccess:true});
+export const retryImportErrors = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/retry-errors`,{method:'POST',silentSuccess:true});
+export const simulateImportRollback = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rollback/simulate`,{method:'POST',silentSuccess:true});
+export const confirmImportRollback = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rollback/confirm`,{method:'POST',silentSuccess:true});
+export const getImportReport = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/report`,{silentSuccess:true});
+export const getImportHistoricalOverview = id => apiFetch(`/importacion/history/overview?batch_id=${encodeURIComponent(id)}`,{silentSuccess:true});
+export async function downloadImportResult(id,kind){
+  if(!['report.xlsx','errors.csv','errors.xlsx'].includes(kind))throw new Error('Formato de descarga no permitido');
+  const token=getToken();if(!token)throw new Error('Inicia sesión para descargar el resultado');
+  const response=await fetch(`${BASE}/api/v1/importacion/batches/${encodeURIComponent(id)}/${kind}`,{
+    headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a descargar el resultado.');
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar el resultado');
+  return response.blob();
+}
 export async function uploadImportFile(file, type, sourceSystem, mapping={}) {
   const token=getToken();
   if (!token) throw new Error('Inicia sesión para importar datos');

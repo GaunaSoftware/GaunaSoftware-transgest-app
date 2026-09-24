@@ -128,13 +128,14 @@ function createImportDocuments(db=dbDefault,batches=createImportBatches(db),stor
     const rows=(await db.query(`SELECT * FROM import_rows WHERE batch_id=$1 ORDER BY row_number`,[batchId])).rows;
     const totals={associated:0,new:0,existing:0,review:0,unidentified:0};
     for(const row of rows){
+      if((await batches.getBatch(empresaId,batchId)).status==='cancelled')return{cancelled:true};
       const decision=await match(db,empresaId,row);
       const bucket={attach:'associated',create:'new',skip:'existing',review:'review',invalid:'unidentified'}[decision.action];totals[bucket]++;
       await db.query('UPDATE import_rows SET simulation=$3::jsonb WHERE id=$1 AND batch_id=$2',
         [row.id,batchId,JSON.stringify({action:decision.action,reason:decision.reason||null,target_id:decision.targetId||null})]);
     }
     await db.query(`UPDATE import_batches SET status='ready',dry_run_at=NOW(),config=jsonb_set(config,'{dry_run}',$3::jsonb,true)
-      WHERE id=$1 AND empresa_id=$2`,[batchId,empresaId,JSON.stringify(totals)]);
+      WHERE id=$1 AND empresa_id=$2 AND status IN ('review','ready')`,[batchId,empresaId,JSON.stringify(totals)]);
     return totals;
   }
   async function confirm(empresaId,batchId,actorId){
@@ -159,6 +160,8 @@ function createImportDocuments(db=dbDefault,batches=createImportBatches(db),stor
         const decision=await match(client,empresaId,row);
         if(!['attach','create','skip'].includes(decision.action))throw fail(decision.reason||'Documento requiere revisión','DOC_REVIEW');
         let targetId=decision.targetId;
+        const previousSnapshot=decision.action==='attach'
+          ? (await client.query(`SELECT to_jsonb(t) AS snapshot FROM ${decision.docTable} t WHERE id=$1 AND empresa_id=$2`,[targetId,empresaId])).rows[0]?.snapshot : null;
         if(decision.action==='attach'){
           const {rows:docs}=await client.query(`UPDATE ${decision.docTable} SET storage_key=$3,file_name=$4,file_mime='application/pdf',
             file_size_bytes=$5,file_sha256=$6,uploaded_at=NOW() WHERE id=$1 AND empresa_id=$2 AND storage_key IS NULL AND file_url IS NULL RETURNING id`,
@@ -174,8 +177,11 @@ function createImportDocuments(db=dbDefault,batches=createImportBatches(db),stor
         }
         if(!targetId)throw fail('Destino documental no encontrado','DOC_TARGET');
         if(decision.action!=='skip')await storage.commit(client,empresaId,`db:${decision.blob.id}`);
-        await client.query('UPDATE import_rows SET status=$3,target_id=$4,error_code=NULL,error_message=NULL,updated_at=NOW() WHERE id=$1 AND batch_id=$2',
-          [id,batchId,decision.action==='skip'?'skipped':decision.action==='attach'?'updated':'created',targetId]);
+        const targetSnapshot=decision.action==='skip'?null:(await client.query(`SELECT to_jsonb(t) AS snapshot FROM ${decision.docTable} t WHERE id=$1 AND empresa_id=$2`,[targetId,empresaId])).rows[0]?.snapshot;
+        await client.query(`UPDATE import_rows SET status=$3,target_id=$4,target_snapshot=$5::jsonb,previous_snapshot=$6::jsonb,
+          error_code=NULL,error_message=NULL,updated_at=NOW() WHERE id=$1 AND batch_id=$2`,
+          [id,batchId,decision.action==='skip'?'skipped':decision.action==='attach'?'updated':'created',targetId,
+            targetSnapshot?JSON.stringify(targetSnapshot):null,previousSnapshot?JSON.stringify(previousSnapshot):null]);
       });}catch(cause){await db.query("UPDATE import_rows SET status='failed',error_code=$3,error_message=$4 WHERE id=$1 AND batch_id=$2 AND status='valid'",
         [id,batchId,cause.code||'DOC_FAILED',String(cause.message||'Error').slice(0,500)]);}
     }
@@ -191,6 +197,49 @@ function createImportDocuments(db=dbDefault,batches=createImportBatches(db),stor
     const {rows}=await db.query("SELECT id,empresa_id FROM import_batches WHERE tipo='Docs_PDF' AND status='running' ORDER BY created_at LIMIT 100");
     for(const row of rows)setImmediate(()=>run(row.empresa_id,row.id).catch(()=>{}));
   }
-  return{stage,simulate,confirm,run,resume,parsePackage};
+  async function cancel(empresaId,batchId,actorId){
+    return db.transaction(async client=>{
+      const batch=(await client.query('SELECT * FROM import_batches WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[batchId,empresaId])).rows[0];
+      if(!batch)throw fail('Lote no encontrado','BATCH_NOT_FOUND',404);
+      if(batch.tipo!=='Docs_PDF'||!['review','ready','running'].includes(batch.status))throw fail('Lote no cancelable','BATCH_STATE',409);
+      await client.query("UPDATE import_batches SET status='cancelled',finished_at=NOW() WHERE id=$1 AND empresa_id=$2",[batchId,empresaId]);
+      await client.query('INSERT INTO import_events(batch_id,actor_id,action) VALUES($1,$2,$3)',[batchId,actorId||null,'cancelled']);
+      return{id:batchId,status:'cancelled'};
+    });
+  }
+  async function continueBatch(empresaId,batchId,actorId){
+    const result=await db.transaction(async client=>{
+      const batch=(await client.query('SELECT * FROM import_batches WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[batchId,empresaId])).rows[0];
+      if(!batch)throw fail('Lote no encontrado','BATCH_NOT_FOUND',404);
+      if(batch.tipo!=='Docs_PDF'||!['cancelled','failed'].includes(batch.status))throw fail('Lote no detenido','BATCH_STATE',409);
+      const pending=(await client.query("SELECT 1 FROM import_rows WHERE batch_id=$1 AND status='valid' LIMIT 1",[batchId])).rows.length>0;
+      if(!pending)throw fail('No quedan documentos pendientes; usa Reintentar errores si procede','BATCH_STATE',409);
+      if(!batch.dry_run_at&&Number(batch.created_rows)+Number(batch.updated_rows)>0)throw fail('Lote parcialmente aplicado sin simulación verificable','BATCH_STATE',409);
+      const next=pending&&batch.dry_run_at?'running':'review';
+      await client.query('UPDATE import_batches SET status=$3,finished_at=NULL WHERE id=$1 AND empresa_id=$2',[batchId,empresaId,next]);
+      await client.query('INSERT INTO import_events(batch_id,actor_id,action) VALUES($1,$2,$3)',[batchId,actorId||null,'resumed']);
+      return{id:batchId,status:next};
+    });
+    if(result.status==='running')setImmediate(()=>run(empresaId,batchId).catch(()=>{}));
+    return result;
+  }
+  async function retryErrors(empresaId,batchId,actorId){
+    const result=await db.transaction(async client=>{
+      const batch=(await client.query('SELECT * FROM import_batches WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[batchId,empresaId])).rows[0];
+      if(!batch)throw fail('Lote no encontrado','BATCH_NOT_FOUND',404);
+      if(batch.tipo!=='Docs_PDF'||!['completed_with_errors','failed'].includes(batch.status))throw fail('Lote sin errores reintentables','BATCH_STATE',409);
+      const retried=await client.query(`UPDATE import_rows SET status='valid',error_code=NULL,error_message=NULL,updated_at=NOW()
+        WHERE batch_id=$1 AND status='failed' AND simulation->>'action' IN ('attach','create','skip') RETURNING id`,[batchId]);
+      const pending=(await client.query("SELECT 1 FROM import_rows WHERE batch_id=$1 AND status='valid' LIMIT 1",[batchId])).rows.length>0;
+      if(!pending)throw fail('No hay errores reintentables','BATCH_STATE',409);
+      await client.query("UPDATE import_batches SET status='running',finished_at=NULL WHERE id=$1 AND empresa_id=$2",[batchId,empresaId]);
+      await client.query('INSERT INTO import_events(batch_id,actor_id,action,details) VALUES($1,$2,$3,$4::jsonb)',
+        [batchId,actorId||null,'retry_errors',JSON.stringify({rows:retried.rows.length})]);
+      return{id:batchId,status:'running',retried:retried.rows.length};
+    });
+    setImmediate(()=>run(empresaId,batchId).catch(()=>{}));
+    return result;
+  }
+  return{stage,simulate,confirm,run,resume,parsePackage,cancel,continueBatch,retryErrors};
 }
 module.exports={createImportDocuments,parsePackage,identityFromFilename};

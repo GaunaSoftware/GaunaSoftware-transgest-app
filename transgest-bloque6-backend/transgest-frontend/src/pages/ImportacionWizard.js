@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getImportCatalog, getImportBatches, getImportBatch, getImportRows,
   simulateImportBatch, confirmImportBatch, uploadImportFile, downloadImportTemplate,
   uploadDocumentPackage, simulateDocumentBatch, confirmDocumentBatch } from '../services/api';
+import { cancelImportBatch, continueImportBatch, retryImportErrors, simulateImportRollback,
+  confirmImportRollback, getImportReport, getImportHistoricalOverview, downloadImportResult } from '../services/api';
 import './ImportacionWizard.css';
 
 const GROUPS=[
@@ -11,9 +13,11 @@ const GROUPS=[
   {title:'Documentación',items:[['Docs_Conductores','Documentos de conductores'],['Docs_Vehiculos','Documentos de vehículos']]},
 ];
 const STEPS=['Archivo','Validación','Revisión','Importación','Resultado'];
-const SUPPORTED=new Set(GROUPS.flatMap(group=>group.items.map(([key])=>key)).filter(key=>!key.startsWith('Viajes_')));
+const SUPPORTED=new Set(GROUPS.flatMap(group=>group.items.map(([key])=>key)));
 const fmt=value=>Number(value||0).toLocaleString('es-ES');
-const STATUS={review:'Revisión',ready:'Simulación lista',validating:'Simulando',running:'Importando',completed:'Completado',completed_with_errors:'Completado con incidencias',failed:'Fallido',cancelled:'Cancelado'};
+const eur=value=>Number(value||0).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
+const HISTORIC_TYPES=new Set(['Facturas_Historicas','Facturas_Lineas','Facturas_Pendientes','Viajes_Historicos','Pack_TransGest']);
+const STATUS={review:'Revisión',ready:'Simulación lista',validating:'Simulando',running:'Importando',completed:'Completado',completed_with_errors:'Completado con incidencias',failed:'Fallido',cancelled:'Cancelado',rolled_back:'Revertido'};
 function saveBlob(blob,filename){
   const link=document.createElement('a');
   link.href=URL.createObjectURL(blob);link.download=filename;document.body.appendChild(link);link.click();link.remove();
@@ -21,7 +25,7 @@ function saveBlob(blob,filename){
 }
 function currentStep(batch){
   if (!batch) return 1;
-  if (['completed','completed_with_errors','failed','cancelled'].includes(batch.status)) return 5;
+  if (['completed','completed_with_errors','failed','cancelled','rolled_back'].includes(batch.status)) return 5;
   if (batch.status==='running') return 4;
   if (batch.status==='ready') return 3;
   return 2;
@@ -42,6 +46,9 @@ export default function ImportacionWizard(){
   const [mapping,setMapping]=useState({});
   const [unknownHeader,setUnknownHeader]=useState(null);
   const [rowPage,setRowPage]=useState(0);
+  const [report,setReport]=useState(null);
+  const [historical,setHistorical]=useState(null);
+  const [rollbackPreview,setRollbackPreview]=useState(null);
 
   const loadHistory=useCallback(()=>getImportBatches().then(data=>setHistory(data.batches||[])).catch(cause=>setError(cause.message)),[]);
   useEffect(()=>{getImportCatalog().then(setCatalog).catch(cause=>setError(cause.message));loadHistory();},[loadHistory]);
@@ -59,11 +66,19 @@ export default function ImportacionWizard(){
     if (!batch?.id) return;
     getImportRows(batch.id,{limit:50,offset:rowPage*50}).then(data=>setRows(data.rows||[])).catch(cause=>setError(cause.message));
   },[batch?.id,batch?.status,rowPage]);
+  useEffect(()=>{
+    if(!batch?.id||!['completed','completed_with_errors','failed','cancelled','rolled_back'].includes(batch.status))return;
+    getImportReport(batch.id).then(setReport).catch(cause=>setError(cause.message));
+  },[batch?.id,batch?.status]);
+  useEffect(()=>{
+    if(!batch?.id||!HISTORIC_TYPES.has(batch.tipo)||!['completed','completed_with_errors','rolled_back'].includes(batch.status))return;
+    getImportHistoricalOverview(batch.id).then(setHistorical).catch(cause=>setError(cause.message));
+  },[batch?.id,batch?.tipo,batch?.status]);
 
   const definition=useMemo(()=>catalog?.templates?.find(item=>item.type===type),[catalog,type]);
   const dryRun=batch?.config?.dry_run;
   const step=currentStep(batch);
-  function selectType(next){setType(next);setBatch(null);setRows([]);setFile(null);setDocumentFiles([]);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);}
+  function selectType(next){setType(next);setBatch(null);setRows([]);setFile(null);setDocumentFiles([]);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);setReport(null);setHistorical(null);setRollbackPreview(null);}
   async function download(typeName){
     try{const result=await downloadImportTemplate(typeName);saveBlob(result.blob,result.filename);}
     catch(cause){setError(cause.message);}
@@ -92,8 +107,25 @@ export default function ImportacionWizard(){
     catch(cause){setError(cause.message);}finally{setBusy(false);}
   }
   async function openBatch(item){
-    setType(item.tipo);setFile(null);setRowPage(0);setError('');
+    setType(item.tipo);setFile(null);setRowPage(0);setError('');setReport(null);setHistorical(null);setRollbackPreview(null);
     try{await refresh(item.id);}catch(cause){setError(cause.message);}
+  }
+  async function runAction(action){
+    setBusy(true);setError('');
+    try{
+      if(action==='rollback-preview')setRollbackPreview(await simulateImportRollback(batch.id));
+      else if(action==='rollback-confirm'){
+        await confirmImportRollback(batch.id);setRollbackPreview(null);await refresh(batch.id);
+      }else{
+        const fn={cancel:cancelImportBatch,continue:continueImportBatch,retry:retryImportErrors}[action];
+        await fn(batch.id);await refresh(batch.id);
+      }
+      await loadHistory();
+    }catch(cause){setError(cause.message);}finally{setBusy(false);}
+  }
+  async function downloadResult(kind){
+    try{saveBlob(await downloadImportResult(batch.id,kind),`${kind.startsWith('report')?'Informe_Migracion':'Errores_TransGest'}_${batch.id.slice(0,8)}.${kind.split('.').pop()}`);}
+    catch(cause){setError(cause.message);}
   }
   const processed=Number(batch?.created_rows||0)+Number(batch?.updated_rows||0)+Number(batch?.skipped_rows||0)+Number(batch?.failed_rows||0);
   const selectedLabel=type==='Pack_TransGest'?'Migración completa':type==='Docs_PDF'?'Carga documental masiva':GROUPS.flatMap(group=>group.items).find(([key])=>key===type)?.[1];
@@ -145,7 +177,31 @@ export default function ImportacionWizard(){
           {batch.status==='running'&&<div className="mig-progress" role="progressbar" aria-valuenow={processed} aria-valuemin={0} aria-valuemax={batch.total_rows}>
             <div style={{width:`${Math.min(100,100*processed/Math.max(1,batch.total_rows))}%`}}/><span>{fmt(processed)} / {fmt(batch.total_rows)} procesadas. Puedes cerrar esta página.</span></div>}
           {['completed','completed_with_errors'].includes(batch.status)&&<p className="mig-complete">Migración terminada. Revisa las filas con incidencias antes de volver a subir el archivo.</p>}
+          <div className="mig-actions">
+            {['review','ready','validating','running'].includes(batch.status)&&<button className="mig-button mig-button-secondary" disabled={busy} onClick={()=>runAction('cancel')}>Detener lote</button>}
+            {['cancelled','failed'].includes(batch.status)&&<button className="mig-button mig-button-secondary" disabled={busy} onClick={()=>runAction('continue')}>Continuar lote</button>}
+            {['completed_with_errors','failed'].includes(batch.status)&&<button className="mig-button mig-button-secondary" disabled={busy} onClick={()=>runAction('retry')}>Reintentar errores procesables</button>}
+            {['completed','completed_with_errors','failed','cancelled','rolled_back'].includes(batch.status)&&<button className="mig-button mig-button-secondary" onClick={()=>downloadResult('report.xlsx')}>Descargar informe XLSX</button>}
+            {['ready','completed_with_errors','failed','cancelled'].includes(batch.status)&&<><button className="mig-button mig-button-secondary" onClick={()=>downloadResult('errors.csv')}>Errores CSV</button><button className="mig-button mig-button-secondary" onClick={()=>downloadResult('errors.xlsx')}>Errores XLSX</button></>}
+            {['completed','completed_with_errors','failed','cancelled'].includes(batch.status)&&!rollbackPreview&&<button className="mig-button mig-button-secondary" disabled={busy} onClick={()=>runAction('rollback-preview')}>Simular reversión</button>}
+          </div>
+          {rollbackPreview&&<div className="mig-simulation" role="status"><strong>Simulación de reversión</strong>
+            <p>{fmt(rollbackPreview.revertibles)} registros reversibles · {fmt(rollbackPreview.bloqueados)} bloqueados · {fmt(rollbackPreview.ignorados)} sin creación.</p>
+            {rollbackPreview.bloqueos?.map((item,index)=><p key={`${item.entity_type}-${item.row_number}-${index}`}>{item.entity_type}, fila {item.row_number}: {item.reason}</p>)}
+            <div className="mig-actions"><button className="mig-button mig-button-secondary" onClick={()=>setRollbackPreview(null)}>Cerrar simulación</button>
+              {rollbackPreview.bloqueados===0&&rollbackPreview.revertibles>0&&<button className="mig-button" disabled={busy} onClick={()=>runAction('rollback-confirm')}>Revertir registros intactos</button>}</div>
+          </div>}
         </section>
+        {report?.summary?.length>0&&<section className="mig-panel"><h2>Resultado por entidad</h2><div className="mig-table-wrap"><table><thead><tr><th>Entidad</th><th>Estado</th><th>Filas</th></tr></thead><tbody>
+          {report.summary.map(item=><tr key={`${item.entity_type}-${item.status}`}><td>{item.entity_type}</td><td>{item.status}</td><td>{fmt(item.count)}</td></tr>)}
+        </tbody></table></div></section>}
+        {historical&&<section className="mig-panel"><h2>Histórico de origen de este lote</h2>
+          <p className="mig-muted">Estos importes conservan el significado del software anterior. No se suman a los KPI netos ni a la cartera actual sin conciliación fiscal y de cobros.</p>
+          <div className="mig-stats"><div><strong>{fmt(historical.facturas?.documentos)}</strong><span>Facturas históricas · {eur(historical.facturas?.total_origen)} total de origen</span></div>
+            <div><strong>{fmt(historical.lineas?.lineas)}</strong><span>Líneas · {fmt(historical.lineas?.lineas_con_coste)} con coste proveedor</span></div>
+            <div><strong>{fmt(historical.saldos?.documentos)}</strong><span>Saldos iniciales · {eur(historical.saldos?.saldo_de_origen)}</span></div>
+            <div><strong>{fmt(historical.viajes?.viajes)}</strong><span>Viajes históricos · {fmt(historical.viajes?.viajes_con_importe)} con importe</span></div></div>
+        </section>}
         <section className="mig-panel"><div className="mig-panel-head"><h2>Filas del lote</h2><span className="mig-muted">Página {rowPage+1}</span></div>
           <div className="mig-table-wrap"><table><thead><tr><th>Hoja</th><th>Fila</th><th>ID origen</th><th>Estado</th><th>Simulación / incidencia</th></tr></thead><tbody>
             {rows.map(row=><tr key={row.id||`${row.entity_type}-${row.row_number}`}><td>{row.entity_type}</td><td>{row.row_number}</td><td>{row.source_id||'—'}</td><td>{row.status}</td><td>{row.error_message||row.simulation?.reason||'—'}</td></tr>)}

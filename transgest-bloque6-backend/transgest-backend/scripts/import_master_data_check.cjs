@@ -18,7 +18,7 @@ async function main() {
       CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);
       CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);`);
     const dir=path.join(__dirname,'migrations');
-    for (const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_tenant_keys.sql']) await pg.exec(fs.readFileSync(path.join(dir,name),'utf8'));
+    for (const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_tenant_keys.sql','20260924_import_rollback.sql']) await pg.exec(fs.readFileSync(path.join(dir,name),'utf8'));
     await pg.query('INSERT INTO empresas(id) VALUES($1),($2)',[a,b]);
     const batch=(await pg.query("INSERT INTO import_batches(empresa_id,tipo,filename,source_system) VALUES($1,'Pack_TransGest','test.xlsx','old') RETURNING id",[a])).rows[0].id;
     let decision=await evaluateMaster(pg,a,'old','Clientes',{nombre:'Cliente A',cif:'B12345678'},'c1','a'.repeat(64));

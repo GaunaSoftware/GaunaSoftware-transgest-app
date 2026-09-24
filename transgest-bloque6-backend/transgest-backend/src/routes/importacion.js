@@ -5,6 +5,9 @@ const { parseFile } = require('../services/importParser');
 const { HEADERS, REQUIRED, ALIASES, columnsFor } = require('../services/importCatalog');
 const { createImportEngine } = require('../services/importEngine');
 const { createImportDocuments } = require('../services/importDocuments');
+const { createImportRollback } = require('../services/importRollback');
+const { createImportReports } = require('../services/importReports');
+const { createImportHistoricalOverview } = require('../services/importHistoricalOverview');
 
 const rawFile = express.raw({ type: () => true, limit: '20mb' });
 function handle(res, error) {
@@ -13,8 +16,10 @@ function handle(res, error) {
     code: error.code || 'IMPORT_ERROR',
   });
 }
-function createImportRouter(batches = createImportBatches(), engine = createImportEngine(), documents = createImportDocuments()) {
+function createImportRouter(batches = createImportBatches(), engine = createImportEngine(), documents = createImportDocuments(),
+  rollback = createImportRollback(), reports = createImportReports(), historical = createImportHistoricalOverview()) {
   const router = express.Router();
+  router.use((_req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
   router.get('/catalog', (_req, res) => res.json({ version: 1, templates: Object.entries(HEADERS).map(([type, header]) => ({ type, columns: header.split(','), required: REQUIRED[type] || [] })), aliases: ALIASES }));
   router.get('/templates/pack.xlsx', async (_req, res) => {
     try {
@@ -86,6 +91,52 @@ function createImportRouter(batches = createImportBatches(), engine = createImpo
   });
   router.post('/documents/:id/confirm', async(req,res)=>{
     try{res.status(202).json(await documents.confirm(req.empresaId,req.params.id,req.user.id));}catch(cause){handle(res,cause);}
+  });
+  for(const [path,method] of [['cancel','cancel'],['continue','continueBatch'],['retry-errors','retryErrors']]){
+    router.post(`/batches/:id/${path}`,async(req,res)=>{
+      try{
+        const batch=await batches.getBatch(req.empresaId,req.params.id);
+        const service=batch.tipo==='Docs_PDF'?documents:engine;
+        res.status(202).json(await service[method](req.empresaId,req.params.id,req.user.id));
+      }catch(cause){handle(res,cause);}
+    });
+  }
+  router.post('/batches/:id/rollback/simulate',async(req,res)=>{
+    try{res.json(await rollback.simulate(req.empresaId,req.params.id));}catch(cause){handle(res,cause);}
+  });
+  router.post('/batches/:id/rollback/confirm',async(req,res)=>{
+    try{res.json(await rollback.confirm(req.empresaId,req.params.id,req.user.id));}catch(cause){handle(res,cause);}
+  });
+  router.get('/batches/:id/report',async(req,res)=>{
+    try{res.json(await reports.report(req.empresaId,req.params.id));}catch(cause){handle(res,cause);}
+  });
+  router.get('/batches/:id/report.xlsx',async(req,res)=>{
+    try{
+      const content=await reports.reportXlsx(req.empresaId,req.params.id);
+      res.set('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.set('Content-Disposition','attachment; filename="Informe_Migracion_TransGest.xlsx"');res.send(content);
+    }catch(cause){handle(res,cause);}
+  });
+  router.get('/batches/:id/errors.csv',async(req,res)=>{
+    try{
+      const content=await reports.errorsCsv(req.empresaId,req.params.id);
+      res.set('Content-Type','text/csv; charset=utf-8');
+      res.set('Content-Disposition','attachment; filename="Errores_TransGest.csv"');res.send(content);
+    }catch(cause){handle(res,cause);}
+  });
+  router.get('/batches/:id/errors.xlsx',async(req,res)=>{
+    try{
+      const content=await reports.errorsXlsx(req.empresaId,req.params.id);
+      res.set('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.set('Content-Disposition','attachment; filename="Errores_TransGest.xlsx"');res.send(content);
+    }catch(cause){handle(res,cause);}
+  });
+  router.get('/history/overview',async(req,res)=>{
+    try{
+      const batchId=req.query.batch_id||null;
+      if(batchId)await batches.getBatch(req.empresaId,batchId);
+      res.json(await historical.overview(req.empresaId,batchId));
+    }catch(cause){handle(res,cause);}
   });
   router.get('/batches', async (req, res) => {
     try { res.json({ batches: await batches.listBatches(req.empresaId, req.query) }); }

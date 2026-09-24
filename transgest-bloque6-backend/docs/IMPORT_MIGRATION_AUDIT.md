@@ -1,6 +1,6 @@
 # Auditoría y plan de migración de datos
 
-Estado: auditoría terminada sobre `origin/main` (`6dca5de`), rama aislada `codex/import-migration-audit`. Este documento registra hechos verificados, no resultados de una importación real. No se han consultado datos de producción.
+Estado: auditoría terminada sobre `origin/main` (`6dca5de`), rama aislada `codex/import-migration-audit`. Las nueve fases se implementaron en esta rama; la evidencia de pruebas y limitaciones actuales está en [IMPORT_MIGRATION_VALIDATION.md](IMPORT_MIGRATION_VALIDATION.md). No se han consultado datos de producción.
 
 ## Estado actual y reutilización
 

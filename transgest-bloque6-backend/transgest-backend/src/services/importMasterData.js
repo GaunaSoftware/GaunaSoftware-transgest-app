@@ -115,9 +115,10 @@ async function createMaster(client, empresaId, batchId, type, data, decision) {
       [empresaId,decision.customerId,text(data.origen),text(data.destino),data.km,text(data.notas),text(data.unidad)||'viaje',data.precio,batchId]);
       routeId = route.rows[0].id;
     }
-    const price = await client.query(`INSERT INTO ruta_precios_cliente(ruta_id,cliente_id,precio,tarifa_tipo)
-      VALUES($1,$2,$3,$4) RETURNING id`, [routeId,decision.customerId,data.precio,text(data.unidad)||'viaje']);
-    return { table: TABLES[type], id: price.rows[0].id };
+    const price = await client.query(`INSERT INTO ruta_precios_cliente(ruta_id,cliente_id,precio,tarifa_tipo,empresa_id,import_batch_id)
+      VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, [routeId,decision.customerId,data.precio,text(data.unidad)||'viaje',empresaId,batchId]);
+    return { table: TABLES[type], id: price.rows[0].id,
+      auxiliary: decision.routeId ? null : { table:'rutas', id:routeId } };
   } else throw new Error('Tipo de maestro no implementado');
   const { rows } = await client.query(sql, params);
   return { table: TABLES[type], id: rows[0].id };

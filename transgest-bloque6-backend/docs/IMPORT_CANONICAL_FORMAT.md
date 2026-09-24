@@ -33,9 +33,18 @@ Las plantillas se descargan desde `GET /api/v1/importacion/templates/<NombreHoja
 - En documentos, la importación de metadatos no implica que el PDF esté almacenado; `archivo_nombre` permite su emparejamiento posterior. DNI y matrícula se normalizan solo para búsqueda, sin cambiar su visualización.
 - `Gastos_Operativos.tipo`: `peaje`, `combustible_agregado`, `parking`, `ferry`, `adblue`, `dieta`, `lavado`, `recambios`, `mantenimiento`, `renting_leasing`, `itv`, `otros_costes_flota`. El combustible agregado sin litros no crea un repostaje.
 - `Gastos_Estructura` representa un movimiento real histórico. No se inserta en los costes recurrentes/presupuestados existentes.
-- `Facturas_Historicas` conserva número y serie de origen. No genera numeración, envío, VeriFactu ni SII. `Facturas_Pendientes` se presenta como **Saldos / facturas pendientes** y alimenta cartera, no el histórico de facturación.
+- `Facturas_Historicas` conserva número y serie de origen. No genera numeración, envío, VeriFactu ni SII. `Facturas_Pendientes` se presenta como **Saldos / facturas pendientes**: es una apertura de cartera separada, todavía sin imputación automática de cobros posteriores.
 - El libro o CSV exportado escapa los textos que empiecen por `=`, `+`, `-`, `@`, tabulador o retorno para que no se ejecuten como fórmulas. Los números negativos permanecen como números.
 
 ## Resultado y compatibilidad
 
 Cada carga pasa por validación, previsualización y simulación sin escrituras antes de confirmar. Se informa de creados, actualizados, omitidos, errores y advertencias, con fichero de errores descargable. El backend conserva lote, fila, usuario, hash, mapping y duración. Las plantillas v1 no admiten columnas desconocidas sin mapeo manual explícito. Cambiar un nombre de hoja o campo exige una versión nueva del contrato.
+
+## Operación de lotes y límites de interpretación
+
+- `POST /batches/:id/simulate` y `POST /batches/:id/confirm` son pasos separados. Para PDFs se utilizan `/documents/:id/simulate` y `/documents/:id/confirm`.
+- `POST /batches/:id/cancel`, `/continue` y `/retry-errors` detienen, continúan o reintentan solo filas procesables. El worker vuelve a resolver identidad y relaciones dentro de una transacción antes de crear cada destino.
+- `POST /batches/:id/rollback/simulate` describe bloqueos; `/rollback/confirm` solo revierte registros aún idénticos a su huella de importación y sin referencias posteriores. La confirmación vuelve a verificar las huellas. No elimina registros preexistentes omitidos.
+- `GET /batches/:id/report.xlsx`, `/errors.csv` y `/errors.xlsx` descargan resultados privados de la empresa, con textos protegidos frente a fórmulas.
+- `GET /history/overview?batch_id=<UUID>` muestra totales de origen por lote, separados de la facturación y cobros actuales. El total de factura histórica puede incluir IVA, las líneas pueden usar otra base y el saldo pendiente es el del origen; no se suman ni concilian automáticamente con KPI netos de TransGest.
+- Los viajes históricos quedan en `import_viajes_historicos`, separados de tráfico actual. Los pendientes sí entran en `pedidos` con referencia de migración y sin disparar rutas de notificación. La conciliación de históricos de origen con BI financiero o cobros posteriores requiere una fase específica y datos fiscales/bancarios adicionales.

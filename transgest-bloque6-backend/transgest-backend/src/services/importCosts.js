@@ -51,7 +51,7 @@ async function evaluateCost(client, empresaId, sourceSystem, type, data, sourceI
   }
   if (text(data.pedido_source_id)) {
     const order = await resolveOne(client,
-      `SELECT target_id AS id FROM import_identities WHERE empresa_id=$1 AND entity_type IN ('Viajes_Historicos','Viajes_Pendientes')
+      `SELECT target_id AS id FROM import_identities WHERE empresa_id=$1 AND entity_type='Viajes_Pendientes'
        AND source_system=$2 AND source_id=$3`,[empresaId,sourceSystem,text(data.pedido_source_id)],'Pedido de origen');
     if (order.error) return review(order.error);
     result.orderId=order.id;

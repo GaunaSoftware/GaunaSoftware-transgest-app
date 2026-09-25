@@ -8,7 +8,13 @@ const published003 = new Set([
   'ca5c77b11d30acf3a379e8be611cc794492b0eca30b5d92ddc6c632f7ca58d12', // 3cc8d14
   '046a56f955e70ee7d83b9be4deaa863084a2049fbe9cbcbc0e0b67b962c535e7', // 3afea48
 ]);
+// La primera versión de claves de importación se aplicó en el ensayo aislado.
+// Producción rechazó su índice único por duplicados históricos y revirtió la
+// transacción. La variante de ensayo conserva sus índices más restrictivos.
+const canonicalImportTenantKeys = '2caa107bc18bd22896fcc973ac3e57b48525dcb265824b8b0e561a6232fa3621';
+const stagingImportTenantKeys = 'a86bf4dfbe7990f5e3c5a96386b3ccae09e98b1e09da99d31021d4b0c09fa8d2';
 function isPublishedHistoricalVariant(id, recorded, current) {
-  return id === '003_operational_normalization' && current === canonical003 && published003.has(recorded);
+  return (id === '003_operational_normalization' && current === canonical003 && published003.has(recorded)) ||
+    (id === '20260924_import_tenant_keys' && current === canonicalImportTenantKeys && recorded === stagingImportTenantKeys);
 }
 module.exports = { isPublishedHistoricalVariant };

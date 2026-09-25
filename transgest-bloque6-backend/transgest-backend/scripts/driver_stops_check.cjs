@@ -44,6 +44,12 @@ async function main(){
   assert.equal(dated.fecha_descarga_planificada.toISOString().slice(0,10),'2026-09-26');
   assert.equal(dated.planificacion_origen,'legacy_sin_verificar');
   assert.equal(dated.carga_real_at,null);
+  const legacyDeliveryId='66666666-6666-4666-8666-666666666666';
+  await pg.query("INSERT INTO pedidos(id,empresa_id,estado,fecha_carga,fecha_entrega) VALUES($1,$2,'confirmado','2026-09-25','2026-09-26')",[legacyDeliveryId,order.empresa_id]);
+  await pg.query("UPDATE pedidos SET fecha_entrega='2026-09-29',descarga_real_at=NOW(),estado='entregado' WHERE id=$1",[legacyDeliveryId]);
+  const legacyDelivery=(await pg.query('SELECT fecha_descarga_planificada,descarga_real_at FROM pedidos WHERE id=$1',[legacyDeliveryId])).rows[0];
+  assert.equal(legacyDelivery.fecha_descarga_planificada.toISOString().slice(0,10),'2026-09-26','actual delivery must not replace the planned date');
+  assert.ok(legacyDelivery.descarga_real_at);
   const truck='44444444-4444-4444-8444-444444444444';
   await pg.query('UPDATE pedidos SET vehiculo_id=$1',[truck]);
   await pg.query("INSERT INTO pedidos(id,empresa_id,estado,vehiculo_id) VALUES('55555555-5555-4555-8555-555555555555',$1,'en_curso',$2)",[order.empresa_id,truck]);

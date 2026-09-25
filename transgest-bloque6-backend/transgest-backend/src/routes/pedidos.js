@@ -3467,6 +3467,7 @@ router.post("/colaborador/carga/:token", async (req, res) => {
       UPDATE pedidos
       SET estado='en_curso',
           colaborador_carga_confirmada_at=NOW(),
+          carga_real_at=COALESCE(carga_real_at,NOW()),
           notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
       WHERE id=$2 AND empresa_id=$3
     `, [notas ? `CARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
@@ -3584,6 +3585,7 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
       UPDATE pedidos
       SET estado='entregado',
           colaborador_descarga_confirmada_at=NOW(),
+          descarga_real_at=COALESCE(descarga_real_at,NOW()),
           fecha_entrega=COALESCE(fecha_entrega, CURRENT_DATE),
           notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
       WHERE id=$2 AND empresa_id=$3
@@ -9062,6 +9064,9 @@ router.patch("/:id/estado",
     const cargaRealDesdeEstado = estado === "en_curso" &&
       ["confirmado", "espera_carga", "cargando"].includes(String(rows[0].estado || "").toLowerCase()) &&
       !rows[0].carga_real_at;
+    const descargaRealDesdeEstado = estado === "entregado" &&
+      String(rows[0].estado || "").toLowerCase() !== "entregado" &&
+      !rows[0].descarga_real_at;
     if (cargaRealDesdeEstado && req.user?.rol !== "chofer") {
       const fechaPlan = normalizePedidoDate(rows[0].fecha_carga_planificada || rows[0].fecha_carga);
       const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -9159,13 +9164,13 @@ router.patch("/:id/estado",
     } else if (estado === "entregado" && facturacionMes) {
       // La entrega y el mes elegido se guardan juntos, sin exito parcial.
       await db.query(
-        "UPDATE pedidos SET estado=$1, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
-        [estado, req.params.id, empresaId, facturacionMes]
+        "UPDATE pedidos SET estado=$1, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3",
+        [estado, req.params.id, empresaId, facturacionMes, descargaRealDesdeEstado]
       );
     } else {
       await db.query(
-        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END WHERE id=$2 AND empresa_id=$3",
-        [estado, req.params.id, empresaId, cargaRealDesdeEstado]
+        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3",
+        [estado, req.params.id, empresaId, cargaRealDesdeEstado, descargaRealDesdeEstado]
       );
     }
 

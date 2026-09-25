@@ -1636,6 +1636,15 @@ async function savePortalProveedorChoferPasos({ pedidoId, empresaId, patch = {},
            updated_at=NOW()`,
     [pedidoId, empresaId, JSON.stringify(nextData)]
   );
+  if (patch.carga_ok || patch.descarga_ok) {
+    await db.query(
+      `UPDATE pedidos
+          SET carga_real_at=CASE WHEN $3::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END,
+              descarga_real_at=CASE WHEN $4::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END
+        WHERE id=$1 AND empresa_id=$2`,
+      [pedidoId, empresaId, !!patch.carga_ok, !!patch.descarga_ok]
+    );
+  }
   await logPedidoEventoPortal(pedidoId, empresaId, "colaborador_portal.operativa_actualizada", {
     colaborador_id: colaboradorId,
     pasos: nextData,

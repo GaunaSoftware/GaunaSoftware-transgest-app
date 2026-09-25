@@ -20,6 +20,7 @@ import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
 import { displayLocation, missingLocationFields } from '../utils/orderTown';
+import { transportStateMeta } from '../utils/transportStateCatalog';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
 
@@ -750,10 +751,7 @@ function buildPedidoCriticalAlertKey(item) {
 
 const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
 const ESTADOS_ACTIVOS = ESTADOS_RAW.filter(estado => !["entregado", "cancelado"].includes(estado));
-const LABEL_ESTADO = {
-  pendiente:"Pendiente", confirmado:"Confirmado", espera_carga:"Espera carga", cargando:"Cargando", en_curso:"En curso", espera_descarga:"Espera descarga",
-  descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
-};
+const LABEL_ESTADO = Object.fromEntries(ESTADOS_RAW.map(estado => [estado, transportStateMeta(estado).label]));
 
 const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"cancelado_cliente", l:"Cancelado por el cliente" },

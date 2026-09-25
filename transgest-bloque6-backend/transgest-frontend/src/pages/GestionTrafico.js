@@ -11,6 +11,7 @@ import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import RemolqueGrupaje from "../components/RemolqueGrupaje";
 import { inferPlaceGeo } from "../utils/placeGeo";
+import { TRANSPORT_STATES, RECOMMENDED_STATE_FLOW, transportStateMeta } from "../utils/transportStateCatalog";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcTiempoTransito(km, cfg){
@@ -197,28 +198,10 @@ function buscarTarifaRutaPedido(pedido, rutas = []) {
   }).map(r => calcularTarifaRutaPedido(pedido, r)).find(Boolean) || null;
 }
 
-const EC = {
-  en_curso:   { label:"En Curso",   color:"#f97316", bg:"rgba(249,115,22,.18)",  border:"rgba(249,115,22,.5)"  },
-  espera_carga: { label:"Espera carga", color:"#eab308", bg:"rgba(234,179,8,.16)", border:"rgba(234,179,8,.45)" },
-  cargando: { label:"Cargando", color:"var(--accent-l)", bg:"var(--accent-a16)", border:"var(--accent-a45)" },
-  espera_descarga: { label:"Espera descarga", color:"#d946ef", bg:"rgba(217,70,239,.16)", border:"rgba(217,70,239,.45)" },
-  descarga: { label:"En descarga", color:"#a78bfa", bg:"rgba(167,139,250,.16)", border:"rgba(167,139,250,.45)" },
-  confirmado: { label:"Confirmado", color:"#3b82f6", bg:"rgba(59,130,246,.18)",  border:"rgba(59,130,246,.5)"  },
-  pendiente:  { label:"Pendiente",  color:"#9ca3af", bg:"rgba(156,163,175,.14)", border:"rgba(156,163,175,.4)" },
-  entregado:  { label:"Entregado",  color:"#10b981", bg:"rgba(16,185,129,.16)",  border:"rgba(16,185,129,.45)" },
-  cancelado:  { label:"Cancelado",  color:"#ef4444", bg:"rgba(239,68,68,.14)",   border:"rgba(239,68,68,.4)"   },
-  facturado:  { label:"Facturado",  color:"#8b5cf6", bg:"rgba(139,92,246,.15)",  border:"rgba(139,92,246,.4)"  },
-};
+const EC = TRANSPORT_STATES;
 
-const QUICK_STATE_FLOW = {
-  pendiente: { next: "confirmado", label: "Confirmar" },
-  confirmado: { next: "espera_carga", label: "Espera carga" },
-  espera_carga: { next: "cargando", label: "Cargando" },
-  cargando: { next: "en_curso", label: "En curso" },
-  en_curso: { next: "espera_descarga", label: "Espera descarga" },
-  espera_descarga: { next: "descarga", label: "Descarga" },
-  descarga: { next: "entregado", label: "Entregar" },
-};
+const QUICK_STATE_FLOW = Object.fromEntries(Object.entries(RECOMMENDED_STATE_FLOW)
+  .map(([from, next]) => [from, { next, label:transportStateMeta(next).label }]));
 const CRITICAL_ALERTS_STORAGE_KEY = "tms_trafico_critical_alerts_read";
 
 function broadcastPedidosChanged(detail = {}) {
@@ -2353,7 +2336,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
 }
 
 function RutaMapaVisual({ plan, remotePlan, onPreferencia, estado }) {
-  const color=({pendiente:'#f59e0b',confirmado:'#3b82f6',espera_carga:'#eab308',cargando:'#8b5cf6',en_curso:'#06b6d4',espera_descarga:'#f97316',descarga:'#f97316',entregado:'#10b981',facturado:'#10b981',incidencia:'#ef4444',cancelado:'#64748b'})[estado]||'#64748b';
+  const color=transportStateMeta(estado).color;
   const stops = remotePlan?.stops?.length ? remotePlan.stops : plan?.stops || [];
   const points = (remotePlan?.waypoint_coordinates || []).filter(c => c.lon != null && c.lat != null && Number.isFinite(Number(c.lon)) && Number.isFinite(Number(c.lat))).map((c,i) => ({lng:Number(c.lon),lat:Number(c.lat),stopNumber:i+1,label:c.address || stops[i]?.address || 'Parada',tone:{color,label:String(estado||'').replace(/_/g,' ')}}));
   const geometry = routeGeometry(remotePlan?.geometry);

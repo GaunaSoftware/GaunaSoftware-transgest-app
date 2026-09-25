@@ -3,27 +3,14 @@ import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getExcepc
 import { useAuth } from "../context/AuthContext";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { planHasFeature } from "../utils/planFeatures";
+import { transportStateMeta } from "../utils/transportStateCatalog";
 
 import DashboardWorkspace from "./dashboard/DashboardWorkspace";
 import DashboardBI from "./dashboard/DashboardBI";
 
 const fmtN   = n => Number(n||0).toLocaleString("es-ES");
-const ESTADO_PEDIDO = {
-  pendiente: { label:"Pendiente", color:"var(--text4)" },
-  confirmado: { label:"Confirmado", color:"var(--accent-l)" },
-  espera_carga: { label:"Espera carga", color:"#eab308" },
-  cargando: { label:"Cargando", color:"var(--accent-l)" },
-  en_curso: { label:"En ruta", color:"#f59e0b" },
-  espera_descarga: { label:"Espera descarga", color:"#d946ef" },
-  descarga: { label:"En descarga", color:"#a78bfa" },
-  entregado: { label:"Entregado", color:"var(--green)" },
-  facturado: { label:"Facturado", color:"#8b5cf6" },
-  cancelado: { label:"Cancelado", color:"#ef4444" },
-  incidencia: { label:"Incidencia", color:"#f97316" },
-};
 function estadoPedidoMeta(estado) {
-  const key = String(estado || "").toLowerCase();
-  return ESTADO_PEDIDO[key] || { label: key ? key.replace(/_/g, " ") : "-", color:"var(--text4)" };
+  return transportStateMeta(estado);
 }
 
 function dashboardPeriodToBi(value) {

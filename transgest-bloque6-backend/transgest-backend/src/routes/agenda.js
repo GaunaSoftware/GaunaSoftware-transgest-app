@@ -43,7 +43,7 @@ function normalizeType(value) {
 
 async function ensureOwnerOrManager(req, eventoId) {
   const { rows } = await db.query(
-    `SELECT id, empresa_id, creado_por, asignado_a, visibilidad
+    `SELECT id, empresa_id, creado_por, asignado_a, visibilidad, source_type
        FROM agenda_eventos
       WHERE id=$1 AND empresa_id=$2`,
     [eventoId, empresaId(req)]
@@ -52,6 +52,11 @@ async function ensureOwnerOrManager(req, eventoId) {
   if (!row) {
     const err = new Error("Evento no encontrado");
     err.statusCode = 404;
+    throw err;
+  }
+  if (row.source_type) {
+    const err = new Error("Esta incidencia automática se resuelve al cambiar la causa del pedido; no se puede editar ni borrar manualmente.");
+    err.statusCode = 409;
     throw err;
   }
   if (canManageAll(req) && row.visibilidad === "equipo") return row;
@@ -90,6 +95,7 @@ router.get("/", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const params = [empresaId(req)];
   const where = ["e.empresa_id=$1"];
+  if (req.query.mostrar_resueltas !== '1') where.push('(e.source_type IS NULL OR e.resolved_at IS NULL)');
   const qIdx = () => `$${params.length}`;
 
   if (req.query.desde) {
@@ -115,17 +121,21 @@ router.get("/", async (req, res) => {
   params.push(req.user.id);
   const ownerIdx = qIdx();
   const own = `(e.asignado_a = ${ownerIdx}::uuid OR e.creado_por = ${ownerIdx}::uuid)`;
-  where.push(req.query.modo === "mias" ? own : `(${own} OR e.visibilidad = 'equipo')`);
+  const teamAuto = canManageAll(req) ? "(e.source_type IS NOT NULL AND e.visibilidad='equipo')" : "false";
+  const teamVisible = canManageAll(req) ? "e.visibilidad='equipo'" : "false";
+  where.push(req.query.modo === "mias" ? `(${own} OR ${teamAuto})` : `(${own} OR ${teamVisible})`);
 
 
   const { rows } = await db.query(
     `SELECT e.*,
             uc.nombre AS creado_por_nombre,
             ua.nombre AS asignado_a_nombre,
-            ua.rol    AS asignado_a_rol
+            ua.rol    AS asignado_a_rol,
+            p.numero  AS pedido_numero
        FROM agenda_eventos e
        LEFT JOIN usuarios uc ON uc.id = e.creado_por
        LEFT JOIN usuarios ua ON ua.id = e.asignado_a
+       LEFT JOIN pedidos p ON p.id=e.pedido_id AND p.empresa_id=e.empresa_id
       WHERE ${where.join(" AND ")}
       ORDER BY e.fecha_inicio ASC, e.created_at ASC`,
     params

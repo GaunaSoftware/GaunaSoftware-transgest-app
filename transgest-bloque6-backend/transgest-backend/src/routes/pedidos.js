@@ -4,6 +4,7 @@ const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
 const express = require("express");
+const { syncOrderIncidents } = require('../services/agendaIncidents');
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
 const logger  = require("../services/logger");
@@ -1957,6 +1958,8 @@ async function savePedidoChoferPasos({
     await guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location: patch.carga_ubicacion, actorId, paradaId:patch.parada_id })
       .catch(e => logger.warn("No se pudo guardar ubicacion de carga desde app chofer:", e.message));
   }
+  await syncOrderIncidents({ empresaId, pedidoId })
+    .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda desde app chofer:", e.message));
   return stopResult?.data || nextData;
 }
 
@@ -3076,10 +3079,10 @@ async function procesarPedidosEntregaVencida() {
        AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
        AND COALESCE(p.pendiente_completar,false) = false
        AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
-       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= (NOW() AT TIME ZONE 'Europe/Madrid')::date - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
        -- Solo vencidos recientes: evita marcar datos historicos antiguos de golpe.
-       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= CURRENT_DATE - 60
-     RETURNING p.id
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
+     RETURNING p.id, p.empresa_id
   `).catch(e => { logger.warn("Auto-incidencia por entrega vencida fallo:", e.message); return { rows: [] }; });
   return { marcados: rows.length };
 }
@@ -3091,6 +3094,25 @@ function startPedidosVencidosScheduler() {
   const run = async () => {
     const r = await procesarPedidosEntregaVencida();
     if (r.marcados) logger.info(`[Incidencias] Auto-incidencia entrega vencida: ${r.marcados} pedido(s) marcados`);
+    const candidates = await db.query(`
+      SELECT p.id, p.empresa_id FROM pedidos p JOIN empresas e ON e.id=p.empresa_id
+       WHERE (COALESCE(e.estado,'activo')='activo'
+         AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
+         AND p.estado::text NOT IN ('entregado','cancelado')
+         AND ((p.fecha_carga >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
+               AND p.fecha_carga < (NOW() AT TIME ZONE 'Europe/Madrid')::date)
+           OR (COALESCE(p.fecha_entrega,p.fecha_descarga) >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
+               AND COALESCE(p.fecha_entrega,p.fecha_descarga) < (NOW() AT TIME ZONE 'Europe/Madrid')::date)))
+          OR EXISTS (SELECT 1 FROM agenda_eventos a WHERE a.empresa_id=p.empresa_id
+              AND a.source_type='pedido' AND a.source_id=p.id::text AND a.resolved_at IS NULL)
+       ORDER BY p.empresa_id, p.id
+    `).catch(e => { logger.warn("No se pudieron leer pedidos para incidencias de agenda:", e.message); return { rows: [] }; });
+    for (let start = 0; start < candidates.rows.length; start += 8) {
+      await Promise.all(candidates.rows.slice(start, start + 8).map(p =>
+        syncOrderIncidents({ empresaId:p.empresa_id, pedidoId:p.id })
+          .catch(e => logger.warn("No se pudo reconciliar incidencia de agenda:", e.message))
+      ));
+    }
   };
   try {
     const cron = require("node-cron");
@@ -9164,6 +9186,9 @@ router.patch("/:id/estado",
       );
     }
 
+    await syncOrderIncidents({ empresaId, pedidoId:req.params.id })
+      .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras estado:", e.message));
+
     if (estado === "descarga" && rows[0].vehiculo_id && rows[0].destino) {
       await db.query(
         "UPDATE vehiculos SET ubicacion_actual=$1, ubicacion_fuente='ultima_descarga', ubicacion_ts=NOW() WHERE id=$2 AND empresa_id=$3",
@@ -9557,6 +9582,10 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     let pedidoActualizado = rows[0];
     pedidoActualizado = await limpiarPendienteCompletarSiProcede(pedidoActualizado, empresaId, req.user);
     pedidoActualizado = await confirmarPedidoPorAsignacionSiProcede(pedidoActualizado, empresaId, req.user);
+    if (["estado", "fecha_carga", "fecha_entrega", "fecha_descarga"].some(key => key in body)) {
+      await syncOrderIncidents({ empresaId, pedidoId:pedidoActualizado.id })
+        .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras editar pedido:", e.message));
+    }
     if (assignmentFieldsTouched) await sincronizarConjuntoChoferDesdePedido(db, pedidoActualizado, empresaId);
     if (assignmentFieldsTouched && pedidoAntesAsignacion) {
       const changed = ["vehiculo_id", "chofer_id", "chofer2_id", "remolque_id", "colaborador_id"].some(

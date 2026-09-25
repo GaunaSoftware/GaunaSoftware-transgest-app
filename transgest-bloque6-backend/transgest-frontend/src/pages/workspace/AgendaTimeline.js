@@ -1,4 +1,5 @@
 import {agendaStyle,agendaType} from "./agendaTypes";
+import { incidentAccessibleText, isAutomaticIncident } from "./agendaIncident";
 const key = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const time = d => new Date(d).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"});
 export default function AgendaTimeline({day, view, events, selectDay, openEvent}) {
@@ -9,8 +10,9 @@ export default function AgendaTimeline({day, view, events, selectDay, openEvent}
   const eventHours = entries.filter(e=>!e.todo_dia).map(e=>new Date(e.fecha_inicio).getHours()).filter(Number.isFinite);
   const first=Math.min(8,...eventHours),last=Math.max(18,...eventHours);
   const hours=Array.from({length:last-first+1},(_,i)=>first+i);
-  const eventButton=(e,d)=><button key={e.id} style={agendaStyle(e.tipo)} className={`agenda-event event-${e.tipo}`} onClick={()=>{selectDay(key(d));openEvent(e);}}>
+  const eventButton=(e,d)=><button key={e.id} style={agendaStyle(e.tipo)} className={`agenda-event event-${e.tipo}`} title={isAutomaticIncident(e) ? incidentAccessibleText(e) : e.titulo} aria-label={isAutomaticIncident(e) ? incidentAccessibleText(e) : e.titulo} onClick={()=>{selectDay(key(d));openEvent(e);}}>
     <time>{e.todo_dia ? "Todo el día" : `${time(e.fecha_inicio)}${e.fecha_fin ? ` – ${time(e.fecha_fin)}` : ""}`}</time><strong>{e.titulo}</strong><span>{agendaType(e.tipo).label}</span><span>{e.asignado_a_nombre || "Sin responsable"}</span><small>{e.prioridad || "media"} · {e.estado === "en_progreso" ? "En progreso" : e.estado}</small>
+    {isAutomaticIncident(e) && <span className="agenda-incident-focus-detail">{e.explanation} {e.recommended_action}</span>}
   </button>;
   const cells=hour=>days.map(d=><div key={key(d)} className={`agenda-hour-cell ${key(d)===key(new Date()) ? "is-today" : ""}`}>{(events.get(key(d))||[]).filter(e=>hour===null ? e.todo_dia : !e.todo_dia&&new Date(e.fecha_inicio).getHours()===hour).sort((a,b)=>new Date(a.fecha_inicio)-new Date(b.fecha_inicio)).map(e=>eventButton(e,d))}</div>);
   return <div className="agenda-timeline" role="region" aria-label="Calendario de eventos" tabIndex={0}>

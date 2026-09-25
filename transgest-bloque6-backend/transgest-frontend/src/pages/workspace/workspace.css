@@ -17,5 +17,7 @@
 .modern-workspace h1,.modern-workspace .tg-agenda-title,.modern-modal [style*="Syne"]{font-family:'DM Sans',sans-serif!important}
 .tg-agenda-page .tg-agenda-filters label{white-space:nowrap;justify-content:flex-start!important}.tg-agenda-page .tg-agenda-filters label input[type=checkbox]{width:16px!important;flex:none!important;min-width:16px!important;margin:0!important}
 .agenda-time-grid{min-width:888px}.agenda-time-grid.is-day{min-width:0}.agenda-hour-row{display:contents}.agenda-hour-label{padding:12px 4px;font-size:11px;color:var(--text3);border-bottom:1px solid var(--border);background:var(--card-bg,var(--bg2))}.agenda-hour-cell{min-width:0;min-height:62px;padding:5px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);display:flex;flex-direction:column;gap:5px}.agenda-day-heading{border-right:1px solid var(--border)}.agenda-event{width:100%}
+.agenda-event .agenda-incident-focus-detail{display:none;white-space:normal;text-align:left;font-size:11px;line-height:1.4;margin-top:5px}
+.agenda-event:hover .agenda-incident-focus-detail,.agenda-event:focus-visible .agenda-incident-focus-detail{display:block}
 
 .operations-requests.modern-workspace .tgui-page-header{min-width:0;max-width:100%;width:100%;flex-shrink:1}.operations-requests.modern-workspace .tgui-page-header>div{min-width:0;max-width:100%}.operations-requests.modern-workspace .tgui-page-header p{white-space:normal;overflow-wrap:anywhere}

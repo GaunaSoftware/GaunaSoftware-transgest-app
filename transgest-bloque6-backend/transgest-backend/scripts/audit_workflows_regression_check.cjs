@@ -106,6 +106,17 @@ async function main(){
   const otherOrderAfter=(await db.query('SELECT ruta_id,importe FROM pedidos WHERE id=$1 AND empresa_id=$2',[otherOrder.id,company])).rows[0];
   require('node:assert/strict').equal(otherOrderAfter.ruta_id,null);
   require('node:assert/strict').equal(Number(otherOrderAfter.importe),400);
+  const datedOrder=await call('Pedido con carga pactada anterior','POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2020-01-15',fecha_descarga:'2020-01-16',importe:400});
+  await call('Confirmar carga pactada','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'confirmado'});
+  const missingRealDateConfirmation=await call('Exigir confirmación de carga real en otro día','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'en_curso'});
+  require('node:assert/strict').equal(missingRealDateConfirmation.code,'FECHA_REAL_CARGA_CONFIRMAR');
+  const confirmedRealLoad=await call('Registrar carga real confirmada','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'en_curso',confirmar_carga_real:true});
+  require('node:assert/strict').equal(confirmedRealLoad.estado,'en_curso');
+  const datedAfter=(await db.query('SELECT fecha_carga,fecha_carga_planificada,fecha_descarga_planificada,carga_real_at FROM pedidos WHERE id=$1 AND empresa_id=$2',[datedOrder.id,company])).rows[0];
+  require('node:assert/strict').equal(new Date(datedAfter.fecha_carga).toISOString().slice(0,10),'2020-01-15');
+  require('node:assert/strict').equal(new Date(datedAfter.fecha_carga_planificada).toISOString().slice(0,10),'2020-01-15');
+  require('node:assert/strict').equal(new Date(datedAfter.fecha_descarga_planificada).toISOString().slice(0,10),'2020-01-16');
+  require('node:assert/strict').ok(datedAfter.carga_real_at,'La ejecución real debe tener marca temporal del servidor');
   // Fuel is already part of the order total: persist separate lines in both invoice paths.
   const fuelOrders=[];
   for(const [i,amount,fuel] of [[1,528,48],[2,220,20]]){
@@ -320,7 +331,8 @@ async function main(){
  assert.ok(evidence.retryDelivery.emails>0);
  assert.equal(evidence.duplicateDelivery.emails,0);
   const expectedErrors=new Map([
-   ['Rechazar ruta de otro cliente al editar',400],
+  ['Rechazar ruta de otro cliente al editar',400],
+  ['Exigir confirmación de carga real en otro día',409],
   ['Rechazar recargo incluido en porte',409],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],

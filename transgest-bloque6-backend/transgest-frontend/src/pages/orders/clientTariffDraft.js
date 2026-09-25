@@ -1,3 +1,5 @@
+import { parseLocaleNumber } from "../../utils/number";
+
 const CUSTOMER_FIELDS = {
   cliente_id: "",
   cliente_nombre: "",
@@ -45,4 +47,20 @@ export function switchCustomerDraft(draft = {}, customer = null) {
     ventana_descarga: customer.horario_descarga || "",
     mercancia: draft.mercancia || customer.mercancia_habitual || "",
   };
+}
+
+export function routesForCustomer(routes = [], customerId = null) {
+  if (!customerId) return [];
+  return (Array.isArray(routes) ? routes : []).filter(route =>
+    route?.cliente_id && String(route.cliente_id) === String(customerId)
+  );
+}
+
+export function recoverExistingTripPrice(draft = {}, additionalStops = 0) {
+  if (!draft.id || (draft.tipo_precio || 'viaje') !== 'viaje' ||
+      (draft.precio_unitario !== null && draft.precio_unitario !== undefined && draft.precio_unitario !== '')) return null;
+  const total = parseLocaleNumber(draft.importe, NaN);
+  const extras = parseLocaleNumber(draft.extracostes ?? draft.extracostes_importe, 0);
+  const price = total - extras - additionalStops;
+  return Number.isFinite(price) && price >= 0 ? Number(price.toFixed(2)) : null;
 }

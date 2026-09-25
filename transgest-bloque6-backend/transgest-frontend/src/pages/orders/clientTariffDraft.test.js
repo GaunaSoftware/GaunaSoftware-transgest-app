@@ -1,4 +1,4 @@
-import { clearCustomerTariffDraft, hasCustomerDependentValues, switchCustomerDraft } from "./clientTariffDraft";
+import { clearCustomerTariffDraft, hasCustomerDependentValues, recoverExistingTripPrice, routesForCustomer, switchCustomerDraft } from "./clientTariffDraft";
 
 test("quitar cliente vacía tarifa, precio y condiciones del pedido sin tocar maestros ni mercancía", () => {
   const customerA = { id: "a", nombre: "Cliente A", horario_carga: "08:00-12:00" };
@@ -35,4 +35,17 @@ test("cambiar cliente no arrastra tarifa ni referencia del cliente anterior", ()
     ventana_carga: "14:00", ventana_descarga: "18:00", mercancia: "Carga manual",
     tipo_iva: 21,
   });
+});
+
+test("las rutas recibidas al abrir el editor solo muestran las del cliente actual", () => {
+  const routes = [{ id: 'tarifa-a', cliente_id: 'a', precio_base: 500 }, { id: 'tarifa-b', cliente_id: 'b', precio_base: 400 }];
+  expect(routesForCustomer(routes, 'b')).toEqual([routes[1]]);
+  expect(routesForCustomer(routes, '')).toEqual([]);
+});
+
+test("un viaje existente sin precio unitario conserva su importe al editarlo", () => {
+  expect(recoverExistingTripPrice({ id: 'pedido-b', tipo_precio: 'viaje', importe: 400, precio_unitario: null })).toBe(400);
+  expect(recoverExistingTripPrice({ id: 'pedido-b', tipo_precio: 'viaje', importe: 430, extracostes_importe: 20 }, 10)).toBe(400);
+  expect(recoverExistingTripPrice({ id: 'pedido-b', tipo_precio: 'viaje', importe: 430, precio_unitario: 380 })).toBeNull();
+  expect(recoverExistingTripPrice({ tipo_precio: 'viaje', importe: 430 })).toBeNull();
 });

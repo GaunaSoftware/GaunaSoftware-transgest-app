@@ -11,7 +11,7 @@ import OrderAssignmentFields from "./orders/editor/OrderAssignmentFields";
 import OrderDocumentFields from "./orders/editor/OrderDocumentFields";
 import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
 import { driverName, stopSchedule } from "./orders/quickInfo";
-import { hasCustomerDependentValues, switchCustomerDraft } from "./orders/clientTariffDraft";
+import { hasCustomerDependentValues, recoverExistingTripPrice, routesForCustomer, switchCustomerDraft } from "./orders/clientTariffDraft";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
@@ -1232,8 +1232,13 @@ function compactNumberInput(value) {
 
 function normalizePedidoTarifaDraft(draft = {}) {
   const tipo = draft.tipo_precio || "viaje";
+  const recoveredPrice = recoverExistingTripPrice(
+    draft,
+    sumAdditionalStopPrices(draft.puntos_carga) + sumAdditionalStopPrices(draft.puntos_descarga)
+  );
   const next = {
     ...draft,
+    ...(recoveredPrice !== null ? { precio_unitario: recoveredPrice } : {}),
     tipo_iva: draft.tipo_iva ?? 21,
     iva_regimen: draft.iva_regimen || ivaOptionValue(draft),
   };
@@ -6554,7 +6559,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [editorStep, setEditorStep] = useState(editando?._focus_asignacion ? 2 : 1);
   const [choferPasosMapa, setChoferPasosMapa] = useState(null);
   const [clientes, setClientes] = useState(clientesProp || []);
-  const [rutas,    setRutas]    = useState(rutas_prop || []);
+  const [rutasCargadas, setRutas] = useState(() => routesForCustomer(rutas_prop, editando?.cliente_id));
   const [etiquetasCatalogo, setEtiquetasCatalogo] = useState(() => {
     const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG?.cfg_trafico?.etiquetas_catalogo);
     return Array.isArray(cat) ? cat.filter(e => e && String(e.nombre || "").trim()) : [];
@@ -6646,6 +6651,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
       : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje",  fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
+  const rutas = React.useMemo(() => routesForCustomer(rutasCargadas, form.cliente_id), [rutasCargadas, form.cliente_id]);
   const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
   const [nombreBusqueda, setNombreBusqueda]= useState("");
@@ -6729,8 +6735,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
 
   useEffect(() => {
     let alive = true;
+    setRutas([]);
     if (!form.cliente_id) {
-      setRutas([]);
       return undefined;
     }
     getRutasCliente(form.cliente_id, { silentError: true })

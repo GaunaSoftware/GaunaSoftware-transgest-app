@@ -999,28 +999,6 @@ function minutosEntreIso(a, b) {
   return Math.round((end - start) / 60000);
 }
 
-function buildLocalDateTime(fecha, hora = "00:00") {
-  const date = normalizePedidoDate(fecha);
-  if (!date) return null;
-  const time = normalizePedidoTime(hora) || "00:00";
-  const d = new Date(`${date}T${time}:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function addMinutesDate(date, minutes = 0) {
-  if (!date || Number.isNaN(date.getTime())) return null;
-  return new Date(date.getTime() + Number(minutes || 0) * 60000);
-}
-
-function splitPedidoDateTime(date) {
-  if (!date || Number.isNaN(date.getTime())) return { fecha: null, hora: null };
-  const pad = n => String(n).padStart(2, "0");
-  return {
-    fecha: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    hora: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
-  };
-}
-
 async function notificarGestionPedido(empresaId, tipo, titulo, mensaje, data = {}, createdBy = null) {
   if (!empresaId) return;
   const { rows } = await db.query(
@@ -1823,22 +1801,11 @@ async function savePedidoChoferPasos({
       if (referenciaReal) addUpdate("referencia_cliente", referenciaReal);
     }
 
-    const cargaPlan = buildLocalDateTime(pedido.fecha_carga, pedido.hora_carga || "00:00");
-    const descargaPlan = buildLocalDateTime(pedido.fecha_descarga || pedido.fecha_entrega, pedido.hora_descarga || "00:00");
-    const cargaReal = nextData.carga_iniciada_at ? new Date(nextData.carga_iniciada_at) : null;
-    const referenciaRetraso = cargaReal && Number.isFinite(cargaReal.getTime()) ? cargaReal : new Date();
-    const debeEvaluarRetraso = cargaPlan && descargaPlan && (
-      patch.carga_iniciada || patch.carga_ok || patch.viaje_iniciado || patch.posicionado_descarga || patch.descarga_iniciada || patch.descarga_ok || !nextData.carga_iniciada
-    );
-    const retrasoMin = debeEvaluarRetraso ? minutosEntreIso(cargaPlan.toISOString(), referenciaRetraso.toISOString()) : 0;
-    if (retrasoMin > 5) {
-      const nuevaDescarga = splitPedidoDateTime(addMinutesDate(descargaPlan, retrasoMin));
-      if (nuevaDescarga.fecha) {
-        if (pedido.fecha_descarga) addUpdate("fecha_descarga", nuevaDescarga.fecha);
-        else addUpdate("fecha_entrega", nuevaDescarga.fecha);
-      }
-      if (nuevaDescarga.hora) addUpdate("hora_descarga", nuevaDescarga.hora);
-    }
+    // Driver progress must never rewrite the date agreed with the customer.
+    // A forecast needs its own explicitly sourced field and is not inferred
+    // from the planned date using the application server's local timezone.
+    if (patch.carga_ok) updates.push("carga_real_at=COALESCE(carga_real_at,NOW())");
+    if (patch.descarga_ok) updates.push("descarga_real_at=COALESCE(descarga_real_at,NOW())");
 
     if (updates.length) {
       params.push(pedidoId, empresaId);
@@ -1848,7 +1815,8 @@ async function savePedidoChoferPasos({
       ).catch(e => logger.warn("No se pudo sincronizar pedido desde pasos de chofer:", e.message));
       await logPedidoEvento(pedidoId, empresaId, "pedido.sincronizado_app_chofer", {
         estado: nextEstado,
-        retraso_min: retrasoMin > 5 ? retrasoMin : 0,
+        carga_real_registrada: !!patch.carga_ok,
+        descarga_real_registrada: !!patch.descarga_ok,
       }, actorTipo, actorId);
       if (nextEstado === "entregado") {
         await aplicarAutomatismosEntrega(pedidoId, empresaId, actorId || null, {}).catch(e => logger.warn("No se pudo aplicar automatismo de entrega desde app chofer:", e.message));
@@ -9091,6 +9059,21 @@ router.patch("/:id/estado",
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
     }
+    const cargaRealDesdeEstado = estado === "en_curso" &&
+      ["confirmado", "espera_carga", "cargando"].includes(String(rows[0].estado || "").toLowerCase()) &&
+      !rows[0].carga_real_at;
+    if (cargaRealDesdeEstado && req.user?.rol !== "chofer") {
+      const fechaPlan = normalizePedidoDate(rows[0].fecha_carga_planificada || rows[0].fecha_carga);
+      const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      if (fechaPlan && fechaPlan !== hoyMadrid && req.body.confirmar_carga_real !== true) {
+        return res.status(409).json({
+          code: "FECHA_REAL_CARGA_CONFIRMAR",
+          error: `El pedido estaba planificado para ${fechaPlan}. Confirma que la carga se ha completado hoy (${hoyMadrid}).`,
+          fecha_planificada: fechaPlan,
+          fecha_real: hoyMadrid,
+        });
+      }
+    }
     if(req.user?.rol==='chofer'&&estado==='entregado') {
       const progress=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
       if(progress.paradas&&!progress.firma_entrega)return res.status(409).json({error:'Confirma y firma todas las descargas antes de finalizar el viaje.',code:'DRIVER_DELIVERIES_PENDING'});
@@ -9181,8 +9164,8 @@ router.patch("/:id/estado",
       );
     } else {
       await db.query(
-        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
-        [estado, req.params.id, empresaId]
+        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END WHERE id=$2 AND empresa_id=$3",
+        [estado, req.params.id, empresaId, cargaRealDesdeEstado]
       );
     }
 

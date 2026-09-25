@@ -9587,6 +9587,23 @@ export default function Pedidos() {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
       return false;
     }
+    const confirmaCargaReal = estado === "en_curso" &&
+      ["confirmado", "espera_carga", "cargando"].includes(String(p?.estado || "").toLowerCase()) &&
+      !p?.carga_real_at;
+    if (confirmaCargaReal && user?.rol !== "chofer") {
+      const fechaPlan = String(p?.fecha_carga_planificada || p?.fecha_carga || "").slice(0, 10);
+      const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone:"Europe/Madrid", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+      if (fechaPlan && fechaPlan !== hoyMadrid) {
+        const confirmed = await confirmDialog({
+          title:"Registrar carga real",
+          message:`El pedido estaba planificado para ${fechaPlan}. ¿Registrar la carga real como realizada hoy (${hoyMadrid})? La fecha planificada se conservará.`,
+          confirmText:"Registrar carga de hoy",
+          tone:"warning",
+        });
+        if (!confirmed) return false;
+        extra = { ...extra, confirmar_carga_real:true };
+      }
+    }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
       setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });

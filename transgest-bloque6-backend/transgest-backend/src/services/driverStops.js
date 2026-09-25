@@ -91,6 +91,8 @@ async function saveStop(db,{pedidoId,empresaId,choferId,patch}) {
   await client.query(`INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,chofer_id,data,updated_at) VALUES($1,$2,$3,$4,NOW())
    ON CONFLICT(pedido_id) DO UPDATE SET data=EXCLUDED.data,chofer_id=COALESCE(EXCLUDED.chofer_id,pedido_chofer_pasos.chofer_id),updated_at=NOW()`,[pedidoId,empresaId,choferId,JSON.stringify(merged.data)]);
   await client.query('UPDATE pedidos SET estado=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3',[merged.state,pedidoId,empresaId]);
+  if(patch.carga_ok)await client.query('UPDATE pedidos SET carga_real_at=COALESCE(carga_real_at,NOW()) WHERE id=$1 AND empresa_id=$2',[pedidoId,empresaId]);
+  if(patch.descarga_ok&&merged.data.descarga_ok)await client.query('UPDATE pedidos SET descarga_real_at=COALESCE(descarga_real_at,NOW()) WHERE id=$1 AND empresa_id=$2',[pedidoId,empresaId]);
   if(merged.goods)await client.query('UPDATE pedidos SET mercancia=$1,bultos=$2,peso_kg=$3,updated_at=NOW() WHERE id=$4 AND empresa_id=$5',[merged.goods.mercancia,merged.goods.bultos,merged.goods.peso_kg,pedidoId,empresaId]);
   if(choferId)await client.query("UPDATE choferes SET estado=$1 WHERE id=$2 AND empresa_id=$3 AND COALESCE(estado,'disponible') NOT IN ('baja','vacaciones','ausencia')",[merged.state==='entregado'?'disponible':merged.state==='en_curso'?'en_ruta':merged.stop.tipo==='descarga'?'descargando':'carga',choferId,empresaId]);
   return merged;

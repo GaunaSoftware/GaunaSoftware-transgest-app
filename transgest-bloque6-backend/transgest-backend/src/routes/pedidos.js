@@ -9089,6 +9089,18 @@ router.patch("/:id/estado",
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
     }
+    // Reintentos de una transición ya aplicada no deben generar de nuevo
+    // eventos, correos ni automatismos de entrega. La incidencia se excluye:
+    // un nuevo aviso en el mismo estado puede aportar información distinta.
+    if (String(rows[0].estado || "").toLowerCase() === estado && estado !== "incidencia") {
+      if (estado === "entregado" && facturacionMes && normalizePedidoDate(rows[0].facturacion_mes) !== facturacionMes) {
+        await db.query(
+          "UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3",
+          [facturacionMes, req.params.id, empresaId]
+        );
+      }
+      return res.json({ ok: true, estado, sin_cambios: true, facturacion_auto: false });
+    }
     const cargaRealDesdeEstado = estado === "en_curso" &&
       ["confirmado", "espera_carga", "cargando"].includes(String(rows[0].estado || "").toLowerCase()) &&
       !rows[0].carga_real_at;
@@ -9139,6 +9151,7 @@ router.patch("/:id/estado",
         return res.status(400).json({ error: "Indica el motivo de cancelacion para cancelar este pedido.", code: "MOTIVO_CANCELACION_REQUERIDO" });
       }
     }
+    let estadoActualizado = true;
     if (estado === "incidencia") {
       const incidenciaNota = `INCIDENCIA: ${incidenciaData.label} - ${incidencia}`;
       try {
@@ -9176,7 +9189,7 @@ router.patch("/:id/estado",
         ).catch(colErr => logger.warn(`Campos estructurados de incidencia no guardados (${colErr?.code || "?"}): ${colErr.message}`));
       }
     } else if (estado === "cancelado") {
-      await db.query(
+      const result = await db.query(
         `UPDATE pedidos
          SET estado=$1,
              motivo_cancelacion=$2::text,
@@ -9186,20 +9199,29 @@ router.patch("/:id/estado",
                WHEN NULLIF($2::text,'') IS NULL THEN notas
                ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4::text))
              END
-         WHERE id=$5 AND empresa_id=$6`,
+         WHERE id=$5 AND empresa_id=$6 AND estado<>$1::estado_pedido`,
         [estado, motivoCancelacion || null, actorUsuarioId, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
       );
+      estadoActualizado = result.rowCount > 0;
     } else if (estado === "entregado" && facturacionMes) {
       // La entrega y el mes elegido se guardan juntos, sin exito parcial.
-      await db.query(
-        "UPDATE pedidos SET estado=$1, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3",
+      const result = await db.query(
+        "UPDATE pedidos SET estado=$1::estado_pedido, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
         [estado, req.params.id, empresaId, facturacionMes, descargaRealDesdeEstado]
       );
+      estadoActualizado = result.rowCount > 0;
     } else {
-      await db.query(
-        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3",
+      const result = await db.query(
+        "UPDATE pedidos SET estado=$1::estado_pedido, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
         [estado, req.params.id, empresaId, cargaRealDesdeEstado, descargaRealDesdeEstado]
       );
+      estadoActualizado = result.rowCount > 0;
+    }
+    if (!estadoActualizado) {
+      if (estado === "entregado" && facturacionMes) {
+        await db.query("UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3 AND estado::text='entregado'", [facturacionMes, req.params.id, empresaId]);
+      }
+      return res.json({ ok: true, estado, sin_cambios: true, facturacion_auto: false });
     }
 
     await syncOrderIncidents({ empresaId, pedidoId:req.params.id })
@@ -9842,10 +9864,6 @@ router.delete("/:id/factura", async (req, res) => {
 router.get("/:id/carta-porte", async (req, res) => {
   try {
     const empresaId = req.user && req.user.empresa_id;
-    const cartaPorte = await ensurePedidoCartaPorteNumero(req.params.id, empresaId).catch((error) => {
-      logger.warn("No se pudo asegurar la numeracion de carta de porte:", error.message);
-      return null;
-    });
     const { rows } = await db.query(`
       SELECT
         p.*,
@@ -9871,6 +9889,16 @@ router.get("/:id/carta-porte", async (req, res) => {
       WHERE p.id = $1 AND p.empresa_id = $2
     `, [req.params.id, empresaId]);
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+    const cartaPorteAutorizada = req.user?.rol === "colaborador"
+      ? String(rows[0].colaborador_id || "") === String(req.user?.colaborador_id || "\u0000")
+      : await usuarioPuedeGestionarPedido(req, rows[0]);
+    if (!cartaPorteAutorizada) {
+      return res.status(403).json({ error: "No puedes acceder a este pedido" });
+    }
+    const cartaPorte = await ensurePedidoCartaPorteNumero(req.params.id, empresaId).catch((error) => {
+      logger.warn("No se pudo asegurar la numeracion de carta de porte:", error.message);
+      return null;
+    });
 
     const { rows: empresaRows } = await db.query(
       "SELECT nombre, cif, cfg_precios FROM empresas WHERE id = $1 LIMIT 1",

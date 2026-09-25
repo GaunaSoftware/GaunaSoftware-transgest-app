@@ -130,7 +130,20 @@ async function main(){
   const order=await call('Crear viaje asignado','POST','/pedidos',{cliente_id:client.id,vehiculo_id:vehicle.id,chofer_id:driver.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',fecha_entrega:'2026-09-17',fecha_descarga:'2026-09-17',hora_carga:'09:00',importe:500,mercancia:'Palets auditoría',peso_kg:24200,bultos:20});
   if(order.id){
    await call('Confirmar viaje','PATCH','/pedidos/'+order.id+'/estado',{estado:'confirmado'});
-   await call('Completar viaje','PATCH','/pedidos/'+order.id+'/estado',{estado:'entregado'});
+   const confirmedEvents=(await db.query("SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2 AND tipo='estado.actualizado'",[order.id,company])).rows[0].n;
+   const repeatedConfirmation=await call('Reintentar confirmación sin efectos duplicados','PATCH','/pedidos/'+order.id+'/estado',{estado:'confirmado'});
+   require('node:assert/strict').equal(repeatedConfirmation.sin_cambios,true);
+   require('node:assert/strict').equal((await db.query("SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2 AND tipo='estado.actualizado'",[order.id,company])).rows[0].n,confirmedEvents);
+   const concurrentDeliveries=await Promise.all([
+    call('Completar viaje (petición 1)','PATCH','/pedidos/'+order.id+'/estado',{estado:'entregado'}),
+    call('Completar viaje (petición 2 simultánea)','PATCH','/pedidos/'+order.id+'/estado',{estado:'entregado'}),
+   ]);
+   require('node:assert/strict').equal(concurrentDeliveries.filter(result=>result.sin_cambios===true).length,1,'Solo una petición simultánea debe aplicar la transición');
+   const deliveredEvents=(await db.query("SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2 AND tipo='estado.actualizado'",[order.id,company])).rows[0].n;
+   require('node:assert/strict').equal(deliveredEvents,confirmedEvents+1,'La entrega simultánea debe producir un solo evento de estado');
+   const repeatedDelivery=await call('Reintentar entrega sin efectos duplicados','PATCH','/pedidos/'+order.id+'/estado',{estado:'entregado'});
+   require('node:assert/strict').equal(repeatedDelivery.sin_cambios,true);
+   require('node:assert/strict').equal((await db.query("SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2 AND tipo='estado.actualizado'",[order.id,company])).rows[0].n,deliveredEvents);
    const invoice=await call('Crear borrador sin documentos ni referencia','POST','/facturas',{cliente_id:client.id,serie:'A',fecha:'2026-09-16',estado:'borrador',pedidos_ids:[order.id],lineas:[{concepto:'Transporte auditoría',cantidad:1,precio_unit:500}]});
    if(invoice.id){await call('Emitir SIN revisar documentación','PATCH','/facturas/'+invoice.id+'/estado',{estado:'emitida'});await call('Enviar SIN documentación','PATCH','/facturas/'+invoice.id+'/estado',{estado:'enviada'});await call('Volver emitida a borrador','PATCH','/facturas/'+invoice.id+'/estado',{estado:'borrador'});
     await db.query("UPDATE facturas SET revision_cobro_at=CURRENT_DATE-2,fecha_vencimiento=CURRENT_DATE-3 WHERE id=$1",[invoice.id]);
@@ -260,9 +273,15 @@ async function main(){
    if(assignedOrder){
     const driverOrder=await call('App chófer: abrir viaje propio','GET','/pedidos/'+assignedOrder.id);
     require('node:assert/strict').equal(driverOrder.id,assignedOrder.id);
+    const ownCarta=await call('App chófer: carta de porte propia','GET','/pedidos/'+assignedOrder.id+'/carta-porte');
+    require('node:assert/strict').equal(ownCarta.id,assignedOrder.id);
     const steps=await call('App chófer: leer pasos propios','GET','/pedidos/'+assignedOrder.id+'/chofer-pasos');
     require('node:assert/strict').ok(steps.data,'El chófer debe poder leer el progreso de su viaje');
    }
+   const unassignedCartaBefore=(await db.query('SELECT carta_porte_numero FROM pedidos WHERE id=$1 AND empresa_id=$2',[defaultLengthOrder.id,company])).rows[0].carta_porte_numero;
+   const unassignedCarta=await call('Bloquear carta de porte de otro viaje','GET','/pedidos/'+defaultLengthOrder.id+'/carta-porte');
+   require('node:assert/strict').equal(unassignedCarta.error,'No puedes acceder a este pedido');
+   require('node:assert/strict').equal((await db.query('SELECT carta_porte_numero FROM pedidos WHERE id=$1 AND empresa_id=$2',[defaultLengthOrder.id,company])).rows[0].carta_porte_numero,unassignedCartaBefore,'El acceso denegado no debe generar número de carta de porte');
    const day=await call('Leer jornada chófer','GET','/choferes/app/jornada');
    const rig={conjunto_confirmado:true,vehiculo_id:day.chofer.vehiculo_id,remolque_id:day.chofer.vehiculo_remolque_id||null};
    await call('Catálogo de clientes del chófer','GET','/pedidos/chofer/clientes');
@@ -306,6 +325,7 @@ async function main(){
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],
   ['Revision caducada por cambio de pedido',409],['Impedir emitida a borrador',409],
   ['Guardar taller usuario B con lectura anterior',409],['Montar segundo neumático en posición ocupada',409],
+  ['Bloquear carta de porte de otro viaje',403],
   ['Rechazar jornada sin confirmar conjunto',400],['Rechazar km de cierre iguales',400],
   ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403]
  ]);

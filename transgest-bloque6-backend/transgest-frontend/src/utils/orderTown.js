@@ -26,7 +26,7 @@ export function orderTown(stop = {}, fallback = '') {
 // Present the best verified location label without pretending that a company name
 // is a municipality. The historic orderTown helper remains strict for town-only uses.
 export function displayLocation(point = {}, fallback = '') {
-  for (const value of [point.poblacion, point.ciudad, point.localidad, point.municipio]) {
+  for (const value of [point.poblacion, point.ciudad, point.city, point.localidad, point.municipio]) {
     const town = clean(value);
     if (town && !isAddress(town) && !isMissingLabel(town)) return town.toUpperCase();
   }
@@ -53,7 +53,7 @@ export function displayOrderLocation(order = {}, kind = 'carga') {
 
 export function missingLocationFields(point = {}) {
   const missing = [];
-  if (![point.poblacion, point.ciudad, point.localidad, point.municipio].some(value => clean(value) && !isMissingLabel(value))) missing.push('población');
+  if (![point.poblacion, point.ciudad, point.city, point.localidad, point.municipio].some(value => clean(value) && !isMissingLabel(value))) missing.push('población');
   if (!clean(point.codigo_postal || point.cp || point.postal_code)) missing.push('código postal');
   if (!clean(point.direccion_normalizada || point.direccion || point.address)) missing.push('dirección');
   return missing;

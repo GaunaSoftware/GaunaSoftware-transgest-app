@@ -19,7 +19,7 @@ import { cargoPayload, fullLoadLength, resolveQuickFullLoadLength, syncFullLoadL
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
-import { displayLocation, missingLocationFields } from '../utils/orderTown';
+import { displayLocation, displayOrderLocation, missingLocationFields } from '../utils/orderTown';
 import { transportStateMeta } from '../utils/transportStateCatalog';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
@@ -6387,12 +6387,13 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   };
   const lat = mapCoordinate(sourceStop.lat ?? sourceStop.latitude ?? (idx === 0 ? pedido[`${side}_lat`] : null), -90, 90);
   const lng = mapCoordinate(sourceStop.lng ?? sourceStop.longitude ?? (idx === 0 ? pedido[`${side}_lng`] : null), -180, 180);
-  const label = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
+  const geocodeLabel = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
+  const label = displayLocation(sourceStop, pedido[side]);
   const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
   const localidad = sourceStop.ciudad || sourceStop.poblacion || sourceStop.localidad || sourceStop.municipio || "";
   const direccion = sourceStop.direccion || sourceStop.address || "";
-  const query = buildMapQueryFromStop(sourceStop, label, pais);
+  const query = buildMapQueryFromStop(sourceStop, geocodeLabel, pais);
   const pointDetails = {
     google_maps_url: googleMapsUrl,
     provincia,
@@ -6509,7 +6510,7 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
     : estado;
   const mapStateMeta = transportStateMeta(mapState);
   const currentLabel = pasos.posicionado_descarga && mapState === "espera_descarga" ? "En punto de descarga" : mapStateMeta.label;
-  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{pedido?.origen || "Origen pendiente"} → {pedido?.destino || "Destino pendiente"}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
+  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{displayOrderLocation(pedido, "carga")} → {displayOrderLocation(pedido, "descarga")}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
   return (
     <div className={`tg-pedido-map-section ${compact ? "order-editor-map" : ""}`} style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>

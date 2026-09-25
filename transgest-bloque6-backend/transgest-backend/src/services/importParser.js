@@ -1,6 +1,6 @@
 const ExcelJS = require('exceljs');
 const JSZip = require('jszip');
-const { HEADERS, REQUIRED, mapHeaders } = require('./importCatalog');
+const { HEADERS, REQUIRED, mapHeaders, canonicalCostType } = require('./importCatalog');
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_UNCOMPRESSED = 100 * 1024 * 1024;
@@ -8,7 +8,6 @@ const MAX_ROWS = 100000;
 const MAX_COLUMNS = 70;
 const NUMERIC = new Set('precio,km,peso_kg,bultos,km_ruta,km_vacio,importe,precio_colaborador,coste_gasoil,coste_peajes,coste_dietas,coste_otros,total,cobrado,saldo_pendiente,linea,coste_proveedor,beneficio_origen,iva_pct,litros,precio_litro,km_odometro'.split(','));
 const DATES = new Set('fecha,fecha_nacimiento,fecha_alta,fecha_emision,fecha_vencimiento,fecha_carga,fecha_descarga,fecha_factura_proveedor,periodo_desde,periodo_hasta,fecha_desde,fecha_hasta'.split(','));
-const COST_TYPES = new Set('peaje,combustible_agregado,parking,ferry,adblue,dieta,lavado,recambios,mantenimiento,renting_leasing,itv,otros_costes_flota'.split(','));
 
 function reject(message, code = 'IMPORT_FILE_INVALID', status = 422) {
   throw Object.assign(new Error(message), { code, status });
@@ -179,9 +178,57 @@ function normalizeRow(type, mapped, values, date1904 = false) {
   }
   if (!normalized.source_id) warnings.push('Sin source_id: requiere revisar fingerprint');
   if (type === 'Conductores' && normalized.estado && !['activo','inactivo'].includes(String(normalized.estado).toLowerCase())) errors.push('estado: solo activo o inactivo');
-  if (type === 'Gastos_Operativos' && normalized.tipo && !COST_TYPES.has(String(normalized.tipo).toLowerCase())) errors.push('tipo: coste operativo no reconocido');
+  if (type === 'Gastos_Operativos' && normalized.tipo) {
+    const costType = canonicalCostType(normalized.tipo, normalized.subtipo);
+    if (!costType) errors.push('tipo: coste operativo no reconocido');
+    else if (String(normalized.tipo).toLowerCase() === 'coste_flota') {
+      normalized.tipo = costType;
+      normalized.subtipo = '';
+    }
+  }
   if (type === 'Repostajes' && (normalized.litros == null || normalized.litros <= 0)) errors.push('litros: debe ser positivo');
   return { source, normalized, errors, warnings };
+}
+function disambiguateInvoiceLines(rows) {
+  const bySource = new Map();
+  const maxLine = new Map();
+  const sourceIds = new Set();
+  for (const row of rows) {
+    const data = row.normalized_data;
+    const sourceId = String(data.source_id || '').trim();
+    if (sourceId) {
+      sourceIds.add(sourceId);
+      if (!bySource.has(sourceId)) bySource.set(sourceId, []);
+      bySource.get(sourceId).push(row);
+    }
+    const invoice = String(data.factura_source_id || '').trim();
+    if (invoice && Number.isInteger(data.linea)) maxLine.set(invoice, Math.max(maxLine.get(invoice) || 0, data.linea));
+  }
+  for (const [sourceId, group] of bySource) {
+    if (group.length < 2) continue;
+    const invoice = String(group[0].normalized_data.factura_source_id || '').trim();
+    const originalLine = group[0].normalized_data.linea;
+    const plates = group.map(row => String(row.normalized_data.vehiculo_matricula || '').toUpperCase().replace(/[^A-Z0-9]/g, ''));
+    // This exact source pattern represents distinct invoice lines in the TLM
+    // export. Without independent vehicle and provenance evidence, duplicates
+    // remain invalid and require human review.
+    if (!invoice || !Number.isInteger(originalLine) || sourceId !== `${invoice}:L${originalLine}` || group.some((row, index) =>
+      row.status !== 'valid' || row.normalized_data.factura_source_id !== invoice ||
+      row.normalized_data.linea !== originalLine || !plates[index] ||
+      !row.source_data.source_sheet || !row.source_data.source_row
+    ) || new Set(plates).size !== group.length) continue;
+    const derived = plates.map(plate => `${sourceId}#${plate}`);
+    if (derived.some(id => sourceIds.has(id))) continue;
+    group.forEach((row, index) => {
+      row.normalized_data.source_id = derived[index];
+      if (index > 0) {
+        const next = (maxLine.get(invoice) || 0) + 1;
+        row.normalized_data.linea = next;
+        maxLine.set(invoice, next);
+      }
+      sourceIds.add(derived[index]);
+    });
+  }
 }
 function buildSheet(type, records, mapping = {}, date1904 = false) {
   if (!records.length) reject(`La hoja ${type} está vacía`, 'EMPTY_SHEET');
@@ -190,14 +237,26 @@ function buildSheet(type, records, mapping = {}, date1904 = false) {
   const headerMap = mapHeaders(type, headers, mapping);
   if (headerMap.errors.length) reject(headerMap.errors.join('; '), 'HEADER_INVALID');
   const rows = [];
+  const importColumn = headers.findIndex(header => header.toLowerCase() === 'importar');
   for (const record of records.slice(1)) {
     if (record.values.length > headers.length && record.values.slice(headers.length).some(value => value !== '')) reject(`Fila ${record.line}: columnas adicionales`, 'COLUMN_COUNT');
     const result = normalizeRow(type, headerMap.mapped, record.values, date1904);
+    if (importColumn >= 0 && ![true, 1, 'true', '1', 'si', 'sí', 'yes'].includes(
+      typeof record.values[importColumn] === 'string'
+        ? record.values[importColumn].trim().toLowerCase()
+        : record.values[importColumn]
+    )) result.errors.push('importar: la fila está excluida o no tiene un valor afirmativo');
     const raw = Object.fromEntries(headers.map((header, index) => [header, record.values[index] instanceof Date ? record.values[index].toISOString() : (record.values[index] ?? '')]));
     rows.push({ entity_type: type, row_number: record.line, source_data: raw,
       normalized_data: result.normalized, status: result.errors.length ? 'invalid' : result.warnings.length ? 'warning' : 'valid',
       error_code: result.errors.length ? 'ROW_INVALID' : result.warnings.length ? 'ROW_WARNING' : null,
       error_message: [...result.errors, ...result.warnings].join('; ') || null });
+  }
+  if (type === 'Facturas_Lineas') disambiguateInvoiceLines(rows);
+  const sourceCounts = new Map();
+  for (const row of rows) {
+    const sourceId = String(row.normalized_data.source_id || '').trim();
+    if (sourceId) sourceCounts.set(sourceId, (sourceCounts.get(sourceId) || 0) + 1);
   }
   const bySourceId = new Map();
   for (const row of rows) {
@@ -205,6 +264,19 @@ function buildSheet(type, records, mapping = {}, date1904 = false) {
     if (!sourceId) continue;
     const first = bySourceId.get(sourceId);
     if (!first) { bySourceId.set(sourceId, row); continue; }
+    if (type === 'Conductores' && sourceCounts.get(sourceId) === 2) {
+      const pair = [first, row];
+      const active = pair.find(item => String(item.normalized_data.estado).toLowerCase() === 'activo');
+      const obsolete = pair.find(item => String(item.normalized_data.estado).toLowerCase() === 'inactivo' && /obsoleto/i.test(String(item.source_data.notas || '')));
+      if (active && obsolete && active.status === 'valid' && obsolete.status === 'valid' &&
+        active.normalized_data.dni && active.normalized_data.dni === obsolete.normalized_data.dni &&
+        active.normalized_data.nombre === obsolete.normalized_data.nombre) {
+        obsolete.status = 'invalid';
+        obsolete.error_code = 'SUPERSEDED_DRIVER';
+        obsolete.error_message = 'Ficha obsoleta duplicada; prevalece la ficha activa del mismo conductor';
+        continue;
+      }
+    }
     for (const duplicate of [first, row]) {
       duplicate.status = 'invalid';
       duplicate.error_code = 'DUPLICATE_SOURCE_ID';
@@ -224,7 +296,11 @@ async function parseFile(buffer, filename, type, mapping = {}) {
     inspectZip(buffer);
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await normalizeSpreadsheetNamespace(buffer));
-    const sheets = type === 'Pack_TransGest' ? workbook.worksheets : [workbook.getWorksheet(type)];
+    // RAW_* are archival source tabs retained for traceability, never import
+    // entities. Other unknown tabs still fail so a misspelled entity is visible.
+    const sheets = type === 'Pack_TransGest'
+      ? workbook.worksheets.filter(sheet => !/^RAW_/i.test(sheet.name))
+      : [workbook.getWorksheet(type)];
     if (!sheets.length || sheets.length > Object.keys(HEADERS).length) reject('Hojas no válidas', 'SHEET_LIMIT');
     let total = 0;
     const parsed = sheets.map(sheet => {

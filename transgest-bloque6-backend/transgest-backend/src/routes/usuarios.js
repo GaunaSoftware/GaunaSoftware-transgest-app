@@ -5,7 +5,7 @@ const crypto   = require("crypto");
 const { body, validationResult } = require("express-validator");
 const db       = require("../services/db");
 const { enviarEmail } = require("../services/email");
-const { authenticate, SOLO_GERENTE } = require("../middleware/auth");
+const { authenticate, SOLO_GERENTE, planHasFeature } = require("../middleware/auth");
 const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
 
 const router = express.Router();
@@ -180,6 +180,9 @@ router.post("/",
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { nombre, email, username, rol, perfil, permisos, cliente_id, chofer_id } = req.body;
+    if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
+      return res.status(403).json({ error: "La app del chófer está disponible desde TransGest Pro. Puedes dar de alta su ficha en Conductores sin crear acceso a la app.", code:"DRIVER_APP_NOT_INCLUDED" });
+    }
     const eid = empresaId(req);
     const modoAlta = String(req.body.modo_alta || (email ? "invitacion" : "temporal")).toLowerCase();
     if (modoAlta === "invitacion" && !email) {
@@ -257,6 +260,9 @@ router.patch("/:id", async (req, res) => {
   const eid = empresaId(req);
   if (rol !== undefined && !ROLES_PERMITIDOS.includes(rol)) {
     return res.status(400).json({ error: "Rol no valido" });
+  }
+  if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
+    return res.status(403).json({ error: "La app del chófer está disponible desde TransGest Pro.", code:"DRIVER_APP_NOT_INCLUDED" });
   }
   if (String(req.params.id) === String(req.user?.id) && activo === false) {
     return res.status(400).json({ error: "No puedes desactivar tu propio usuario" });

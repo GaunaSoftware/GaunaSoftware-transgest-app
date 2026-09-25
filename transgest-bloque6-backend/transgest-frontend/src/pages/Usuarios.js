@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getUsuarios, crearUsuario, editarUsuario, resetPassword, getChoferes, getVehiculos, getClientes, getEmpresaConfig } from "../services/api";
 import { notify, promptDialog } from "../services/notify";
 import { FormField, ModalShell, StatusBadge } from "../components/ui";
+import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 
 const ROLES = [
   "gerente",
@@ -14,6 +15,7 @@ const ROLES = [
   "chofer",
   "cliente",
 ];
+const GO_RESTRICTED_MODULES = new Set(["dashboard", "control_tower", "informes", "explotacion", "objetivos", "ia", "app_chofer", "rutas_recomendadas", "rutas_recomendadas_chofer"]);
 
 const LABEL = {
   gerente: "Gerente",
@@ -377,7 +379,9 @@ export default function Usuarios() {
   }
 
   const usuariosFiltrados = usuarios.filter(u => tab === "clientes" ? u.rol === "cliente" : u.rol !== "cliente");
-  const rolesDisponibles = tab === "clientes" ? ["cliente"] : ROLES.filter(r => r !== "cliente");
+  const driverAppIncluded = planHasFeature(getEmpresaPlanLocal(), "app_chofer");
+  const currentPlan = getEmpresaPlanLocal();
+  const rolesDisponibles = tab === "clientes" ? ["cliente"] : ROLES.filter(r => r !== "cliente" && (r !== "chofer" || driverAppIncluded || (editando && form.rol === "chofer")));
 
   return (
     <div className="tg-responsive-page" style={S.page}>
@@ -637,18 +641,20 @@ export default function Usuarios() {
               </div>
               {MODULOS_PERM.map(m => {
                 const permisos = normalizarPermisosUI(form.permisos, form.rol).modulos[m.id] || {};
-                const disabled = m.id === "ia" && !IA_ALLOWED_ROLES.has(String(form.rol || "").toLowerCase());
+                const planRestricted = (currentPlan === "lite" && GO_RESTRICTED_MODULES.has(m.id)) || (m.id === "ia" && !planHasFeature(currentPlan, "ai"));
+                const roleRestricted = m.id === "ia" && !IA_ALLOWED_ROLES.has(String(form.rol || "").toLowerCase());
+                const disabled = planRestricted || roleRestricted;
                 return (
                   <div key={m.id} style={{display:"grid",gridTemplateColumns:"1fr 64px 64px",alignItems:"center",borderTop:"1px solid #1d2840"}}>
                     <div style={{padding:"8px 10px",fontSize:12,color:disabled ? "var(--text5)" : "var(--text2)"}}>
                       {m.label}
-                      {disabled && <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>Solo gerencia, trafico, administracion y contabilidad</span>}
+                      {disabled && <span style={{display:"block",fontSize:10,color:"var(--text5)",marginTop:2}}>{planRestricted ? "No incluido en el plan actual" : "Solo gerencia, trafico, administracion y contabilidad"}</span>}
                     </div>
                     <label style={{display:"flex",justifyContent:"center",padding:8}}>
-                      <input type="checkbox" disabled={disabled} checked={!!permisos.ver} onChange={()=>togglePermiso(m.id,"ver")}/>
+                      <input type="checkbox" disabled={disabled} checked={!planRestricted && !!permisos.ver} onChange={()=>togglePermiso(m.id,"ver")}/>
                     </label>
                     <label style={{display:"flex",justifyContent:"center",padding:8}}>
-                      <input type="checkbox" disabled={disabled} checked={!!permisos.editar} onChange={()=>togglePermiso(m.id,"editar")}/>
+                      <input type="checkbox" disabled={disabled} checked={!planRestricted && !!permisos.editar} onChange={()=>togglePermiso(m.id,"editar")}/>
                     </label>
                   </div>
                 );

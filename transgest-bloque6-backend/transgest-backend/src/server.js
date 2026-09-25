@@ -297,14 +297,14 @@ function portalClientePermission(req, res, next) {
   return requireModulePermission(modulo)(req, res, next);
 }
 function choferesPermissionUnlessApp(req, res, next) {
-  if (req.user?.rol === "chofer" && req.path.startsWith("/app/")) return next();
+  if (req.user?.rol === "chofer" && req.path.startsWith("/app/")) return requireModulePermission("app_chofer")(req, res, next);
   if (/^\/gastos(?:\/|$)/.test(req.path)) return requireModulePermission("hojas_ruta")(req, res, next);
   if (/^\/ubicaciones-operativas(?:\/|$)/.test(req.path)) return requireModulePermission("empresa")(req, res, next);
   return requireModulePermission("choferes")(req, res, next);
 }
 function vehiculosPermissionUnlessChoferAlertas(req, res, next) {
-  if (req.user?.rol === "chofer" && req.path === "/alertas-doc") return res.json([]);
-  if (req.user?.rol === "chofer" && req.method === "PATCH" && /^\/[^/]+\/km$/.test(req.path || "")) return next();
+  if (req.user?.rol === "chofer" && req.path === "/alertas-doc") return requireModulePermission("app_chofer")(req, res, () => res.json([]));
+  if (req.user?.rol === "chofer" && req.method === "PATCH" && /^\/[^/]+\/km$/.test(req.path || "")) return requireModulePermission("app_chofer")(req, res, next);
   return requireModulePermission("vehiculos")(req, res, next);
 }
 safeUse(`${api}/auth`,          authRoutes);

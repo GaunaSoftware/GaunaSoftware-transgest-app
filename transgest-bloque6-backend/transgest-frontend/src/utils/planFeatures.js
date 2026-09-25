@@ -31,6 +31,12 @@ export function getEmpresaPlanLocal() {
       : localStorage.getItem("tms_token");
     if (token) {
       const payload = JSON.parse(atob(token.split(".")[1]));
+      // /auth/me refreshes the current company plan after login. The JWT can
+      // still contain the previous plan when SuperAdmin changes the company.
+      const currentUser = JSON.parse(localStorage.getItem("tms_user") || "null");
+      const sameCompany = String(currentUser?.empresa_id || "") === String(payload?.empresa_id || "");
+      const sameUser = !payload?.sub || String(currentUser?.id || "") === String(payload.sub);
+      if (sameCompany && sameUser && currentUser?.plan) return normalizePlan(currentUser.plan);
       if (payload?.plan) return normalizePlan(payload.plan);
     }
   } catch {}
@@ -46,6 +52,7 @@ export function getEmpresaPlanLocal() {
 const PLAN_FEATURES = {
   lite: {
     ai: false,
+    app_chofer: false,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
@@ -57,6 +64,7 @@ const PLAN_FEATURES = {
   },
   basico: {
     ai: false,
+    app_chofer: true,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
@@ -68,6 +76,7 @@ const PLAN_FEATURES = {
   },
   profesional: {
     ai: false,
+    app_chofer: true,
     kpis_avanzados: true,
     here_routing: true,
     optimizacion_rutas: true,
@@ -75,10 +84,11 @@ const PLAN_FEATURES = {
     contabilidad: true,
     taller: true,
     importacion: true,
-    objetivos: false,
+    objetivos: true,
   },
   enterprise: {
     ai: true,
+    app_chofer: true,
     kpis_avanzados: true,
     here_routing: true,
     optimizacion_rutas: true,

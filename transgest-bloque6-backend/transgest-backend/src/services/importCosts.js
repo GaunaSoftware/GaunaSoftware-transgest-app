@@ -1,11 +1,11 @@
 const { compact } = require('./importMasterData');
+const { canonicalCostType } = require('./importCatalog');
 
 const TABLES = Object.freeze({
   Gastos_Operativos: 'gastos_operativos',
   Repostajes: 'vehiculo_repostajes',
   Gastos_Estructura: 'gastos_estructura_movimientos',
 });
-const COST_TYPES = new Set('peaje,combustible_agregado,parking,ferry,adblue,dieta,lavado,recambios,mantenimiento,renting_leasing,itv,otros_costes_flota'.split(','));
 function text(value) { return String(value ?? '').trim() || null; }
 function review(reason) { return { action:'review', reason }; }
 async function resolveOne(client, sql, params, label) {
@@ -28,7 +28,7 @@ async function evaluateCost(client, empresaId, sourceSystem, type, data, sourceI
     return result;
   }
   if (type === 'Gastos_Operativos') {
-    if (!COST_TYPES.has(String(data.tipo||'').toLowerCase())) return review('Tipo de gasto operativo no reconocido');
+    if (!canonicalCostType(data.tipo, data.subtipo)) return review('Tipo de gasto operativo no reconocido');
     if (data.periodo_desde && data.periodo_hasta && data.periodo_desde > data.periodo_hasta) return review('Periodo invertido');
     if (!data.fecha && !data.periodo_desde && !data.periodo_hasta) return review('Indica fecha o periodo real del gasto');
   }
@@ -65,7 +65,7 @@ async function createCost(client, empresaId, batchId, sourceSystem, type, data, 
     sql = `INSERT INTO gastos_operativos(empresa_id,tipo,subtipo,proveedor,vehiculo_id,pedido_id,chofer_id,periodo_desde,periodo_hasta,fecha,
       pais,importe,iva_pct,referencia,notas,source_system,source_id,import_batch_id)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`;
-    params = [empresaId,text(data.tipo)?.toLowerCase(),text(data.subtipo),text(data.proveedor),decision.vehicleId||null,decision.orderId||null,
+    params = [empresaId,canonicalCostType(data.tipo, data.subtipo),String(data.tipo||'').toLowerCase()==='coste_flota'?null:text(data.subtipo),text(data.proveedor),decision.vehicleId||null,decision.orderId||null,
       decision.driverId||null,data.periodo_desde||null,data.periodo_hasta||null,data.fecha||null,text(data.pais),data.importe,
       data.iva_pct??null,text(data.referencia),text(data.notas),sourceSystem,text(data.source_id),batchId];
   } else if (type === 'Repostajes') {

@@ -33,6 +33,7 @@ const PLAN_ALIAS = {
 const PLAN_FEATURES = {
   lite: {
     ai: false,
+    app_chofer: false,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
@@ -44,6 +45,7 @@ const PLAN_FEATURES = {
   },
   basico: {
     ai: false,
+    app_chofer: true,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
@@ -55,6 +57,7 @@ const PLAN_FEATURES = {
   },
   profesional: {
     ai: false,
+    app_chofer: true,
     kpis_avanzados: true,
     here_routing: true,
     optimizacion_rutas: true,
@@ -62,10 +65,11 @@ const PLAN_FEATURES = {
     contabilidad: true,
     taller: true,
     importacion: true,
-    objetivos: false,
+    objetivos: true,
   },
   enterprise: {
     ai: true,
+    app_chofer: true,
     kpis_avanzados: true,
     here_routing: true,
     optimizacion_rutas: true,
@@ -82,7 +86,7 @@ const PLAN_DISABLED_MODULES = {
     "control_tower", "calculador_portes", "palets", "taller", "grupajes",
     "hojas_ruta", "nominas", "contabilidad", "informes", "excepciones",
     "objetivos", "ia", "rutas_recomendadas", "rutas_recomendadas_chofer",
-    "actividad", "explotacion", "gastos_estructura",
+    "actividad", "explotacion", "gastos_estructura", "app_chofer", "dashboard",
   ]),
   basico: new Set([
     "ia", "informes", "excepciones", "objetivos", "rutas_recomendadas", "rutas_recomendadas_chofer",
@@ -90,7 +94,7 @@ const PLAN_DISABLED_MODULES = {
     "actividad", "colaboradores",
   ]),
   profesional: new Set([
-    "ia", "objetivos",
+    "ia",
   ]),
 };
 
@@ -624,6 +628,7 @@ function requireModulePermission(modulo) {
       return next();
     }
     if (modulo === "pedidos" && req.user.rol === "chofer" && isChoferPedidosOperationalPath(req)) {
+      if (PLAN_DISABLED_MODULES[plan]?.has("app_chofer")) return res.status(403).json({error:"Tu plan actual no incluye la app del chófer.",modulo:"app_chofer",plan,upgrade_required:true});
       const operation = ['GET','HEAD'].includes(String(req.method || 'GET').toUpperCase()) ? 'ver' : 'editar';
       if (reglas.app_chofer?.[operation] !== true) return res.status(403).json({error:'Permiso denegado para la app del chofer',modulo:'app_chofer',tipo:operation});
       return next();

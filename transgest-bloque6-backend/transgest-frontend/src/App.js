@@ -13,7 +13,7 @@ import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
 import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
-import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
+import { getEmpresaPlanLocal, normalizePlan, planHasFeature } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
 
 // Carga perezosa de todos los mÃƒÂ³dulos
@@ -190,8 +190,8 @@ const IC = {
 // Matriz efectiva: Lite=minimo DCD, Basico=trafico core, Profesional=avanzado sin IA, Enterprise=todo.
 const MODULOS_POR_PLAN = {
     lite: [
-      "dashboard","agenda","pedidos","plan_diario","gestion_trafico","app_chofer",
-      "clientes","rutas","colaboradores","vehiculos","choferes","solicitudes",
+      "agenda","pedidos","plan_diario","gestion_trafico",
+      "clientes","rutas","tarifas","colaboradores","vehiculos","choferes","solicitudes",
       "documentos","avisos","facturacion","control_horario","empresa","usuarios",
       "importacion","mi_cuenta","facturacion_grupo"
     ],
@@ -203,15 +203,7 @@ const MODULOS_POR_PLAN = {
       "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
       "facturacion_grupo"
     ],
-    profesional: [
-      "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
-      "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
-      "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
-      "documentos","avisos","facturacion","contabilidad","informes","excepciones",
-    "empresa","usuarios","actividad","importacion","mi_cuenta",
-    "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
-    "facturacion_grupo","informes_grupo","rutas_recomendadas_chofer"
-  ],
+    profesional: null,
   enterprise: null,
 };
 
@@ -219,6 +211,7 @@ function planPermite(plan, moduloId) {
   if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
   if (moduloId === "app_mecanico") return planPermite(plan, "taller");
   if (!Object.prototype.hasOwnProperty.call(MODULOS_POR_PLAN, plan)) return false;
+  if (plan === "profesional") return moduloId !== "ia";
   const permitidos = MODULOS_POR_PLAN[plan];
   if (permitidos === null) return true; // enterprise: todo
   return permitidos.includes(moduloId);
@@ -1892,6 +1885,13 @@ function AppInner() {
     }
   }
 
+  if (user?.rol === "chofer" && !user?.colaborador_id && !planHasFeature(empresaPlan, "app_chofer")) {
+    return <main style={{maxWidth:560,margin:"8vh auto",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+      <h1>App del chófer no incluida</h1>
+      <p>La empresa puede gestionar conductores desde la oficina. El acceso del chófer a la app está disponible desde TransGest Pro.</p>
+      <button type="button" onClick={logout}>Cerrar sesión</button>
+    </main>;
+  }
   if (user?.rol === "colaborador" || (user?.rol === "chofer" && user?.colaborador_id)) return <Suspense fallback={<p>Cargando…</p>}><SupplierApp/></Suspense>;
 
   return (

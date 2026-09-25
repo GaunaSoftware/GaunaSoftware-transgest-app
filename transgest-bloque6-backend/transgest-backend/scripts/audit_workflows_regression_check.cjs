@@ -275,6 +275,8 @@ async function main(){
     require('node:assert/strict').equal(driverOrder.id,assignedOrder.id);
     const ownCarta=await call('App chófer: carta de porte propia','GET','/pedidos/'+assignedOrder.id+'/carta-porte');
     require('node:assert/strict').equal(ownCarta.id,assignedOrder.id);
+    const managementSummary=await call('Bloquear resumen económico ida-retorno al chófer','GET','/pedidos/'+assignedOrder.id+'/ida-retorno');
+    require('node:assert/strict').equal(managementSummary.error,'No puedes acceder al resumen de ida y retorno');
     const steps=await call('App chófer: leer pasos propios','GET','/pedidos/'+assignedOrder.id+'/chofer-pasos');
     require('node:assert/strict').ok(steps.data,'El chófer debe poder leer el progreso de su viaje');
    }
@@ -325,7 +327,7 @@ async function main(){
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],
   ['Revision caducada por cambio de pedido',409],['Impedir emitida a borrador',409],
   ['Guardar taller usuario B con lectura anterior',409],['Montar segundo neumático en posición ocupada',409],
-  ['Bloquear carta de porte de otro viaje',403],
+  ['Bloquear carta de porte de otro viaje',403],['Bloquear resumen económico ida-retorno al chófer',403],
   ['Rechazar jornada sin confirmar conjunto',400],['Rechazar km de cierre iguales',400],
   ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403]
  ]);

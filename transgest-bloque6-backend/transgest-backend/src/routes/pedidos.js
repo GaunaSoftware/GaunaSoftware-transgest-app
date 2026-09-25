@@ -7479,6 +7479,11 @@ router.post("/:id/avisar-cliente", GERENTE_O_TRAFICO, async (req, res) => {
 
 router.get("/:id/ida-retorno", async (req, res) => {
   try {
+    // El resumen enlazado incluye precios y datos del otro servicio. Su acceso
+    // corresponde a la mesa de gestión, no a la vista operativa del conductor.
+    if (!ROLES_GESTION_PEDIDOS.has(req.user?.rol)) {
+      return res.status(403).json({ error: "No puedes acceder al resumen de ida y retorno" });
+    }
     await ensureColaboradorWorkflowSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows } = await db.query(

@@ -3,6 +3,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const db = require("../services/db");
 const logger = require("../services/logger");
+const { priceFor } = require("../services/commercialPricing");
 const {
   assertPasswordNotReused,
   rememberPasswordHash,
@@ -54,7 +55,7 @@ router.get("/", async (req, res) => {
   try {
     const empresa = await safeOne(
       `SELECT id, nombre, cif, email_admin, plan, estado, fecha_vencimiento,
-              max_vehiculos, max_usuarios, ciclo_facturacion, metodo_pago
+              max_vehiculos, max_usuarios, ciclo_facturacion, metodo_pago, origen_comercial
          FROM empresas
         WHERE id=$1`,
       [empId],
@@ -73,10 +74,12 @@ router.get("/", async (req, res) => {
       nombre: empresa.nombre || "",
       cif: empresa.cif || "",
       email_admin: empresa.email_admin || req.user?.email || "",
-      plan: empresa.plan || "basico",
+      plan: empresa.plan || "profesional",
       estado: empresa.estado || "activo",
       fecha_vencimiento: empresa.fecha_vencimiento || null,
       ciclo_facturacion: empresa.ciclo_facturacion || "mensual",
+      origen_comercial: empresa.origen_comercial || null,
+      tarifa_catalogo_eur: empresa.origen_comercial ? priceFor(empresa.plan, empresa.ciclo_facturacion || "mensual", empresa.origen_comercial) : null,
       metodo_pago: empresa.metodo_pago || "pendiente",
       limites: {
         vehiculos: Number(empresa.max_vehiculos || 0) || null,

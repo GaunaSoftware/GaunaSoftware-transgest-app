@@ -27,7 +27,6 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
     conductor_efectivo_apellidos: pedido?.conductor_efectivo_apellidos || '',
     conductor_efectivo_telefono: pedido?.conductor_efectivo_telefono || '',
   });
-  const [sale, setSale] = useState('');
   const [purchase, setPurchase] = useState('');
   const [error, setError] = useState('');
   const [activePicker, setActivePicker] = useState("");
@@ -123,7 +122,7 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
   async function asignar() {
     setError('');
     let prices;
-    try { prices = modo === 'proveedor' ? assignmentPricePatch(sale, purchase) : {}; }
+    try { prices = modo === 'proveedor' ? assignmentPricePatch('', purchase) : {}; }
     catch (e) { setError(e.message); return; }
     // Proveedor externo: excluyente con la flota propia, asi que se limpia todo
     // lo de transporte propio al asignarlo.
@@ -259,11 +258,12 @@ export default function QuickAssignModal({ pedido, vehiculos = [], choferes = []
 
         {modo === 'proveedor' && <fieldset style={{border:'1px solid var(--border2)',borderRadius:8,marginTop:16,padding:12}}>
           <legend>Importes del viaje</legend>
-          <label style={S.label}>Precio de venta total (€)<input style={S.input} inputMode="decimal" value={sale} placeholder={esBulk?'Conservar el precio de cada pedido':String(pedido?.importe ?? '')} onChange={e=>setSale(e.target.value)}/></label>
+          <div style={S.label}>Precio de venta del pedido (sin IVA)</div>
+          <output style={{...S.input,display:'block',fontSize:16,fontWeight:800,color:'var(--text,#0f172a)',background:'var(--bg2,#fff)',opacity:1}}>{esBulk ? 'Se conserva el precio de cada pedido' : (parseAssignmentMoney(pedido?.precio_venta_total ?? pedido?.importe ?? pedido?.precio_unitario)?.toLocaleString('es-ES',{style:'currency',currency:'EUR'}) || 'Sin precio configurado')}</output>
           {modo==='proveedor' && <label style={S.label}>Coste total del proveedor (€)<input style={S.input} inputMode="decimal" value={purchase} placeholder={esBulk?'Conservar el coste de cada pedido':String(pedido?.precio_colaborador ?? '')} onChange={e=>setPurchase(e.target.value)}/></label>}
-          <div style={S.ayuda}>En blanco se conserva el importe actual. Los importes introducidos son totales por viaje, sin impuestos{esBulk?' y se aplican a cada pedido seleccionado':''}.</div>
-          {modo==='proveedor' && (!esBulk || (sale && purchase)) && (()=>{
-            const revenue=parseAssignmentMoney(sale || pedido?.importe);
+          <div style={S.ayuda}>El precio de venta se conserva según el pedido y no puede modificarse desde esta ventana. El coste en blanco conserva el importe actual del proveedor.</div>
+          {modo==='proveedor' && !esBulk && (()=>{
+            const revenue=parseAssignmentMoney(pedido?.precio_venta_total ?? pedido?.importe ?? pedido?.precio_unitario);
             const cost=parseAssignmentMoney(purchase || pedido?.precio_colaborador);
             if(revenue===null || cost===null || !Number.isFinite(revenue+cost))return <div style={S.ayuda}>Indica venta y coste para calcular el margen.</div>;
             return <div role="status" style={{fontWeight:700,color:revenue<cost?'var(--danger,#c33)':'var(--accent)'}}>Margen sobre transporte: {(revenue-cost).toLocaleString('es-ES',{style:'currency',currency:'EUR'})}{revenue>0?` (${((revenue-cost)/revenue*100).toFixed(1)} %)`:''}<div style={S.ayuda}>Antes de otros costes operativos.</div></div>;

@@ -698,7 +698,7 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
     // la columna y generaba 'column e.razon_social does not exist' en cada login.
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(100)").catch(captureStartupMigrationError);
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'profesional'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_vehiculos INTEGER NOT NULL DEFAULT 0").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_usuarios INTEGER NOT NULL DEFAULT 0").catch(captureStartupMigrationError);

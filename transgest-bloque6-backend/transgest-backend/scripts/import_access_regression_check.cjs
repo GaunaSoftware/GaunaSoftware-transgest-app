@@ -14,7 +14,7 @@ function request({ module = 'importacion', plan = 'basico', role = 'gerente', me
 }
 
 for (const [source, normalized] of Object.entries({
-  go: 'lite', transgest_go: 'lite', control: 'basico', transgest_control: 'basico',
+  go: 'lite', transgest_go: 'lite', control: 'profesional', transgest_control: 'profesional',
   pro: 'profesional', transgest_pro: 'profesional', pro_intelligence: 'enterprise',
   planner: 'profesional', pro_planner: 'profesional',
 })) assert.equal(normalizePlan(source), normalized);
@@ -37,6 +37,9 @@ assert.equal(request({ module:'app_chofer', plan:'profesional', role:'chofer' })
 assert.equal(request({ module:'pedidos', plan:'lite', role:'chofer', path:'/' }).status, 403);
 assert.equal(request({ module:'pedidos', plan:'profesional', role:'chofer', path:'/' }).next, true);
 assert.equal(planHasFeature('lite', 'kpis_avanzados'), false);
+for (const feature of ['app_chofer', 'here_routing', 'optimizacion_rutas', 'taller', 'contabilidad']) {
+  assert.equal(planHasFeature('lite', feature), false, `Go no debe habilitar ${feature}`);
+}
 assert.equal(planHasFeature('profesional', 'kpis_avanzados'), true);
 assert.equal(planHasFeature('profesional', 'objetivos'), true);
 assert.equal(request({ module:'ia', plan:'profesional' }).status, 403);
@@ -55,6 +58,6 @@ assert.equal(request({ module: 'empresa', role: 'contable', plan: 'profesional',
 const denied = { modulos: { gastos_estructura: { ver: false, editar: false } } };
 assert.equal(request({ module: 'empresa', plan: 'profesional', method: 'POST', path: '/gastos-estructura', permissions: denied }).status, 403);
 assert.equal(request({ module: 'importacion', plan: 'basico', method: 'POST', permissions: { modulos: { importacion: { ver: false, editar: false } } } }).status, 403);
-assert.equal(request({ module: 'empresa', role: 'contable', plan: 'basico', method: 'POST', path: '/gastos-estructura' }).status, 403);
+assert.equal(request({ module: 'empresa', role: 'contable', plan: 'basico', method: 'POST', path: '/gastos-estructura' }).next, true);
 
 console.log('PASS: import onboarding access, known/unknown plans, structure-cost permissions, explicit denials.');

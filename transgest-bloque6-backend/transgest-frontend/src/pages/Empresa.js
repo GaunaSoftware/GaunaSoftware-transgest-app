@@ -2,7 +2,7 @@ import DriverLocationsSettings from "../components/DriverLocationsSettings";
 import DataQuality from "../components/DataQuality";
 import { PAYMENT_METHODS, validateCompanyPaymentSettings, formatCompanyPaymentTerms } from "../utils/companyPayment";
 import { useState, useEffect, useCallback } from "react";
-import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
+import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getFacturaPlantilla, guardarFacturaPlantilla, eliminarFacturaPlantilla, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { getEmpresaPlanLocal, normalizePlan } from "../utils/planFeatures";
@@ -95,6 +95,8 @@ export default function Empresa() {
   const [logo, setLogo]             = useState(null);  // base64
   const [logoMime, setLogoMime]     = useState("image/png");
   const [logoUploading, setLogoUploading] = useState(false);
+  const [facturaPlantilla, setFacturaPlantilla] = useState(null);
+  const [plantillaBusy, setPlantillaBusy] = useState(false);
   const esGerente = user?.rol === "gerente";
   // Sesion de superadmin (soporte) impersonando la empresa: solo entonces se
   // muestran los ajustes tecnicos/sensibles (Tesoreria, Email, WhatsApp, VERIFACTU
@@ -755,10 +757,17 @@ export default function Empresa() {
     ...(esSuperadmin ? [{ id:"tesoreria", l:"Tesoreria" }] : []),
     { id:"sostenibilidad", l:"Sostenibilidad / CO2" },
     { id:"factura", l:"Configuración facturas" },
+    { id:"ubicaciones", l:"Puntos/Ubicaciones" },
     ...(esSuperadmin ? [{ id:"email", l:"Email / Notificaciones" }, { id:"whatsapp", l:"WhatsApp" }] : []),
     { id:"trafico_cfg", l:"Config. Tráfico" },
     { id:"calidad_datos", l:"Calidad de datos" },
   ];
+  useEffect(() => {
+    if (tab !== 'factura') return;
+    let active=true;
+    getFacturaPlantilla().then(data=>{if(active)setFacturaPlantilla(data);}).catch(e=>{if(active)notify(e.message || 'No se pudo consultar la plantilla de factura','error');});
+    return ()=>{active=false;};
+  }, [tab]);
   useEffect(() => {
     if (!TABS.some(t => t.id === tab)) setTab("empresa");
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -801,8 +810,7 @@ export default function Empresa() {
       </div>
       <div style={S.sub}>Datos fiscales y configuración - alimentan todas las facturas y comunicaciones</div>
 
-      <DriverLocationsSettings/>
-
+      {tab === "empresa" && <>
       {/* ── Logo de empresa ────────────────────────────────────────── */}
       <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:16}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:12}}>Logo de la empresa</div>
@@ -983,6 +991,7 @@ export default function Empresa() {
           </div>
         )}
       </div>
+      </>}
 
       {/* Tabs */}
       <div style={{ display:"flex", gap:0, borderBottom:"1px solid #141a28", marginBottom:20, overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch" }}>
@@ -995,6 +1004,8 @@ export default function Empresa() {
           }}>{t.l}</button>
         ))}
       </div>
+
+      {tab === "ubicaciones" && <DriverLocationsSettings/>}
 
       {/* ── Datos fiscales ── */}
       {tab==="calidad_datos" && <DataQuality/>}
@@ -1568,6 +1579,16 @@ export default function Empresa() {
       {/* ── Config facturas ── */}
       {tab==="factura" && (
         <div>
+          <div style={S.section}>
+            <div style={S.secTitle}>Plantilla visual de factura</div>
+            <p style={{fontSize:12,color:'var(--text4)',lineHeight:1.6}}>Sube una imagen A4 vertical PNG o JPG (recomendado 1240 × 1754 px; máximo 2 MB). Deja libre la zona central para los datos obligatorios. Se aplicará a las nuevas impresiones y a los PDF adjuntos por correo; los importes y datos fiscales guardados no cambian.</p>
+            {facturaPlantilla?.imagen_base64 && <img alt="Vista previa de plantilla de factura" src={`data:${facturaPlantilla.mime};base64,${facturaPlantilla.imagen_base64}`} style={{display:'block',width:150,maxHeight:210,objectFit:'contain',border:'1px solid var(--border)',margin:'12px 0'}}/>}
+            <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              {esGerente && <label style={{...S.btn,background:'var(--accent)',color:'#fff',cursor:plantillaBusy?'wait':'pointer'}}>{plantillaBusy?'Guardando…':'Subir plantilla'}<input type="file" accept="image/png,image/jpeg" hidden disabled={plantillaBusy} onChange={async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;if(!['image/png','image/jpeg'].includes(file.type)||file.size>2*1024*1024){notify('Usa PNG o JPG de hasta 2 MB.','error');return;}setPlantillaBusy(true);try{const imagen_base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',').pop());reader.onerror=reject;reader.readAsDataURL(file);});await guardarFacturaPlantilla({nombre:file.name,mime:file.type,imagen_base64});setFacturaPlantilla(await getFacturaPlantilla());notify('Plantilla de factura guardada.','success');}catch(error){notify(error.message||'No se pudo guardar la plantilla.','error');}finally{setPlantillaBusy(false);}}}/></label>}
+              {facturaPlantilla?.nombre && <span style={{fontSize:12,color:'var(--text3)'}}>{facturaPlantilla.nombre}</span>}
+              {esGerente && facturaPlantilla && <button type="button" style={S.btn} disabled={plantillaBusy} onClick={async()=>{if(!await confirmDialog({title:'Quitar plantilla',message:'Las nuevas impresiones usarán el diseño estándar. ¿Continuar?',confirmText:'Quitar'}))return;setPlantillaBusy(true);try{await eliminarFacturaPlantilla();setFacturaPlantilla(null);}catch(error){notify(error.message,'error');}finally{setPlantillaBusy(false);}}}>Quitar plantilla</button>}
+            </div>
+          </div>
           <div style={S.section}>
             <div style={S.secTitle}>Series de facturación</div>
             <div style={S.info}>

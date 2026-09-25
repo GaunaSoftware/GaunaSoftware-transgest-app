@@ -4,9 +4,32 @@ function configured() {
   return Boolean(process.env.STRIPE_SECRET_KEY);
 }
 
-function planPriceId(plan, ciclo) {
-  const key = `STRIPE_PRICE_${String(plan || "").toUpperCase()}_${String(ciclo || "mensual").toUpperCase()}`;
+function planPriceId(plan, ciclo, origin) {
+  if (['planner','pro_planner'].includes(plan)) return process.env[`STRIPE_PRICE_${String(plan).toUpperCase()}_${String(ciclo || 'mensual').toUpperCase()}`] || null;
+  if (!['directa','canal'].includes(origin)) return null;
+  const key = `STRIPE_PRICE_${String(plan || "").toUpperCase()}_${String(ciclo || "mensual").toUpperCase()}_${origin.toUpperCase()}`;
   return process.env[key] || null;
+}
+
+async function assertCatalogPrice(priceId, expectedEur, cycle) {
+  if (expectedEur === null || expectedEur === undefined) throw new Error('Tarifa comercial no configurada para este plan');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Number(process.env.STRIPE_TIMEOUT_MS || 10000));
+  try {
+    const response = await fetch(`${API_BASE}/prices/${encodeURIComponent(priceId)}`, {
+      headers:{ Authorization:'Basic ' + Buffer.from(`${process.env.STRIPE_SECRET_KEY}:`).toString('base64') },
+      signal:controller.signal,
+    });
+    const actual = await response.json();
+    if (!response.ok) throw new Error(actual.error?.message || `Stripe error ${response.status}`);
+    const interval = cycle === 'anual' ? 'year' : 'month';
+    if (actual.active !== true || actual.currency !== 'eur' || actual.unit_amount !== Math.round(expectedEur * 100) || actual.recurring?.interval !== interval || actual.recurring?.interval_count !== 1) {
+      const err = new Error('El precio configurado en Stripe no coincide con la tarifa comercial. Revisa importe, moneda y periodicidad.');
+      err.code = 'stripe_price_mismatch';
+      throw err;
+    }
+    return actual;
+  } finally { clearTimeout(timer); }
 }
 
 async function request(path, params = {}) {
@@ -115,6 +138,7 @@ async function createCheckoutSession({ customerId, priceId, empresaId, plan, cic
 module.exports = {
   configured,
   planPriceId,
+  assertCatalogPrice,
   createCustomer,
   createCheckoutSession,
 };

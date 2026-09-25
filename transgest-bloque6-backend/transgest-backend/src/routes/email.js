@@ -12,10 +12,13 @@ const EID = req => req.empresaId || req.user?.empresa_id;
 const ESTADOS_ENVIO_FACTURA = ['emitida', 'enviada', 'cobrada', 'vencida', 'reclamada', 'sin_cobrar'];
 
 async function getEmpresaPerfilEmail(empresaId) {
-  const { rows } = await db.query("SELECT nombre, cfg_precios FROM empresas WHERE id=$1", [empresaId]);
+  const [{rows}, template] = await Promise.all([
+    db.query("SELECT nombre, cfg_precios FROM empresas WHERE id=$1", [empresaId]),
+    db.query('SELECT mime,imagen_base64 FROM empresa_factura_plantillas WHERE empresa_id=$1',[empresaId]),
+  ]);
   const cfg = rows[0]?.cfg_precios || {};
   const perfil = cfg?.empresa_perfil && typeof cfg.empresa_perfil === "object" ? cfg.empresa_perfil : cfg;
-  return { nombre: rows[0]?.nombre || "TransGest", ...perfil };
+  return { nombre: rows[0]?.nombre || "TransGest", ...perfil, factura_plantilla:template.rows[0] || null };
 }
 
 async function cargarFacturaEmailContext(facturaId, empresaId) {

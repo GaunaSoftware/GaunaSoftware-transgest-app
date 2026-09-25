@@ -24,6 +24,12 @@ async function main() {
   }]));
   assert.ok(huge.numpages > 1);
   assert.ok(huge.text.includes('FIN_MULTIPAGINA'), 'single multi-page concept remains complete');
+  const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC';
+  const branded = await parsePdf(await buildFacturaPdfBuffer({ numero:'QA-PLANTILLA', total:1210 }, lineas,
+    { razon_social:'Empresa QA', factura_plantilla:{mime:'image/png',imagen_base64:tinyPng} }));
+  assert.ok(branded.numpages >= 3, 'template must not interrupt pagination');
+  assert.ok(branded.text.includes('QA-PLANTILLA'));
+  assert.ok(branded.text.includes('LINEA_QA_060'));
   if (process.argv.includes('--write-sample')) {
     const fs = require('node:fs');
     const path = require('node:path');

@@ -8,10 +8,10 @@ const fmt  = d => d ? new Date(d).toLocaleDateString("es-ES") : "Sin límite";
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 
 const PLAN_INFO = {
-  lite:        { label: "TransGest Go",        color:"var(--accent)", precio:"Según contrato", features:["Operativa esencial","Conductores y vehículos","Pedidos y facturación","Sin IA, BI ni app del chófer"] },
-  basico:      { label: "TransGest Control",      color:"#6b7280", precio:"99 EUR/mes",  features:["Vehiculos ilimitados","Usuarios ilimitados","Pedidos y facturacion"] },
-  profesional: { label: "TransGest Pro", color:"#3b82f6", precio:"Según contrato", features:["Usuarios y vehículos ilimitados","KPIs e informes","App del chófer","Sin IA"] },
-  enterprise:  { label: "TransGest Pro Intelligence",  color:"#8b5cf6", precio:"Según contrato", features:["Usuarios y vehículos ilimitados","KPIs e informes","App del chófer e IA","1.000 consultas de IA al mes"] },
+  lite:        { label: "TransGest Go", color:"var(--accent)", features:["Usuarios y vehículos ilimitados","Pedidos y viajes","Documentación y facturación","Importación"] },
+  basico:      { label: "TransGest Pro (plan heredado)", color:"#6b7280", features:["Usuarios y vehículos ilimitados","Pedidos y facturación"] },
+  profesional: { label: "TransGest Pro", color:"#3b82f6", features:["Usuarios y vehículos ilimitados","Tráfico y flota","KPIs e informes de gestión"] },
+  enterprise:  { label: "TransGest Pro Intelligence", color:"#8b5cf6", features:["Todo Pro","Inteligencia y automatización","1.000 consultas de IA al mes","Integración estándar incluida"] },
 };
 
 const EF = { pendiente:"#f59e0b", pagada:"#10b981", vencida:"#ef4444" };
@@ -254,7 +254,8 @@ export default function MiCuenta(){
                   <span style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:24,color:plan.color}}>{plan.label}</span>
                   <span style={{padding:"2px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:`${plan.color}20`,color:plan.color,border:`1px solid ${plan.color}40`}}>{cuenta.estado}</span>
                 </div>
-                <div style={{fontSize:13,color:"var(--text4)",marginTop:3}}>{plan.precio}</div>
+                <div style={{fontSize:13,color:"var(--text4)",marginTop:3}}>{cuenta.tarifa_catalogo_eur == null ? 'Tarifa comercial pendiente de clasificar' : `${Number(cuenta.tarifa_catalogo_eur).toLocaleString('es-ES',{style:'currency',currency:'EUR'})} / ${cuenta.ciclo_facturacion === 'anual' ? 'año' : 'mes'} · ${cuenta.origen_comercial === 'canal' ? 'Canal' : 'Directa'} · sin IVA`}</div>
+                <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Tarifa de catálogo para nuevas contrataciones; tu contrato y facturas pueden tener condiciones anteriores.</div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:11,color:"var(--text5)",marginBottom:2}}>Vence el</div>

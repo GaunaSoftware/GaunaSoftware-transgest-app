@@ -7,8 +7,8 @@ test('lists towns, never street addresses or company names', () => {
   expect(orderTown({},'SKRETTING')).toBe('POBLACION PENDIENTE');
   expect(orderTown({},'Benissa')).toBe('BENISSA');
 });
-test('commercial names preserve existing plan identifiers', () => {
-  expect(['lite','basico','profesional','enterprise'].map(getBrandDisplayName)).toEqual(['TransGest Go','TransGest Control','TransGest Pro','TransGest Pro Intelligence']);
+test('commercial names map legacy Control to Pro without changing its identifier in historical data', () => {
+  expect(['lite','basico','profesional','enterprise'].map(getBrandDisplayName)).toEqual(['TransGest Go','TransGest Pro','TransGest Pro','TransGest Pro Intelligence']);
 });
 
 // A reordered secondary stop can contain only direccion, without ciudad.

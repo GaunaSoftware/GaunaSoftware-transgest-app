@@ -1,5 +1,5 @@
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
-import { guardarControlCobrosConfig, getReclamacionesEnvios } from '../services/api';
+import { guardarControlCobrosConfig, getReclamacionesEnvios, getFacturaPlantilla } from '../services/api';
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
 import InvoiceList from "./finance/InvoiceList";
 import TreasuryView from "./finance/TreasuryView";
@@ -672,13 +672,19 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
               Enviar
               {factura.estado==="enviada" && <span style={{fontSize:9,marginLeft:4,opacity:0.7}}>enviada</span>}
             </button>
-          <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border)"}} onClick={()=>{
+          <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid var(--border)"}} onClick={async()=>{
             // Open new window with invoice HTML for printing
             const wrapper = document.getElementById("factura-print-wrapper");
             if (!wrapper) { notify("Error: no se encontro el contenido de la factura", "error"); return; }
             const w = window.open("","_blank","width=900,height=700");
             if(!w){notify('Permite abrir la ventana de impresión en el navegador.','error');return;}
+            w.document.write('<!doctype html><html><body><p>Preparando factura…</p></body></html>');
+            w.document.close();
+            let template=null;
+            try { template=await getFacturaPlantilla(); }
+            catch(error) { w.close(); notify(`No se pudo comprobar la plantilla: ${error.message}`, 'error'); return; }
             const clean=wrapper.cloneNode(true);
+            w.document.open();
             clean.querySelectorAll('[data-internal],button,input,select,textarea').forEach(node=>node.remove());
             w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Factura</title>
@@ -686,6 +692,8 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
   *{box-sizing:border-box;margin:0;padding:0}
   :root{--text:#111;--text2:#374151;--text3:#475569;--text4:#64748b;--border:#d1d5db;--bg:#fff;--bg2:#fff;--bg3:#f8fafc;--bg4:#f1f5f9;--green:#047857}
   body{font-family:'Segoe UI',Arial,sans-serif;padding:32px;color:#111;font-size:12px;line-height:1.5;background:#fff}
+  .invoice-template-bg{position:fixed;top:0;left:0;width:100%;height:100%;max-height:none;max-width:none;object-fit:fill;z-index:0;margin:0}
+  .invoice-print-content{position:relative;z-index:1}
   img{max-height:52px;max-width:160px;object-fit:contain;display:block;margin-bottom:8px}
   table{width:100%;border-collapse:collapse;margin:12px 0}
   th{background:#f3f4f6;padding:7px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
@@ -701,7 +709,8 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
   .fiscal-note{margin-top:10px;font-size:10px;color:#475569;line-height:1.5}
   @media print{@page{margin:1cm;size:A4}body{padding:0}}
 </style></head><body>`);
-            w.document.write(clean.innerHTML);
+            if (template?.imagen_base64 && ['image/png','image/jpeg'].includes(template.mime)) w.document.write(`<img class="invoice-template-bg" alt="" src="data:${template.mime};base64,${template.imagen_base64}">`);
+            w.document.write(`<div class="invoice-print-content">${clean.innerHTML}</div>`);
             w.document.write("</body></html>");
             w.document.close();
             w.focus();

@@ -217,6 +217,15 @@ async function main(){
   const driverUser=crypto.randomUUID();await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo,chofer_id) VALUES($1,$2,'Conductor auditoría','driver-login@example.invalid',$3,'chofer',true,$4)",[driverUser,company,await req('bcryptjs').hash(password,10),driver.id]);
   const managerToken=token;token=null;const driverLogin=await call('Login app chófer','POST','/auth/login',{email:'driver-login@example.invalid',password});token=driverLogin.token;
   if(token){
+   const driverOrders=await call('App chófer: cargar viajes propios','GET','/pedidos?chofer_id='+driver.id);
+   require('node:assert/strict').ok(Array.isArray(driverOrders.data),'La app debe cargar los viajes asignados al chófer');
+   const assignedOrder=driverOrders.data.find(item=>item.chofer_id===driver.id);
+   if(assignedOrder){
+    const driverOrder=await call('App chófer: abrir viaje propio','GET','/pedidos/'+assignedOrder.id);
+    require('node:assert/strict').equal(driverOrder.id,assignedOrder.id);
+    const steps=await call('App chófer: leer pasos propios','GET','/pedidos/'+assignedOrder.id+'/chofer-pasos');
+    require('node:assert/strict').ok(steps.data,'El chófer debe poder leer el progreso de su viaje');
+   }
    const day=await call('Leer jornada chófer','GET','/choferes/app/jornada');
    const rig={conjunto_confirmado:true,vehiculo_id:day.chofer.vehiculo_id,remolque_id:day.chofer.vehiculo_remolque_id||null};
    await call('Catálogo de clientes del chófer','GET','/pedidos/chofer/clientes');

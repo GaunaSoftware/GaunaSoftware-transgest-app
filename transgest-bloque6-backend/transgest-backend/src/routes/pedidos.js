@@ -3773,6 +3773,23 @@ function normalizeCargoLengthMode(value) {
   if (value === 'auto' || value === 'manual') return value;
   throw Object.assign(new Error('Modo de longitud ocupada no válido'), { status: 400 });
 }
+async function initialCargoLength(client, empresaId, remolqueId, body = {}) {
+  if (body.workspace === 'planner' || (body.tipo_carga && body.tipo_carga !== 'completa')) return null;
+  const requestedMode = normalizeCargoLengthMode(body.longitud_ocupada_mode);
+  const requestedLength = parseLocaleNumber(body.carga_largo_m ?? body.metros_lineales);
+  if (requestedMode === 'manual' || (!requestedMode && requestedLength > 0)) {
+    return { mode: 'manual', length: requestedLength > 0 ? requestedLength : null };
+  }
+  let trailerLength = null;
+  if (remolqueId) {
+    const { rows } = await client.query(
+      "SELECT data->>'metros_carga' AS metros_carga FROM vehiculos_ext WHERE empresa_id=$1 AND vehiculo_id=$2",
+      [empresaId, remolqueId]
+    );
+    trailerLength = parseLocaleNumber(rows[0]?.metros_carga);
+  }
+  return { mode: 'auto', length: trailerLength > 0 ? Math.min(13.65, trailerLength) : 13.65 };
+}
 const UUID_PEDIDO_FIELDS = new Set([
   "cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id",
   "colaborador_id", "remolque_id", "viaje_enlazado_id", "grupo_ida_vuelta",
@@ -4813,6 +4830,11 @@ async function resolveCompatibleRutaId(queryClient, empresaId, rutaId, payload =
       WHERE r.id=$1
         AND COALESCE(r.activa,true)=true
         AND (r.empresa_id=$2 OR r.empresa_id IS NULL)
+        AND $3::uuid IS NOT NULL
+        AND (r.cliente_id=$3 OR rpc.cliente_id=$3 OR
+             (r.cliente_id IS NULL AND NOT EXISTS (
+               SELECT 1 FROM ruta_precios_cliente other_price WHERE other_price.ruta_id=r.id
+             )))
       LIMIT 1`,
     [rutaIdNorm, empresaId, clienteId]
   );
@@ -8522,6 +8544,8 @@ router.post("/chofer", async (req, res) => {
         ]
       );
       pedido = rows[0];
+      const remolqueId = normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null;
+      const cargoLength = await initialCargoLength(client, empresaId, remolqueId, req.body);
 
       const extraFields = [
         ["fecha_descarga", fechaDescargaNorm],
@@ -8535,11 +8559,12 @@ router.post("/chofer", async (req, res) => {
         ["cmr_tipo", cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body?.cmr_tipo)],
         ["referencia_cliente", req.body?.referencia_cliente || null],
         ["tipo_carga", req.body?.tipo_carga || null],
-        ["metros_lineales", normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
-        ["longitud_ocupada_mode", normalizeCargoLengthMode(req.body?.longitud_ocupada_mode)],
+        ["metros_lineales", cargoLength ? cargoLength.length : normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
+        ["carga_largo_m", cargoLength ? cargoLength.length : normalizePedidoValue("carga_largo_m", req.body?.carga_largo_m)],
+        ["longitud_ocupada_mode", cargoLength ? cargoLength.mode : normalizeCargoLengthMode(req.body?.longitud_ocupada_mode)],
         ["puntos_carga", JSON.stringify(puntosCarga)],
         ["puntos_descarga", JSON.stringify(puntosDescarga)],
-        ["remolque_id", normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null],
+        ["remolque_id", remolqueId],
       ].filter(([, value]) => value !== undefined);
       const updated = await updateExistingPedidoFields(client, extraFields, pedido.id, empresaId);
       pedido = updated || pedido;
@@ -8763,6 +8788,8 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         pedido.origen_producto='planner';
       }
 
+      const cargoLength = await initialCargoLength(client, empresaId, remolque_id_efectivo, req.body);
+
       const ivaPedido = (req.body.tipo_iva !== undefined || req.body.iva_regimen !== undefined)
         ? normalizeIvaRegimen(req.body.tipo_iva, req.body.iva_regimen)
         : null;
@@ -8801,12 +8828,12 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         km_ruta: req.body.km_ruta ?? null,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
-        metros_lineales: req.body.metros_lineales ?? null,
-        longitud_ocupada_mode: normalizeCargoLengthMode(req.body.longitud_ocupada_mode),
+        metros_lineales: cargoLength ? cargoLength.length : (req.body.metros_lineales ?? null),
+        longitud_ocupada_mode: cargoLength ? cargoLength.mode : normalizeCargoLengthMode(req.body.longitud_ocupada_mode),
         palets_tipo: req.body.palets_tipo ?? null,
         palets_cantidad: req.body.palets_cantidad ?? null,
         palets_apilables: req.body.palets_apilables ?? false,
-        carga_largo_m: req.body.carga_largo_m ?? null,
+        carga_largo_m: cargoLength ? cargoLength.length : (req.body.carga_largo_m ?? null),
         carga_ancho_m: req.body.carga_ancho_m ?? null,
         carga_alto_m: req.body.carga_alto_m ?? null,
         tipo_precio: req.body.tipo_precio ?? "viaje",
@@ -8895,6 +8922,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         (k in req.body) ||
         (k === "precio_colaborador" && supplierPriceUpdated) ||
         ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
+        (cargoLength && ["metros_lineales", "carga_largo_m", "longitud_ocupada_mode"].includes(k)) ||
         ["origen_pais","destino_pais","cmr_tipo"].includes(k) ||
         (["origen_provincia","destino_provincia"].includes(k) && (req.body.puntos_carga !== undefined || req.body.puntos_descarga !== undefined)) ||
         (k === "coste_gasoil" && normalizedExtraFieldMap.colaborador_id) ||
@@ -9272,6 +9300,15 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  if (body.cliente_id !== undefined && String(body.cliente_id || '') !== String(pedidoActualRows[0].cliente_id || '') && body.ruta_id === undefined) {
+    body.ruta_id = null;
+  }
+  if (body.ruta_id) {
+    const routeOwner = await resolveCompatibleRutaId(db, empresaId, body.ruta_id, {
+      cliente_id: body.cliente_id || pedidoActualRows[0].cliente_id,
+    });
+    if (!routeOwner.rutaId) return res.status(400).json({ error: 'La ruta no pertenece al cliente de este pedido.' });
+  }
   await require("../services/orderFuelCost").fillMissingFuelCost(db,body,pedidoActualRows[0],empresaId);
   if('precio_venta_total' in body){
     const total=parseLocaleNumber(body.precio_venta_total);

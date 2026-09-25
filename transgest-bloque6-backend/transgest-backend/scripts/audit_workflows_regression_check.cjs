@@ -57,6 +57,24 @@ async function main(){
  const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
  const driver=await call('Crear conductor','POST','/choferes',{nombre:'Conductor',apellidos:'de Pruebas',dni:'00000000T',telefono:'960000001',email:'driver@example.invalid',activo:true});
  const vehicle=await call('Crear tractora','POST','/vehiculos',{matricula:'1234AUD',tipo:'tractora',marca:'Prueba',modelo:'Auditoría',fecha_itv:'2027-09-16',km_actuales:10000,activo:true});
+ const trailer=await call('Crear remolque con longitud útil','POST','/vehiculos',{matricula:'5678AUD',tipo:'remolque',metros_carga:12.4,activo:true});
+ require('node:assert/strict').ok(trailer.id,'Debe existir el remolque de prueba');
+ const defaultLengthOrder=await call('Carga completa sin longitud explícita','POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',importe:400});
+ require('node:assert/strict').equal(defaultLengthOrder.longitud_ocupada_mode,'auto');
+ require('node:assert/strict').equal(Number(defaultLengthOrder.metros_lineales),13.65);
+ require('node:assert/strict').equal(Number(defaultLengthOrder.carga_largo_m),13.65);
+ const defaultLengthReload=await call('Reabrir carga completa automática','GET','/pedidos/'+defaultLengthOrder.id);
+ require('node:assert/strict').equal(defaultLengthReload.longitud_ocupada_mode,'auto');
+ require('node:assert/strict').equal(Number(defaultLengthReload.carga_largo_m),13.65);
+ const trailerLengthOrder=await call('Carga completa con remolque corto','POST','/pedidos',{cliente_id:client.id,remolque_id_manual:trailer.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',importe:400});
+ require('node:assert/strict').equal(trailerLengthOrder.longitud_ocupada_mode,'auto');
+ require('node:assert/strict').equal(Number(trailerLengthOrder.metros_lineales),12.4);
+ const manualLengthOrder=await call('Carga completa con longitud manual','POST','/pedidos',{cliente_id:client.id,remolque_id_manual:trailer.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',metros_lineales:7.2,importe:400});
+ require('node:assert/strict').equal(manualLengthOrder.longitud_ocupada_mode,'manual');
+ require('node:assert/strict').equal(Number(manualLengthOrder.carga_largo_m),7.2);
+ const manualLengthReload=await call('Reabrir carga completa manual','GET','/pedidos/'+manualLengthOrder.id);
+ require('node:assert/strict').equal(manualLengthReload.longitud_ocupada_mode,'manual');
+ require('node:assert/strict').equal(Number(manualLengthReload.metros_lineales),7.2);
  for(const url of ['/clientes','/choferes','/vehiculos','/pedidos','/facturas','/rutas','/palets','/taller/estado','/agenda','/intelligence/estado','/soporte'])await call('Listado '+url,'GET',url);
  const ticket=await call('Crear solicitud soporte','POST','/soporte',{asunto:'Auditoría local',mensaje:'Mensaje sin salida al exterior.'});
  if(ticket.id){await call('Recargar conversación','GET','/soporte/'+ticket.id);await call('Responder conversación','POST','/soporte/'+ticket.id+'/mensajes',{mensaje:'Segunda intervención de prueba'});}
@@ -76,6 +94,18 @@ async function main(){
   require('node:assert/strict').equal(batch.id,stagedBody.batch.id);
   await call('Importar tarifa CSV','POST','/rutas/importar',{cliente_id:client.id,texto:'Origen;Destino;Precio;Km\nValencia;Madrid;500;350'});
   evidence.routesAfterFailedImport=(await db.query('SELECT COUNT(*)::int AS n FROM rutas WHERE empresa_id=$1',[company])).rows[0];
+  const foreignRoute=(await db.query('SELECT id FROM rutas WHERE empresa_id=$1 AND cliente_id=$2 LIMIT 1',[company,client.id])).rows[0];
+  require('node:assert/strict').ok(foreignRoute?.id,'La tarifa de prueba debe quedar vinculada al cliente');
+  const otherClient=await call('Crear segundo cliente sin tarifa','POST','/clientes',{nombre:'Beta Auditoría',cif:'B87654322',email:'beta@example.invalid'});
+  const otherRoutes=await call('Segundo cliente sin tarifas ajenas','GET','/clientes/'+otherClient.id+'/rutas');
+  require('node:assert/strict').equal(otherRoutes.length,0);
+  const otherOrder=await call('Crear pedido con ruta ajena indicada','POST','/pedidos',{cliente_id:otherClient.id,ruta_id:foreignRoute.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',importe:400});
+  require('node:assert/strict').equal(otherOrder.ruta_id,null,'No se debe vincular una tarifa de otro cliente al pedido');
+  const forbiddenRoute=await call('Rechazar ruta de otro cliente al editar','PUT','/pedidos/'+otherOrder.id,{ruta_id:foreignRoute.id});
+  require('node:assert/strict').equal(forbiddenRoute.error,'La ruta no pertenece al cliente de este pedido.');
+  const otherOrderAfter=(await db.query('SELECT ruta_id,importe FROM pedidos WHERE id=$1 AND empresa_id=$2',[otherOrder.id,company])).rows[0];
+  require('node:assert/strict').equal(otherOrderAfter.ruta_id,null);
+  require('node:assert/strict').equal(Number(otherOrderAfter.importe),400);
   // Fuel is already part of the order total: persist separate lines in both invoice paths.
   const fuelOrders=[];
   for(const [i,amount,fuel] of [[1,528,48],[2,220,20]]){
@@ -268,7 +298,8 @@ async function main(){
  assert.ok(evidence.failedDelivery.emails_fallidos>0);
  assert.ok(evidence.retryDelivery.emails>0);
  assert.equal(evidence.duplicateDelivery.emails,0);
- const expectedErrors=new Map([
+  const expectedErrors=new Map([
+   ['Rechazar ruta de otro cliente al editar',400],
   ['Rechazar recargo incluido en porte',409],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],
@@ -288,7 +319,12 @@ async function main(){
  evidence.passed=true;
  evidence.created={company:!!company,user:!!user,client:!!client.id,driver:!!driver.id,vehicle:!!vehicle.id};
  if(process.env.AUDIT_BROWSER==='1'){
-  console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',password,company,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
+  // Keep this order free of Planner reservations and customer debt so the
+  // browser can exercise an ordinary save/reopen cycle without bypassing guards.
+  const qaClient=await call('Cliente limpio para QA visual','POST','/clientes',{nombre:'Cliente QA visual',cif:'B87654321',direccion:'Calle de Ensayo 2',cp:'46002',ciudad:'Valencia',codigo_postal:'46002',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'visual@example.invalid',telefono:'960000002',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias'});
+  const qaOrder=await call('Pedido libre para QA visual','POST','/pedidos',{cliente_id:qaClient.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-26',fecha_descarga:'2026-09-27',tipo_carga:'completa',importe:400,mercancia:'Mercancía sintética'});
+  require('node:assert/strict').ok(qaClient.id && qaOrder.id,'Browser QA fixture must be complete');
+  console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
   await new Promise(resolve=>process.once('SIGINT',resolve));
  }
  }finally{await new Promise(r=>server.close(r));}

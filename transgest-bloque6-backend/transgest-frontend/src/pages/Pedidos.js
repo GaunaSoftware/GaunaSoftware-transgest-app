@@ -11,6 +11,7 @@ import OrderAssignmentFields from "./orders/editor/OrderAssignmentFields";
 import OrderDocumentFields from "./orders/editor/OrderDocumentFields";
 import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
 import { driverName, stopSchedule } from "./orders/quickInfo";
+import { hasCustomerDependentValues, switchCustomerDraft } from "./orders/clientTariffDraft";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
@@ -18,7 +19,7 @@ import { cargoPayload, fullLoadLength } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
-import { orderTown } from '../utils/orderTown';
+import { displayLocation, missingLocationFields } from '../utils/orderTown';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
 
@@ -1775,8 +1776,9 @@ function puntoScopeLabel(punto = {}, clienteId = "") {
 }
 
 function puntoLocationLabel(punto = {}) {
+  const locality = displayLocation(punto);
   return [
-    punto.ciudad || punto.poblacion || punto.localidad || punto.municipio,
+    locality === "Ubicación incompleta" || normalizePlaceText(locality) === normalizePlaceText(punto.nombre) ? "" : locality,
     punto.provincia || punto.region,
     punto.pais,
   ].map(v => String(v || "").trim()).filter(Boolean).join(", ");
@@ -2012,9 +2014,13 @@ function stopDisplayParts(stop = {}, fallback = "", clienteId = "", tipo = "ambo
 
 
 
-function pedidoStopListLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+function pedidoStopLocation(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
   const saved = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
-  return orderTown({...(saved || {}), ...stop}, fallback);
+  const point = { ...(saved || {}) };
+  for (const [key, value] of Object.entries(stop || {})) {
+    if (value !== null && value !== undefined && String(value).trim() !== "") point[key] = value;
+  }
+  return { label: displayLocation(point, fallback), missing: missingLocationFields(point) };
 }
 
 function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España", clienteId = "", tipo = "ambos") {
@@ -3110,14 +3116,22 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         <div style={quickGrid}>
           <div style={{gridColumn:"1/-1"}}>
             <label style={S.label}>Cliente *</label>
-            <input list="clientes-pedido-rapido" style={inp} value={form.cliente_nombre} onChange={e=>{
+            <input list="clientes-pedido-rapido" style={inp} value={form.cliente_nombre} onChange={async e=>{
               const value = e.target.value;
               const exact = clientes.find(c => (c.nombre || "").trim().toLowerCase() === value.trim().toLowerCase());
+              const customerChanged = String(exact?.id || "") !== String(form.cliente_id || "");
+              if (customerChanged && hasCustomerDependentValues(form)) {
+                const accepted = await confirmDialog({
+                  title: "Cambiar cliente del pedido",
+                  message: "Se limpiarán la tarifa, el precio, los mínimos, las ventanas y la referencia del cliente anterior. Los datos maestros no se modificarán.",
+                  confirmText: "Cambiar cliente",
+                });
+                if (!accepted) return;
+              }
               setForm(p => ({
-                ...p,
+                ...(customerChanged ? switchCustomerDraft(p, exact || null) : p),
                 cliente_nombre: value,
                 cliente_id: exact?.id || "",
-                ruta_id: exact?.id === p.cliente_id ? p.ruta_id : "",
               }));
             }} placeholder="Nombre del cliente"/>
             <datalist id="clientes-pedido-rapido">
@@ -10449,7 +10463,16 @@ export default function Pedidos() {
           notifyDriver:notificarChoferAppAccion, sendTo:(p,target)=>enviarWhatsappPedidoAccion(p,target)}}
         describe={p => {
           const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
-          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length, loadDetails:loads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.origen:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n"), unloadDetails:unloads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.destino:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n")};
+          const origin = pedidoStopLocation(loads[0] || {},p.origen,p.cliente_id || "","carga");
+          const destination = pedidoStopLocation(unloads[0] || {},p.destino,p.cliente_id || "","descarga");
+          const detail = (stop, index, type) => {
+            const fallback = index === 0 ? (type === "carga" ? p.origen : p.destino) : "";
+            const location = pedidoStopLocation(stop, fallback, p.cliente_id || "", type);
+            const fields = [...new Set([stop.nombre, stopAddress(stop) || fallback, stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))];
+            if (location.missing.length) fields.push(`Faltan: ${location.missing.join(", ")}`);
+            return `${index+1}. ${fields.join(" · ") || location.label}`;
+          };
+          return {origin:origin.label, destination:destination.label, loads:loads.length, unloads:unloads.length, originMissing:origin.missing, destinationMissing:destination.missing, loadDetails:loads.map((stop,i)=>detail(stop,i,"carga")).join("\n"), unloadDetails:unloads.map((stop,i)=>detail(stop,i,"descarga")).join("\n")};
         }}
         filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
           setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},

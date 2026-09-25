@@ -21,3 +21,27 @@ export function orderTown(stop = {}, fallback = '') {
   }
   return 'POBLACION PENDIENTE';
 }
+
+// Present the best verified location label without pretending that a company name
+// is a municipality. The historic orderTown helper remains strict for town-only uses.
+export function displayLocation(point = {}, fallback = '') {
+  for (const value of [point.poblacion, point.ciudad, point.localidad, point.municipio]) {
+    const town = clean(value);
+    if (town && !isAddress(town)) return town.toUpperCase();
+  }
+  const fromAddress = orderTown({ direccion: point.direccion_normalizada || point.direccion || point.address || '' }, fallback);
+  if (fromAddress !== 'POBLACION PENDIENTE') return fromAddress;
+  const name = clean(point.nombre || point.cliente_nombre || point.name);
+  if (name) return name;
+  const legacyName = clean(fallback);
+  if (legacyName && !isAddress(legacyName)) return legacyName;
+  return 'Ubicación incompleta';
+}
+
+export function missingLocationFields(point = {}) {
+  const missing = [];
+  if (![point.poblacion, point.ciudad, point.localidad, point.municipio].some(value => clean(value))) missing.push('población');
+  if (!clean(point.codigo_postal || point.cp || point.postal_code)) missing.push('código postal');
+  if (!clean(point.direccion_normalizada || point.direccion || point.address)) missing.push('dirección');
+  return missing;
+}

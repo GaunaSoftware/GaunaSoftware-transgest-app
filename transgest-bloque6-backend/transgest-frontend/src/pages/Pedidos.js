@@ -6500,18 +6500,16 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
   if (!mapPoints.length) return null;
   const pasos = getPedidoMapaPasos(pedido, choferPasos);
   const estado = String(pedido?.estado || "pendiente").toLowerCase();
-  const currentLabel = pasos.descarga_ok || ["entregado","facturado"].includes(estado)
-    ? "Viaje entregado"
-    : pasos.descarga_iniciada || estado === "descarga"
-      ? "Descargando"
-      : pasos.posicionado_descarga
-        ? "En punto de descarga"
-        : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso"
-          ? "En ruta"
-          : pasos.carga_proceso || pasos.carga_iniciada
-            ? "En carga"
-          : LABEL_ESTADO[estado] || estado;
-  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{pedido?.origen || "Origen pendiente"} → {pedido?.destino || "Destino pendiente"}</h4><p>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
+  const mapState = ["incidencia","cancelado"].includes(estado) ? estado
+    : pasos.descarga_ok || ["entregado","facturado"].includes(estado) ? "entregado"
+    : pasos.descarga_iniciada || estado === "descarga" ? "descarga"
+    : pasos.posicionado_descarga ? "espera_descarga"
+    : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso" ? "en_curso"
+    : pasos.carga_proceso || pasos.carga_iniciada ? "cargando"
+    : estado;
+  const mapStateMeta = transportStateMeta(mapState);
+  const currentLabel = pasos.posicionado_descarga && mapState === "espera_descarga" ? "En punto de descarga" : mapStateMeta.label;
+  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{pedido?.origen || "Origen pendiente"} → {pedido?.destino || "Destino pendiente"}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
   return (
     <div className={`tg-pedido-map-section ${compact ? "order-editor-map" : ""}`} style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
@@ -6519,7 +6517,7 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
           <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Ruta, paradas y posicion conocida del vehiculo.</div>
         </div>
-        <span style={{fontSize:10,fontWeight:900,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
+        <span style={{fontSize:10,fontWeight:900,border:`1px solid ${mapStateMeta.border}`,background:mapStateMeta.bg,color:"var(--text)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
       </div>
@@ -7073,6 +7071,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   async function ensurePointForClient(point) {
     const targetClienteId = String(clienteId || "").trim();
     if (!targetClienteId) {
+      if (point.punto_general || point.es_general || !point.cliente_id) return { point, changed: false };
       notify("Selecciona primero un cliente para poder asociar el punto.", "warning");
       return null;
     }
@@ -7277,6 +7276,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
             setEditing(null);
             if (onSelectPoint && saved && !saved.location_incomplete && !editing?.id) {
               const ensured = await ensurePointForClient({ ...saved, tipo: saved.tipo || modo || "ambos" });
+              if (!ensured) return;
               const normalized = ensured?.point || normalizePuntoInteresForForm({
                 ...saved,
                 cliente_id: saved.cliente_id || clienteId || "",

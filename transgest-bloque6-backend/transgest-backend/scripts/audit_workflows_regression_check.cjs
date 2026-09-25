@@ -33,13 +33,20 @@ async function main(){
  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'AUDITORÍA LOCAL','B00000000','audit@example.invalid','enterprise','activa')",[company]);
  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente de pruebas','audit@example.invalid',$3,'gerente',true)",[user,company,await req('bcryptjs').hash(password,10)]);
  const express=req('express'),app=express();app.use(express.json({limit:'12mb'}));req('./middleware/asyncErrors')(logger);
+ if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.use('/api/v1/auth',auth);
- for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence'])app.use('/api/v1/'+name,req('./middleware/auth').authenticate,req('./routes/'+name));
+ for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),req('./middleware/auth').authenticate,req('./routes/'+name));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
  app.use('/api/v1/importacion',req('./middleware/auth').authenticate,req('./middleware/auth').requireModulePermission('importacion'),req('./routes/importacion'));
+ if(process.env.AUDIT_BROWSER==='1'){
+  const browserBuild=path.resolve(root,'../transgest-frontend/build');
+  if(!fs.existsSync(path.join(browserBuild,'index.html')))throw Error('Build local ausente para AUDIT_BROWSER');
+  app.use(req('express').static(browserBuild));
+  app.get('*',(request,res)=>res.sendFile(path.join(browserBuild,'index.html')));
+ }
  app.use((err,request,res,next)=>res.status(err.status||500).json({error:err.message}));
  const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
  const base='http://127.0.0.1:'+server.address().port+'/api/v1';let token;
@@ -280,6 +287,10 @@ async function main(){
  if(pg.verifyBackup)evidence.backupRestore=await pg.verifyBackup();
  evidence.passed=true;
  evidence.created={company:!!company,user:!!user,client:!!client.id,driver:!!driver.id,vehicle:!!vehicle.id};
+ if(process.env.AUDIT_BROWSER==='1'){
+  console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',password,company,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
+  await new Promise(resolve=>process.once('SIGINT',resolve));
+ }
  }finally{await new Promise(r=>server.close(r));}
 }
 main().catch(e=>{evidence.fatal=e.stack;process.exitCode=1;}).finally(async()=>{fs.writeFileSync(path.join(__dirname,process.env.AUDIT_PG_PORT?'audit-workflows-native-results.json':'audit-workflows-results.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));await pg?.close();await db.pool.end();});

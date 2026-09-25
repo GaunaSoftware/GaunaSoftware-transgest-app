@@ -15,7 +15,7 @@ import { hasCustomerDependentValues, switchCustomerDraft } from "./orders/client
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
-import { cargoPayload, fullLoadLength } from "../utils/cargoDimensions";
+import { cargoPayload, fullLoadLength, resolveQuickFullLoadLength, syncFullLoadLength } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
@@ -2791,6 +2791,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   const vehiculoPorMatriculaRapida = form.matricula_rapida
     ? vehiculosConjunto.find(v => String(v.matricula || "").replace(/[\s-]/g, "").toUpperCase() === String(form.matricula_rapida || "").replace(/[\s-]/g, "").toUpperCase())
     : null;
+  const vehiculoParaLongitudRapida = vehiculoSeleccionado || vehiculoPorMatriculaRapida;
+  const remolqueParaLongitudRapida = vehiculos.find(v => String(v.id) === String(form.remolque_id_manual || vehiculoParaLongitudRapida?.remolque_id));
+  const metrosUtilesRapidos = parseLocaleNumber(remolqueParaLongitudRapida?.metros_carga, 0);
+  const metrosManualesRapidos = parseLocaleNumber(form.metros_lineales, 0);
   const choferAsignado = choferes.find(c => c.id === form.chofer_id);
   const colaboradorSeleccionado = colaboradores.find(c => c.id === form.colaborador_id);
   const labelConjunto = v => {
@@ -3023,6 +3027,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       const matriculaManualRapida = !vehiculoRapidoId && !colaboradorId
         ? String(form.matricula_rapida || "").trim().toUpperCase()
         : matriculaColaborador;
+      const longitudRapida = resolveQuickFullLoadLength(
+        { ...form, vehiculo_id: vehiculoRapidoId, remolque_id: form.remolque_id_manual || vehiculoRapido?.remolque_id }, vehiculos
+      );
       const tipoPrecio = form.tipo_precio || ruta?.tarifa_tipo || "viaje";
       const kmRuta = toNullableNumber(form.km_ruta) ?? toNullableNumber(ruta?.km);
       const precioUnitario = toNullableNumber(form.precio_unitario) ?? toNullableNumber(ruta?.precio_base) ?? 0;
@@ -3087,7 +3094,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         importe_minimo: tipoPrecio === "viaje" ? toNullableNumber(tarifaDraft.importe_minimo) : null,
         minimo_unidades: tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
         km_ruta: kmRuta,
-        metros_lineales: form.metros_lineales || null,
+        metros_lineales: longitudRapida.length,
+        carga_largo_m: longitudRapida.length,
+        longitud_ocupada_mode: longitudRapida.mode,
         precio_cliente_col: colaboradorId ? importeCalculado : null,
         precio_colaborador: null,
         precio_colaborador_unitario: null,
@@ -3357,7 +3366,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           </div>
           <div>
             <label style={S.label}>ML</label>
-            <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder="Metros lineales"/>
+            <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder={`${fullLoadLength({...form,vehiculo_id:vehiculoParaLongitudRapida?.id||form.vehiculo_id},vehiculos).toLocaleString("es-ES")} m automáticos si se deja vacío`}/>
+            {metrosUtilesRapidos > 0 && metrosManualesRapidos > metrosUtilesRapidos + 0.01 && <small role="alert" style={{color:"var(--red)"}}>La longitud indicada supera los {metrosUtilesRapidos.toLocaleString("es-ES")} m útiles del remolque.</small>}
           </div>
           <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",borderRadius:8,padding:"8px 10px"}}>
             <label style={S.label}>EUR/km venta</label>
@@ -6861,10 +6871,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const remolqueActual = vehiculosLocal.find(v => v.id === (form.remolque_id_manual || vehiculoActual?.remolque_id));
   const longitudCargaCompleta = fullLoadLength(form, vehiculosLocal);
   useEffect(() => {
-    if ((form.tipo_carga || 'completa') !== 'completa') return;
-    setForm(previous => Number(previous.carga_largo_m) === longitudCargaCompleta && Number(previous.metros_lineales) === longitudCargaCompleta
-      ? previous : { ...previous, carga_largo_m: longitudCargaCompleta, metros_lineales: longitudCargaCompleta, _cargoLengthManual: true });
-  }, [form.id, form.tipo_carga, longitudCargaCompleta]);
+    setForm(previous => syncFullLoadLength(previous, longitudCargaCompleta));
+  }, [form.id, form.tipo_carga, form.longitud_ocupada_mode, longitudCargaCompleta]);
   // Aviso si la carga (metros lineales) supera los metros de carga del remolque
   // asignado (p. ej. viaje de 13,65 m en una plataforma de 11 m).
   const cargaMetrosLineales = parseFloat(String(form.metros_lineales ?? "").replace(",", ".")) || 0;

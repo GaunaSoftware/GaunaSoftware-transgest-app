@@ -1,4 +1,4 @@
-import {fullLoadLength,palletLayout,cargoCount,cargoLength,cargoPayload,updateCargo} from './cargoDimensions';
+import {fullLoadLength,palletLayout,cargoCount,cargoLength,cargoPayload,updateCargo,cargoLengthMode,syncFullLoadLength,resolveQuickFullLoadLength} from './cargoDimensions';
 
 test('calculates complete rows and their occupied width',()=>{
  expect(palletLayout(1,'europeo')).toEqual({length:0.8,width:1.2});
@@ -36,8 +36,32 @@ test('manual dimensions survive later quantity edits and are used by groupage',(
 
 test('full load uses explicit trailer, linked trailer, or 13.65m fallback',()=>{
  const vehicles=[{id:'tractor',remolque_id:'long'},{id:'long',metros_carga:15},{id:'short',metros_carga:'12,5'}];
- expect(fullLoadLength({vehiculo_id:'tractor'},vehicles)).toBe(15);
+ expect(fullLoadLength({vehiculo_id:'tractor'},vehicles)).toBe(13.65);
  expect(fullLoadLength({vehiculo_id:'tractor',remolque_id_manual:'short'},vehicles)).toBe(12.5);
  expect(fullLoadLength({},vehicles)).toBe(13.65);
  expect(fullLoadLength({remolque_id_manual:'missing'},vehicles)).toBe(13.65);
+});
+
+test('new complete loads follow trailer in auto mode; historic and manual lengths survive',()=>{
+ const fresh=syncFullLoadLength({tipo_carga:'completa'},12.5);
+ expect(fresh).toMatchObject({longitud_ocupada_mode:'auto',carga_largo_m:12.5,metros_lineales:12.5});
+ expect(syncFullLoadLength(fresh,11)).toMatchObject({longitud_ocupada_mode:'auto',carga_largo_m:11,metros_lineales:11});
+ const manuallyEdited=updateCargo(fresh,'carga_largo_m','10,5');
+ expect(syncFullLoadLength(manuallyEdited,9)).toMatchObject({longitud_ocupada_mode:'manual',carga_largo_m:'10,5',metros_lineales:'10,5'});
+ const legacy={id:'historic',tipo_carga:'completa',carga_largo_m:7,metros_lineales:7};
+ expect(cargoLengthMode(legacy)).toBe('manual');
+ expect(syncFullLoadLength(legacy,13.65)).toBe(legacy);
+ expect(cargoPayload({...legacy,palets_tipo:'europeo',palets_cantidad:2})).toMatchObject({carga_largo_m:7,metros_lineales:7});
+ expect(cargoPayload({id:'legacy-default',metros_lineales:13.65,palets_tipo:'europeo',palets_cantidad:2})).toMatchObject({carga_largo_m:13.65,metros_lineales:13.65});
+ expect(cargoPayload({id:'legacy-empty',palets_tipo:'europeo',palets_cantidad:2})).toMatchObject({carga_largo_m:null,metros_lineales:null});
+ expect(cargoPayload({tipo_carga:'completa',longitud_ocupada_mode:'auto'})).toMatchObject({metros_lineales:13.65});
+ expect(cargoPayload({tipo_carga:'completa',longitud_ocupada_mode:'manual',carga_largo_m:'10,5'})).toMatchObject({metros_lineales:10.5});
+});
+
+test('quick order preserves manual length and accepts Spanish decimal input',()=>{
+ const vehicles=[{id:'trailer',metros_carga:'12,5'}];
+ expect(resolveQuickFullLoadLength({remolque_id:'trailer',metros_lineales:''},vehicles)).toEqual({length:12.5,mode:'auto'});
+ expect(resolveQuickFullLoadLength({remolque_id:'trailer',metros_lineales:'10,5'},vehicles)).toEqual({length:10.5,mode:'manual'});
+ expect(resolveQuickFullLoadLength({metros_lineales:'10.5'},vehicles)).toEqual({length:10.5,mode:'manual'});
+ expect(()=>resolveQuickFullLoadLength({metros_lineales:'-1'},vehicles)).toThrow('mayor que cero');
 });

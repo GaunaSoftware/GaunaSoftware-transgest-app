@@ -3776,6 +3776,11 @@ const NUMERIC_PEDIDO_FIELDS = new Set([
   "importe_minimo", "minimo_unidades", "importe_paralizacion",
   "paralizacion_horas", "grupaje_id",
 ]);
+function normalizeCargoLengthMode(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (value === 'auto' || value === 'manual') return value;
+  throw Object.assign(new Error('Modo de longitud ocupada no válido'), { status: 400 });
+}
 const UUID_PEDIDO_FIELDS = new Set([
   "cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id",
   "colaborador_id", "remolque_id", "viaje_enlazado_id", "grupo_ida_vuelta",
@@ -8539,6 +8544,7 @@ router.post("/chofer", async (req, res) => {
         ["referencia_cliente", req.body?.referencia_cliente || null],
         ["tipo_carga", req.body?.tipo_carga || null],
         ["metros_lineales", normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
+        ["longitud_ocupada_mode", normalizeCargoLengthMode(req.body?.longitud_ocupada_mode)],
         ["puntos_carga", JSON.stringify(puntosCarga)],
         ["puntos_descarga", JSON.stringify(puntosDescarga)],
         ["remolque_id", normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null],
@@ -8804,6 +8810,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
         metros_lineales: req.body.metros_lineales ?? null,
+        longitud_ocupada_mode: normalizeCargoLengthMode(req.body.longitud_ocupada_mode),
         palets_tipo: req.body.palets_tipo ?? null,
         palets_cantidad: req.body.palets_cantidad ?? null,
         palets_apilables: req.body.palets_apilables ?? false,
@@ -9237,6 +9244,13 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
   await ensureColaboradorWorkflowSchema();
   const empresaId = req.empresaId||req.user?.empresa_id;
   const body = req.body;
+  let longitudOcupadaModeUpdate;
+  try {
+    longitudOcupadaModeUpdate = body.longitud_ocupada_mode === undefined
+      ? undefined : normalizeCargoLengthMode(body.longitud_ocupada_mode);
+  } catch (modeError) {
+    return res.status(modeError.status || 400).json({ error: modeError.message });
+  }
   if (body.tipo_precio_colaborador != null && !["viaje", "tonelada"].includes(body.tipo_precio_colaborador)) {
     return res.status(400).json({ error: "Tipo de tarifa del proveedor no valido" });
   }
@@ -9352,6 +9366,7 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
     metros_lineales: body.metros_lineales ?? null,
+    longitud_ocupada_mode: longitudOcupadaModeUpdate,
     // Detalle de la carga (ocupacion real del remolque en los grupajes)
     palets_tipo: body.palets_tipo ?? null,
     palets_cantidad: body.palets_cantidad ?? null,

@@ -89,14 +89,14 @@ async function syncOrderIncidents({ empresaId, pedidoId, queryable = db, today =
   if (!order) return;
   const currentDay = today || asDateOnly(order.today_madrid);
   const state = String(order.estado || '').toLowerCase();
-  const closed = ['entregado', 'cancelado'].includes(state);
+  const closed = ['entregado', 'facturado', 'cancelado'].includes(state);
   const config = order.cfg_trafico || {};
   const automaticEnabled = String(config.auto_incidencia) !== 'false';
   const loadDate = asDateOnly(order.fecha_carga);
   const deliveryDate = asDateOnly(order.fecha_entrega || order.fecha_descarga);
   const offset = /^[1-9][0-9]*$/.test(String(config.auto_incidencia_dias || ''))
     ? Math.min(365, Number(config.auto_incidencia_dias)) : 1;
-  const loadPending = !closed && automaticEnabled && !allLoadsComplete(order.pasos) &&
+  const loadPending = !closed && !order.pendiente_completar && automaticEnabled && !allLoadsComplete(order.pasos) &&
     !['en_curso', 'espera_descarga', 'descarga'].includes(state) &&
     loadDate && loadDate < currentDay && loadDate >= dayMinus(currentDay, 60);
   const deliveryPending = !closed && !order.pendiente_completar &&

@@ -3098,7 +3098,7 @@ function startPedidosVencidosScheduler() {
       SELECT p.id, p.empresa_id FROM pedidos p JOIN empresas e ON e.id=p.empresa_id
        WHERE (COALESCE(e.estado,'activo')='activo'
          AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
-         AND p.estado::text NOT IN ('entregado','cancelado')
+         AND p.estado::text NOT IN ('entregado','facturado','cancelado')
          AND ((p.fecha_carga >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
                AND p.fecha_carga < (NOW() AT TIME ZONE 'Europe/Madrid')::date)
            OR (COALESCE(p.fecha_entrega,p.fecha_descarga) >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60

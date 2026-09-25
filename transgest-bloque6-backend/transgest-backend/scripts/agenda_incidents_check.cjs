@@ -87,6 +87,13 @@ const { syncOrderIncidents } = require('../src/services/agendaIncidents');
     await db.query("UPDATE empresas SET cfg_trafico='{\"auto_incidencia\":false}'::jsonb WHERE id=$1", [companyA]);
     await sync();
     assert.equal((await db.query('SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL')).rows[0].n, 0, 'Disabling automation resolves active auto incidents');
+    await db.query("UPDATE empresas SET cfg_trafico='{}'::jsonb WHERE id=$1", [companyA]);
+    await db.query("UPDATE pedidos SET pendiente_completar=true WHERE id=$1", [order]);
+    await sync();
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL')).rows[0].n, 0, 'Unfinished drafts must not create incidents');
+    await db.query("UPDATE pedidos SET pendiente_completar=false, estado='facturado' WHERE id=$1", [order]);
+    await sync();
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL')).rows[0].n, 0, 'Invoiced orders are final');
     const fresh = new PGlite();
     try {
       await fresh.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY);

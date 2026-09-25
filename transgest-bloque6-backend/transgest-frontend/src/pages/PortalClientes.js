@@ -29,6 +29,8 @@ import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
 import PortalPointPicker from "../components/PortalPointPicker";
+import { TRANSPORT_STATES, transportStateMeta } from "../utils/transportStateCatalog";
+import { displayOrderLocation } from "../utils/orderTown";
 
 import { PortalHeader, PortalOverview, PortalTracking, PortalHelp } from "./portal/PortalWorkspace";
 
@@ -58,6 +60,7 @@ const ESTADOS = {
   cancelada: { l: "Cancelada", c: "#ef4444" },
   revisada: { l: "En revisión", c: "#3b82f6" },
 };
+const PEDIDO_ESTADOS = Object.fromEntries(Object.entries(TRANSPORT_STATES).map(([key, meta]) => [key, { l: meta.label, c: meta.color, bg: meta.bg, border: meta.border }]));
 
 const ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE = new Set([
   "en_curso",
@@ -104,7 +107,11 @@ function precioSolicitudLabel(item = {}) {
   ].filter(Boolean).join(" - ");
 }
 
-function estadoClienteSurface(estado) {
+function estadoClienteSurface(estado, isPedido = false) {
+  if (isPedido) {
+    const meta = transportStateMeta(estado);
+    return { background: meta.bg, border: `1px solid ${meta.border}`, boxShadow: `inset 3px 0 0 ${meta.color}` };
+  }
   const key = String(estado || "").toLowerCase();
   const styles = {
     pendiente: { bg: "rgba(245,158,11,.07)", border: "rgba(245,158,11,.22)", bar: "rgba(245,158,11,.70)" },
@@ -933,10 +940,10 @@ export default function PortalClientes() {
         {loading && <div style={{ ...S.card, textAlign: "center", color: "var(--text4)", padding: 28 }}>Cargando portal...</div>}
 
         {!loading && ["inicio", "seguimiento"].includes(tab) && (
-          <PortalTracking pedidos={trackingPedidos} selected={trackingPedido} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
+          <PortalTracking pedidos={trackingPedidos.map(p => ({ ...p, origen: displayOrderLocation(p, "carga"), destino: displayOrderLocation(p, "descarga") }))} selected={trackingPedido ? { ...trackingPedido, origen: displayOrderLocation(trackingPedido, "carga"), destino: displayOrderLocation(trackingPedido, "descarga") } : null} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={PEDIDO_ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
             {!trackingPedido ? <Empty text={q ? "No hay viajes que coincidan con la búsqueda." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
-              const estado = ESTADOS[p.estado] || ESTADOS.pendiente;
-              const surface = estadoClienteSurface(p.estado);
+              const estado = PEDIDO_ESTADOS[p.estado] || PEDIDO_ESTADOS.pendiente;
+              const surface = estadoClienteSurface(p.estado, true);
               const stIdx = p.estado === "facturado" ? TIMELINE.length - 1 : TIMELINE.findIndex(([k]) => k === p.estado);
               const dcd = docControl[p.id];
               return (
@@ -944,10 +951,10 @@ export default function PortalClientes() {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                     <div>
                       <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, color: "var(--accent)", fontSize: 13 }}>{p.numero}</div>
-                      <div style={{ fontWeight: 800, color: "var(--text)", marginTop: 4 }}>{p.origen || "-"} -> {p.destino || "-"}</div>
+                      <div style={{ fontWeight: 800, color: "var(--text)", marginTop: 4 }}>{displayOrderLocation(p, "carga")} -> {displayOrderLocation(p, "descarga")}</div>
                       {p.referencia_cliente && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>Ref. cliente: {p.referencia_cliente}</div>}
                     </div>
-                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: estado.c, background: `${estado.c}18`, border: `1px solid ${estado.c}30` }}>{estado.l}</span>
+                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: "var(--text)", background: estado.bg, border: `1px solid ${estado.border}` }}>{estado.l}</span>
                   </div>
 
                   <PortalArrival orderId={p.id}/>
@@ -1057,7 +1064,7 @@ export default function PortalClientes() {
                 <div key={p.id} style={{ borderBottom: "1px solid var(--border2)", padding: "11px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                     <div>
-                      <div style={{ fontWeight: 900, color: "var(--text)" }}>{p.numero} - {p.origen || "-"} -> {p.destino || "-"}</div>
+                      <div style={{ fontWeight: 900, color: "var(--text)" }}>{p.numero} - {displayOrderLocation(p, "carga")} -> {displayOrderLocation(p, "descarga")}</div>
                       <div style={{ fontSize: 12, color: "var(--text4)" }}>{dateEs(p.fecha_carga)}</div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:5 }}>
                         <span style={{ padding:"2px 8px", borderRadius:20, fontSize:13, fontWeight:800, color:Number(resumen.albaranes_count || 0) > 0 ? "#10b981" : "#f97316", background:Number(resumen.albaranes_count || 0) > 0 ? "rgba(16,185,129,.12)" : "rgba(249,115,22,.12)" }}>
@@ -1206,8 +1213,8 @@ export default function PortalClientes() {
             )}
             {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la búsqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
               const e = ESTADOS[s.estado] || ESTADOS.pendiente;
-              const pedidoEstado = s.pedido_estado ? (ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
-              const surface = estadoClienteSurface(s.pedido_estado || s.estado);
+              const pedidoEstado = s.pedido_estado ? (PEDIDO_ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
+              const surface = estadoClienteSurface(s.pedido_estado || s.estado, !!s.pedido_estado);
               return (
                 <div key={s.id} style={{
                   ...surface,

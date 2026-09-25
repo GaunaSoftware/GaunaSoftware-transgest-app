@@ -12,6 +12,7 @@ import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../service
 import RemolqueGrupaje from "../components/RemolqueGrupaje";
 import { inferPlaceGeo } from "../utils/placeGeo";
 import { TRANSPORT_STATES, RECOMMENDED_STATE_FLOW, transportStateMeta } from "../utils/transportStateCatalog";
+import { displayOrderLocation } from "../utils/orderTown";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcTiempoTransito(km, cfg){
@@ -902,7 +903,7 @@ function TripCard({
       onDragStart={(e2) => onDragStart?.(e2, pedido)}
       onDragOver={(e2) => onDragOverTrip?.(e2, pedido)}
       onDrop={(e2) => onDropTrip?.(e2, pedido)}
-      title={`${pedido.numero} - ${pedido.origen||""} -> ${pedido.destino||""}`}
+      title={`${pedido.numero} - ${displayOrderLocation(pedido, "carga")} -> ${displayOrderLocation(pedido, "descarga")}`}
       style={{
         background: e.bg,
         border: `1.5px solid ${tieneConflictoDuro ? "rgba(239,68,68,.42)" : tieneConflicto ? "rgba(245,158,11,.35)" : e.border}`,
@@ -988,15 +989,13 @@ function TripCard({
       )}
 
       {/* Origen -> Destino */}
-      {(pedido.origen || pedido.destino) && (
+      {(pedido.origen || pedido.destino || safeStops(pedido.puntos_carga).length || safeStops(pedido.puntos_descarga).length) && (
         <div style={{
           fontSize:11, fontWeight:700, color:"var(--text)",
           lineHeight:1.25, marginBottom:2, overflow:"hidden",
           display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
         }}>
-          {pedido.origen && pedido.destino
-            ? `${pedido.origen} -> ${pedido.destino}`
-            : pedido.origen || pedido.destino}
+          {`${displayOrderLocation(pedido, "carga")} -> ${displayOrderLocation(pedido, "descarga")}`}
         </div>
       )}
 
@@ -4321,7 +4320,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     />
                   </label>
                   <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:800,color:"var(--text)"}}>{p.numero}</span>
-                  <span style={{fontSize:12,color:"var(--text3)"}}>{p.origen} -> {p.destino}</span>
+                  <span style={{fontSize:12,color:"var(--text3)"}}>{displayOrderLocation(p, "carga")} -> {displayOrderLocation(p, "descarga")}</span>
                   {reasons.map(reason => (
                     <span key={`${p.id}-${reason.key}`} style={{
                       fontSize:10,
@@ -5078,7 +5077,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     >
                       <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>{p.numero || "Pedido"} - {getPedidoClienteLabel(p)}</div>
                       <div style={{ fontSize:11, color:"var(--text4)", marginTop:2 }}>
-                        {p.origen || "-"} - {p.destino || "-"}{p.estado ? ` - ${EC[p.estado]?.label || p.estado}` : ""}
+                        {displayOrderLocation(p, "carga")} - {displayOrderLocation(p, "descarga")}{p.estado ? ` - ${EC[p.estado]?.label || p.estado}` : ""}
                       </div>
                     </button>
                   ))}
@@ -5094,7 +5093,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                     <option value="">Seleccionar viaje...</option>
                     {viajesParaAnadir.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.numero || "Pedido"} - {getPedidoClienteLabel(p)} - {p.origen || "-"} a {p.destino || "-"}
+                        {p.numero || "Pedido"} - {getPedidoClienteLabel(p)} - {displayOrderLocation(p, "carga")} a {displayOrderLocation(p, "descarga")}
                       </option>
                     ))}
                   </select>
@@ -5116,7 +5115,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                       }}
                     >
                       <div style={{ fontSize:12, fontWeight:900, color:"var(--text)" }}>{p.numero || "Pedido"} - {getPedidoClienteLabel(p)}</div>
-                      <div style={{ fontSize:11, color:"var(--text4)", marginTop:2 }}>{p.origen || "-"} - {p.destino || "-"}{fechaPedido(p) ? ` - ${fechaPedido(p)}` : ""}</div>
+                      <div style={{ fontSize:11, color:"var(--text4)", marginTop:2 }}>{displayOrderLocation(p, "carga")} - {displayOrderLocation(p, "descarga")}{fechaPedido(p) ? ` - ${fechaPedido(p)}` : ""}</div>
                     </button>
                   ))}
                 </div>

@@ -3,6 +3,7 @@ import "./operations/operations.css";
 import { useEffect, useMemo, useState } from "react";
 import { getControlTower } from "../services/api";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { TRANSPORT_STATES, transportStateMeta } from "../utils/transportStateCatalog";
 
 const S = {
   page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
@@ -193,6 +194,7 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:8}}>
         {rows.map(row => {
           const total = Number(row.total || 0);
+          const transportState = TRANSPORT_STATES[row.key] ? transportStateMeta(row.key) : null;
           return (
             <button
               key={row.key}
@@ -200,10 +202,10 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
               onClick={() => total > 0 && onStatusClick?.(row)}
               disabled={total <= 0}
               style={{
-                border:`1px solid ${selectedKey === row.key ? "var(--accent-a48)" : "var(--border)"}`,
+                border:`1px solid ${selectedKey === row.key ? (transportState?.border || "var(--accent-a48)") : "var(--border)"}`,
                 borderRadius:8,
                 padding:"9px 10px",
-                background:selectedKey === row.key ? "var(--accent-a10)" : "var(--bg3)",
+                background:selectedKey === row.key ? (transportState?.bg || "var(--accent-a10)") : "var(--bg3)",
                 cursor:total > 0 ? "pointer" : "default",
                 textAlign:"left",
                 fontFamily:"'DM Sans',sans-serif",
@@ -211,11 +213,11 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
               }}
             >
               <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
-                <span style={{fontSize:11,fontWeight:900,color:"var(--text)",whiteSpace:"nowrap"}}>{row.label}</span>
-                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:900,color:"var(--accent-xl)"}}>{total}</span>
+                <span style={{fontSize:11,fontWeight:900,color:"var(--text)",whiteSpace:"nowrap"}}>{transportState?.label || row.label}</span>
+                <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:900,color:"var(--text)"}}>{total}</span>
               </div>
               <div style={{height:5,background:"var(--bg4)",borderRadius:99,overflow:"hidden",marginTop:8}}>
-                <div style={{height:"100%",width:`${Math.max(4, total / max * 100)}%`,background:"var(--accent)",borderRadius:99}} />
+                <div style={{height:"100%",width:`${Math.max(4, total / max * 100)}%`,background:transportState?.color || "var(--accent)",borderRadius:99}} />
               </div>
             </button>
           );

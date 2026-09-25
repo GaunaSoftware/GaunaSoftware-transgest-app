@@ -1057,7 +1057,7 @@ router.post("/integracion/solicitar", requireCliente, async (req, res) => {
 
 router.get("/pedidos", requireCliente, async (req, res) => {
   const { rows } = await db.query(
-    `SELECT p.id,p.numero,p.referencia_cliente,p.origen,p.destino,p.fecha_carga,p.hora_carga,
+    `SELECT p.id,p.numero,p.referencia_cliente,p.origen,p.destino,p.puntos_carga,p.puntos_descarga,p.fecha_carga,p.hora_carga,
             p.fecha_descarga,p.hora_descarga,p.fecha_entrega,p.mercancia,p.peso_kg,p.bultos,
             p.estado,p.ultima_posicion,p.posicion_ts,p.notas,
             v.matricula AS vehiculo_matricula,

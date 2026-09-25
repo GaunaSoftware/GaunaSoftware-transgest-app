@@ -810,8 +810,7 @@ export default function Empresa() {
       </div>
       <div style={S.sub}>Datos fiscales y configuración - alimentan todas las facturas y comunicaciones</div>
 
-      {tab === "ubicaciones" && <DriverLocationsSettings/>}
-
+      {tab === "empresa" && <>
       {/* ── Logo de empresa ────────────────────────────────────────── */}
       <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12,padding:"16px 18px",marginBottom:16}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:13,color:"var(--text)",marginBottom:12}}>Logo de la empresa</div>
@@ -992,6 +991,7 @@ export default function Empresa() {
           </div>
         )}
       </div>
+      </>}
 
       {/* Tabs */}
       <div style={{ display:"flex", gap:0, borderBottom:"1px solid #141a28", marginBottom:20, overflowX:"auto", overflowY:"hidden", WebkitOverflowScrolling:"touch" }}>
@@ -1004,6 +1004,8 @@ export default function Empresa() {
           }}>{t.l}</button>
         ))}
       </div>
+
+      {tab === "ubicaciones" && <DriverLocationsSettings/>}
 
       {/* ── Datos fiscales ── */}
       {tab==="calidad_datos" && <DataQuality/>}

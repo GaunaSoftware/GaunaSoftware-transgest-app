@@ -1566,8 +1566,11 @@ function looksLikeStreetAddress(value) {
 }
 
 function hasNumericMapCoords(draft = {}) {
-  const lat = Number(draft.lat ?? draft.latitud);
-  const lng = Number(draft.lng ?? draft.longitud ?? draft.lon);
+  const rawLat = draft.lat ?? draft.latitud;
+  const rawLng = draft.lng ?? draft.longitud ?? draft.lon;
+  if (rawLat == null || rawLng == null || String(rawLat).trim() === "" || String(rawLng).trim() === "") return false;
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
   return Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lng) && Math.abs(lng) <= 180;
 }
 
@@ -1661,9 +1664,9 @@ function resolvePuntoInteresQuery(place, puntos = null) {
 }
 
 function savePuntoInteres(punto) {
-  const direccion = (punto?.direccion || direccionCompletaPunto(punto)).trim();
+  const direccion = String(punto?.direccion || "").trim();
   const nombre = (punto?.nombre || punto?.cliente_nombre || direccion).trim();
-  if (!direccion) return getPuntosInteres();
+  if (!nombre) return getPuntosInteres();
   const id = punto?.id || `poi_${Date.now()}`;
   const googleMapsUrl = cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || "");
   const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
@@ -1671,6 +1674,8 @@ function savePuntoInteres(punto) {
     id,
     nombre,
     direccion,
+    location_incomplete: !!punto?.location_incomplete || !direccion,
+    synced: punto?.synced !== false,
     cif: (punto?.cif || "").trim(),
     telefono: (punto?.telefono || "").trim(),
     email: (punto?.email || "").trim(),
@@ -1686,7 +1691,7 @@ function savePuntoInteres(punto) {
     cliente_id: punto?.cliente_id || "",
     punto_general: punto?.punto_general ?? punto?.es_general ?? !punto?.cliente_id,
     es_general: punto?.es_general ?? punto?.punto_general ?? !punto?.cliente_id,
-    direccion_key: punto?.direccion_key || normalizePlaceText([direccion, punto?.ciudad, punto?.provincia, punto?.pais || "España"].filter(Boolean).join(", ")),
+    direccion_key: direccion ? (punto?.direccion_key || normalizePlaceText([direccion, punto?.ciudad, punto?.provincia, punto?.pais || "España"].filter(Boolean).join(", "))) : "",
     google_maps_url: googleMapsUrl,
     lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? mapsCoords?.lat ?? null,
     lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? mapsCoords?.lng ?? null,
@@ -2174,9 +2179,9 @@ function calcIvaPedido(form = {}, baseOverride = null) {
 
 function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos", includeGenerales = true }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
-  const puntosDisponibles = Array.isArray(puntosProp)
+  const puntosDisponibles = (Array.isArray(puntosProp)
     ? filterPuntosForPedido(puntosProp, { clienteId, tipo, includeGenerales: false })
-    : filterPuntosForPedido(puntos, { clienteId, tipo, includeGenerales });
+    : filterPuntosForPedido(puntos, { clienteId, tipo, includeGenerales })).filter(p => !p.location_incomplete);
 
   useEffect(() => {
     const refresh = () => setPuntos(getPuntosInteres());
@@ -3426,7 +3431,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   const initialPoint = normalizePuntoInteresForForm(initial || {});
   const geoRequestRef = React.useRef(0);
   function inferPuntoGeoDraft(draft = {}) {
-    const inferred = inferPlaceGeo(draft, draft.ciudad, draft.direccion, draft.nombre);
+    const inferred = inferPlaceGeo({ ...draft, nombre:"", cliente_nombre:"" }, draft.ciudad, draft.direccion);
     if (!inferred) return draft;
     return {
       ...draft,
@@ -3440,7 +3445,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   async function completarPuntoGeo(draft = form) {
     const requestId = geoRequestRef.current + 1;
     geoRequestRef.current = requestId;
-    const next = await resolveGeoDraft(draft, draft.pais || "España", draft.ciudad, draft.direccion, draft.nombre);
+    const next = await resolveGeoDraft({ ...draft, nombre:"", cliente_nombre:"" }, draft.pais || "España", draft.ciudad, draft.direccion);
     let merged = next;
     setForm(current => {
       if (requestId !== geoRequestRef.current) {
@@ -3512,10 +3517,20 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
 
   async function guardar() {
     if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
-    if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
     const resolvedForm = await completarPuntoGeo(form);
+    const missing = missingLocationFields(resolvedForm);
     const locationIssue = pointLocationValidationIssue(resolvedForm);
-    if (locationIssue) { notify(locationIssue, "warning"); return; }
+    if (locationIssue && (!missing.length || (resolvedForm.google_maps_url && !isGoogleMapsReference(resolvedForm.google_maps_url)))) {
+      notify(locationIssue, "warning"); return;
+    }
+    if (missing.length) {
+      const confirmed = await confirmDialog({
+        title: "Ubicación incompleta",
+        message: `Faltan ${missing.join(", ")}. El punto se guardará incompleto y no podrá seleccionarse para un viaje hasta completar su ubicación. ¿Guardarlo igualmente?`,
+        confirmText: "Guardar incompleto", cancelText: "Completar datos", tone: "warning",
+      });
+      if (!confirmed) return;
+    }
     const mapsCoords = coordsFromMapsUrl(resolvedForm.google_maps_url);
     const payload = {
       ...resolvedForm,
@@ -3523,6 +3538,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
       punto_general: !!resolvedForm.punto_general,
       pais: canonicalCountry(resolvedForm.pais || form.pais || "España") || "España",
       provincia: String(resolvedForm.provincia || "").trim(),
+      allow_incomplete_location: missing.length > 0,
+      location_incomplete: missing.length > 0,
       google_maps_url: cleanMapsUrl(resolvedForm.google_maps_url),
       lat: resolvedForm.lat || mapsCoords?.lat || null,
       lng: resolvedForm.lng || mapsCoords?.lng || null,
@@ -3531,7 +3548,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     try {
       saved = payload.id ? await editarPuntoInteres(payload.id, payload) : await crearPuntoInteres(payload);
     } catch (e) {
-      notify("Punto guardado localmente, pero no se ha sincronizado con la base de datos: " + e.message, "warning");
+      saved = { ...payload, id: payload.id || `poi_${Date.now()}`, synced:false };
+      notify("Punto guardado solo en este navegador; no se sincronizó con la base de datos: " + e.message, "warning");
     }
     const next = savePuntoInteres(saved || payload);
     onSave?.(next, saved || payload);
@@ -4058,7 +4076,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
     setPoiDraft({
       ...newStop,
       nombre: newStop.cliente_nombre || texto,
-      direccion: newStop.direccion || texto,
+      direccion: newStop.direccion || "",
       tipo,
       cliente_id: form.cliente_id || "",
     });
@@ -7034,7 +7052,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       ...(clone ? {} : { id: point.id }),
       nombre: point.nombre || point.direccion || "",
       cif: point.cif || "",
-      direccion: point.direccion || point.nombre || "",
+      direccion: point.direccion || "",
       codigo_postal: point.codigo_postal || "",
       ciudad: point.ciudad || "",
       provincia: point.provincia || "",
@@ -7070,6 +7088,17 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       notify("El punto necesita nombre y direccion antes de poder seleccionarse.", "warning");
       return null;
     }
+    const missing = missingLocationFields(payload);
+    if (missing.length) {
+      const confirmed = await confirmDialog({
+        title: "Ubicación incompleta",
+        message: `Al asociar este punto faltan ${missing.join(", ")}. ¿Guardar la copia como incompleta?`,
+        confirmText: "Guardar incompleta", cancelText: "Cancelar", tone: "warning",
+      });
+      if (!confirmed) return null;
+      payload.allow_incomplete_location = true;
+      payload.location_incomplete = true;
+    }
 
     let saved = null;
     try {
@@ -7093,7 +7122,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       ...base,
       id: base.id || `poi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       nombre: (base.nombre || base.direccion || "").trim(),
-      direccion: (base.direccion || base.nombre || "").trim(),
+      direccion: String(base.direccion || "").trim(),
       cliente_id: targetClienteId,
       punto_general: false,
       es_general: false,
@@ -7109,8 +7138,18 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   }
 
   async function selectPoint(point) {
+    if (point?.location_incomplete) {
+      setEditing(point);
+      notify("Completa la ubicación antes de usar este punto en un viaje.", "warning");
+      return;
+    }
     const result = await ensurePointForClient(point);
     if (!result?.point) return;
+    if (result.point.location_incomplete) {
+      setEditing(result.point);
+      notify("Completa la ubicación antes de usar este punto en un viaje.", "warning");
+      return;
+    }
     onSelectPoint?.(result.point);
     if (result.changed) {
       notify(result.cloned ? "Punto copiado al cliente y seleccionado." : "Punto asociado al cliente y seleccionado.", "success");
@@ -7138,7 +7177,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     const text = pointSearch.trim();
     setEditing({
       nombre:text,
-      direccion:text,
+      direccion:"",
       tipo: modo || "ambos",
       pais:"España",
       cliente_id: clienteId || "",
@@ -7207,9 +7246,10 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                         {scope}
                       </span>
                     </div>
-                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || puntoLocationLabel(point) || "-"}</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || "Dirección pendiente"}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
+                      {point.location_incomplete && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#b45309"}}>Ubicación incompleta</span>}
                       {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a22)"}}>{puntoLocationLabel(point)}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
@@ -7217,7 +7257,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                     {onSelectPoint && (
-                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)",padding:"6px 10px"}}>Seleccionar</button>
+                      <button type="button" onClick={()=>selectPoint(point)} disabled={!!point.location_incomplete} title={point.location_incomplete ? "Completa la ubicación para usarla en un viaje" : ""} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)",padding:"6px 10px"}}>Seleccionar</button>
                     )}
                     <button type="button" onClick={()=>setEditing(point)} style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"6px 10px"}}>Editar</button>
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
@@ -7237,13 +7277,18 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
             setPuntos(next);
             onApply?.(next);
             setEditing(null);
-            if (onSelectPoint && saved && !editing?.id) {
+            if (onSelectPoint && saved && !saved.location_incomplete && !editing?.id) {
               const ensured = await ensurePointForClient({ ...saved, tipo: saved.tipo || modo || "ambos" });
               const normalized = ensured?.point || normalizePuntoInteresForForm({
                 ...saved,
                 cliente_id: saved.cliente_id || clienteId || "",
                 tipo: saved.tipo || modo || "ambos",
               });
+              if (normalized.location_incomplete) {
+                setEditing(normalized);
+                notify("Completa la ubicación antes de usar este punto en un viaje.", "warning");
+                return;
+              }
               onSelectPoint(normalized);
               notify("Punto guardado y seleccionado.", "success");
               onClose?.();

@@ -51,11 +51,26 @@ function parseStops(raw) {
   return [];
 }
 
+function fullStopAddress(stop = {}) {
+  const street = String(stop.direccion || stop.address || '').trim();
+  const postal = String(stop.codigo_postal || stop.cp || stop.postal_code || '').trim();
+  const city = String(stop.ciudad || stop.poblacion || stop.localidad || '').trim();
+  const province = String(stop.provincia || stop.region || '').trim();
+  const country = String(stop.pais || stop.country || '').trim();
+  if (!street && !city && !postal) return '';
+  const has = value => value && street.toLocaleLowerCase('es').includes(value.toLocaleLowerCase('es'));
+  const locality = [has(postal) ? '' : postal, has(city) ? '' : city].filter(Boolean).join(' ');
+  return [street, locality, province && province.toLocaleLowerCase('es') !== city.toLocaleLowerCase('es') && !has(province) ? province : '',
+    country && !has(country) ? country : ''].filter(Boolean).join(', ');
+}
+
 function firstStopInfo(stops = [], fallbackName = "") {
   const stop = Array.isArray(stops) ? stops[0] || {} : {};
   return {
     nombre: stop.nombre || stop.name || fallbackName || "",
-    direccion: stop.direccion || stop.address || stop.nombre || stop.name || fallbackName || "",
+    direccion: fullStopAddress(stop),
+    codigo_postal: stop.codigo_postal || stop.cp || '',
+    ciudad: stop.ciudad || stop.poblacion || '',
     cliente_nombre: stop.cliente_nombre || stop.clienteNombre || "",
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || "",
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || "",
@@ -74,7 +89,9 @@ function normalizeStopList(stops = [], fallback = {}) {
     confirmacion_chofer: stop.confirmacion_chofer || null,
     firma_parada: stop.firma_parada || null,
     nombre: stop.nombre || stop.name || stop.cliente_nombre || "",
-    direccion: stop.direccion || stop.address || stop.nombre || stop.name || "",
+    direccion: fullStopAddress(stop),
+    codigo_postal: stop.codigo_postal || stop.cp || '',
+    ciudad: stop.ciudad || stop.poblacion || '',
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || fallback.fecha || "",
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || fallback.hora || "",
     ventana: stop.ventana || fallback.ventana || "",
@@ -1043,7 +1060,9 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     origen: {
       nombre: carga.nombre || pedido?.origen || "",
       direccion: carga.direccion || pedido?.origen || "",
-      provincia: pedido?.origen_provincia || "",
+      codigo_postal: carga.codigo_postal || '',
+      ciudad: carga.ciudad || '',
+      provincia: pedido?.origen_provincia || carga.provincia || "",
       pais: origenPais,
       google_maps_url: carga.google_maps_url || "",
       referencia: carga.referencia || "",
@@ -1051,8 +1070,10 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     destino: {
       nombre: descarga.nombre || pedido?.destino || "",
       direccion: descarga.direccion || pedido?.destino || "",
+      codigo_postal: descarga.codigo_postal || '',
+      ciudad: descarga.ciudad || '',
       destinatario: descarga.cliente_nombre || pedido?.destino || "",
-      provincia: pedido?.destino_provincia || "",
+      provincia: pedido?.destino_provincia || descarga.provincia || "",
       pais: destinoPais,
       google_maps_url: descarga.google_maps_url || "",
       referencia: descarga.referencia || "",
@@ -2012,4 +2033,3 @@ module.exports = {
   verifyPublicVerificationCode,
   buildPublicUrl,
 };
-

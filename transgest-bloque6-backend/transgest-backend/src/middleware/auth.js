@@ -15,49 +15,61 @@ const PLAN_ALIAS = {
   mini: "lite",
   transgest_lite: "lite",
   transgest_mini: "lite",
-  basic: "basico",
-  basico: "basico",
+  basic: "profesional",
+  basico: "profesional",
   profesional: "profesional",
   professional: "profesional",
+  pro: "profesional",
+  transgest_pro: "profesional",
+  control: "profesional",
+  transgest_control: "profesional",
+  go: "lite",
+  transgest_go: "lite",
+  pro_intelligence: "enterprise",
+  transgest_pro_intelligence: "enterprise",
   enterprise: "enterprise",
 };
 
 const PLAN_FEATURES = {
   lite: {
     ai: false,
+    app_chofer: false,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
     gestion_rutas: true,
     contabilidad: false,
     taller: false,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   basico: {
     ai: false,
+    app_chofer: true,
     kpis_avanzados: false,
     here_routing: false,
     optimizacion_rutas: false,
     gestion_rutas: true,
     contabilidad: false,
     taller: false,
-    importacion: false,
+    importacion: true,
     objetivos: false,
   },
   profesional: {
     ai: false,
+    app_chofer: true,
     kpis_avanzados: true,
     here_routing: true,
     optimizacion_rutas: true,
     gestion_rutas: true,
     contabilidad: true,
     taller: true,
-    importacion: false,
-    objetivos: false,
+    importacion: true,
+    objetivos: true,
   },
   enterprise: {
     ai: true,
+    app_chofer: true,
     kpis_avanzados: true,
     here_routing: true,
     optimizacion_rutas: true,
@@ -71,19 +83,18 @@ const PLAN_FEATURES = {
 
 const PLAN_DISABLED_MODULES = {
   lite: new Set([
-    "dashboard", "control_tower", "agenda", "plan_diario", "gestion_trafico", "calculador_portes",
-    "palets", "colaboradores", "vehiculos", "choferes", "taller", "grupajes", "solicitudes",
-    "hojas_ruta", "nominas", "control_horario", "documentos", "facturacion",
-    "contabilidad", "informes", "excepciones", "objetivos", "ia", "rutas_recomendadas",
-    "rutas_recomendadas_chofer", "importacion", "actividad", "usuarios",
+    "control_tower", "calculador_portes", "palets", "taller", "grupajes",
+    "hojas_ruta", "nominas", "contabilidad", "informes", "excepciones",
+    "objetivos", "ia", "rutas_recomendadas", "rutas_recomendadas_chofer",
+    "actividad", "explotacion", "gastos_estructura", "app_chofer", "dashboard",
   ]),
   basico: new Set([
     "ia", "informes", "excepciones", "objetivos", "rutas_recomendadas", "rutas_recomendadas_chofer",
-    "taller", "contabilidad", "nominas", "explotacion", "gastos_estructura", "importacion",
+    "taller", "contabilidad", "nominas", "explotacion", "gastos_estructura",
     "actividad", "colaboradores",
   ]),
   profesional: new Set([
-    "ia", "objetivos", "importacion",
+    "ia",
   ]),
 };
 
@@ -106,6 +117,7 @@ const MODULE_IDS = [
   "hojas_ruta",
   "facturacion",
   "contabilidad",
+  "gastos_estructura",
   "nominas",
   "control_horario",
   "informes",
@@ -129,8 +141,8 @@ const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "conta
 const ROLE_PERMISSION_PRESETS = {
   gerente: { ver: MODULE_IDS, editar: MODULE_IDS },
   contable: {
-    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
-    editar: ["agenda","clientes","facturacion","contabilidad","nominas","control_horario","documentos","avisos","mi_cuenta"],
+    ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","informes","documentos","avisos","empresa","mi_cuenta"],
+    editar: ["agenda","clientes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","documentos","avisos","mi_cuenta"],
   },
   trafico: {
     ver: ["agenda","dashboard","pedidos","plan_diario","solicitudes","gestion_trafico","calculador_portes","clientes","rutas","grupajes","palets","colaboradores","vehiculos","choferes","taller","hojas_ruta","control_horario","documentos","avisos","mi_cuenta"],
@@ -257,12 +269,12 @@ function normalizePermissionsForRole(permisos, rol) {
 }
 
 function normalizePlan(plan) {
-  return PLAN_ALIAS[String(plan || "").trim().toLowerCase()] || "enterprise";
+  return PLAN_ALIAS[String(plan || "").trim().toLowerCase()] || "unknown";
 }
 
 function planHasFeature(plan, feature) {
   const normalized = normalizePlan(plan);
-  return Boolean((PLAN_FEATURES[normalized] || PLAN_FEATURES.enterprise)[feature]);
+  return Boolean(PLAN_FEATURES[normalized]?.[feature]);
 }
 
 function getSubscriptionState(empresa) {
@@ -585,10 +597,16 @@ function requireRole(...roles) {
 function requireModulePermission(modulo) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "No autenticado" });
+    if (modulo === "empresa" && /^\/gastos-estructura(?:\/|$)/.test(String(req.path || ""))) {
+      return requireModulePermission("gastos_estructura")(req, res, next);
+    }
     if (!companyProducts.moduleAvailable(req.user.productos, modulo)) {
       return res.status(403).json({error:"Este módulo no está incluido en los productos habilitados para tu empresa.",modulo,code:"PRODUCT_NOT_ENABLED"});
     }
     const plan = normalizePlan(req.user?.plan || req.suscripcion?.plan);
+    if (plan === "unknown") {
+      return res.status(403).json({ error: "Plan de empresa no reconocido. Contacta con soporte.", code: "UNKNOWN_PLAN", modulo });
+    }
     if (PLAN_DISABLED_MODULES[plan]?.has(modulo)) {
       return res.status(403).json({
         error: "Tu plan actual no incluye este modulo.",
@@ -610,6 +628,7 @@ function requireModulePermission(modulo) {
       return next();
     }
     if (modulo === "pedidos" && req.user.rol === "chofer" && isChoferPedidosOperationalPath(req)) {
+      if (PLAN_DISABLED_MODULES[plan]?.has("app_chofer")) return res.status(403).json({error:"Tu plan actual no incluye la app del chófer.",modulo:"app_chofer",plan,upgrade_required:true});
       const operation = ['GET','HEAD'].includes(String(req.method || 'GET').toUpperCase()) ? 'ver' : 'editar';
       if (reglas.app_chofer?.[operation] !== true) return res.status(403).json({error:'Permiso denegado para la app del chofer',modulo:'app_chofer',tipo:operation});
       return next();

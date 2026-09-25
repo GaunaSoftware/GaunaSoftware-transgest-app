@@ -14,6 +14,9 @@ function buildFacturaPdfBuffer(factura = {}, lineas = [], empresa = {}) {
     const date = value => value ? new Date(value).toLocaleDateString('es-ES', { timeZone: 'Europe/Madrid' }) : '';
     doc.on('pageAdded', () => {
       page++;
+      if (empresa.factura_plantilla?.imagen_base64) {
+        doc.image(Buffer.from(empresa.factura_plantilla.imagen_base64,'base64'),0,0,{width:doc.page.width,height:doc.page.height});
+      }
       doc.font('Helvetica-Bold').fontSize(10).fillColor('#374151');
       doc.text(page === 1 ? 'FACTURA' : 'FACTURA / CONTINUACION', 48, 40, { width: 390 });
       doc.text(String(page), 498, 40, { width: 49, align: 'right' });

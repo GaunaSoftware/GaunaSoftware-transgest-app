@@ -67,7 +67,7 @@ function extractProviderUuid(response = {}) {
     || null;
 }
 
-const PLAN_PRICES = { lite: 49, basico: 99, profesional: 199, enterprise: 399 };
+const { MONTHLY_EUR, normalizeOrigin, priceFor, monthlyEquivalent } = require('../services/commercialPricing');
 const API_PROVIDERS = ["here", "ors", "anthropic", "openai", "ai_generic", "locatel", "tacogest", "movildata", "gps_generic"];
 const GPS_PROVIDERS = ["locatel", "tacogest", "movildata", "gps_generic"];
 const APP_META_DEFAULTS = {
@@ -537,9 +537,8 @@ async function buildIntegracionesSalud() {
   };
 }
 
-function monthlyPlanValue(plan, ciclo = "mensual") {
-  const base = PLAN_PRICES[plan] || 0;
-  return ciclo === "anual" ? (base * 12 * 0.85) / 12 : base;
+function monthlyPlanValue(plan, ciclo = "mensual", origenComercial = "directa") {
+  return monthlyEquivalent(plan, ciclo, origenComercial) || 0;
 }
 
 function htmlEscape(value) {
@@ -739,17 +738,26 @@ function billingEmailForEmpresa(empresa = {}) {
 async function createBillingCheckoutForEmpresa(empresa, userId = null) {
   const plan = empresa.plan || "profesional";
   const ciclo = empresa.ciclo_facturacion || "mensual";
-  const priceId = stripe.planPriceId(plan, ciclo);
+  if (!empresa.origen_comercial && ['lite','profesional','enterprise'].includes(plan)) {
+    const err = new Error('Clasifica el origen comercial de la empresa antes de generar un enlace de pago.');
+    err.code = 'commercial_origin_required';
+    throw err;
+  }
+  const origin = normalizeOrigin(empresa.origen_comercial);
+  const priceId = stripe.planPriceId(plan, ciclo, origin);
   if (!stripe.configured() || !priceId) {
     const missing = [
       !stripe.configured() ? "STRIPE_SECRET_KEY" : null,
-      !priceId ? `STRIPE_PRICE_${String(plan).toUpperCase()}_${String(ciclo).toUpperCase()}` : null,
+      !priceId ? `STRIPE_PRICE_${String(plan).toUpperCase()}_${String(ciclo).toUpperCase()}_${origin.toUpperCase()}` : null,
     ].filter(Boolean);
     const err = new Error("Stripe no esta configurado para este plan/ciclo");
     err.code = "stripe_not_configured";
     err.missing = missing;
     throw err;
   }
+
+  const expectedPrice = priceFor(plan, ciclo, origin);
+  if (expectedPrice !== null) await stripe.assertCatalogPrice(priceId, expectedPrice, ciclo);
 
   let customerId = empresa.stripe_customer_id;
   if (!customerId) {
@@ -1122,6 +1130,10 @@ router.get("/empresas", superAuth, async (req, res) => {
   res.json(rows);
 });
 
+router.get('/tarifas-comerciales', superAuth, (req, res) => {
+  res.json({ monthly_eur: MONTHLY_EUR, annual_discount_pct: 15, integration_eur: { lite:1500, profesional:1500, enterprise:0 }, ai_included_monthly:1000, ai_extra_block:{ queries:500, eur:49 }, storage_extra_block:{ gb:100, eur_monthly:39 } });
+});
+
 // ── POST /superadmin/empresas — Crear empresa manualmente ────────────────
 async function refreshEmpresaCalendarioLaboral(empresaId, year, ccaa, actorEmail = "") {
   let fetched;
@@ -1220,6 +1232,7 @@ router.post("/empresas", superAuth, async (req, res) => {
     email_admin,
     nombre_admin,
     plan = "profesional",
+    origen_comercial,
     fecha_vencimiento,
     ciclo_facturacion = "mensual",
     metodo_pago = "pendiente",
@@ -1229,7 +1242,8 @@ router.post("/empresas", superAuth, async (req, res) => {
   if (!nombre_empresa || !email_admin || !nombre_admin) {
     return res.status(400).json({ error: "Nombre empresa, email admin y nombre admin son obligatorios" });
   }
-  if (!["lite","basico","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({error:"Plan no válido"});
+  if (!["lite","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({error:"Plan no válido"});
+  if (!['directa','canal'].includes(origen_comercial)) return res.status(400).json({error:'Origen comercial no válido'});
   try {
     const dominio = nombre_empresa.toLowerCase()
       .normalize("NFD").replace(/[̀-ͯ]/g, "")
@@ -1238,10 +1252,10 @@ router.post("/empresas", superAuth, async (req, res) => {
 
     const result = await db.transaction(async (client) => {
       const empresaRes = await client.query(`
-        INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, fecha_vencimiento, ciclo_facturacion, metodo_pago, iban_facturacion, email_facturacion)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id, nombre, dominio
+        INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, fecha_vencimiento, ciclo_facturacion, metodo_pago, iban_facturacion, email_facturacion, origen_comercial)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, nombre, dominio
       `, [nombre_empresa, cif||null, email_admin, dominio, plan, 0, 0,
-          fecha_vencimiento || null, ciclo_facturacion, normalizeBillingMethod(metodo_pago), iban_facturacion || null, email_facturacion || email_admin]);
+          fecha_vencimiento || null, ciclo_facturacion, normalizeBillingMethod(metodo_pago), iban_facturacion || null, email_facturacion || email_admin, origen_comercial]);
 
       const empresa = empresaRes.rows[0];
       const tempHash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
@@ -1269,7 +1283,7 @@ router.post("/empresas", superAuth, async (req, res) => {
       empresa_id: result.empresa.id,
       force_platform: true,
     }).catch(e => ({ error: e.message }));
-    await audit(req, "empresa.creada", { nombre_empresa, email_admin, plan }, result.empresa.id);
+    await audit(req, "empresa.creada", { nombre_empresa, email_admin, plan, origen_comercial }, result.empresa.id);
 
     res.status(201).json({
       ok: true,
@@ -1408,6 +1422,7 @@ router.post("/empresas/demo", superAuth, async (req, res) => {
 router.patch("/empresas/:id", superAuth, async (req, res) => {
   const {
     plan,
+    origen_comercial,
     estado,
     fecha_vencimiento,
     ciclo_facturacion,
@@ -1424,8 +1439,12 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
   const updates = [], params = [];
   let i = 1;
   if (plan !== undefined) {
-    if (!["lite","basico","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
+    if (!["lite","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
     updates.push(`plan=$${i++}`); params.push(plan);
+  }
+  if (origen_comercial !== undefined) {
+    if (!['directa','canal'].includes(origen_comercial)) return res.status(400).json({ error:'Origen comercial no válido' });
+    updates.push(`origen_comercial=$${i++}`); params.push(origen_comercial);
   }
   if (estado !== undefined) {
     if (!["activo","suspendido","cancelado"].includes(estado)) return res.status(400).json({ error: "Estado no válido" });
@@ -1587,6 +1606,8 @@ router.post("/empresas/:id/billing/checkout", superAuth, async (req, res) => {
     await audit(req, "empresa.billing_checkout", { metodo_pago: empresa.metodo_pago || "auto" }, empresa.id);
     res.json({ ok: true, url: session.url });
   } catch (err) {
+    if (err.code === 'commercial_origin_required') return res.status(409).json({ error: err.message });
+    if (err.code === 'stripe_price_mismatch') return res.status(422).json({ error: err.message });
     if (err.code === "stripe_not_configured") {
       return res.status(503).json({ error: err.message, faltan: err.missing || [] });
     }
@@ -1599,8 +1620,12 @@ router.post("/empresas/:id/billing/recordatorio", superAuth, async (req, res) =>
   const empresa = rows[0];
   if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
   let checkoutUrl = "";
-  if (stripe.configured() && stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion)) {
-    checkoutUrl = (await createBillingCheckoutForEmpresa(empresa, req.superadmin.id || null).catch(() => null))?.url || "";
+  if (['lite','profesional','enterprise'].includes(empresa.plan) && !empresa.origen_comercial) {
+    return res.status(409).json({ error: 'Clasifica el origen comercial antes de enviar un recordatorio de pago.' });
+  }
+  if (stripe.configured() && stripe.planPriceId(empresa.plan, empresa.ciclo_facturacion, empresa.origen_comercial)) {
+    try { checkoutUrl = (await createBillingCheckoutForEmpresa(empresa, req.superadmin.id || null))?.url || ""; }
+    catch(error) { return res.status(error.code === 'stripe_price_mismatch' ? 422 : 502).json({ error: `No se envió el recordatorio: ${error.message}` }); }
   }
   try {
     const mail = await sendBillingReminder(empresa, req.body?.tipo || "auto", checkoutUrl);
@@ -1613,26 +1638,14 @@ router.post("/empresas/:id/billing/recordatorio", superAuth, async (req, res) =>
 
 // ── GET /superadmin/stats — Métricas globales ─────────────────────────────
 router.get("/stripe/status", superAuth, async (req, res) => {
+  const statusFor = origin => Object.fromEntries(['lite','profesional','enterprise'].map(plan => [plan,{
+    mensual:Boolean(stripe.planPriceId(plan,'mensual',origin)),
+    anual:Boolean(stripe.planPriceId(plan,'anual',origin)),
+  }]));
   res.json({
     configured: stripe.configured(),
-    prices: {
-      lite: {
-        mensual: Boolean(stripe.planPriceId("lite", "mensual")),
-        anual: Boolean(stripe.planPriceId("lite", "anual")),
-      },
-      basico: {
-        mensual: Boolean(stripe.planPriceId("basico", "mensual")),
-        anual: Boolean(stripe.planPriceId("basico", "anual")),
-      },
-      profesional: {
-        mensual: Boolean(stripe.planPriceId("profesional", "mensual")),
-        anual: Boolean(stripe.planPriceId("profesional", "anual")),
-      },
-      enterprise: {
-        mensual: Boolean(stripe.planPriceId("enterprise", "mensual")),
-        anual: Boolean(stripe.planPriceId("enterprise", "anual")),
-      },
-    },
+    prices: statusFor('directa'),
+    prices_by_origin:{directa:statusFor('directa'),canal:statusFor('canal')},
   });
 });
 
@@ -1794,11 +1807,12 @@ router.get("/stats", superAuth, async (req, res) => {
     db.query("SELECT COUNT(*) FROM pedidos WHERE fecha_pedido >= NOW()-INTERVAL '30 days'"),
     db.query("SELECT COALESCE(SUM(importe),0) AS total FROM facturas_suscripcion WHERE fecha_emision >= date_trunc('month', CURRENT_DATE)").catch(() => ({ rows: [{ total: 0 }] })),
     db.query("SELECT COALESCE(SUM(importe),0) AS total FROM facturas_suscripcion WHERE estado IN ('pendiente','vencida')").catch(() => ({ rows: [{ total: 0 }] })),
-    db.query("SELECT plan, ciclo_facturacion FROM empresas WHERE estado='activo'"),
+    db.query("SELECT plan, ciclo_facturacion, origen_comercial FROM empresas WHERE estado='activo'"),
   ]);
-  const mrr = empresasPlanes.rows.reduce((sum, e) => sum + monthlyPlanValue(e.plan, e.ciclo_facturacion), 0);
+  const mrr = empresasPlanes.rows.reduce((sum, e) => sum + (e.origen_comercial ? monthlyPlanValue(e.plan, e.ciclo_facturacion, e.origen_comercial) : 0), 0);
   res.json({
     empresas_activas: parseInt(empresas.rows[0].count),
+    empresas_sin_origen_comercial: empresasPlanes.rows.filter(e => !e.origen_comercial && ['lite','profesional','enterprise'].includes(e.plan)).length,
     usuarios_total:   parseInt(usuarios.rows[0].count),
     pedidos_mes:      parseInt(pedidos.rows[0].count),
     mrr_estimado:     mrr,

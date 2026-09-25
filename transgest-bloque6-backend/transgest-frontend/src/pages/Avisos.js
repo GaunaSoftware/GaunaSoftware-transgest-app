@@ -1,4 +1,5 @@
 import "./workspace/workspace.css";
+import "./Avisos.css";
 import { useState, useEffect, useMemo } from "react";
 import { getTodosLosDocs, getVehiculos, getChoferes, getNotificaciones, marcarNotificacionLeida, marcarTodasNotificacionesLeidas, getTallerEstado, getEmpresaConfig, setConfigAlertas } from "../services/api";
 import { confirmDialog } from "../services/notify";
@@ -8,13 +9,19 @@ import { normalizePlatformDocuments } from "../components/PlatformDocumentsEdito
 // ── Semáforo ─────────────────────────────────────────────────────────────
 function semaforo(fecha) {
   if (!fecha) return { color:"var(--text4)", label:"Sin fecha", dias:null, nivel:6, bg:"rgba(61,79,114,.1)" };
-  const dias = Math.ceil((new Date(fecha) - new Date()) / 86400000);
+  const key = String(fecha).slice(0,10);
+  const target = new Date(`${key}T12:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || Number.isNaN(target.getTime())) return {color:"var(--text4)",label:"Fecha inválida",dias:null,nivel:6,bg:"rgba(61,79,114,.1)"};
+  const now = new Date();
+  const today = new Date(now.getFullYear(),now.getMonth(),now.getDate(),12);
+  const dias = Math.round((target-today)/86400000);
   if (dias > 216) return { color:"var(--green)", label:`${dias} días`, dias, nivel:6, bg:"rgba(34,211,160,.10)", texto:"En plazo" };
   if (dias > 90)  return { color:"var(--green)", label:`${dias} días`, dias, nivel:5, bg:"rgba(34,211,160,.10)", texto:"En plazo" };
   if (dias > 60)  return { color:"#84cc16", label:`${dias} días`, dias, nivel:4, bg:"rgba(132,204,22,.10)", texto:"Atención próxima" };
   if (dias > 30)  return { color:"#fbbf24", label:`${dias} días`, dias, nivel:3, bg:"rgba(251,191,36,.12)", texto:"Renovar pronto" };
   if (dias > 7)   return { color:"#fb8c3a", label:`${dias} días`, dias, nivel:2, bg:"rgba(251,140,58,.14)", texto:"Renovar urgente" };
   if (dias > 0)   return { color:"#f05252", label:`${dias} días`, dias, nivel:1, bg:"rgba(240,82,82,.16)", texto:"Crítico" };
+  if (dias === 0) return { color:"#f05252", label:"Hoy", dias, nivel:1, bg:"rgba(240,82,82,.16)", texto:"Vence hoy" };
   return { color:"#f05252", label:"CADUCADO", dias, nivel:0, bg:"rgba(240,82,82,.20)", texto:"Caducado", caducado:true };
 }
 
@@ -24,13 +31,14 @@ const LEYENDA = [
   { color:"#fbbf24", rango:"31–60 días", texto:"Renovar pronto" },
   { color:"#fb8c3a", rango:"8–30 días",  texto:"Renovar urgente" },
   { color:"#f05252", rango:"1–7 días",   texto:"Crítico" },
+  { color:"#f05252", rango:"Hoy",   texto:"Vence hoy" },
   { color:"#f05252", rango:"Caducado",   texto:"Caducado", bold:true },
 ];
 
 const S = {
   page: {flex:1, padding:"24px 28px"},
   title:{fontFamily:"'Syne',sans-serif",fontSize:22,fontWeight:800,marginBottom:4,color:"var(--text)"},
-  card: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8,overflow:"hidden"},
+  card: {background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:12,overflowX:"auto"},
   th:   {textAlign:"left",padding:"9px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text4)",borderBottom:"1px solid var(--border)",background:"var(--bg3)",whiteSpace:"nowrap"},
   td:   {padding:"10px 14px",borderBottom:"1px solid var(--border)",fontSize:13,color:"var(--text)",verticalAlign:"middle"},
   btn:  {padding:"6px 14px",borderRadius:7,border:"1px solid",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"},
@@ -130,16 +138,20 @@ export default function Avisos() {
   const [editAv,    setEditAv]    = useState(null);
   const [notificaciones, setNotificaciones] = useState([]);
   const [noLeidas, setNoLeidas] = useState(0);
+  const [loadErrors,setLoadErrors] = useState([]);
+  const [notificationError,setNotificationError] = useState('');
 
   const TIPOS_MANT = ["Cambio aceite","Cambio filtros","Cambio neumáticos","Revisión frenos","Cambio correa distribución","Revisión tacógrafo","Mantenimiento preventivo","Revisión ITV","Otro"];
 
   useEffect(() => {
+    const failed=[];
+    const unavailable=(name,fallback)=>{failed.push(name);return fallback;};
     Promise.all([
-      getTodosLosDocs().catch(()=>[]),
-      getVehiculos().catch(()=>[]),
-      getChoferes().catch(()=>[]),
-      getTallerEstado().catch(()=>null),
-      getEmpresaConfig().catch(()=>null),
+      getTodosLosDocs().catch(()=>unavailable('Documentos',[])),
+      getVehiculos().catch(()=>unavailable('Vehículos',[])),
+      getChoferes().catch(()=>unavailable('Conductores',[])),
+      getTallerEstado().catch(()=>unavailable('Taller',null)),
+      getEmpresaConfig().catch(()=>unavailable('Configuración',null)),
       cargarNotificaciones(),
     ])
       .then(([docsData, vehiculosData, choferesData, tallerData, empresaCfg]) => {
@@ -148,6 +160,7 @@ export default function Avisos() {
         setChoferes(Array.isArray(choferesData) ? choferesData : []);
         setTallerEstado(tallerData && typeof tallerData === "object" ? tallerData : { reparaciones: [] });
         setAvisosCfg(Array.isArray(empresaCfg?.cfg_alertas) ? empresaCfg.cfg_alertas : []);
+        setLoadErrors(failed);
       })
       .finally(()=>setLoading(false));
   }, []);
@@ -155,11 +168,13 @@ export default function Avisos() {
   function cargarNotificaciones() {
     return getNotificaciones(80)
       .then(d => {
+        setNotificationError('');
         const pendientes = dedupeNotificaciones(Array.isArray(d?.data) ? d.data.filter(n => !n?.leida) : []);
         setNotificaciones(pendientes);
         setNoLeidas(Number(d?.no_leidas || 0));
       })
-      .catch(() => {
+      .catch((error) => {
+        setNotificationError(error.message || 'No se pudieron cargar los avisos internos.');
         setNotificaciones([]);
         setNoLeidas(0);
       });
@@ -248,7 +263,7 @@ export default function Avisos() {
     vehiculos.forEach(v => {
     const vMerged = { ...v };
     avisosCfg.forEach(cfg => {
-      if (!cfg.activo) return;
+      if (cfg.activo === false || !cfg.tipo_mantenimiento) return;
       const ultimas = reps.filter(r=>r.vehiculo_id===v.id&&(r.tipo===cfg.tipo_mantenimiento||r.tipo?.includes(cfg.tipo_mantenimiento))).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
       const ult = ultimas[0];
       if (!ult) return;
@@ -327,6 +342,7 @@ export default function Avisos() {
       if (filtro==="duplicados") return Number(d.historial_oculto || 0) > 0;
       if (filtro==="vehiculos") return !!d.vehiculo_matricula;
       if (filtro==="choferes") return !!d.chofer_nombre;
+      if (filtro==="plataformas") return d.origen === 'plataforma';
       return true;
     })
     .filter(d => {
@@ -378,19 +394,19 @@ export default function Avisos() {
 
   return (
     <div className="tg-responsive-page modern-workspace notices-workspace" style={S.page}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-        <div style={S.title}>Avisos y vencimientos</div>
+      <div className="notices-heading">
+        <div><div style={S.title}>Avisos y vencimientos</div><p>Documentación de vehículos, conductores y plataformas; mantenimiento y avisos internos.</p></div>
         {tab === "documentos" && (
           <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
             <button onClick={verInformeCaducidades} style={{...S.btn,borderColor:"var(--border2)",background:"var(--bg4)",color:"var(--text2)"}}>Ver informe</button>
-            <button onClick={exportarInformeCsv} style={{...S.btn,borderColor:"rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",color:"var(--green)"}}>Exportar Excel</button>
+            <button onClick={exportarInformeCsv} style={{...S.btn,borderColor:"rgba(16,185,129,.35)",background:"rgba(16,185,129,.12)",color:"var(--green)"}}>Exportar CSV</button>
           </div>
         )}
       </div>
       {/* Main tabs */}
-      <div style={{display:"flex",gap:0,borderBottom:"1px solid var(--border)",marginBottom:18}}>
+      <div className="notices-tabs" role="tablist" aria-label="Secciones de avisos">
         {[["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configurar avisos"]].map(([id,l])=>(
-          <button key={id} onClick={()=>setTab(id)}
+          <button key={id} role="tab" aria-selected={tab===id} onClick={()=>setTab(id)}
             style={{padding:"7px 16px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent-l)":"transparent"}`,
                     background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer",
                     color:tab===id?"var(--accent-xl)":"var(--text4)"}}>
@@ -398,6 +414,8 @@ export default function Avisos() {
           </button>
         ))}
       </div>
+      {!!loadErrors.length && <div className="notices-error" role="alert">No se pudieron consultar: {loadErrors.join(', ')}. Los resultados pueden estar incompletos.</div>}
+      {tab === 'internos' && notificationError && <div className="notices-error" role="alert">{notificationError} Pulsa Actualizar para reintentar.</div>}
 
       {tab==="internos" && (
         <div>
@@ -413,12 +431,12 @@ export default function Avisos() {
               </button>
             </div>
           </div>
-          {notificaciones.length===0 ? (
+          {!notificationError && notificaciones.length===0 ? (
             <div style={{textAlign:"center",padding:50,background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:12}}>
               <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:6}}>Sin avisos internos</div>
               <div style={{color:"var(--text4)",fontSize:12}}>Cuando se te asigne una excepcion o tarea critica aparecera aqui.</div>
             </div>
-          ) : (
+          ) : !notificationError ? (
             <div style={{display:"grid",gap:10}}>
               {notificaciones.map(n => (
                 <div key={n.id} style={{background:n.leida?"var(--bg2)":"rgba(34,211,160,.08)",border:`1px solid ${n.leida?"var(--border)":"rgba(34,211,160,.28)"}`,borderRadius:10,padding:"13px 14px",display:"grid",gridTemplateColumns:"1fr auto",gap:12,alignItems:"start"}}>
@@ -452,7 +470,7 @@ export default function Avisos() {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
@@ -466,11 +484,11 @@ export default function Avisos() {
           {l:"Incompletos",  v:sinFecha,  c:"#94a3b8", bg:"rgba(148,163,184,.10)"},
           {l:"En plazo",     v:enPlazo,   c:"var(--green)", bg:"rgba(34,211,160,.10)"},
         ].map((k,i)=>(
-          <div key={i} style={{background:k.bg,border:`1px solid ${k.c}30`,borderRadius:12,padding:"14px 16px",cursor:"pointer"}}
+          <button key={i} type="button" style={{background:k.bg,border:`1px solid ${k.c}30`,borderRadius:12,padding:"14px 16px",cursor:"pointer",textAlign:'left'}}
             onClick={()=>setFiltro(i===0||i===1?"criticos":i===3?"incompletos":"todos")}>
             <div style={{fontFamily:"'Syne',sans-serif",fontSize:26,fontWeight:800,color:k.c,lineHeight:1}}>{k.v}</div>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:k.c,opacity:.7,marginTop:4}}>{k.l}</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -499,7 +517,7 @@ export default function Avisos() {
 
       {/* Filtros */}
       <div style={{display:"flex",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}}>
-        {[["todos","Todos"],["criticos","Solo críticos y caducados"],["vehiculos","Vehículos"],["choferes","Choferes"]].map(([v,l])=>(
+        {[["todos","Todos"],["criticos","Solo críticos y caducados"],["vehiculos","Vehículos"],["choferes","Choferes"],["plataformas","Plataformas"]].map(([v,l])=>(
           <button key={v} onClick={()=>setFiltro(v)}
             style={{...S.btn,
                     borderColor:filtro===v?"var(--accent)":"var(--border2)",
@@ -528,8 +546,8 @@ export default function Avisos() {
         <div style={{textAlign:"center",color:"var(--text4)",padding:60}}>Cargando avisos...</div>
       ) : filtrados.length===0 ? (
         <div style={{textAlign:"center",padding:60,background:"var(--card-bg, var(--bg2))",border:"1px solid var(--border)",borderRadius:8}}>
-          <div style={{color:"var(--green)",fontWeight:700,fontSize:15}}>Sin avisos para este filtro</div>
-          <div style={{color:"var(--text4)",fontSize:12,marginTop:6}}>Toda la documentación está en plazo</div>
+          <div style={{color:"var(--text)",fontWeight:700,fontSize:15}}>Sin documentos para este filtro</div>
+          <div style={{color:"var(--text4)",fontSize:12,marginTop:6}}>{loadErrors.length ? 'Reintenta la consulta: parte de los datos no está disponible.' : 'Prueba otro filtro o revisa si faltan documentos por registrar.'}</div>
         </div>
       ) : (
         <div style={S.card}>
@@ -543,7 +561,7 @@ export default function Avisos() {
                   <td style={{...S.td,fontWeight:600,fontSize:12}}>
                     {d.vehiculo_matricula
                       ? <span>{d.vehiculo_matricula}</span>
-                      : <span>{d.chofer_nombre}</span>}
+                      : <span>{d.chofer_nombre || d.entidad_nombre || 'Plataforma'}</span>}
                   </td>
                   <td style={{...S.td,fontSize:12}}>
                     {d.tipo_doc}

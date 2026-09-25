@@ -121,8 +121,8 @@ const PERMISOS = {
     editar: ["todo"],
   },
   contable: {
-    ver:    ["dashboard","agenda","clientes","vehiculos","choferes","facturacion","contabilidad","nominas","pedidos","documentos","informes","actividad","empresa"],
-    editar: ["clientes","facturacion","contabilidad","nominas","documentos"],
+    ver:    ["dashboard","agenda","clientes","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","pedidos","documentos","informes","actividad","empresa"],
+    editar: ["clientes","facturacion","contabilidad","gastos_estructura","nominas","documentos"],
   },
   trafico: {
     ver:    ["dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],

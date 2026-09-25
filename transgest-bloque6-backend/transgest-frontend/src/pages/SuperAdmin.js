@@ -82,8 +82,8 @@ async function saFetch(path, opts={}){
 
 const PLAN_COLOR   = {planner:"#008f82",pro_planner:"#0e7490",lite:"#0f766e",basico:"#6b7280",profesional:"#3b82f6",enterprise:"#8b5cf6"};
 const ESTADO_COLOR = {activo:"#10b981",suspendido:"#f59e0b",cancelado:"#ef4444"};
-const PLANES_OPTS  = ["lite","basico","profesional","enterprise","planner","pro_planner"];
-const PLAN_PRICES  = {lite:49,basico:99,profesional:199,enterprise:399};
+const PLANES_OPTS  = ["lite","profesional","enterprise","planner","pro_planner"];
+const PLAN_PRICES  = {directa:{lite:169,profesional:349,enterprise:479},canal:{lite:259,profesional:539,enterprise:959}};
 const ACCOUNTING_MAPPING_ITEM_LABELS = {
   chart_of_accounts:"Plan contable",
   parties:"Terceros",
@@ -101,8 +101,8 @@ const normalizeAccountingMappingItems = value => ({
   ...(value && typeof value === "object" ? value : {}),
 });
 const countAccountingMappingItems = value => Object.values(normalizeAccountingMappingItems(value)).filter(Boolean).length;
-const monthlyPlanValue = (plan, ciclo="mensual") => {
-  const base = PLAN_PRICES[plan] || 0;
+const monthlyPlanValue = (plan, ciclo="mensual", origin="directa") => {
+  const base = PLAN_PRICES[origin === "canal" ? "canal" : "directa"][plan] || 0;
   return ciclo === "anual" ? (base * 12 * 0.85) / 12 : base;
 };
 
@@ -176,11 +176,14 @@ function LoginSA({ onLogin }){
 
 // Section
 function ModalNuevaEmpresa({ onClose, onCreada }){
-  const [form,setForm]=useState({nombre_empresa:"",cif:"",nombre_admin:"",email_admin:"",plan:"profesional",ciclo_facturacion:"mensual",fecha_vencimiento:"",metodo_pago:"pendiente",email_facturacion:"",iban_facturacion:""});
+  const [form,setForm]=useState({nombre_empresa:"",cif:"",nombre_admin:"",email_admin:"",plan:"profesional",origen_comercial:"",ciclo_facturacion:"mensual",fecha_vencimiento:"",metodo_pago:"pendiente",email_facturacion:"",iban_facturacion:""});
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
   async function crear(){
     if(!form.nombre_empresa||!form.email_admin||!form.nombre_admin){setErr("Rellena todos los campos obligatorios");return;}
+    if(!form.origen_comercial){setErr("Selecciona si la venta es Directa o de Canal");return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_admin)){setErr("Indica un correo válido para el gerente");return;}
+    if(form.email_facturacion && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_facturacion)){setErr("Indica un correo de facturación válido");return;}
     setLoading(true); setErr("");
     try{
       const res = await saFetch("/empresas",{method:"POST",body:form});
@@ -196,11 +199,12 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
   const lbl={display:"block",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",color:"#64748b",marginBottom:3,marginTop:12};
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:14,padding:24,width:"min(500px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
+      <div className="sa-company-modal" role="dialog" aria-modal="true" aria-label="Nueva empresa" style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:14,padding:24,width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#e2e8f0",marginBottom:4}}>Nueva empresa</div>
-        <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>Se creara el espacio de datos y se enviara una invitacion al gerente valida durante 72 horas.</div>
+        <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Configura la empresa y su plan. Al crearla se enviará una invitación al gerente válida durante 72 horas. No se emitirá ningún cobro automático.</div>
         {err&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,padding:"9px 12px",color:"#fca5a5",fontSize:13,marginBottom:12}}>{err}</div>}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+        <div className="sa-company-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+          <h3 className="sa-company-section">1. Empresa y producto</h3>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa *</label><input style={inp} value={form.nombre_empresa} onChange={f("nombre_empresa")} placeholder="Transportes Garcia S.L."/></div>
           <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={f("cif")} placeholder="B12345678"/></div>
           <div><label style={lbl}>Plan</label>
@@ -208,12 +212,20 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
               {PLANES_OPTS.map(p=><option key={p} value={p}>{getBrandDisplayName(p)}</option>)}
             </select>
           </div>
+          <div><label style={lbl}>Origen comercial *</label><select style={inp} value={form.origen_comercial} onChange={f("origen_comercial")}><option value="">Selecciona el origen</option><option value="directa">Directa</option><option value="canal">Canal</option></select></div>
           <div><label style={lbl}>Facturacion</label>
             <select style={inp} value={form.ciclo_facturacion} onChange={f("ciclo_facturacion")}>
               <option value="mensual">Mensual</option>
               <option value="anual">Anual (-15%)</option>
             </select>
           </div>
+          <div style={{gridColumn:"1/-1",padding:"10px 12px",marginTop:12,border:"1px solid #284357",borderRadius:8,color:"#e2e8f0",fontSize:12}}>
+            {!form.origen_comercial ? 'Selecciona el origen comercial para ver la tarifa.' : PLAN_PRICES[form.origen_comercial]?.[form.plan] ? <><strong>{form.ciclo_facturacion === "anual" ? `${(monthlyPlanValue(form.plan,"anual",form.origen_comercial)*12).toLocaleString("es-ES",{style:"currency",currency:"EUR"})} / año` : `${monthlyPlanValue(form.plan,"mensual",form.origen_comercial).toLocaleString("es-ES",{style:"currency",currency:"EUR"})} / mes`}</strong><span style={{display:"block",color:"#94a3b8"}}>Sin IVA · usuarios y vehículos ilimitados · integración {form.plan === "enterprise" ? "incluida" : "1.500 € + IVA"}</span></> : "Tarifa de Planner pendiente de configurar"}
+          </div>
+          <h3 className="sa-company-section">2. Contacto y acceso</h3>
+          <div><label style={lbl}>Nombre del gerente *</label><input style={inp} value={form.nombre_admin} onChange={f("nombre_admin")} placeholder="Carlos Garcia"/></div>
+          <div><label style={lbl}>Correo del gerente *</label><input type="email" style={inp} value={form.email_admin} onChange={f("email_admin")} placeholder="carlos@empresa.com"/></div>
+          <h3 className="sa-company-section">3. Facturación y vigencia</h3>
           <div><label style={lbl}>Metodo de pago</label>
             <select style={inp} value={form.metodo_pago} onChange={f("metodo_pago")}>
               <option value="pendiente">Pendiente</option>
@@ -222,11 +234,6 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
               <option value="transferencia">Transferencia</option>
             </select>
           </div>
-          <div style={{gridColumn:"1/-1",borderTop:"1px solid #1c2740",paddingTop:4,marginTop:8}}>
-            <label style={{...lbl,color:"#94a3b8"}}>Administrador (rol gerente)</label>
-          </div>
-          <div><label style={lbl}>Nombre *</label><input style={inp} value={form.nombre_admin} onChange={f("nombre_admin")} placeholder="Carlos Garcia"/></div>
-          <div><label style={lbl}>Email *</label><input type="email" style={inp} value={form.email_admin} onChange={f("email_admin")} placeholder="carlos@empresa.com"/></div>
           <div><label style={lbl}>Email facturacion</label><input type="email" style={inp} value={form.email_facturacion} onChange={f("email_facturacion")} placeholder="facturas@empresa.com"/></div>
           <div><label style={lbl}>IBAN domiciliacion</label><input style={inp} value={form.iban_facturacion} onChange={f("iban_facturacion")} placeholder="ES00..."/></div>
           <div><label style={lbl}>Vencimiento (vacio=sin limite)</label><input type="date" style={inp} value={form.fecha_vencimiento} onChange={f("fecha_vencimiento")}/></div>
@@ -248,6 +255,7 @@ const supportRequest = (path, options) => saFetch(`/soporte${path}`,options);
 function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
   const [form,setForm]=useState({
     plan:empresa.plan,
+    origen_comercial:empresa.origen_comercial||"",
     estado:empresa.estado,
     ciclo_facturacion:empresa.ciclo_facturacion||"mensual",
     fecha_vencimiento:empresa.fecha_vencimiento?.slice(0,10)||"",
@@ -307,6 +315,7 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
   async function guardar(){
     setLoading(true); setErr("");
     const body = { ...form, fecha_vencimiento: form.fecha_vencimiento || null };
+    if (!body.origen_comercial) delete body.origen_comercial;
     try{ await saFetch("/empresas/"+empresa.id,{method:"PATCH",body}); onGuardado(); }
     catch(e){ setErr(e.message); }
     finally{ setLoading(false); }
@@ -385,8 +394,10 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div><label style={lbl}>Plan</label>
             <select style={inp} value={form.plan} onChange={f("plan")}>
+              {form.plan === "basico" && <option value="basico">Control · pendiente migración a Pro</option>}
               {PLANES_OPTS.map(p=><option key={p} value={p}>{getBrandDisplayName(p)}</option>)}
             </select></div>
+          <div><label style={lbl}>Origen comercial</label><select style={inp} value={form.origen_comercial} onChange={f("origen_comercial")}><option value="">Por clasificar</option><option value="directa">Directa</option><option value="canal">Canal</option></select>{!form.origen_comercial&&<small style={{display:'block',color:'#fbbf24',marginTop:5}}>Clasifícala antes de generar nuevos enlaces de pago.</small>}</div>
           <div><label style={lbl}>Estado</label>
             <select style={inp} value={form.estado} onChange={f("estado")}>
               {["activo","suspendido","cancelado"].map(s=><option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
@@ -2986,7 +2997,7 @@ export default function SuperAdmin(){
   });
 
   // Section
-  const mrr = Number(stats?.mrr_estimado ?? empresas.filter(e=>e.estado==="activo").reduce((s,e)=>s+monthlyPlanValue(e.plan, e.ciclo_facturacion),0));
+  const mrr = Number(stats?.mrr_estimado ?? empresas.filter(e=>e.estado==="activo"&&e.origen_comercial).reduce((s,e)=>s+monthlyPlanValue(e.plan, e.ciclo_facturacion,e.origen_comercial),0));
   const porVencer = empresas.filter(e=>e.fecha_vencimiento&&(new Date(e.fecha_vencimiento)-new Date())<7*24*3600*1000&&e.estado==="activo");
   const vencidas  = empresas.filter(e=>e.fecha_vencimiento&&new Date(e.fecha_vencimiento)<new Date()&&e.estado==="activo");
 
@@ -3216,6 +3227,7 @@ export default function SuperAdmin(){
                 </div>
               ))}
             </div>
+            {!!stats.empresas_sin_origen_comercial && <div role="alert" style={{...S.card,borderColor:'#f59e0b',color:'#fbbf24'}}>Hay {stats.empresas_sin_origen_comercial} empresa(s) sin origen comercial. El MRR estimado no incluye su nueva tarifa hasta que se clasifiquen como Directa o Canal. Sus contratos e importes históricos se conservan.</div>}
 
             <PasswordResetRequestsPanel
               items={passwordRequests}
@@ -3230,7 +3242,7 @@ export default function SuperAdmin(){
                 <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:".06em",marginBottom:14}}>Empresas por plan</div>
                 {PLANES_OPTS.map(plan=>{
                   const count=empresas.filter(e=>e.plan===plan&&e.estado==="activo").length;
-                  const revenue=empresas.filter(e=>e.plan===plan&&e.estado==="activo").reduce((s,e)=>s+monthlyPlanValue(e.plan, e.ciclo_facturacion),0);
+                  const revenue=empresas.filter(e=>e.plan===plan&&e.estado==="activo"&&e.origen_comercial).reduce((s,e)=>s+monthlyPlanValue(e.plan, e.ciclo_facturacion,e.origen_comercial),0);
                   const pct=stats.empresas_activas>0 ? (count/stats.empresas_activas)*100:0;
                   return(
                     <div key={plan} style={{marginBottom:10}}>
@@ -3238,7 +3250,7 @@ export default function SuperAdmin(){
                         <span style={{fontSize:12,color:"#e2e8f0",fontWeight:600}}>{getBrandDisplayName(plan)}</span>
                         <div style={{display:"flex",gap:12,fontSize:11}}>
                           <span style={{color:PLAN_COLOR[plan],fontWeight:700}}>{count} empresas</span>
-                          <span style={{color:"#64748b"}}>{Object.prototype.hasOwnProperty.call(PLAN_PRICES,plan)?`${fmt2(revenue)} EUR/mes`:'Tarifa pendiente de configurar'}</span>
+                          <span style={{color:"#64748b"}}>{Object.prototype.hasOwnProperty.call(PLAN_PRICES.directa,plan)?`${fmt2(revenue)} EUR/mes`:'Tarifa pendiente de configurar'}</span>
                         </div>
                       </div>
                       <div style={{height:6,background:"#1e2a45",borderRadius:3,overflow:"hidden"}}>

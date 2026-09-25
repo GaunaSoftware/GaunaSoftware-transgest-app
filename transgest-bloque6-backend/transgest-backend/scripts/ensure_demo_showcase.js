@@ -36,7 +36,7 @@ async function ensureSchema() {
 
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS cfg_precios JSONB NOT NULL DEFAULT '{}'::jsonb").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(120)").catch(() => {});
-  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch(() => {});
+  await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'profesional'").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_vehiculos INTEGER DEFAULT 10").catch(() => {});
   await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_usuarios INTEGER DEFAULT 5").catch(() => {});

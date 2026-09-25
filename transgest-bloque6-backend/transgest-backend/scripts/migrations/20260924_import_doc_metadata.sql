@@ -1,0 +1,32 @@
+-- Metadatos compatibles con el almacenamiento legacy file_url/DataURL.
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS storage_key TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_name TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_mime TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS file_sha256 CHAR(64);
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS estado_vencimiento TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS numero_doc TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS organismo TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS archivo_nombre TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS notas TEXT;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS import_batch_id UUID REFERENCES import_batches(id) ON DELETE SET NULL;
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60);
+ALTER TABLE docs_choferes ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_docs_choferes_import_batch ON docs_choferes(import_batch_id) WHERE import_batch_id IS NOT NULL;
+
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS storage_key TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_name TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_mime TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS file_sha256 CHAR(64);
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS estado_vencimiento TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS numero_doc TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS organismo TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS archivo_nombre TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS notas TEXT;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS import_batch_id UUID REFERENCES import_batches(id) ON DELETE SET NULL;
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS tipo_doc VARCHAR(60);
+ALTER TABLE docs_vehiculos ADD COLUMN IF NOT EXISTS empresa_id UUID REFERENCES empresas(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_docs_vehiculos_import_batch ON docs_vehiculos(import_batch_id) WHERE import_batch_id IS NOT NULL;

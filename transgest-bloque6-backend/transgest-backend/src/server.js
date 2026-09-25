@@ -297,14 +297,14 @@ function portalClientePermission(req, res, next) {
   return requireModulePermission(modulo)(req, res, next);
 }
 function choferesPermissionUnlessApp(req, res, next) {
-  if (req.user?.rol === "chofer" && req.path.startsWith("/app/")) return next();
+  if (req.user?.rol === "chofer" && req.path.startsWith("/app/")) return requireModulePermission("app_chofer")(req, res, next);
   if (/^\/gastos(?:\/|$)/.test(req.path)) return requireModulePermission("hojas_ruta")(req, res, next);
   if (/^\/ubicaciones-operativas(?:\/|$)/.test(req.path)) return requireModulePermission("empresa")(req, res, next);
   return requireModulePermission("choferes")(req, res, next);
 }
 function vehiculosPermissionUnlessChoferAlertas(req, res, next) {
-  if (req.user?.rol === "chofer" && req.path === "/alertas-doc") return res.json([]);
-  if (req.user?.rol === "chofer" && req.method === "PATCH" && /^\/[^/]+\/km$/.test(req.path || "")) return next();
+  if (req.user?.rol === "chofer" && req.path === "/alertas-doc") return requireModulePermission("app_chofer")(req, res, () => res.json([]));
+  if (req.user?.rol === "chofer" && req.method === "PATCH" && /^\/[^/]+\/km$/.test(req.path || "")) return requireModulePermission("app_chofer")(req, res, next);
   return requireModulePermission("vehiculos")(req, res, next);
 }
 safeUse(`${api}/auth`,          authRoutes);
@@ -343,6 +343,7 @@ safeUse(`${api}/mi-cuenta`,     authenticate, requireModulePermission("mi_cuenta
 safeUse(`${api}/superadmin`,    superadminRoutes);
 safeUse(`${api}/superadmin`,    exportacionRoutes);
 safeUse(`${api}/empresa`,       authenticate, requireModulePermission("empresa"), datosEmpresaRoutes);
+safeUse(`${api}/importacion`,   authenticate, requireModulePermission("importacion"), require("./routes/importacion"));
 safeUse(`${api}/palets`,        authenticate, requireModulePermission("palets"), paletsRoutes);
 safeUse(`${api}/puntos-interes`, authenticate, requireModulePermission("pedidos"), puntosInteresRoutes);
 safeUse(`${api}/geocoding`,     authenticate, requireModulePermission("pedidos"), geocodingRoutes);
@@ -697,7 +698,7 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
     // la columna y generaba 'column e.razon_social does not exist' en cada login.
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS razon_social VARCHAR(255)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS dominio VARCHAR(100)").catch(captureStartupMigrationError);
-    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'basico'").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'profesional'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado VARCHAR(20) NOT NULL DEFAULT 'activo'").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_vehiculos INTEGER NOT NULL DEFAULT 0").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS max_usuarios INTEGER NOT NULL DEFAULT 0").catch(captureStartupMigrationError);
@@ -1479,6 +1480,11 @@ async function startServer() {
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
     try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
+    require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
+    require('./services/importDocuments').createImportDocuments().resume().catch(e => logger.warn('Documentos pendientes: ' + e.message));
+    const documentStorage = new (require('./services/DocumentStorageProvider').DatabaseDocumentStorageProvider)();
+    documentStorage.cleanupExpired().catch(e => logger.warn('Limpieza documental: ' + e.message));
+    setInterval(() => documentStorage.cleanupExpired().catch(e => logger.warn('Limpieza documental: ' + e.message)), 24 * 60 * 60 * 1000).unref();
   });
   } catch (e) {
     logger.error("Startup abortado: " + e.message);

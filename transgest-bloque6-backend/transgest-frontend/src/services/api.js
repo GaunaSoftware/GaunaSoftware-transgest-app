@@ -1030,6 +1030,9 @@ export const getObjetivos          = ()        => apiFetch("/empresa/objetivos")
 export const setObjetivo           = (periodo,d) => apiFetch(`/empresa/objetivos/${periodo}`, {method:"PUT",body:d});
 // Config empresa
 export const getEmpresaConfig      = ()        => apiFetch("/empresa/config");
+export const getFacturaPlantilla = () => apiFetch('/empresa/factura-plantilla');
+export const guardarFacturaPlantilla = data => apiFetch('/empresa/factura-plantilla',{method:'POST',body:data});
+export const eliminarFacturaPlantilla = () => apiFetch('/empresa/factura-plantilla',{method:'DELETE'});
 export const setConfigTrafico      = (data)    => apiFetch("/empresa/config/trafico", {method:"PUT",body:data});
 export const setConfigPrecios      = (data)    => apiFetch("/empresa/config/precios", {method:"PUT",body:data});
 export const actualizarCapitalTesoreria = (data) => apiFetch("/empresa/config/tesoreria/capital", {method:"PUT",body:data});
@@ -1243,3 +1246,91 @@ export async function downloadBiReport(id) {
 }
 
 export const getBiHoja = params => apiFetch(`/hojas-ruta/bi?${new URLSearchParams(params)}`, {silentSuccess:true,silentError:true});
+
+// Migración canónica: el archivo viaja una vez al backend. La sesión se
+// comprueba al volver para evitar mostrar resultados de otra empresa.
+export const getImportCatalog = () => apiFetch('/importacion/catalog', {silentSuccess:true});
+export const getImportBatches = () => apiFetch('/importacion/batches', {silentSuccess:true});
+export const getImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}`, {silentSuccess:true});
+export const getImportRows = (id, params={}) => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rows?${new URLSearchParams(params)}`, {silentSuccess:true});
+export const simulateImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/simulate`, {method:'POST',silentSuccess:true});
+export const confirmImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/confirm`, {method:'POST',silentSuccess:true});
+export const cancelImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/cancel`,{method:'POST',silentSuccess:true});
+export const continueImportBatch = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/continue`,{method:'POST',silentSuccess:true});
+export const retryImportErrors = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/retry-errors`,{method:'POST',silentSuccess:true});
+export const simulateImportRollback = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rollback/simulate`,{method:'POST',silentSuccess:true});
+export const confirmImportRollback = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/rollback/confirm`,{method:'POST',silentSuccess:true});
+export const getImportReport = id => apiFetch(`/importacion/batches/${encodeURIComponent(id)}/report`,{silentSuccess:true});
+export const getImportHistoricalOverview = id => apiFetch(`/importacion/history/overview?batch_id=${encodeURIComponent(id)}`,{silentSuccess:true});
+export async function downloadImportResult(id,kind){
+  if(!['report.xlsx','errors.csv','errors.xlsx'].includes(kind))throw new Error('Formato de descarga no permitido');
+  const token=getToken();if(!token)throw new Error('Inicia sesión para descargar el resultado');
+  const response=await fetch(`${BASE}/api/v1/importacion/batches/${encodeURIComponent(id)}/${kind}`,{
+    headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a descargar el resultado.');
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar el resultado');
+  return response.blob();
+}
+export async function uploadImportFile(file, type, sourceSystem, mapping={}) {
+  const token=getToken();
+  if (!token) throw new Error('Inicia sesión para importar datos');
+  const response=await fetch(`${BASE}/api/v1/importacion/upload`,{
+    method:'POST',cache:'no-store',headers:{
+      Authorization:`Bearer ${token}`,
+      'Content-Type':'application/octet-stream',
+      'X-Import-Filename':encodeURIComponent(file.name),
+      'X-Import-Type':type,
+      'X-Import-Source-System':sourceSystem,
+      'X-Import-Mapping':JSON.stringify(mapping),
+    },body:file,
+  });
+  if (getToken()!==token) throw new Error('La sesión ha cambiado. Vuelve a cargar el archivo.');
+  const data=await response.json().catch(()=>({}));
+  if (!response.ok) throw Object.assign(new Error(data.error||'No se pudo validar el archivo'),{code:data.code||'IMPORT_ERROR'});
+  return data;
+}
+export async function downloadImportTemplate(type) {
+  const token=getToken();
+  if (!token) throw new Error('Inicia sesión para descargar la plantilla');
+  const url=type==='Pack_TransGest'?'/importacion/templates/pack.xlsx':`/importacion/templates/${encodeURIComponent(type)}.csv`;
+  const response=await fetch(`${BASE}/api/v1${url}`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if (getToken()!==token) throw new Error('La sesión ha cambiado. Vuelve a descargar la plantilla.');
+  if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar la plantilla');
+  return {blob:await response.blob(),filename:type==='Pack_TransGest'?'Pack_TransGest_v1.xlsx':`${type}_v1.csv`};
+}
+export async function downloadStoredDocument(scope,id){
+  const token=getToken();
+  const response=await fetch(`${BASE}/api/v1/docs/archivo/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,{
+    headers:token?{Authorization:`Bearer ${token}`}:{},cache:'no-store'});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a descargar el documento.');
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar el documento');
+  return response.blob();
+}
+export const simulateDocumentBatch=id=>apiFetch(`/importacion/documents/${encodeURIComponent(id)}/simulate`,{method:'POST',silentSuccess:true});
+export const confirmDocumentBatch=id=>apiFetch(`/importacion/documents/${encodeURIComponent(id)}/confirm`,{method:'POST',silentSuccess:true});
+export async function uploadDocumentPackage(files){
+  const items=Array.from(files||[]);
+  if(!items.length)throw new Error('Selecciona archivos PDF o un ZIP');
+  if(items.length>256)throw new Error('Selecciona como máximo 256 archivos por lote');
+  let body,filename;
+  if(items.length===1&&/\.(pdf|zip)$/i.test(items[0].name)){
+    body=items[0];filename=items[0].name;
+  }else{
+    if(items.some(file=>!/\.pdf$/i.test(file.name)))throw new Error('La selección múltiple solo admite PDFs. Usa un ZIP para carpetas.');
+    const manifestBytes=new TextEncoder().encode(JSON.stringify({files:items.map(file=>({name:file.name,size:file.size}))}));
+    const header=new Uint8Array(10);header.set(new TextEncoder().encode('TGDP1\n'));
+    new DataView(header.buffer).setUint32(6,manifestBytes.length,false);
+    body=new Blob([header,manifestBytes,...items],{type:'application/octet-stream'});
+    filename='documentos-masivos.tgdp';
+  }
+  if(body.size>20*1024*1024)throw new Error('El lote supera 20 MB. Divide la carga en varios lotes.');
+  const token=getToken();
+  if(!token)throw new Error('Inicia sesión para subir documentos');
+  const response=await fetch(`${BASE}/api/v1/importacion/documents/preview`,{method:'POST',cache:'no-store',headers:{
+    Authorization:`Bearer ${token}`,'Content-Type':'application/octet-stream','X-Import-Filename':encodeURIComponent(filename),
+  },body});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a subir los documentos.');
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(data.error||'No se pudieron revisar los documentos');
+  return data;
+}

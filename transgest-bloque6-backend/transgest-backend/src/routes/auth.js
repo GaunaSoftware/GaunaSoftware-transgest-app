@@ -421,10 +421,9 @@ router.get("/demo/options", authenticate, async (req, res) => {
     demo: true,
     empresa: { id: empresa.id, nombre: empresa.nombre, plan: empresa.plan },
     plans: [
-      { id: "lite", label: "Lite / Mini" },
-      { id: "basico", label: "Basico" },
-      { id: "profesional", label: "Profesional" },
-      { id: "enterprise", label: "Enterprise" },
+      { id: "lite", label: "TransGest Go" },
+      { id: "profesional", label: "TransGest Pro" },
+      { id: "enterprise", label: "TransGest Pro Intelligence" },
     ],
     usuarios: rows,
   });
@@ -434,7 +433,7 @@ router.post("/demo/switch-plan", authenticate, async (req, res) => {
   const empresa = await assertDemoSession(req, res);
   if (!empresa) return;
   const plan = String(req.body?.plan || "").toLowerCase();
-  if (!["lite", "basico", "profesional", "enterprise"].includes(plan)) {
+  if (!["lite", "profesional", "enterprise"].includes(plan)) {
     return res.status(400).json({ error: "Plan demo no valido" });
   }
   await db.query(
@@ -505,7 +504,7 @@ router.post("/billing/checkout", async (req, res) => {
 
   const { rows } = await db.query(
     `SELECT u.id, u.nombre, u.email, u.rol, u.empresa_id,
-            e.nombre AS empresa_nombre, e.email_admin, e.plan, e.ciclo_facturacion, e.metodo_pago,
+            e.nombre AS empresa_nombre, e.email_admin, e.plan, e.ciclo_facturacion, e.metodo_pago, e.origen_comercial,
             e.stripe_customer_id
      FROM usuarios u
      JOIN empresas e ON e.id=u.empresa_id
@@ -516,20 +515,27 @@ router.post("/billing/checkout", async (req, res) => {
   if (!user) return res.status(401).json({ error: "Usuario no valido" });
   if (user.rol !== "gerente") return res.status(403).json({ error: "Solo gerencia puede abrir el pago" });
 
-  const plan = req.body.plan || user.plan || "profesional";
+  const plan = user.plan || "profesional";
+  if (plan === 'basico') return res.status(409).json({error:'El plan Control debe migrarse a Pro antes de contratar.'});
   const ciclo = req.body.ciclo || user.ciclo_facturacion || "mensual";
-  const priceId = stripe.planPriceId(plan, ciclo);
+  if (!["mensual","anual"].includes(ciclo)) return res.status(400).json({error:'Ciclo no válido'});
+  if (!user.origen_comercial && ['lite','profesional','enterprise'].includes(plan)) return res.status(409).json({error:'El origen comercial de la empresa debe clasificarse en SuperAdmin antes de contratar.'});
+  const origin = user.origen_comercial;
+  const priceId = stripe.planPriceId(plan, ciclo, origin);
   if (!stripe.configured() || !priceId) {
     return res.status(503).json({
       error: "Stripe no esta configurado para este plan/ciclo",
       faltan: [
         !stripe.configured() ? "STRIPE_SECRET_KEY" : null,
-        !priceId ? `STRIPE_PRICE_${plan.toUpperCase()}_${ciclo.toUpperCase()}` : null,
+        !priceId ? `STRIPE_PRICE_${plan.toUpperCase()}_${ciclo.toUpperCase()}_${origin.toUpperCase()}` : null,
       ].filter(Boolean),
     });
   }
 
   try {
+    const { priceFor } = require('../services/commercialPricing');
+    const expectedPrice = priceFor(plan,ciclo,origin);
+    if (expectedPrice !== null) await stripe.assertCatalogPrice(priceId, expectedPrice, ciclo);
     let customerId = user.stripe_customer_id;
     if (!customerId) {
       const customer = await stripe.createCustomer({
@@ -552,6 +558,7 @@ router.post("/billing/checkout", async (req, res) => {
     });
     res.json({ ok: true, url: session.url });
   } catch (err) {
+    if (err.code === 'stripe_price_mismatch') return res.status(422).json({ error: err.message });
     res.status(500).json({ error: err.message });
   }
 });

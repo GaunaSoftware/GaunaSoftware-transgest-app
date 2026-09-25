@@ -2,9 +2,30 @@ const { cacheMiddleware, invalidateCache } = require("../services/cache");
 // src/routes/docs.js — Documentación vehículos y choferes
 const express = require("express");
 const db      = require("../services/db");
+const {DatabaseDocumentStorageProvider}=require('../services/DocumentStorageProvider');
 const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
 const router  = express.Router();
+const privateStorage=new DatabaseDocumentStorageProvider(db);
 router.use(authenticate);
+
+router.get('/archivo/:scope/:id',async(req,res)=>{
+  const scope=req.params.scope;
+  if(!['chofer','vehiculo'].includes(scope))return res.status(404).json({error:'Documento no encontrado'});
+  const table=scope==='chofer'?'docs_choferes':'docs_vehiculos';
+  const entity=scope==='chofer'?'choferes':'vehiculos';
+  const foreign=scope==='chofer'?'chofer_id':'vehiculo_id';
+  try{
+    const {rows}=await db.query(`SELECT d.storage_key FROM ${table} d JOIN ${entity} e ON e.id=d.${foreign}
+      WHERE d.id=$1 AND d.empresa_id=$2 AND e.empresa_id=$2`,[req.params.id,req.empresaId||req.user?.empresa_id]);
+    if(!rows[0]?.storage_key)return res.status(404).json({error:'Archivo no encontrado'});
+    const file=await privateStorage.read(req.empresaId||req.user?.empresa_id,rows[0].storage_key);
+    if(!file)return res.status(404).json({error:'Archivo no encontrado'});
+    res.set('Content-Type','application/pdf');
+    res.set('Content-Disposition',`attachment; filename="${String(file.file_name||'documento.pdf').replace(/["\r\n]/g,'_')}"`);
+    res.set('Cache-Control','private, no-store');
+    res.send(Buffer.from(file.content));
+  }catch(cause){res.status(500).json({error:'No se pudo descargar el documento'});}
+});
 
 function normalizeDocType(value, scope) {
   const raw = String(value || "").trim().toLowerCase();
@@ -96,7 +117,7 @@ router.get("/todos", cacheMiddleware(120), async (req, res) => {
     const empresaId = req.user?.empresa_id;
     if (!empresaId) return res.json([]);
     const vehiculos = await db.query(`
-      SELECT d.id, d.tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,
+      SELECT d.id, d.tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,d.storage_key,d.file_name,
              d.referencia, d.alerta_dias, d.created_at,
              'vehiculo' AS entidad_tipo,
              v.id AS entidad_id,
@@ -106,7 +127,7 @@ router.get("/todos", cacheMiddleware(120), async (req, res) => {
       WHERE v.empresa_id=$1
     `, [empresaId]).catch(() => ({ rows: [] }));
     const choferes = await db.query(`
-      SELECT d.id, d.tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,
+      SELECT d.id, d.tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,d.storage_key,d.file_name,
              d.referencia, d.alerta_dias, d.created_at,
              'chofer' AS entidad_tipo,
              c.id AS entidad_id,

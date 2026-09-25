@@ -6,25 +6,19 @@ const workshopImg = "https://images.unsplash.com/photo-1487754180451-c456f719a1f
 const officeImg = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1400&q=80";
 
 const plans = [
-  { name: "TransGest Go", price: "49 EUR/mes", text: "Pedidos y documentacion de transporte.", items: ["App chofer", "Clientes y rutas", "Pedidos y DCD con QR"] },
-  {
-    name: "TransGest Control",
-    price: "99 EUR/mes",
-    text: "Operativa completa para trafico, flota, clientes, rutas, facturacion y taller.",
-    items: ["Vehiculos ilimitados", "Usuarios ilimitados", "Pedidos y cuadrantes", "Facturacion operativa"],
-  },
+  { name: "TransGest Go", price: "169 EUR/mes", text: "Operativa esencial para autónomos y pequeñas estructuras.", items: ["Usuarios y vehículos ilimitados", "Clientes, pedidos y viajes", "Documentación y facturación", "Integración estándar: 1.500 € + IVA"] },
   {
     name: "TransGest Pro",
-    price: "199 EUR/mes",
-    text: "Control de gestion con KPIs, objetivos y seguimiento economico de la empresa.",
-    items: ["Todo TransGest Control", "KPIs de gestion", "Objetivos y tarifas", "Informes avanzados"],
+    price: "349 EUR/mes",
+    text: "Control integral de tráfico, flota, conductores y finanzas.",
+    items: ["Todo TransGest Go", "KPIs e informes de gestión", "Flota y conductores", "Integración estándar: 1.500 € + IVA"],
     featured: true,
   },
   {
     name: "TransGest Pro Intelligence",
-    price: "399 EUR/mes",
-    text: "Inteligencia artificial, acompanamiento y configuracion avanzada para equipos exigentes.",
-    items: ["Todo TransGest Pro", "IA incluida", "Soporte prioritario", "Configuracion avanzada"],
+    price: "479 EUR/mes",
+    text: "Todo Pro con automatización e IA aplicada a la operativa.",
+    items: ["Todo TransGest Pro", "1.000 consultas IA/mes", "Integración estándar incluida", "500 consultas extra: 49 €/mes"],
   },
 ];
 
@@ -168,7 +162,7 @@ export default function WebPublica() {
               </article>
             ))}
           </div>
-          <div style={S.discount}>Facturacion anual con 15% de descuento.</div>
+          <div style={S.discount}>Tarifa de venta directa, sin IVA. Usuarios y vehículos ilimitados. Contratación anual: 15 % de descuento. Ampliación documental: 39 € por 100 GB/mes; conectores y desarrollos a medida se presupuestan aparte.</div>
         </section>
 
         <section style={S.altSection}>

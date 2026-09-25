@@ -8,7 +8,7 @@ const PLAN_BRAND_SUFFIX = {
   planner: "Planner",
   pro_planner: "Pro Planner",
   lite: "Go",
-  basico: "Control",
+  basico: "Pro",
   profesional: "Pro",
   enterprise: "Pro Intelligence",
 };

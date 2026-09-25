@@ -30,7 +30,6 @@ export function organizeSidebar(modules, financeTabs, role) {
     group("nav_clientes", "Clientes", "clientes", [
       take("clientes", "Clientes"),
       group("nav_rutas_tarifas", "Rutas y tarifas", "rutas", [take("rutas", "Rutas"), take("tarifas", "Tarifas")]),
-      take("palets", "Gestión de almacén"),
     ]),
     group("nav_flota", "Flota", "vehiculos", [take("choferes", "Conductores"), take("vehiculos", "Vehículos"), take("taller", "Taller"), take("colaboradores", "Colaboradores")]),
     group("nav_finanzas", "Finanzas", "facturacion_grupo", [
@@ -38,11 +37,18 @@ export function organizeSidebar(modules, financeTabs, role) {
       group("nav_informes", "Informes", "informes_grupo", [take("informes", "Informes de gestión"), take("explotacion", "Explotación"), take("objetivos", "Objetivos")]),
       take("contabilidad", "Contabilidad"), take("gastos_estructura", "Gastos de estructura"), take("nominas", "Nóminas"), take("hojas_ruta", "Hojas de ruta"),
     ]),
-    group("nav_gestion", "Gestión", "empresa", [
-      take("control_horario", "Control horario"),
-      group("nav_configuracion", "Configuración", "empresa", [take("avisos", "Avisos"), take("empresa", "Mi empresa"), take("usuarios", "Usuarios y roles"), take("importacion", "Importación"), take("mi_cuenta", "Mi cuenta")]),
-      group("nav_trazabilidad", "Trazabilidad", "actividad", [take("actividad", "Registro de actividad"), take("excepciones", "Excepciones operativas")]), take("documentos", "Documentación"),
+    group("nav_gestion", "Gestión", "control_horario", [take("control_horario", "Control horario")]),
+    group("nav_avisos", "Avisos", "avisos", [
+      take("avisos", "Avisos y vencimientos"),
+      take("actividad", "Trazabilidad"),
+      take("excepciones", "Excepciones operativas"),
+      take("documentos", "Documentación"),
     ]),
+    group("nav_configuracion", "Configuración", "empresa", [
+      take("empresa", "Mi empresa"), take("usuarios", "Usuarios y roles"),
+      take("importacion", "Importación"), take("mi_cuenta", "Mi cuenta"),
+    ]),
+    take("palets", "Gestión de almacén"),
   ].filter(Boolean);
   // Keep any future/unknown accessible leaves reachable without duplicating routes.
   const remaining = all.filter(item => !item.children?.length && !used.has(item.id));

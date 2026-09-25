@@ -197,3 +197,11 @@
   .tg-superadmin-page [style*="display: flex"], .tg-superadmin-page [style*="display:flex"] { flex-wrap: wrap; }
   .sa-scope-notice-global { grid-template-columns: 1fr; }
 }
+
+.sa-company-section { grid-column: 1 / -1; margin: 18px 0 0; padding: 0 0 7px; border-bottom: 1px solid #284357; color: #a7f3d0; font-size: 12px; letter-spacing: .04em; }
+.sa-company-grid > div { min-width: 0; }
+@media (max-width: 620px) {
+  .sa-company-modal { padding: 16px !important; }
+  .sa-company-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .sa-company-grid > div { grid-column: 1 / -1 !important; }
+}

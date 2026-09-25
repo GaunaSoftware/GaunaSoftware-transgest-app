@@ -13,7 +13,7 @@ import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
 import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
-import { getEmpresaPlanLocal, normalizePlan } from "./utils/planFeatures";
+import { getEmpresaPlanLocal, normalizePlan, planHasFeature } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
 
 // Carga perezosa de todos los mÃƒÂ³dulos
@@ -59,7 +59,7 @@ const Invitacion          = lazy(() => import("./pages/Invitacion"));
 const SuperAdmin          = lazy(() => import("./pages/SuperAdmin"));
 const Tarifas             = lazy(() => import("./pages/Tarifas"));
 const Objetivos           = lazy(() => import("./pages/Objetivos"));
-const Importacion         = lazy(() => import("./pages/Importacion"));
+const Importacion         = lazy(() => import("./pages/ImportacionWizard"));
 const Palets              = lazy(() => import("./pages/Palets"));
 const WebPublica          = lazy(() => import("./pages/WebPublica"));
 const Agenda             = lazy(() => import("./pages/Agenda"));
@@ -190,42 +190,35 @@ const IC = {
 // Matriz efectiva: Lite=minimo DCD, Basico=trafico core, Profesional=avanzado sin IA, Enterprise=todo.
 const MODULOS_POR_PLAN = {
     lite: [
-      "app_chofer",
-      "clientes",
-      "rutas",
-      "pedidos",
-      "mi_cuenta"
+      "agenda","pedidos","plan_diario","gestion_trafico",
+      "clientes","rutas","tarifas","colaboradores","vehiculos","choferes","solicitudes",
+      "documentos","avisos","facturacion","control_horario","empresa","usuarios",
+      "importacion","mi_cuenta","facturacion_grupo"
     ],
     basico: [
       "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","calculador_portes","palets","app_chofer",
       "clientes","rutas","vehiculos","choferes","grupajes","solicitudes",
       "hojas_ruta","control_horario","documentos","avisos","facturacion","empresa",
-      "usuarios","mi_cuenta",
+      "usuarios","importacion","mi_cuenta",
       "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
       "facturacion_grupo"
     ],
-    profesional: [
-      "dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas_recomendadas","calculador_portes","palets","app_chofer",
-      "clientes","tarifas","colaboradores","vehiculos","choferes","taller","grupajes","rutas","solicitudes",
-      "explotacion","hojas_ruta","gastos_estructura","nominas","control_horario",
-      "documentos","avisos","facturacion","contabilidad","informes","excepciones",
-    "empresa","usuarios","actividad","mi_cuenta",
-    "cuadrante_grupo","cuadrante_vehiculos","cuadrante_choferes","cuadrante_semana",
-    "facturacion_grupo","informes_grupo","rutas_recomendadas_chofer"
-  ],
+    profesional: null,
   enterprise: null,
 };
 
 function planPermite(plan, moduloId) {
   if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
   if (moduloId === "app_mecanico") return planPermite(plan, "taller");
-  const permitidos = MODULOS_POR_PLAN[plan] || MODULOS_POR_PLAN.profesional;
+  if (!Object.prototype.hasOwnProperty.call(MODULOS_POR_PLAN, plan)) return false;
+  if (plan === "profesional") return moduloId !== "ia";
+  const permitidos = MODULOS_POR_PLAN[plan];
   if (permitidos === null) return true; // enterprise: todo
   return permitidos.includes(moduloId);
 }
 
 function filtrarModulosPorPlan(modulos, plan) {
-  if (!plan || plan === "enterprise") return modulos;
+  if (plan === "enterprise") return modulos;
   const filtrar = (items) => items
     .filter(item => planPermite(plan, item.id))
     .map(item => ({
@@ -1219,11 +1212,11 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
 const DEMO_PLAN_META = {
   lite: {
     label: "TransGest Go",
-    detail: "DCD, app chofer, pedidos, clientes, rutas/tarifas y tacografo. Sin IA ni modulos avanzados.",
+    detail: "Pedidos, clientes, viajes, documentación y facturación esenciales. Sin KPIs ni IA.",
   },
   basico: {
-    label: "TransGest Control",
-    detail: "Trafico core con documentos y facturacion basica. Sin IA, KPIs avanzados, taller ni contabilidad.",
+    label: "TransGest Pro (antiguo Control)",
+    detail: "La antigua edición Control se migra a Pro; conserva sus datos y permisos.",
   },
   profesional: {
     label: "TransGest Pro",
@@ -1892,6 +1885,13 @@ function AppInner() {
     }
   }
 
+  if (user?.rol === "chofer" && !user?.colaborador_id && !planHasFeature(empresaPlan, "app_chofer")) {
+    return <main style={{maxWidth:560,margin:"8vh auto",padding:24,fontFamily:"'DM Sans',sans-serif"}}>
+      <h1>App del chófer no incluida</h1>
+      <p>La empresa puede gestionar conductores desde la oficina. El acceso del chófer a la app está disponible desde TransGest Pro.</p>
+      <button type="button" onClick={logout}>Cerrar sesión</button>
+    </main>;
+  }
   if (user?.rol === "colaborador" || (user?.rol === "chofer" && user?.colaborador_id)) return <Suspense fallback={<p>Cargando…</p>}><SupplierApp/></Suspense>;
 
   return (

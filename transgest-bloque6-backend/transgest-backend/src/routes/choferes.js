@@ -439,7 +439,7 @@ function serializeJornada(row) {
 
 function requireChoferApp(req, res, next) {
   if (req.user?.rol !== "chofer") return res.status(403).json({ error: "Acceso exclusivo para app de chofer" });
-  next();
+  return require("../middleware/auth").requireModulePermission("app_chofer")(req, res, next);
 }
 
 function vehiculoTieneGpsExterno(row = {}) {

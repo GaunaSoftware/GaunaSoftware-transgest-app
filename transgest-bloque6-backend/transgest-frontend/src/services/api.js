@@ -615,6 +615,7 @@ export async function getFacturasTodas(params = {}, options = {}) {
   return rest.reduce((acc, arr) => acc.concat(arr), data);
 }
 export const getFactura     = (id)        => apiFetch(`/facturas/${id}`);
+export const guardarFacturaAnotaciones = (id, data) => apiFetch(`/facturas/${id}/anotaciones`, { method:"PATCH", body:data });
 export const getFacturaFiscal = (id)      => apiFetch(`/facturas/${id}/fiscal`);
 export const reencolarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/requeue`, { method:"POST", body:{} });
 export const sincronizarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/sincronizar`, { method:"POST", body:{} });

@@ -10,7 +10,7 @@ import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
 import { registrarRevisionFactura } from '../services/api';
-import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
+import { getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -568,7 +568,57 @@ function getFacturaFiscalRowMeta(factura) {
   };
 }
 
-export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
+function FacturaAnotaciones({ factura, onGuardar }) {
+  const actual = factura.anotaciones;
+  const data = actual?.datos || {};
+  const [values, setValues] = useState({
+    matricula:data.matricula || '', remolque:data.remolque || '',
+    referencias_internas:data.referencias_internas || '', referencia_cliente:data.referencia_cliente || '',
+    observaciones_informativas:data.observaciones_informativas || '',
+    etiquetas:(data.etiquetas || []).join(', '), motivo:'',
+  });
+  const [busy, setBusy] = useState(false);
+  const fields = [
+    ['matricula','Matrícula'], ['remolque','Remolque'],
+    ['referencias_internas','Referencias internas'], ['referencia_cliente','Referencia del cliente'],
+    ['observaciones_informativas','Observaciones informativas'], ['etiquetas','Etiquetas internas, separadas por comas'],
+  ];
+  const history = factura.anotaciones_historial || [];
+  return <section data-internal className="finance-review" aria-label="Datos informativos de factura" style={{margin:'12px 18px'}}>
+    <h3>Datos informativos {actual && <Badge>Datos informativos actualizados · v{actual.version}</Badge>}</h3>
+    <p>Estos datos se guardan en un historial separado. La factura fiscal y su PDF original no se modifican.</p>
+    <details><summary>{onGuardar ? 'Editar datos informativos' : 'Ver datos informativos'}</summary>
+      <form onSubmit={async event=>{
+        event.preventDefault(); if(!onGuardar) return;
+        setBusy(true);
+        try {
+          await onGuardar(factura.id, {
+            version:actual?.version || 0, motivo:values.motivo,
+            matricula:values.matricula, remolque:values.remolque,
+            referencias_internas:values.referencias_internas, referencia_cliente:values.referencia_cliente,
+            observaciones_informativas:values.observaciones_informativas,
+            etiquetas:values.etiquetas.split(',').map(item=>item.trim()).filter(Boolean),
+          });
+          setValues(previous=>({...previous,motivo:''}));
+          notify('Datos informativos guardados con historial.','success');
+        } catch(error) { notify(error.message || 'No se pudieron guardar los datos informativos.','error'); }
+        finally { setBusy(false); }
+      }}>
+        <div className="tgui-filter-fields" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:10}}>
+          {fields.map(([key,label])=><label key={key}>{label}<input className="tgui-input" disabled={!onGuardar || busy} value={values[key]} onChange={event=>setValues(previous=>({...previous,[key]:event.target.value}))} maxLength={key==='observaciones_informativas'?2000:key==='referencias_internas'?500:key==='referencia_cliente'?255:key==='etiquetas'?1200:60}/></label>)}
+        </div>
+        {onGuardar && <><label>Motivo del cambio<input className="tgui-input" required minLength={5} maxLength={1000} value={values.motivo} onChange={event=>setValues(previous=>({...previous,motivo:event.target.value}))}/></label><Button type="submit" disabled={busy}>{busy?'Guardando…':'Guardar anotación'}</Button></>}
+      </form>
+    </details>
+    {history.length>0 && <details><summary>Historial de anotaciones ({history.length})</summary>
+      <ol>{history.map(entry=><li key={entry.version}><strong>Versión {entry.version}</strong> · {new Date(entry.created_at).toLocaleString('es-ES')} · {entry.motivo} · Usuario {entry.usuario_id || 'no disponible'}
+        <ul>{Object.entries(entry.cambios || {}).map(([key,change])=><li key={key}>{key}: {JSON.stringify(change.anterior)} → {JSON.stringify(change.nuevo)}</li>)}</ul>
+      </li>)}</ol>
+    </details>}
+  </section>;
+}
+
+export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, onGuardarAnotaciones, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
   const empresa = useEmpresaPerfil();
   const [revisionConfirmada,setRevisionConfirmada]=useState(false);
   const [motivoSinReferencia,setMotivoSinReferencia]=useState('');
@@ -746,6 +796,7 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:14,cursor:"pointer",padding:"0 4px"}}>Cerrar</button>
         </div>
 
+        {factura.estado !== 'borrador' && <FacturaAnotaciones key={`${factura.id}:${factura.anotaciones?.version || 0}`} factura={factura} onGuardar={onGuardarAnotaciones}/>}
         {/* Contenido */}
         {factura.estado==='borrador'&&<section className="finance-review" aria-label="Revisión antes de emitir">
           <h3>Revisión antes de emitir</h3>
@@ -3270,6 +3321,7 @@ export default function Facturacion() {
           onCambiarEstado={canEdit ? cambiarEstado : null}
           onCorregirPedido={canEdit ? setPedidoCorreccion : null}
           onAnalizarPedido={canEdit && aiDisponible ? analizarSoportesPedidoFactura : null}
+          onGuardarAnotaciones={canEdit ? async (id, data) => { await guardarFacturaAnotaciones(id, data); const refreshed = await getFactura(id); setVistaFact(refreshed); return refreshed; } : null}
           analizandoPedidoId={analizandoPedidoId}
           aiDisponible={aiDisponible}
           rectificadasIds={rectificadasIds}

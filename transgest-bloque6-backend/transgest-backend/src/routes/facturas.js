@@ -14,6 +14,7 @@ const fiscalScheduler = require("../services/fiscalScheduler");
 const contabilidadExport = require("../services/contabilidadExport");
 const { ensureAccountingIntegrationSettingsTable } = require("../services/accountingIntegrationsCatalog");
 const { unbilledOptions, readUnbilledTrips } = require("../services/unbilledTrips");
+const invoiceAnnotations = require("../services/invoiceAnnotations");
 
 const router = express.Router();
 router.use(authenticate);
@@ -870,7 +871,7 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
 
   if (!rows[0]) return res.status(404).json({ error: "Factura no encontrada" });
 
-  const [lineas, extras, pedidos, docs, fiscal, fiscalEventos, fiscalEnvios, auditRows, emailRows] = await Promise.all([
+  const [lineas, extras, pedidos, docs, fiscal, fiscalEventos, fiscalEnvios, auditRows, emailRows, anotaciones] = await Promise.all([
     db.query(`SELECT fl.*
                 FROM factura_lineas fl
                 JOIN facturas f ON f.id=fl.factura_id
@@ -923,6 +924,7 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
                  AND (meta->>'factura_id'=$1 OR meta->>'factura_numero'=(SELECT numero FROM facturas WHERE id=$1 AND empresa_id=$2))
                ORDER BY sent_at DESC
                LIMIT 20`, [req.params.id, empresaId]).catch(() => ({ rows: [] })),
+    invoiceAnnotations.read(db, { facturaId: req.params.id, empresaId }),
   ]);
 
   res.json({
@@ -936,7 +938,26 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
     fiscal_envios: fiscalEnvios.rows,
     audit_log: auditRows.rows,
     email_log: emailRows.rows,
+    anotaciones: anotaciones.actual,
+    anotaciones_historial: anotaciones.historial,
   });
+});
+
+router.patch("/:id/anotaciones", GERENTE_O_CONTABLE, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const saved = await invoiceAnnotations.save(db, {
+      facturaId: req.params.id,
+      empresaId,
+      actorId: req.user?.id || null,
+      body: req.body,
+    });
+    res.json(saved);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    logger.error("No se pudieron guardar anotaciones de factura:", error);
+    res.status(500).json({ error: "No se pudieron guardar las anotaciones." });
+  }
 });
 
 router.get("/:id/fiscal", GERENTE_O_CONTABLE, async (req, res) => {

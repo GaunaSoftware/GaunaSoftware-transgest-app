@@ -9011,6 +9011,10 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
       pedidoCreado = pedido;
       remolqueMatCreado = remolque_mat;
     });
+    // Assignment can confirm the order during creation, without going through
+    // PATCH /estado. Reconcile its incidents after the transaction commits.
+    await syncOrderIncidents({ empresaId, pedidoId:pedidoCreado.id })
+      .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras crear pedido:", e.message));
     // Sugerir fijar la mercancia como habitual del cliente si se repite lo suficiente
     // y el cliente todavia no la tiene fijada. No debe romper la creacion.
     let sugerenciaMercancia = null;
@@ -9647,7 +9651,7 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     let pedidoActualizado = rows[0];
     pedidoActualizado = await limpiarPendienteCompletarSiProcede(pedidoActualizado, empresaId, req.user);
     pedidoActualizado = await confirmarPedidoPorAsignacionSiProcede(pedidoActualizado, empresaId, req.user);
-    if (["estado", "fecha_carga", "fecha_entrega", "fecha_descarga"].some(key => key in body)) {
+    if (assignmentFieldsTouched || ["estado", "fecha_carga", "fecha_entrega", "fecha_descarga", "puntos_carga"].some(key => key in body)) {
       await syncOrderIncidents({ empresaId, pedidoId:pedidoActualizado.id })
         .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras editar pedido:", e.message));
     }

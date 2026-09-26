@@ -2,7 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { PGlite } = require('@electric-sql/pglite');
-const { syncOrderIncidents } = require('../src/services/agendaIncidents');
+const { syncOrderIncidents, allLoadsComplete } = require('../src/services/agendaIncidents');
+const { driverStops } = require('../src/services/driverStops');
 
 (async () => {
   const db = new PGlite();
@@ -15,7 +16,8 @@ const { syncOrderIncidents } = require('../src/services/agendaIncidents');
       CREATE TABLE usuarios (id uuid PRIMARY KEY, nombre text, rol text);
       CREATE TABLE pedidos (id uuid PRIMARY KEY, empresa_id uuid NOT NULL, numero text,
         estado text, fecha_carga date, fecha_entrega date, fecha_descarga date,
-        pendiente_completar boolean DEFAULT false, incidencia_automatica boolean DEFAULT false);
+        pendiente_completar boolean DEFAULT false, incidencia_automatica boolean DEFAULT false,
+        puntos_carga jsonb, puntos_descarga jsonb, origen text, destino text, carga_real_at timestamptz);
       CREATE TABLE pedido_chofer_pasos (pedido_id uuid PRIMARY KEY, empresa_id uuid NOT NULL, data jsonb);
       CREATE TABLE agenda_eventos (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), empresa_id uuid NOT NULL,
         titulo text NOT NULL, descripcion text, fecha_inicio timestamptz, todo_dia boolean,
@@ -94,6 +96,28 @@ const { syncOrderIncidents } = require('../src/services/agendaIncidents');
     await db.query("UPDATE pedidos SET pendiente_completar=false, estado='facturado' WHERE id=$1", [order]);
     await sync();
     assert.equal((await db.query('SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL')).rows[0].n, 0, 'Invoiced orders are final');
+    // Finishing the first of two loads currently sets the legacy order state
+    // en_curso; that must not resolve an incident about ALL loads being complete.
+    const loadPoints = [{ id:'first-load' }, { id:'second-load' }];
+    const loadStops = driverStops({ puntos_carga:loadPoints }).filter(s => s.tipo === 'carga');
+    const progress = { carga_ok:false, paradas:{ [loadStops[0].id]:{ tipo:'carga', carga_ok:true } } };
+    await db.query("UPDATE pedidos SET estado='en_curso', puntos_carga=$1, carga_real_at=NOW() WHERE id=$2", [JSON.stringify(loadPoints), order]);
+    await db.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)', [order,companyA,JSON.stringify(progress)]);
+    await sync();
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL AND cause_code='carga_sin_finalizar'")).rows[0].n, 1, 'An unfinished second load keeps the incident active');
+    progress.carga_ok = true;
+    progress.paradas[loadStops[1].id] = { tipo:'carga', carga_ok:true };
+    await db.query('UPDATE pedido_chofer_pasos SET data=$1 WHERE pedido_id=$2', [JSON.stringify(progress),order]);
+    await sync();
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL AND cause_code='carga_sin_finalizar'")).rows[0].n, 0, 'The incident resolves after every planned load is completed');
+    const legacyOrder = { origen:'Almacén sintético' };
+    const legacyStop = driverStops(legacyOrder)[0];
+    assert.equal(allLoadsComplete({paradas:{[legacyStop.id]:{tipo:'carga',carga_ok:true}}},legacyOrder), true, 'Single-point orders keep their original stop identity');
+    assert.equal(allLoadsComplete({carga_ok:true,paradas:{[loadStops[0].id]:{tipo:'carga',carga_ok:true}}},{puntos_carga:loadPoints}),false,'A stale global flag cannot hide a missing planned stop');
+    await db.query('UPDATE pedidos SET puntos_carga=NULL,origen=$1 WHERE id=$2',[legacyOrder.origen,order]);
+    await db.query('UPDATE pedido_chofer_pasos SET data=$1 WHERE pedido_id=$2',[JSON.stringify({carga_ok:false}),order]);
+    await sync();
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM agenda_eventos WHERE resolved_at IS NULL AND cause_code='carga_sin_finalizar'")).rows[0].n,0,'A single load confirmed with an actual timestamp by traffic is not pending');
     const fresh = new PGlite();
     try {
       await fresh.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY);

@@ -1,4 +1,5 @@
 const db = require('./db');
+const { driverStops, stopData } = require('./driverStops');
 
 const CAUSES = Object.freeze({
   carga_sin_finalizar: {
@@ -27,11 +28,15 @@ function dayMinus(date, count) {
   return d.toISOString().slice(0, 10);
 }
 
-function allLoadsComplete(data) {
+function allLoadsComplete(data, order = {}) {
   if (!data || typeof data !== 'object') return false;
+  const plannedStops = driverStops(order).filter(stop => stop.tipo === 'carga');
+  if (Object.keys(data.paradas || {}).length) {
+    return plannedStops.every(stop => stopData(stop, data, plannedStops).carga_ok === true);
+  }
+  // Explicit legacy confirmation remains compatible when per-stop data is absent.
   if (data.carga_ok === true) return true;
-  const stops = Object.values(data.paradas || {}).filter(stop => stop?.tipo === 'carga');
-  return stops.length > 0 && stops.every(stop => stop.carga_ok === true);
+  return false;
 }
 
 async function upsertActive(queryable, { empresaId, pedido, causeCode }) {
@@ -76,6 +81,7 @@ async function syncOrderIncidents({ empresaId, pedidoId, queryable = db, today =
   const { rows } = await queryable.query(
     `SELECT p.id, p.numero, p.estado::text AS estado, p.fecha_carga, p.fecha_entrega,
             p.fecha_descarga, p.pendiente_completar, p.incidencia_automatica,
+            p.puntos_carga, p.puntos_descarga, p.origen, p.destino, p.carga_real_at,
             COALESCE(e.cfg_trafico,'{}'::jsonb) AS cfg_trafico,
             s.data AS pasos,
             (NOW() AT TIME ZONE 'Europe/Madrid')::date AS today_madrid
@@ -96,8 +102,12 @@ async function syncOrderIncidents({ empresaId, pedidoId, queryable = db, today =
   const deliveryDate = asDateOnly(order.fecha_entrega || order.fecha_descarga);
   const offset = /^[1-9][0-9]*$/.test(String(config.auto_incidencia_dias || ''))
     ? Math.min(365, Number(config.auto_incidencia_dias)) : 1;
-  const loadPending = !closed && !order.pendiente_completar && automaticEnabled && !allLoadsComplete(order.pasos) &&
-    !['en_curso', 'espera_descarga', 'descarga'].includes(state) &&
+  const hasLoadProgress = typeof order.pasos?.carga_ok === 'boolean' ||
+    Object.values(order.pasos?.paradas || {}).some(stop => stop?.tipo === 'carga');
+  const singleLoadConfirmed = order.carga_real_at && driverStops(order).filter(stop => stop.tipo === 'carga').length === 1;
+  const loaded = singleLoadConfirmed || (hasLoadProgress ? allLoadsComplete(order.pasos, order)
+    : ['en_curso', 'espera_descarga', 'descarga'].includes(state));
+  const loadPending = !closed && !order.pendiente_completar && automaticEnabled && !loaded &&
     loadDate && loadDate < currentDay && loadDate >= dayMinus(currentDay, 60);
   const deliveryPending = !closed && !order.pendiente_completar &&
     automaticEnabled && deliveryDate &&

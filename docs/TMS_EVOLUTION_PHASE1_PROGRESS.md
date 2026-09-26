@@ -64,3 +64,20 @@ Frontend: `npm run check`, 35 suites/97 pruebas y `npm run build` correctos. Tam
 Pendiente del bloque 1.6: el modelo legacy todavía agrupa «cargado» y «en tránsito» en `en_curso`. Separar esas transiciones requiere el modelo operativo y su compatibilidad de las fases 2–4; no se infiere una salida real a partir del color ni de una carga finalizada.
 
 No hay push, merge, despliegue ni migración aplicada por este avance.
+
+## Cierre de regresiones de Agenda y fechas importadas — 26/09/2026
+
+Esta evidencia actualiza los pendientes de 1.1, 1.7 y 1.9 de la tabla inicial:
+
+- Se reprodujo que confirmar la primera de dos cargas podía resolver prematuramente la incidencia. El reconciliador compara ahora todas las paradas de carga planificadas, aunque el estado legacy sea `en_curso` o exista un timestamp de la primera carga. La confirmación web de una única carga conserva su efecto aunque los pasos del conductor estén desactualizados.
+- Crear un pedido ya asignado puede confirmarlo sin pasar por `PATCH /estado`. Ahora se reconcilia Agenda tras confirmar la transacción de alta, y tras editar asignación o paradas. No se pierde un aviso hasta la revisión diaria.
+- El aviso de inicio de la aplicación muestra causa y condición de resolución; las incidencias automáticas ya no ofrecen «Completar» ni «Posponer», acciones que el servidor rechazaba correctamente. Las tareas manuales conservan ambas acciones.
+- El banco HTTP pasa **52 comprobaciones del flujo del chófer**, incluidas incidencia activa antes de cargar, desaparición de activos tras la carga e histórico con resolución. Continúan verificadas lectura/escritura por conductor y empresa, documentos, firmas sintéticas, GPS, fechas y reintentos.
+- En navegador integrado local se abrió la incidencia por teclado a 1440 px y por toque a 390 px; el detalle muestra causa, acción, pedido y resolución. «Mostrar resueltas» conserva los avisos finalizados. Una sesión nueva muestra la ventana inicial sin acciones manuales incompatibles. Datos PGlite sintéticos, sin llamadas externas.
+- `npm run import:trips:regression` aplica también la migración de fechas: el viaje importado conserva las fechas pactadas, no inventa timestamps reales y una entrega posterior no reemplaza la fecha planificada. Los históricos siguen separados de los pedidos operativos.
+
+Reejecución tras recuperar la sesión de Codex: backend `npm run check` y `npm run audit:regression` con salida 0; frontend `npm run check`, 35 suites/97 pruebas y `npm run build` con salida 0. Se conservan las advertencias de compilación previas. `npm run import:trips:regression` también termina con salida 0. No hay nuevas migraciones en este ajuste; siguen siendo necesarias las migraciones de fase 1 documentadas arriba.
+
+No queda pendiente el E2E de escritura del bloque 1.9 listado originalmente: lo cubre el banco sintético descrito. Siguen pendientes pruebas de cámara/Android real, offline y firma reforzada de sus fases específicas. No se han convertido estados históricos, avisos manuales o incidencias legacy sin causa verificable.
+
+La fase 1 sigue abierta por la consolidación del estado operativo y las comprobaciones documentales restantes. Este cierre de regresiones no declara terminada toda la evolución.

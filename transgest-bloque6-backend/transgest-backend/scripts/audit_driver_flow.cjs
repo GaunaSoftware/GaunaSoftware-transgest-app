@@ -13,11 +13,16 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
     checks++;
     return data;
   }
+  const plannedDay = daysAgo => { const d=new Date(); d.setUTCDate(d.getUTCDate()-daysAgo); return d.toISOString().slice(0,10); };
+  const plannedLoad=plannedDay(3), plannedDelivery=plannedDay(2);
+  const agenda = history => request('GET', `/agenda${history?'?mostrar_resueltas=1':''}`, null, 200, managerToken);
   const order = await request('POST', '/pedidos', { cliente_id: client.id, chofer_id: driver.id, vehiculo_id: vehicle.id,
-    origen: 'Valencia', destino: 'Madrid', fecha_carga: '2026-09-20', fecha_descarga: '2026-09-21', importe: 500,
+    origen: 'Valencia', destino: 'Madrid', fecha_carga: plannedLoad, fecha_descarga: plannedDelivery, importe: 500,
     puntos_carga: [{ id: 'pickup', direccion: 'Calle sintética 1', ciudad: 'Valencia' }],
     puntos_descarga: [{ id: 'dropoff', direccion: 'Calle sintética 2', ciudad: 'Madrid' }] }, 201, managerToken);
   await request('PATCH', `/pedidos/${order.id}/estado`, { estado: 'confirmado' }, 200, managerToken);
+  const loadIncident = (await agenda()).find(e => e.pedido_id===order.id && e.cause_code==='carga_sin_finalizar');
+  assert.ok(loadIncident?.explanation && loadIncident?.recommended_action, 'An overdue load explains its cause and action in Agenda');
   const trip = await request('GET', `/pedidos/${order.id}`);
   const [load, unload] = driverStops(trip);
   await request('GET', `/pedidos/${order.id}/documento-control-digital`, null, 409);
@@ -37,6 +42,8 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await request('POST', `/pedidos/${order.id}/firma`, { parada_id: load.id, rol: 'cargador', firma_nombre: 'Firmante sintético', firma: signature });
   await patch(load, { firma_cargador: true });
   await patch(load, { carga_ok: true });
+  assert.equal((await agenda()).some(e => e.id===loadIncident.id), false, 'Completing the load hides its active incident');
+  assert.ok((await agenda(true)).find(e => e.id===loadIncident.id)?.resolved_at, 'The resolved incident remains in history');
   await request('GET', `/pedidos/${order.id}/documento-control-digital`);
   await request('POST', `/pedidos/${order.id}/documento-control-digital/evento`, { action: 'consultado' });
   await request('GET', `/pedidos/${order.id}/carta-porte`);
@@ -56,8 +63,8 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2', [order.id, company])).rows[0].n, beforeRetry, 'Reintentar el cierre no duplica eventos');
   const done = (await db.query('SELECT estado,carga_real_at,descarga_real_at,fecha_carga_planificada,fecha_descarga_planificada FROM pedidos WHERE id=$1 AND empresa_id=$2', [order.id, company])).rows[0];
   assert.equal(done.estado, 'entregado'); assert.ok(done.carga_real_at && done.descarga_real_at);
-  assert.equal(new Date(done.fecha_carga_planificada).toISOString().slice(0, 10), '2026-09-20');
-  assert.equal(new Date(done.fecha_descarga_planificada).toISOString().slice(0, 10), '2026-09-21');
+  assert.equal(new Date(done.fecha_carga_planificada).toISOString().slice(0, 10), plannedLoad);
+  assert.equal(new Date(done.fecha_descarga_planificada).toISOString().slice(0, 10), plannedDelivery);
 
   const otherDriver = crypto.randomUUID(), otherTrip = crypto.randomUUID(), otherCompany = crypto.randomUUID(), foreignTrip = crypto.randomUUID(), foreignClient = crypto.randomUUID();
   await db.query("INSERT INTO choferes(id,empresa_id,nombre,apellidos) VALUES($1,$2,'Otro','Sintético')", [otherDriver, company]);

@@ -55,6 +55,8 @@ async function prepare(db,company,user,input){
    keys.add(key);return {...line,cantidad:n,parada:stop,descuento_pct:discount};
   }).sort((a,b)=>String(a.existencia_id).localeCompare(String(b.existencia_id))||a.parada-b.parada);
   const prep=(await tx.query('INSERT INTO planner_preparaciones(empresa_id,pedido_id,created_by) VALUES($1,$2,$3) RETURNING *',[company,order.id,user])).rows[0];
+  const policy=(await tx.query("SELECT billing_trigger FROM planner_facturacion_politicas WHERE empresa_id=$1 AND ambito IN ('empresa',$2) ORDER BY (ambito=$2) DESC LIMIT 1",[company,String(order.cliente_id)])).rows[0];
+  if(policy){await tx.query('UPDATE planner_preparaciones SET billing_trigger=$3 WHERE id=$1 AND empresa_id=$2',[prep.id,company,policy.billing_trigger]);prep.billing_trigger=policy.billing_trigger;}
   let totalWeight=0,totalPallets=0,supportPallets=0;const descriptions=[];
   for(const line of lines){
    const row=(await tx.query(`SELECT e.*,a.coste,a.precio_venta,a.activo,a.peso_kg,a.unidades_palet,a.referencia,a.descripcion,a.unidad FROM planner_existencias e JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id
@@ -82,6 +84,7 @@ async function transition(db,company,user,id,input){
   if(['expedida','cancelada'].includes(prep.estado))throw fail('La preparación está cerrada.',409);
   const lines=(await tx.query('SELECT * FROM planner_preparacion_lineas WHERE preparacion_id=$1 AND empresa_id=$2 ORDER BY existencia_id,parada',[id,company])).rows;
   const action=input.accion;
+  if(prep.incidencia&&action!=='cancelar')throw fail('Resuelve la incidencia desde Carga en muelle antes de continuar.',409);
   if(action==='repartir_coste'){
    await require('./plannerCosts').snapshotCosts(tx,company,user,prep,input.criterio||'peso');
   }else if(action==='preparar_linea'){
@@ -91,6 +94,7 @@ async function transition(db,company,user,id,input){
   }else if(action==='lista'){
    if(prep.estado!=='preparando'||!lines.length||lines.some(l=>!l.preparada))throw fail('Comprueba todas las líneas antes de marcar la carga como lista.',409);
   }else if(action==='camion'){
+   if(input.situacion==='cargado'&&prep.carretillero_id&&!prep.carga_confirmada_at)throw fail('El carretillero debe confirmar cantidades y foto desde Carga en muelle.',409);
    const next={pendiente:'espera_carga',espera_carga:'cargando',cargando:'cargado',cargado:'salida'}[prep.situacion_camion];
    if(input.situacion!==next||next==='salida')throw fail('Secuencia no válida. Registra espera, carga y camión cargado; después confirma la expedición.',409);
    const assigned=(await tx.query('SELECT colaborador_id,colaborador_precio_confirmado FROM pedidos WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company])).rows[0];
@@ -104,13 +108,18 @@ async function transition(db,company,user,id,input){
    if(action==='cancelar'&&!text(input.motivo,2000))throw fail('Indica el motivo para liberar la mercancía.');
    const order=(await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[prep.pedido_id,company])).rows[0];
    if(action==='expedir'&&(!order||['cancelado','entregado','facturado'].includes(order.estado)))throw fail('El viaje no permite una expedición.',409);
+   if(action==='expedir')await require('./transportDocumentVersions').assertDeparture(tx,company,order,input);
    for(const line of lines){
     const stock=(await tx.query(`UPDATE planner_existencias SET reservado=reservado-$3,cantidad=cantidad-$4 WHERE id=$1 AND empresa_id=$2 AND reservado>=$3 RETURNING *`,[line.existencia_id,company,line.cantidad,action==='expedir'?line.cantidad:0])).rows[0];
     if(!stock)throw fail('La reserva de stock no coincide. No se ha aplicado ningún movimiento.',409);
     await log(tx,{company,user,stock,type:action==='expedir'?'expedicion':'liberacion',quantity:-Number(line.cantidad),reason:action==='expedir'?'Salida de mercancía':text(input.motivo,2000),reference:order?.numero||'',preparation:id});
    }
    if(action==='cancelar')await tx.query('UPDATE pedidos SET peso_kg=NULL,bultos=NULL,palets_cantidad=NULL,metros_lineales=NULL WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company]);
-   if(action==='expedir')await require('./plannerCosts').snapshotCosts(tx,company,user,prep,prep.reparto_coste?.criterio_solicitado||'peso');
+   if(action==='expedir'){
+    await require('./plannerCosts').snapshotCosts(tx,company,user,prep,prep.reparto_coste?.criterio_solicitado||'peso');
+    await tx.query("UPDATE pedidos SET estado='en_curso' WHERE id=$1 AND empresa_id=$2",[prep.pedido_id,company]);
+    await tx.query("INSERT INTO planner_eventos(empresa_id,pedido_id,preparacion_id,tipo,datos,created_by) VALUES($1,$2,$3,'expedicion.salida',$4,$5)",[company,prep.pedido_id,id,JSON.stringify({confirmacion:'trafico',documentos:input.dcd_versiones_revisadas}),user]);
+   }
   }else throw fail('Acción no reconocida.');
   if(action==='camion')await tx.query("INSERT INTO planner_eventos(empresa_id,pedido_id,preparacion_id,tipo,datos,created_by) VALUES($1,$2,$3,'camion.estado',$4,$5)",[company,prep.pedido_id,id,JSON.stringify({anterior:prep.situacion_camion,situacion:input.situacion}),user]);
   return (await tx.query(`UPDATE planner_preparaciones SET version=version+1,

@@ -160,6 +160,7 @@ const ROLE_PERMISSION_PRESETS = {
     ver: ["agenda","dashboard","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","documentos","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
+  carretillero: { ver: ["mi_cuenta"], editar: ["mi_cuenta"] },
   api: { ver: [], editar: [] },
   chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","avisos","mi_cuenta"], editar: ["app_chofer","avisos","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
@@ -247,7 +248,7 @@ function normalizePermissionsForRole(permisos, rol) {
   const base = presetPermisosRol(rol);
   const raw = permisos && typeof permisos === "object" && !Array.isArray(permisos) ? permisos : {};
   const modulos = raw.modulos && typeof raw.modulos === "object" ? raw.modulos : raw;
-  if (["chofer", "cliente", "cliente_portal"].includes(normalizedRole)) {
+  if (["chofer", "cliente", "cliente_portal", "carretillero"].includes(normalizedRole)) {
     // Restricted roles can lose a preset permission, never gain office access.
     for (const id of MODULE_IDS) {
       if (modulos[id]?.ver === false) base.modulos[id] = { ver: false, editar: false };
@@ -551,6 +552,7 @@ async function authenticate(req, res, next) {
       ? rows[0].trafico_config
       : {};
     req.empresaId = rows[0].empresa_id || null;
+    if (req.user.rol === 'carretillero' && !/^\/api\/v1\/(planner-loading|auth)(\/|$)/.test(String(req.originalUrl || '').split('?')[0])) return res.status(403).json({error:'Tu acceso está limitado a las cargas asignadas de almacén.'});
     if (req.user.rol === 'colaborador' || (req.user.rol === 'chofer' && req.user.colaborador_id)) {
       const path = String(req.originalUrl || '').split('?')[0];
       if (!/^\/api\/v1\/(supplier-app|soporte|auth)(\/|$)/.test(path)) return res.status(403).json({error:'Tu acceso de proveedor está limitado a tus viajes, albaranes, vehículos y cuenta.'});

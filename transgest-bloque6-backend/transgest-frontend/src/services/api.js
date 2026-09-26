@@ -506,6 +506,7 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const verificarOrdenColaborador = id => apiFetch(`/pedidos/${id}/orden-colaborador`);
 export const getProduct = () => apiFetch('/producto');
+export const plannerLoadingApi = (path="",options={}) => apiFetch(`/planner-loading${path}`,options);
 export const plannerApi = (path, options={}) => apiFetch(`/planner${path}`, {silentSuccess:true,...options});
 export const enviarPlanDiario = data => apiFetch('/plan-diario/enviar', {method:'POST',body:data});
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);

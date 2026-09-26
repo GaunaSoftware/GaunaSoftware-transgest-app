@@ -11,6 +11,7 @@ const ROLES = [
   "administrativo",
   "responsable_taller",
   "mecanico",
+  "carretillero",
   "colaborador",
   "chofer",
   "cliente",
@@ -24,6 +25,7 @@ const LABEL = {
   administrativo: "Administrativo",
   responsable_taller: "Resp. Taller",
   mecanico: "Mecanico",
+  carretillero: "Carretillero (Planner)",
   colaborador: "Colaborador",
   visualizador: "Visualizador",
   chofer: "Chófer",
@@ -85,6 +87,7 @@ const ALL_MODULE_IDS = MODULOS_PERM.map(m => m.id);
 const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "contable"]);
 
 const ROLE_PRESETS = {
+  carretillero: {ver:["mi_cuenta"],editar:["mi_cuenta"]},
   gerente: { ver: ALL_MODULE_IDS, editar: ALL_MODULE_IDS },
   contable: {
     ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","informes","avisos","empresa","mi_cuenta"],

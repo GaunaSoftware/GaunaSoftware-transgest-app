@@ -1,0 +1,80 @@
+const assert=require('node:assert/strict'),crypto=require('crypto');
+module.exports=async({db,company,user,base,token,password,prep,order,stock})=>{
+ assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);
+ let checks=0;
+ async function request(method,path,body,status=200,session=token){const r=await fetch(base+path,{method,headers:{Authorization:'Bearer '+session,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await r.json();assert.equal(r.status,status,JSON.stringify(data));checks++;return data;}
+ const worker=crypto.randomUUID(),second=crypto.randomUUID();
+ for(const [id,email]of[[worker,'forklift-qa@example.invalid'],[second,'forklift-other@example.invalid']])await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo,permisos) VALUES($1,$2,'Carretillero sintético',$3,$4,'carretillero',true,'{\"modulos\":{\"facturacion\":{\"ver\":true,\"editar\":true}}}')",[id,company,email,await require('bcryptjs').hash(password,4)]);
+ const login=await request('POST','/auth/login',{email:'forklift-qa@example.invalid',password});assert.ok(login.token);const wToken=login.token;
+ const otherLogin=await request('POST','/auth/login',{email:'forklift-other@example.invalid',password});
+ const companyB=crypto.randomUUID(),userB=crypto.randomUUID();
+ await db.query("INSERT INTO empresas(id,nombre,cif,plan,estado,email_admin) VALUES($1,'Planner B sintético','QA-B','enterprise','activa','planner-b@example.invalid')",[companyB]);
+ await db.query("INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,'planner')",[companyB]);
+ await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente B sintético','planner-b@example.invalid',$3,'gerente',true)",[userB,companyB,await require('bcryptjs').hash(password,4)]);
+ const tenantB=await request('POST','/auth/login',{email:'planner-b@example.invalid',password});
+ await request('GET','/planner-loading/'+prep.id,null,404,tenantB.token);
+ await request('POST',`/planner-loading/${prep.id}/accion`,{accion:'incidencia',version:1,motivo:'No autorizado',operacion:crypto.randomUUID()},404,tenantB.token);
+ await request('GET','/planner-loading/politicas',null,403,wToken);
+ await request('POST','/planner-loading/politicas',{ambito:crypto.randomUUID(),billing_trigger:'delivery'},404);
+ await request('POST','/planner-loading/politicas',{ambito:'empresa',billing_trigger:'delivery'});
+ await request('GET','/facturas',null,403,wToken);await request('GET','/planner/inventario/articulos',null,403,wToken);
+ await request('GET','/planner-loading/'+prep.id,null,404,wToken);
+ let current=await request('GET','/planner-loading/'+prep.id);
+ const act=async(body,status=200,session=token)=>{const result=await request('POST',`/planner-loading/${prep.id}/accion`,{version:current.version,operacion:crypto.randomUUID(),...body},status,session);if(status===200)current=result;return result;};
+ await act({accion:'asignar',carretillero_id:worker,billing_trigger:'delivery'});
+ const dock=await request('POST','/planner/muelles',{nombre:'Muelle sintético',almacen:'Principal',horario_inicio:'00:00',horario_fin:'23:59',dias:[1,2,3,4,5,6,7]},201);
+ const book=id=>request('POST','/planner/reservas',{muelle_id:dock.id,pedido_id:id,tipo:'carga',inicio:new Date().toISOString()},201);
+ const safe=await request('GET','/planner-loading/'+prep.id,null,200,wToken);assert.equal(safe.lineas[0].coste_unitario,undefined);assert.equal(safe.lineas[0].precio_venta,undefined);
+ await request('GET','/planner-loading/'+prep.id,null,404,otherLogin.token);
+ await act({accion:'iniciar'},409,wToken);
+ let legacy=await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'camion',situacion:'espera_carga',version:current.version});current.version=legacy.version;
+ await act({accion:'iniciar'},409,wToken);await book(order.id);
+ await act({accion:'iniciar'},200,wToken);
+ const line=current.lineas[0];const reading={accion:'escanear',linea_id:line.id,ubicacion:line.ubicacion,referencia:line.referencia,lote:line.lote,cantidad:10,operacion:crypto.randomUUID()};
+ await act({...reading,lote:'OTRO'},409,wToken);
+ await act(reading,200,wToken);await act(reading,200,wToken);assert.equal(Number(current.lineas[0].cantidad_cargada),10,'Duplicate reading must not add quantity');
+ await act({...reading,cantidad:11},409,wToken);
+ await act({...reading,cantidad:20,operacion:crypto.randomUUID()},409,wToken);
+ await act({accion:'finalizar',confirmado:true},409,wToken);
+ await act({...reading,cantidad:15,operacion:crypto.randomUUID()},200,wToken);
+ const oldDelivery=(await db.query('SELECT * FROM planner_albaran_versiones WHERE empresa_id=$1 AND preparacion_id=$2 ORDER BY version DESC LIMIT 1',[company,prep.id])).rows[0];
+ await db.query("UPDATE pedidos SET referencia_cliente='REVISION-QA',vehiculo_id=(SELECT id FROM vehiculos WHERE empresa_id=$2 AND tipo='tractora' LIMIT 1) WHERE id=$1 AND empresa_id=$2",[order.id,company]);
+ // A real, small synthetic PNG; not camera evidence from a real user.
+ const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6IoAAAAASUVORK5CYII=';
+ await act({accion:'finalizar',confirmado:true,foto_base64:png,foto_mime:'image/png'},200,wToken);
+ assert.ok(current.documentacion_estado.albaran_id);assert.equal(current.documentacion_estado.deca,'pendiente');
+ const newDelivery=(await db.query('SELECT * FROM planner_albaran_versiones WHERE empresa_id=$1 AND preparacion_id=$2 ORDER BY version DESC LIMIT 1',[company,prep.id])).rows[0];
+ assert.equal(newDelivery.version,2);assert.notEqual(newDelivery.id,oldDelivery.id);
+ assert.deepEqual(Buffer.from((await require('../src/services/plannerDocumentation').read(db,company,oldDelivery.id)).pdf),Buffer.from(oldDelivery.pdf));
+ await assert.rejects(db.query('UPDATE planner_albaran_versiones SET numero=$2 WHERE id=$1',[oldDelivery.id,'REWRITE']),{code:'55000'});
+ assert.equal(current.estado_operativo,'cargada');assert.equal(current.listo_facturar,false);
+ const balance=async()=>Number((await db.query('SELECT cantidad FROM planner_existencias WHERE id=$1',[stock.id])).rows[0].cantidad);
+ assert.equal(await balance(),100,'Loading does not dispatch stock');
+ await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'expedir',version:current.version},409);
+ assert.equal(await balance(),100,'Document rejection is atomic');
+ const documentIds=await db.transaction(tx=>require('../src/services/plannerDocumentation').prepareDeca(tx,company,user,order.id,'https://example.invalid'));
+ const doc={id:documentIds[0]};assert.ok(doc.id);
+ const review={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[doc.id]};
+ await act({accion:'documentos_listos',...review},403,wToken);
+ await act({accion:'documentos_listos',...review});assert.equal(current.estado_operativo,'lista_para_salida');
+ legacy=await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'expedir',version:current.version,...review});
+ current=await request('GET','/planner-loading/'+prep.id);assert.equal(current.estado_operativo,'en_transito');assert.equal(current.listo_facturar,false);assert.equal(await balance(),75);
+ await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'expedir',version:current.version,...review},409);assert.equal(await balance(),75);
+ await assert.rejects(require('../src/services/plannerInvoice').saleLines(db,company,prep.id,order.cliente_id),/tras la entrega/);
+ await act({accion:'entregada',confirmado:true,pod_id:crypto.randomUUID()},409);
+ const pod=crypto.randomUUID();await db.query("INSERT INTO pedido_docs(id,empresa_id,pedido_id,tipo,nombre,file_mime,file_base64) VALUES($1,$2,$3,'pod','POD de prueba','image/png',$4)",[pod,company,order.id,png]);
+ await act({accion:'entregada',confirmado:true,pod_id:pod});assert.equal(current.estado_operativo,'entregada');assert.equal(current.listo_facturar,true);
+ if(process.env.AUDIT_BROWSER==='1'){
+  const order2=await request('POST','/pedidos',{workspace:'planner',cliente_id:order.cliente_id,origen:'Almacén SINTÉTICO',destino:'Destino SINTÉTICO',fecha_carga:'2026-09-26',importe:100},201);
+  const sample=await request('POST','/planner/inventario/movimientos',{articulo_id:stock.articulo_id,tipo:'fabricacion',almacen:'Principal',ubicacion:'UI-SINTETICA',lote:'QA-UI',cantidad:10,motivo:'Demostración local identificada',operacion:crypto.randomUUID()},201);
+  const prep2=await request('POST','/planner/inventario/preparaciones',{pedido_id:order2.id,lineas:[{existencia_id:sample.id,cantidad:10}]},201);
+  assert.equal(prep2.billing_trigger,'delivery','New preparation freezes company policy');
+  const data=await request('GET','/planner/inventario/preparaciones/'+prep2.id);
+  await book(order2.id);
+  let version=prep2.version;
+  for(const line of data.lineas){const r=await request('POST',`/planner/inventario/preparaciones/${prep2.id}/accion`,{version,accion:'preparar_linea',linea_id:line.id,preparada:true});version=r.version;}
+  for(const body of [{accion:'lista'},{accion:'camion',situacion:'espera_carga'}]){const r=await request('POST',`/planner/inventario/preparaciones/${prep2.id}/accion`,{version,...body});version=r.version;}
+  await request('POST',`/planner-loading/${prep2.id}/accion`,{version,operacion:crypto.randomUUID(),accion:'asignar',carretillero_id:worker,billing_trigger:'delivery'});
+ }
+ return {checks,idempotentScan:true,tenantAssignment:true,noFinancials:true,photo:true,departureDocuments:true,noDoubleStock:true,deliveryBilling:true};
+};

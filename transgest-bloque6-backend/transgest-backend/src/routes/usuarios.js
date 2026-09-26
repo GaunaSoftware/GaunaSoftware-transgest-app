@@ -19,6 +19,7 @@ const ROLES_PERMITIDOS = [
   "administrativo",
   "responsable_taller",
   "mecanico",
+  "carretillero",
   "colaborador",
   "visualizador",
   "chofer",
@@ -180,7 +181,8 @@ router.post("/",
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { nombre, email, username, rol, perfil, permisos, cliente_id, chofer_id } = req.body;
-    if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
+    if (rol === "carretillero" && !req.user.productos?.includes("planner")) return res.status(403).json({error:"El rol carretillero requiere Planner."});
+  if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
       return res.status(403).json({ error: "La app del chófer está disponible desde TransGest Pro. Puedes dar de alta su ficha en Conductores sin crear acceso a la app.", code:"DRIVER_APP_NOT_INCLUDED" });
     }
     const eid = empresaId(req);
@@ -261,6 +263,7 @@ router.patch("/:id", async (req, res) => {
   if (rol !== undefined && !ROLES_PERMITIDOS.includes(rol)) {
     return res.status(400).json({ error: "Rol no valido" });
   }
+  if (rol === "carretillero" && !req.user.productos?.includes("planner")) return res.status(403).json({error:"El rol carretillero requiere Planner."});
   if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
     return res.status(403).json({ error: "La app del chófer está disponible desde TransGest Pro.", code:"DRIVER_APP_NOT_INCLUDED" });
   }

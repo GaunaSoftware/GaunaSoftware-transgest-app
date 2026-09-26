@@ -40,6 +40,7 @@ async function main(){
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.use('/api/v1/auth',auth);
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
+ app.use('/api/v1/planner-loading',authMiddleware.authenticate,req('./routes/planner_loading'));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
  app.use('/api/v1/portal-cliente',authMiddleware.authenticate,boundaries.portalClientePermission,req('./routes/cliente_portal'));
  app.use('/api/v1/informes',authMiddleware.authenticate,authMiddleware.requireModulePermission('informes'),authMiddleware.requirePlanFeature('kpis_avanzados'),req('./routes/informes'));
@@ -220,8 +221,7 @@ async function main(){
   prepared=await call('Planner: mercancía lista','POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'lista'});
   const note=await call('Planner: generar albarán','POST','/planner/inventario/preparaciones/'+prep.id+'/albaran',{});
   const pdf=await call('Planner: descargar albarán PDF','GET','/planner/inventario/albaranes/'+note.id+'/pdf');if(!Buffer.from(pdf.file_base64||'','base64').subarray(0,4).equals(Buffer.from('%PDF')))throw Error('Albarán PDF inválido');
-  for(const situacion of ['espera_carga','cargando','cargado'])prepared=await call('Planner: estado '+situacion,'POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'camion',situacion});
-  await call('Planner: expedir','POST','/planner/inventario/preparaciones/'+prep.id+'/accion',{version:prepared.version,accion:'expedir'});
+  evidence.plannerLoading=await require('./audit_planner_loading.cjs')({db,company,user,base,token,password,prep,order:plannerOrder,stock});
   const sale=await call('Planner: factura de mercancía','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',planner_preparacion_id:prep.id,referencia_cliente:'VENTA-QA',lineas:[{concepto:'No confiar en cliente',cantidad:1,precio_unit:0.01}]});
   if(!sale.id||Number(sale.base_imponible)!==87.5)throw Error('Factura Planner no respeta el precio de mercancía');
   await call('Planner: revisar factura de venta','POST','/facturas/'+sale.id+'/revision',{confirmado:true});

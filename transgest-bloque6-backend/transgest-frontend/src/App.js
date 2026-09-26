@@ -21,6 +21,7 @@ import { isAutomaticIncident } from "./pages/workspace/agendaIncident";
 const Dashboard    = lazy(() => import("./pages/Dashboard"));
 const Intelligence = lazy(() => import('./pages/Intelligence'));
 const PlannerConnections=lazy(()=>import('./planner/PlannerConnections'));
+const PlannerLoading = lazy(() => import('./planner/PlannerLoading'));
 const PlannerApp = lazy(() => import('./planner/PlannerApp'));
 const ControlTower = lazy(() => import("./pages/ControlTower"));
 const Clientes     = lazy(() => import("./pages/Clientes"));
@@ -2060,6 +2061,10 @@ function ProductWorkspace({path}) {
     if(user.debe_cambiar_password)return <PasswordChangeRequired user={user} onChanged={refreshUser} onLogout={logout}/>;
     if(!['gerente','trafico','administrativo'].includes(user.rol))return <main><h1>Acceso reservado al equipo de tráfico</h1><a href="/">Volver al programa</a></main>;
     return <Suspense fallback={<Spinner/>}><PlannerConnections/></Suspense>;
+  }
+  if(user?.rol==='carretillero'){
+    if(user.debe_cambiar_password)return <PasswordChangeRequired user={user} onChanged={refreshUser} onLogout={logout}/>;
+    return <Suspense fallback={<Spinner/>}><PlannerLoading standalone/></Suspense>;
   }
   const internal=user && !['cliente','cliente_portal','colaborador','chofer'].includes(user.rol);
   const plannerOnly=internal && hasProduct(user,'planner') && !hasProduct(user,'transgest');

@@ -1,0 +1,10 @@
+.planner-loading{max-width:1080px;margin:0 auto;padding:clamp(12px,3vw,28px);color:var(--text);box-sizing:border-box}
+.planner-loading header,.planner-loading nav{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.planner-loading article{padding:12px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}
+.planner-loading form{padding:16px 0}.planner-loading button{margin:6px 6px 6px 0;min-height:44px;white-space:normal;max-width:100%}
+.planner-loading label{display:flex;flex-direction:column;gap:6px;min-width:0}.planner-loading input,.planner-loading select,.planner-loading textarea{box-sizing:border-box;max-width:100%;min-width:0;min-height:44px}
+.planner-loading .pl-check-line{display:flex;flex-direction:row;align-items:center}.planner-loading progress{width:100%}
+.planner-loading .pl-panel{padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--bg2,var(--bg))}
+.planner-loading .pl-panel h2{font-size:1.15rem;margin:0 0 12px}.planner-loading label{margin-bottom:12px}
+.planner-loading h2{font-size:1.2rem}.planner-loading .planner-grid{gap:16px}
+@media(max-width:600px){.planner-loading .planner-grid{grid-template-columns:1fr}.planner-loading h1{font-size:1.5rem}}

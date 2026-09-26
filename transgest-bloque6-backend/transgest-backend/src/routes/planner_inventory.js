@@ -55,32 +55,19 @@ router.get('/preparaciones/:id',wrap(async(req,res)=>{
 router.post('/preparaciones',write,wrap(async(req,res)=>res.status(201).json(await inventory.prepare(db,req.empresaId,req.user.id,req.body))));
 router.post('/preparaciones/:id/accion',write,wrap(async(req,res)=>res.json(await inventory.transition(db,req.empresaId,req.user.id,req.params.id,req.body))));
 router.get('/albaranes',wrap(async(req,res)=>res.json((await db.query(`SELECT a.id,a.numero,a.created_at,a.preparacion_id,p.pedido_id,a.datos->>'pedido_numero' AS pedido_numero,a.datos->>'cliente_nombre' AS cliente,
- a.datos->>'destino' AS destino FROM planner_albaranes a JOIN planner_preparaciones p ON p.id=a.preparacion_id AND p.empresa_id=a.empresa_id WHERE a.empresa_id=$1 ORDER BY a.created_at DESC LIMIT 300`,[req.empresaId])).rows)));
+ a.datos->>'destino' AS destino FROM (SELECT id,empresa_id,preparacion_id,numero,datos,created_at FROM planner_albaran_versiones UNION ALL SELECT a.id,a.empresa_id,a.preparacion_id,a.numero,a.datos,a.created_at FROM planner_albaranes a WHERE NOT EXISTS(SELECT 1 FROM planner_albaran_versiones v WHERE v.empresa_id=a.empresa_id AND v.id=a.id)) a JOIN planner_preparaciones p ON p.id=a.preparacion_id AND p.empresa_id=a.empresa_id WHERE a.empresa_id=$1 ORDER BY a.created_at DESC LIMIT 300`,[req.empresaId])).rows)));
 router.get('/albaranes/:id',wrap(async(req,res)=>{
- const row=(await db.query('SELECT * FROM planner_albaranes WHERE id=$1 AND empresa_id=$2',[req.params.id,req.empresaId])).rows[0];
- if(!row)throw inventory.fail('Albarán no encontrado.',404);res.json(row);
+ const row=await require('../services/plannerDocumentation').read(db,req.empresaId,req.params.id);
+ if(!row)throw inventory.fail('Albarán no encontrado.',404);const {pdf,...metadata}=row;res.json(metadata);
 }));
 router.get('/albaranes/:id/pdf',wrap(async(req,res)=>{
- const row=(await db.query('SELECT * FROM planner_albaranes WHERE id=$1 AND empresa_id=$2',[req.params.id,req.empresaId])).rows[0];
+ const row=await require('../services/plannerDocumentation').read(db,req.empresaId,req.params.id);
  if(!row)throw inventory.fail('Albarán no encontrado.',404);
- const pdf=await require('../services/plannerDeliveryPdf').deliveryPdf(row);
+ const pdf=row.pdf?Buffer.from(row.pdf):await require('../services/plannerDeliveryPdf').deliveryPdf(row);
  res.json({nombre:`${row.numero}.pdf`,file_mime:'application/pdf',file_base64:pdf.toString('base64')});
 }));
 router.post('/preparaciones/:id/albaran',write,wrap(async(req,res)=>{
- const row=await db.transaction(async tx=>{
-  const prep=(await tx.query('SELECT * FROM planner_preparaciones WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[req.params.id,req.empresaId])).rows[0];
-  if(!prep)throw inventory.fail('Preparación no encontrada.',404);
-  if(!['lista','expedida'].includes(prep.estado))throw inventory.fail('Completa la preparación antes de generar el albarán.',409);
-  const old=(await tx.query('SELECT * FROM planner_albaranes WHERE preparacion_id=$1 AND empresa_id=$2',[prep.id,req.empresaId])).rows[0];if(old)return old;
-  const order=(await tx.query(`SELECT p.*,c.nombre AS cliente_nombre,c.cif AS cliente_cif,c.direccion AS cliente_direccion FROM pedidos p JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id WHERE p.id=$1 AND p.empresa_id=$2`,[prep.pedido_id,req.empresaId])).rows[0];
-  if(!order)throw inventory.fail('Completa el destinatario de la carga.',409);
-
-  const lines=(await tx.query(`SELECT l.referencia,l.descripcion,l.unidad,l.cantidad,l.parada,l.peso_kg,e.lote,e.ubicacion FROM planner_preparacion_lineas l JOIN planner_existencias e ON e.id=l.existencia_id AND e.empresa_id=l.empresa_id
-   JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id WHERE l.preparacion_id=$1 AND l.empresa_id=$2 ORDER BY l.parada,a.referencia`,[prep.id,req.empresaId])).rows;
-  // Snapshot never includes costs or transport purchase prices in the recipient document.
-  const data=await require('../services/deliveryData').deliveryData(tx,req.empresaId,order.id,lines);
-  const id=crypto.randomUUID(),number=`ALB-${order.numero}-${id.slice(0,8).toUpperCase()}`;
-  return (await tx.query('INSERT INTO planner_albaranes(id,empresa_id,preparacion_id,numero,datos,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[id,req.empresaId,prep.id,number,JSON.stringify(data),req.user.id])).rows[0];
- });res.status(201).json(row);
+ const record=await db.transaction(tx=>require('../services/plannerDocumentation').delivery(tx,req.empresaId,req.user.id,req.params.id));
+ const {pdf,...metadata}=record;res.status(201).json(metadata);
 }));
 module.exports=router;

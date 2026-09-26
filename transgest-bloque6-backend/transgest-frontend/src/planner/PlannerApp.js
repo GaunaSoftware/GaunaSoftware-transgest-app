@@ -13,6 +13,7 @@ import PlannerSlots from './PlannerSlots';
 import SupportInbox from '../components/SupportInbox';
 const SupplierApp=lazy(()=>import('../pages/SupplierApp'));
 const Providers=lazy(()=>import('./PlannerProviders'));
+const Loading=lazy(()=>import('./PlannerLoading'));
 const Warehouse=lazy(()=>import('./PlannerWarehouse'));
 const Finance=lazy(()=>import('./PlannerFinance'));
 const Intelligence=lazy(()=>import('../pages/Intelligence'));
@@ -67,6 +68,7 @@ export default function PlannerApp({ PasswordChangeComponent }) {
     <main><Suspense fallback={<p>Cargando...</p>}>
       {active === 'pedidos' && <PlannerLoads focusOrder={editOrder} onFocusConsumed={consumeEdit} onPrepare={id=>{setFocusOrder(id);setView('palets');}} />}
       {active === 'muelles' && <PlannerSlots onOrder={id=>{setEditOrder(id);setView('pedidos');}} />}
+      {active === 'loading' && <Loading />}
       {active === 'palets' && <Warehouse focusOrder={focusOrder} onFocusConsumed={consumePreparation} onDocuments={()=>setView('documentos')} onInvoices={()=>setView('facturacion')} />}
       {active === 'facturacion' && <Finance />}
       {active === 'ia' && <Intelligence />}

@@ -12,6 +12,14 @@ module.exports=async({db,company,user,base,token,password,prep,order,stock})=>{
  await db.query("INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,'planner')",[companyB]);
  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente B sintético','planner-b@example.invalid',$3,'gerente',true)",[userB,companyB,await require('bcryptjs').hash(password,4)]);
  const tenantB=await request('POST','/auth/login',{email:'planner-b@example.invalid',password});
+ await request('GET','/planner/wms',null,403,wToken);
+ const wmsLocation=await request('POST','/planner/wms/accion',{accion:'ubicacion',operacion:crypto.randomUUID(),almacen:'QA HTTP',codigo:'HTTP-1'},201);
+ const wmsList=await request('GET','/planner/wms');assert.ok(wmsList.ubicaciones.some(l=>l.id===wmsLocation.resultado.id));
+ assert.equal((await request('GET','/planner/wms',null,200,tenantB.token)).ubicaciones.length,0);
+ await request('POST','/planner/wms/accion',{accion:'calidad',operacion:crypto.randomUUID(),existencia_id:stock.id,version:1,calidad:'liberado',motivo:'Ajena'},404,tenantB.token);
+ await request('GET','/planner/wms/packs/'+crypto.randomUUID()+'/etiqueta',null,404,tenantB.token);
+ const wmsMetrics=await request('GET','/planner/wms/kpis?desde=2020-01-01&hasta=2020-01-31');assert.equal(wmsMetrics.carga.muestra,0);assert.equal(wmsMetrics.carga.media_min,null);
+ await request('GET','/planner/wms/kpis?desde=2026-02-30&hasta=2026-03-01',null,400);
  await request('GET','/planner-loading/'+prep.id,null,404,tenantB.token);
  await request('POST',`/planner-loading/${prep.id}/accion`,{accion:'incidencia',version:1,motivo:'No autorizado',operacion:crypto.randomUUID()},404,tenantB.token);
  await request('GET','/planner-loading/politicas',null,403,wToken);
@@ -28,7 +36,9 @@ module.exports=async({db,company,user,base,token,password,prep,order,stock})=>{
  await request('GET','/planner-loading/'+prep.id,null,404,otherLogin.token);
  await act({accion:'iniciar'},409,wToken);
  let legacy=await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'camion',situacion:'espera_carga',version:current.version});current.version=legacy.version;
- await act({accion:'iniciar'},409,wToken);await book(order.id);
+ await act({accion:'iniciar'},409,wToken);const booking=await book(order.id);
+ const qr=await request('GET',`/planner/wms/reservas/${booking.id}/etiqueta`);assert.equal(qr.contenido,'TG-CHECKIN:'+booking.id);assert.match(qr.qr,/^data:image\/png;base64,/);
+ await request('GET',`/planner/wms/reservas/${booking.id}/etiqueta`,null,404,tenantB.token);
  await act({accion:'iniciar'},200,wToken);
  const line=current.lineas[0];const reading={accion:'escanear',linea_id:line.id,ubicacion:line.ubicacion,referencia:line.referencia,lote:line.lote,cantidad:10,operacion:crypto.randomUUID()};
  await act({...reading,lote:'OTRO'},409,wToken);

@@ -31,6 +31,8 @@ async function move(db,company,user,input){
   }
   await tx.query(`INSERT INTO planner_existencias(empresa_id,articulo_id,almacen,ubicacion,lote,caducidad)
     VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(empresa_id,articulo_id,almacen,ubicacion,lote) DO NOTHING`,[company,article.id,warehouse,location,lot,input.caducidad||null]);
+  const existing=(await tx.query('SELECT caducidad IS NOT DISTINCT FROM $6::date AS misma_caducidad FROM planner_existencias WHERE empresa_id=$1 AND articulo_id=$2 AND almacen=$3 AND ubicacion=$4 AND lote=$5 FOR UPDATE',[company,article.id,warehouse,location,lot,input.caducidad||null])).rows[0];
+  if(!existing?.misma_caducidad)throw fail('Ese lote y ubicación tiene otra caducidad. Revisa la recepción; no se han mezclado existencias.',409);
   const stock=(await tx.query(`UPDATE planner_existencias SET cantidad=cantidad+$6 WHERE empresa_id=$1 AND articulo_id=$2 AND almacen=$3 AND ubicacion=$4 AND lote=$5
     AND cantidad+$6>=reservado RETURNING *`,[company,article.id,warehouse,location,lot,quantity])).rows[0];
   if(!stock)throw fail('El ajuste dejaría menos mercancía que la reservada. Libera primero la preparación.',409);
@@ -59,10 +61,11 @@ async function prepare(db,company,user,input){
   if(policy){await tx.query('UPDATE planner_preparaciones SET billing_trigger=$3 WHERE id=$1 AND empresa_id=$2',[prep.id,company,policy.billing_trigger]);prep.billing_trigger=policy.billing_trigger;}
   let totalWeight=0,totalPallets=0,supportPallets=0;const descriptions=[];
   for(const line of lines){
-   const row=(await tx.query(`SELECT e.*,a.coste,a.precio_venta,a.activo,a.peso_kg,a.unidades_palet,a.referencia,a.descripcion,a.unidad FROM planner_existencias e JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id
+   const row=(await tx.query(`SELECT e.*,(e.caducidad < (now() AT TIME ZONE 'Europe/Madrid')::date) AS caducado,a.coste,a.precio_venta,a.activo,a.peso_kg,a.unidades_palet,a.referencia,a.descripcion,a.unidad FROM planner_existencias e JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id
      WHERE e.id=$1 AND e.empresa_id=$2 FOR UPDATE OF e`,[line.existencia_id,company])).rows[0];
    if(!row||!row.activo)throw fail('Existencia no disponible.',404);
-   if(row.caducidad&&new Date(row.caducidad).toISOString().slice(0,10)<new Date().toISOString().slice(0,10))throw fail('No se puede preparar un lote caducado.',409);
+   if(row.caducado)throw fail('No se puede preparar un lote caducado.',409);
+   if(row.calidad&&row.calidad!=='liberado')throw fail('El lote está pendiente o bloqueado por calidad.',409);
    const stock=(await tx.query('UPDATE planner_existencias SET reservado=reservado+$3 WHERE id=$1 AND empresa_id=$2 AND cantidad-reservado>=$3 RETURNING *',[row.id,company,line.cantidad])).rows[0];
    if(!stock)throw fail('Stock insuficiente. Otra carga puede haber reservado esta mercancía.',409);
    await tx.query(`INSERT INTO planner_preparacion_lineas(empresa_id,preparacion_id,existencia_id,cantidad,coste_unitario,precio_venta,parada,referencia,descripcion,unidad,peso_kg,unidades_palet,descuento_pct) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,[company,prep.id,row.id,line.cantidad,row.coste,line.precio_venta===undefined?row.precio_venta:decimal(line.precio_venta),line.parada,row.referencia,row.descripcion,row.unidad,row.peso_kg,row.unidades_palet,line.descuento_pct]);
@@ -110,8 +113,8 @@ async function transition(db,company,user,id,input){
    if(action==='expedir'&&(!order||['cancelado','entregado','facturado'].includes(order.estado)))throw fail('El viaje no permite una expedición.',409);
    if(action==='expedir')await require('./transportDocumentVersions').assertDeparture(tx,company,order,input);
    for(const line of lines){
-    const stock=(await tx.query(`UPDATE planner_existencias SET reservado=reservado-$3,cantidad=cantidad-$4 WHERE id=$1 AND empresa_id=$2 AND reservado>=$3 RETURNING *`,[line.existencia_id,company,line.cantidad,action==='expedir'?line.cantidad:0])).rows[0];
-    if(!stock)throw fail('La reserva de stock no coincide. No se ha aplicado ningún movimiento.',409);
+    const stock=(await tx.query(`UPDATE planner_existencias SET reservado=reservado-$3,cantidad=cantidad-$4 WHERE id=$1 AND empresa_id=$2 AND reservado>=$3 AND ($4::numeric=0 OR ((calidad IS NULL OR calidad='liberado') AND (caducidad IS NULL OR caducidad>=(now() AT TIME ZONE 'Europe/Madrid')::date))) RETURNING *`,[line.existencia_id,company,line.cantidad,action==='expedir'?line.cantidad:0])).rows[0];
+    if(!stock)throw fail('La reserva no coincide o el lote está bloqueado/caducado. No se ha aplicado ningún movimiento.',409);
     await log(tx,{company,user,stock,type:action==='expedir'?'expedicion':'liberacion',quantity:-Number(line.cantidad),reason:action==='expedir'?'Salida de mercancía':text(input.motivo,2000),reference:order?.numero||'',preparation:id});
    }
    if(action==='cancelar')await tx.query('UPDATE pedidos SET peso_kg=NULL,bultos=NULL,palets_cantidad=NULL,metros_lineales=NULL WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company]);

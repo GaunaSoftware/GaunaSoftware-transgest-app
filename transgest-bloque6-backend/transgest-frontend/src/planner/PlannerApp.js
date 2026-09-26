@@ -43,7 +43,7 @@ export default function PlannerApp({ PasswordChangeComponent }) {
   useEffect(() => {
     document.title = 'TransGest Planner';
     let alive = true;
-    getProduct().then(data => { if (alive) setProduct(data.producto); })
+    getProduct().then(data => { if (!data?.producto) throw new Error('Respuesta de producto incompleta'); if (alive) setProduct(data.producto); })
       .catch(() => { if (alive) setError('No se pudo verificar el servidor de Planner.'); });
     return () => { alive = false; };
   }, []);

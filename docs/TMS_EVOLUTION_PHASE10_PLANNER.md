@@ -34,3 +34,37 @@ Una reversión de código debe conservar las tablas y los originales; el código
 10B WMS profesional está pendiente de implementación/contraste: ubicaciones estructuradas, recepción/ASN, calidad, códigos GS1, FIFO/FEFO, conteos, traslados, packing/SSCC, reposición/cross-dock, check-in y métricas. Existen stock por ubicación/lote, recepción/fabricación, reservas, picking manual, precios congelados, repartos, portal de huecos y medias de carga; eso **no** demuestra el resto del WMS.
 
 No se marca la fase 10 completa ni se anuncia WMS avanzado, control de presencia física certificado o eCMR certificado. La entrega desde transportista/chófer debe conciliarse con el consentimiento y eventos de las fases 11 y siguientes. El flujo nuevo de tráfico puede confirmar la entrega con su POD; no infiere entregas a partir del horario previsto.
+
+
+## 10B — Procesos WMS verificados (26/09/2026)
+
+Migración aditiva `20260926_planner_wms.sql`. Aplicarla después de la migración de carga y **antes** del código que consulta calidad/versiones de stock. Repetirla conserva existencias y decisiones; no se rellenan fechas de recepción ni calidad históricas. Al revertir código, conservar tablas y datos; no bajar a un código sin bloqueo de calidad mientras existan lotes bloqueados/reservados.
+
+| Proceso | Implementación y alcance comprobado |
+| --- | --- |
+| Ubicación | Almacén, código, zona, pasillo, estantería y nivel; identidad por empresa |
+| ASN / recepción | Aviso multilínea; recibidos parciales/excesos, cierre motivado, cantidades preservadas, operaciones UUID reintentables |
+| Calidad | Pendiente/liberado/bloqueado; recepción nueva pone en cuarentena el lote/ubicación; reserva y salida rechazan lotes no liberados/caducados. El histórico sin decisión permanece explícitamente sin revisión |
+| Caducidad | Impide fusionar existencias de mismo lote y ubicación con otra caducidad; fecha de caducidad comparada en Europe/Madrid |
+| Traslado / reposición | Movimiento doble transaccional, conserva total, lote, calidad y recepción conocida; no traslada unidades reservadas. Reposición manual; no algoritmo automático |
+| Inventario / conteo | Apertura con cantidad y revisión de stock; confirmación física motivada, incluso cero; cualquier modificación posterior invalida el conteo. No inventa recuentos históricos |
+| FIFO/FEFO / picking | Propuesta de lotes liberados disponibles; fechas desconocidas al final y cobertura parcial. Reserva/reparto/picking existentes reutilizados; no asignación automática |
+| Código GS1 | GTIN-14, SSCC-18 y AI 00/01/10/17/21/37; check digit, longitudes y fecha; lector como teclado/manual. Fecha 17 conserva AAMMDD (día 00 significa fin de mes), sin atribuir titularidad del prefijo |
+| Packing / SSCC | Contenido por línea de preparación; impide embalar más de lo reservado, duplicar SSCC y modificar cargas cerradas; etiqueta QR descargable autenticada |
+| Cross-docking | Secuencia existente recepción → calidad → preparación → muelle, sin almacenaje intermedio obligatorio; registro de ubicaciones/transfers manual. No motor automático de consolidación |
+| Slots / llegada QR | Portal de solicitudes existente; QR de reserva identificativo, selección/lectura y confirmación por oficina autorizada. No enlace anónimo, no confirma la llegada al abrir un QR |
+| Tiempos / slots | Media real por muelle existente y media/mediana/P90 por periodo añadido. No duración universal obligatoria ni bloqueo exclusivo; programación dinámica automática pendiente de reglas operativas y muestra, no simulada |
+| KPI WMS | Cargas con inicio/fin reales en periodo Madrid; muestra y cobertura. Stock actual separado del periodo, por unidad compatible; pendiente/bloqueado y lotes sin revisión |
+
+Interfaz en Almacén y stock → Procesos de almacén. Reutiliza controles, colores, modal, preparación y movimientos. Listados acotados y límites visibles (ubicaciones 500, ASN/conteos/SSCC 200, auditoría 100); no se anuncian totales históricos sobre esas páginas. No hay cámaras GS1 certificadas, inventario cíclico programado ni reposición autónoma. Estas automatizaciones avanzadas no se presentan como realizadas.
+
+### Evidencia
+
+- `node scripts/planner_inventory_check.cjs`: OK con migración repetida, ASN parcial/exceso, reintento, aislamiento, cuarentena, traslado conservativo, conteo obsoleto/cero, GS1, SSCC, llegada y bloqueo de expedición sin perder reservas (`phase10-wms-stock-final.log`).
+- `node scripts/audit_workflows_regression_check.cjs`: API real en PGlite aislado; gerente A/B, carretillero sin WMS, fechas inválidas/sin muestra y QR privado. Correo/proveedores exteriores deshabilitados (`phase10-wms-http-final.log`).
+- `npm run check`: superado (`phase10-wms-check-final.log`). Se actualizaron únicamente los cargadores simulados de dos pruebas antiguas para admitir el nuevo subrouter; los flujos y el aislamiento se verifican además por HTTP real.
+- Frontend: 53 suites y 127 pruebas; reintento mantiene UUID y perfil sin edición deshabilita escrituras. Build local compilado con advertencias existentes (`phase10-wms-front-final.log`, `phase10-wms-build-final.log`).
+- Navegador local sintético: crear ASN de 12 unidades desde formulario; confirmación y listado visibles. Modal usable a 390 px; página sin desbordamiento global a 390/768/1440/1920. Pestañas corregidas para no comprimir palabras; tablas anchas conservan desplazamiento horizontal. Viewport restaurado.
+- Descubierta respuesta de producto incompleta que dejaba Planner verificando indefinidamente: ahora informa error. El banco de navegador también sirve la ruta pública de producto real.
+
+No se ha desplegado ni probado en equipos físicos, lectores industriales o una base productiva. El intercambio del albarán actual entre empresas se concilia en la fase 11; se conserva cada versión original.

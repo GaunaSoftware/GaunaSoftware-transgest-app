@@ -358,7 +358,7 @@ safeUse(`${api}/portal-cliente`, authenticate, portalClientePermission, clienteP
 safeUse(`${api}/transport-exchange`, authenticate, require("./routes/planner_exchange"));
 safeUse(`${api}/supplier-app`, authenticate, require("./routes/supplier_app"));
 safeUse(`${api}/planner-loading`, authenticate, require("./routes/planner_loading"));
-safeUse(`${api}/planner`, authenticate, (req,res,next)=>requireModulePermission(req.path.startsWith("/inventario")?"palets":"pedidos")(req,res,next), require("./routes/planner"));
+safeUse(`${api}/planner`, authenticate, (req,res,next)=>requireModulePermission((req.path.startsWith("/inventario")||req.path.startsWith("/wms"))?"palets":"pedidos")(req,res,next), require("./routes/planner"));
 safeUse(`${api}/soporte`, authenticate, require("./routes/soporte").createSupportRouter());
  safeUse(`${api}/agenda`,         authenticate, requireModulePermission("agenda"), agendaRoutes);
 safeUse(`${api}/plan-diario`,    authenticate, requireModulePermission("plan_diario"), planDiarioRoutes);

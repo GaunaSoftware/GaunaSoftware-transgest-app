@@ -24,7 +24,8 @@ async function main(){
   assert.throws(()=>apply(i,{descarga_ok:true}),/mercancía/);
   assert.throws(()=>apply(i,{mercancia_confirmada:true,mercancia_cargada:'Sacos',mercancia_palets:'99',mercancia_peso_kg:'999'}),/supera/);
   apply(i,{mercancia_confirmada:true,mercancia_cargada:'Sacos',mercancia_palets:'2',mercancia_peso_kg:'100'});
-  apply(i,{descarga_ok:true});assert.notEqual(order.estado,'entregado');
+  const unloaded=apply(i,{descarga_ok:true});assert.notEqual(order.estado,'entregado');
+  assert.equal(unloaded.unloadingComplete,i===3,'Only the final physical unload completes the order unloading time');
   apply(i,{albaran_descarga:true});apply(i,{firma_entrega:true});assert.equal(order.estado,i===3?'entregado':'en_curso');
  }
  assert.equal(activeDriverStop(order,all),null);

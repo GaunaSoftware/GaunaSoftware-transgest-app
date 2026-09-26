@@ -42,4 +42,15 @@ Base: auditoría en `TMS_EVOLUTION_PHASE0_AUDIT.md`. La fase 1 **no está cerrad
 - Para publicar el bloque 1.8 en el futuro, ejecutar `20260925_factura_anotaciones.sql` antes de activar el detalle de factura. Las anotaciones son internas; no reemplazan ni reimprimen el PDF fiscal original. Un documento de presentación con estos datos necesitaría una versión separada y explícita.
 - Limitación de 1.1: el estado legacy `incidencia` del pedido, cuando lo asignó el scheduler antiguo, no se revierte automáticamente tras replanificar una entrega: no hay estado previo fiable almacenado. El aviso estructurado de Agenda sí se resuelve; decidir una transición del propio pedido exige conservar primero su estado previo y auditar los casos de paralización/manuales.
 
+## Regresión HTTP del chófer — 26/09/2026
+
+`audit_driver_flow.cjs`, invocado por el banco general, recorre 49 comprobaciones HTTP con una jornada sintética abierta y los middlewares de permisos de `server.js`: viaje propio, posición, GPS, carga, mercancía, documento y descarga privada, firmas, DeCA, carta de porte, descarga y cierre. Comprueba también el rechazo de lectura y escritura sobre un viaje de otro conductor de la misma empresa (aunque comparta tractora) y de otra empresa. Los datos, documentos y firmas son exclusivamente sintéticos; no se ha enviado nada a servicios externos.
+
+La prueba reprodujo dos defectos y pasó después de corregirlos:
+
+- La última descarga física no registraba `descarga_real_at` porque se comprobaba el flag global de entrega firmada. Ahora registra la finalización física sin anticipar el estado `entregado`, que sigue exigiendo la firma. Las fechas pactadas no cambian.
+- Reintentar la confirmación final insertaba otro evento y volvía a programar automatismos. La salida idempotente ocurre antes de ambos efectos.
+
+`node scripts/audit_workflows_regression_check.cjs`: correcto, `driverFlow.httpChecks = 49`. `npm run check` backend: correcto, incluidas las regresiones de Planner, facturación, permisos y app del chófer. El test multiparada comprueba que solo la última descarga completa el conjunto, independientemente de su firma. Quedan fuera de esta evidencia la cámara de un teléfono real, la conectividad offline y la firma reforzada/versionada, previstas en las fases 4, 5 y 7; una imagen sintética no demuestra validez jurídica de una firma.
+
 No hay push, merge, despliegue ni migración aplicada por este avance.

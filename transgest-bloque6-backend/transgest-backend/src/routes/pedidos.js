@@ -1738,9 +1738,9 @@ async function savePedidoChoferPasos({
   let stopResult=null;
   if(patch.parada_id){
     const result=await require('../services/driverStops').saveStop(db,{pedidoId,empresaId,choferId,patch});
+    if(result.idempotent)return result.data;
     await logPedidoEvento(pedidoId,empresaId,'chofer_parada.actualizada',{parada_id:patch.parada_id,parada:result.data.paradas[patch.parada_id]},actorTipo,actorId);
     if(result.state==='entregado')await programarAutomatismosEntrega(pedidoId,empresaId,actorId,{});
-    if(result.idempotent)return result.data;
     stopResult=result;
   }
   const current = await getPedidoChoferPasos(pedidoId, empresaId);

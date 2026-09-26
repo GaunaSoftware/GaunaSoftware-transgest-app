@@ -1,0 +1,79 @@
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const { driverStops } = require('../src/services/driverStops');
+
+// Called only by the isolated audit harness, with an already open synthetic workday.
+module.exports = async function auditDriverFlow({ base, fetch, db, managerToken, driverToken, company, client, driver, vehicle }) {
+  assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);
+  let checks = 0;
+  async function request(method, url, body, status = 200, token = driverToken) {
+    const res = await fetch(base + url, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const data = await res.json();
+    assert.equal(res.status, status, `${method} ${url}: ${JSON.stringify(data)}`);
+    checks++;
+    return data;
+  }
+  const order = await request('POST', '/pedidos', { cliente_id: client.id, chofer_id: driver.id, vehiculo_id: vehicle.id,
+    origen: 'Valencia', destino: 'Madrid', fecha_carga: '2026-09-20', fecha_descarga: '2026-09-21', importe: 500,
+    puntos_carga: [{ id: 'pickup', direccion: 'Calle sintética 1', ciudad: 'Valencia' }],
+    puntos_descarga: [{ id: 'dropoff', direccion: 'Calle sintética 2', ciudad: 'Madrid' }] }, 201, managerToken);
+  await request('PATCH', `/pedidos/${order.id}/estado`, { estado: 'confirmado' }, 200, managerToken);
+  const trip = await request('GET', `/pedidos/${order.id}`);
+  const [load, unload] = driverStops(trip);
+  await request('GET', `/pedidos/${order.id}/documento-control-digital`, null, 409);
+  const patch = (stop, data) => request('PATCH', `/pedidos/${order.id}/chofer-pasos`, { parada_id: stop.id, ...data });
+  await patch(load, { carga_iniciada: true }); // Positioning does not require a ready DeCA.
+  await request('POST', `/pedidos/${order.id}/gps`, { lat: 39.47, lng: -0.37 });
+  await patch(load, { carga_proceso: true });
+  await patch(load, { mercancia_confirmada: true, mercancia_cargada: 'Mercancía sintética', mercancia_palets: '2', mercancia_peso_kg: '100' });
+  const doc = await request('POST', `/pedidos/${order.id}/chofer-docs`, { nombre: 'albaran-sintetico.pdf', tipo: 'albaran',
+    file_mime: 'application/pdf', file_base64: Buffer.from('%PDF-1.4\nDocumento sintético de prueba').toString('base64') }, 201);
+  assert.ok((await request('GET', `/pedidos/${order.id}/chofer-docs`)).some(d => d.id === doc.id));
+  const file = await fetch(`${base}/pedidos/${order.id}/chofer-docs/${doc.id}/archivo`, { headers: { Authorization: `Bearer ${driverToken}` } });
+  assert.equal(file.status, 200); assert.match(file.headers.get('content-type'), /application\/pdf/);
+  assert.equal(Buffer.from(await file.arrayBuffer()).subarray(0, 4).toString(), '%PDF'); checks++;
+  const signature = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  await patch(load, { albaran_carga: true });
+  await request('POST', `/pedidos/${order.id}/firma`, { parada_id: load.id, rol: 'cargador', firma_nombre: 'Firmante sintético', firma: signature });
+  await patch(load, { firma_cargador: true });
+  await patch(load, { carga_ok: true });
+  await request('GET', `/pedidos/${order.id}/documento-control-digital`);
+  await request('POST', `/pedidos/${order.id}/documento-control-digital/evento`, { action: 'consultado' });
+  await request('GET', `/pedidos/${order.id}/carta-porte`);
+  await patch(unload, { viaje_iniciado: true });
+  await patch(unload, { posicionado_descarga: true });
+  await patch(unload, { descarga_iniciada: true });
+  await patch(unload, { mercancia_confirmada: true, mercancia_cargada: 'Mercancía sintética', mercancia_palets: '2', mercancia_peso_kg: '100' });
+  await patch(unload, { descarga_ok: true });
+  const finishedUnloading = (await db.query('SELECT descarga_real_at,estado FROM pedidos WHERE id=$1 AND empresa_id=$2', [order.id, company])).rows[0];
+  assert.ok(finishedUnloading.descarga_real_at, 'Finalizar la última descarga debe registrar la fecha real antes de firmar');
+  assert.notEqual(finishedUnloading.estado, 'entregado', 'La descarga física no sustituye la firma de entrega');
+  await patch(unload, { albaran_descarga: true });
+  await request('POST', `/pedidos/${order.id}/firma`, { parada_id: unload.id, rol: 'destinatario', firma_nombre: 'Receptor sintético', firma: signature });
+  await patch(unload, { firma_entrega: true });
+  const beforeRetry = (await db.query('SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2', [order.id, company])).rows[0].n;
+  await patch(unload, { firma_entrega: true });
+  assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2', [order.id, company])).rows[0].n, beforeRetry, 'Reintentar el cierre no duplica eventos');
+  const done = (await db.query('SELECT estado,carga_real_at,descarga_real_at,fecha_carga_planificada,fecha_descarga_planificada FROM pedidos WHERE id=$1 AND empresa_id=$2', [order.id, company])).rows[0];
+  assert.equal(done.estado, 'entregado'); assert.ok(done.carga_real_at && done.descarga_real_at);
+  assert.equal(new Date(done.fecha_carga_planificada).toISOString().slice(0, 10), '2026-09-20');
+  assert.equal(new Date(done.fecha_descarga_planificada).toISOString().slice(0, 10), '2026-09-21');
+
+  const otherDriver = crypto.randomUUID(), otherTrip = crypto.randomUUID(), otherCompany = crypto.randomUUID(), foreignTrip = crypto.randomUUID(), foreignClient = crypto.randomUUID();
+  await db.query("INSERT INTO choferes(id,empresa_id,nombre,apellidos) VALUES($1,$2,'Otro','Sintético')", [otherDriver, company]);
+  await db.query("INSERT INTO pedidos(id,empresa_id,numero,chofer_id,vehiculo_id,cliente_id,estado) VALUES($1,$2,'AJENO-SINTETICO',$3,$4,$5,'confirmado')", [otherTrip, company, otherDriver, vehicle.id, client.id]);
+  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'Empresa aislada sintética','B00000009','tenant-b@example.invalid','enterprise','activa')", [otherCompany]);
+  await db.query("INSERT INTO clientes(id,empresa_id,nombre) VALUES($1,$2,'Cliente aislado sintético')", [foreignClient, otherCompany]);
+  await db.query("INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado) VALUES($1,$2,$3,'OTRA-EMPRESA','confirmado')", [foreignTrip, otherCompany, foreignClient]);
+  for (const [id, status] of [[otherTrip, 403], [foreignTrip, 404]]) {
+    for (const [method, suffix, body] of [
+      ['GET', '', null], ['GET', '/chofer-pasos', null], ['PATCH', '/chofer-pasos', { parada_id: load.id, carga_iniciada: true }],
+      ['GET', '/chofer-docs', null], ['POST', '/chofer-docs', { nombre: 'documento.pdf', tipo: 'albaran', file_base64: 'JVBERg==' }],
+      ['POST', '/gps', { lat: 40, lng: -3 }], ['POST', '/firma', { firma: signature, firma_nombre: 'No autorizado' }],
+      ['GET', '/documento-control-digital', null], ['GET', '/carta-porte', null], ['GET', '/eventos', null],
+      ['PATCH', '/estado', { estado: 'en_curso' }],
+    ]) await request(method, `/pedidos/${id}${suffix}`, body, status);
+  }
+  assert.equal((await db.query('SELECT estado,ultima_posicion,firma_evidencia FROM pedidos WHERE id=$1', [otherTrip])).rows[0].estado, 'confirmado');
+  return { passed: true, httpChecks: checks, writes: 'synthetic_only', coverage: 'driver lifecycle, workday, documents, signature, GPS, dates, retry and cross-driver/tenant rejection' };
+};

@@ -33,9 +33,13 @@ async function main(){
  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'AUDITORÍA LOCAL','B00000000','audit@example.invalid','enterprise','activa')",[company]);
  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente de pruebas','audit@example.invalid',$3,'gerente',true)",[user,company,await req('bcryptjs').hash(password,10)]);
  const express=req('express'),app=express();app.use(express.json({limit:'12mb'}));req('./middleware/asyncErrors')(logger);
+ // Exercise the actual production module boundaries, not authentication alone.
+ const authMiddleware=req('./middleware/auth');
+ const boundarySource=code.slice(code.indexOf('function pedidosAuthUnlessPublic'),code.indexOf('safeUse(`${api}/auth`'));
+ const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp})',authMiddleware);
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.use('/api/v1/auth',auth);
- for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),req('./middleware/auth').authenticate,req('./routes/'+name));
+ for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
@@ -299,7 +303,7 @@ async function main(){
     const ownCarta=await call('App chófer: carta de porte propia','GET','/pedidos/'+assignedOrder.id+'/carta-porte');
     require('node:assert/strict').equal(ownCarta.id,assignedOrder.id);
     const managementSummary=await call('Bloquear resumen económico ida-retorno al chófer','GET','/pedidos/'+assignedOrder.id+'/ida-retorno');
-    require('node:assert/strict').equal(managementSummary.error,'No puedes acceder al resumen de ida y retorno');
+    require('node:assert/strict').ok(managementSummary.error,'Debe rechazarse el resumen económico al chófer');
     const steps=await call('App chófer: leer pasos propios','GET','/pedidos/'+assignedOrder.id+'/chofer-pasos');
     require('node:assert/strict').ok(steps.data,'El chófer debe poder leer el progreso de su viaje');
    }
@@ -312,6 +316,7 @@ async function main(){
    await call('Catálogo de clientes del chófer','GET','/pedidos/chofer/clientes');
    await call('Rechazar jornada sin confirmar conjunto','POST','/choferes/app/jornada/iniciar',{km_inicio:10000});
    await call('Iniciar jornada','POST','/choferes/app/jornada/iniciar',{...rig,km_inicio:10000});
+   evidence.driverFlow=await require('./audit_driver_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client,driver,vehicle});
    await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});
    await call('Rechazar km de cierre inferiores','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:9000});
    await call('Rechazar km de cierre iguales','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:10000});

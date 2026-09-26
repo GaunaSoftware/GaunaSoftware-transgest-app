@@ -53,4 +53,14 @@ La prueba reprodujo dos defectos y pasó después de corregirlos:
 
 `node scripts/audit_workflows_regression_check.cjs`: correcto, `driverFlow.httpChecks = 49`. `npm run check` backend: correcto, incluidas las regresiones de Planner, facturación, permisos y app del chófer. El test multiparada comprueba que solo la última descarga completa el conjunto, independientemente de su firma. Quedan fuera de esta evidencia la cámara de un teléfono real, la conectividad offline y la firma reforzada/versionada, previstas en las fases 4, 5 y 7; una imagen sintética no demuestra validez jurídica de una firma.
 
+## Estados y contraste — 26/09/2026
+
+La inspección encontró mapas de tonos todavía independientes en Pedidos, Plan Diario y el Dashboard. Se sustituyen por `TransportStateBadge`, que reutiliza el catálogo común. Mesa, app del chófer, cargas de Planner y Portal Cliente usan los mismos colores de texto y fondo para un estado de transporte. «Vencido» se muestra separado del estado operativo. Los marcadores de mapas mantienen colores literales compatibles con su proveedor.
+
+`transportStates.css` define los dos temas con fondos opacos; la prueba mide cada combinación y exige contraste mínimo 4,5:1. En navegador local a 390 px se verificaron las tarjetas de Pedidos sin desbordamiento horizontal y los colores calculados de «Pendiente»: texto `#475569` sobre `#f1f5f9` en claro y `#cbd5e1` sobre `#1e293b` en oscuro. No se han modificado estados históricos ni se ha añadido una transición de negocio al cambiar su representación.
+
+Frontend: `npm run check`, 35 suites/97 pruebas y `npm run build` correctos. También se compiló con `REACT_APP_LOCAL_SERVER=true` para verificar únicamente el banco PGlite aislado. Continúan advertencias de compilación de la línea base; no son una validación de despliegue. La primera ejecución de la prueba del componente falló porque JSDOM descarta variables CSS en `color`; se comprueba ahora la serialización real de React y el color calculado en navegador. El mock del test de Dashboard se actualizó para usar el nuevo componente compartido.
+
+Pendiente del bloque 1.6: el modelo legacy todavía agrupa «cargado» y «en tránsito» en `en_curso`. Separar esas transiciones requiere el modelo operativo y su compatibilidad de las fases 2–4; no se infiere una salida real a partir del color ni de una carga finalizada.
+
 No hay push, merge, despliegue ni migración aplicada por este avance.

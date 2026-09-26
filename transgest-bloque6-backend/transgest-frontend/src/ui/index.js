@@ -2,6 +2,7 @@ import { Fragment, forwardRef, useEffect, useId, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import "./transgest-ui.css";
 import "./forms.css";
+import { transportStateMeta, transportStateStyle } from "../utils/transportStateCatalog";
 
 const cx = (...parts) => parts.filter(Boolean).join(" ");
 export const Button = forwardRef(function Button({ variant = "secondary", className, ...props }, ref) {
@@ -16,6 +17,10 @@ export function Section({ title, actions, children, ...props }) {
   return <Card as="section" {...props}><header className="tgui-section-header"><h2>{title}</h2><div className="tgui-actions">{actions}</div></header>{children}</Card>;
 }
 export function Badge({ tone = "neutral", className, ...props }) { return <span className={cx("tgui-badge", `tgui-tone--${tone}`, className)} {...props} />; }
+export function TransportStateBadge({ state, children, ...props }) {
+  const meta = transportStateMeta(state);
+  return <Badge {...props} title={meta.description} style={transportStateStyle(state)}>{children || meta.label}</Badge>;
+}
 export function Icon({ name, size = 20 }) {
   const paths = {
     clients: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",

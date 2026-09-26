@@ -5,6 +5,7 @@ import { dashboardAssignment } from '../orders/quickInfo';
 
 jest.mock('../../services/api', () => ({ getPedidosTodos: jest.fn() }));
 jest.mock('../../ui', () => ({
+  ...jest.requireActual('../../ui'),
   Card: ({children}) => <div>{children}</div>,
   Button: ({children}) => <button>{children}</button>,
   Select: ({children}) => <select>{children}</select>,
@@ -16,6 +17,7 @@ test('dashboard treats an external collaborator as an assignment without an inte
   const order={id:'external',numero:'PED-2026-0397',colaborador_id:'supplier',colaborador_nombre:'Transportes QA',estado:'confirmado',fecha_carga:'2099-01-01'};
   const html=renderToStaticMarkup(<LiveOperations initialItems={[order]} onSnapshot={()=>{}} openOrder={()=>{}}/>);
   expect(html).toContain('Asignado a Transportes QA');
+  expect(html).toContain('Viaje confirmado y pendiente de carga');
   expect(html).not.toContain('Sin conductor');
   expect(html).not.toContain('Sin vehículo');
   expect(dashboardAssignment({...order,colaborador_nombre:''})).toBe('Asignado a colaborador');

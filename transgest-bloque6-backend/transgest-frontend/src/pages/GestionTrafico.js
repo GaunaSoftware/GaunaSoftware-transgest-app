@@ -923,7 +923,7 @@ function TripCard({
       {/* Header: numero + icono estado */}
       <div className="traffic-responsive-flex" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:3, marginBottom:2 }}>
         <span style={{
-          fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:800, color:e.color,
+          fontFamily:"'JetBrains Mono',monospace", fontSize:10, fontWeight:800, color:e.textColor,
           letterSpacing:".02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
         }}>
           {pedido.numero}
@@ -4646,7 +4646,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
                 transition:"all .12s",
               }}>
               <span style={{ width:9, height:9, borderRadius:"50%", background:e.color, flexShrink:0, display:"inline-block" }}/>
-              <span style={{ color: active ? e.color : "var(--text4)" }}>{l}</span>
+              <span style={{ color: active ? e.textColor : "var(--text4)" }}>{l}</span>
             </button>
           );
         })}

@@ -1,6 +1,8 @@
 // Presentation metadata for transport progress. Assignment to a collaborator
 // is an execution attribute, never the primary operational state.
-export const TRANSPORT_STATES = Object.freeze({
+import './transportStates.css';
+
+const states = {
   pendiente: { label:'Pendiente', color:'#64748b', bg:'rgba(100,116,139,.15)', border:'rgba(100,116,139,.4)', icon:'clock', description:'Pendiente de confirmar', final:false },
   confirmado: { label:'Confirmado', color:'#2563eb', bg:'rgba(37,99,235,.15)', border:'rgba(37,99,235,.4)', icon:'check', description:'Viaje confirmado y pendiente de carga', final:false },
   espera_carga: { label:'Espera de carga', color:'#a16207', bg:'rgba(161,98,7,.15)', border:'rgba(161,98,7,.4)', icon:'clock', description:'Vehículo a la espera de iniciar la carga', final:false },
@@ -12,7 +14,14 @@ export const TRANSPORT_STATES = Object.freeze({
   facturado: { label:'Facturado', color:'#047857', bg:'rgba(4,120,87,.15)', border:'rgba(4,120,87,.4)', icon:'file', description:'Servicio facturado', final:true },
   incidencia: { label:'Incidencia', color:'#b91c1c', bg:'rgba(185,28,28,.15)', border:'rgba(185,28,28,.4)', icon:'alert', description:'Requiere revisión operativa', final:false, incident:true },
   cancelado: { label:'Cancelado', color:'#475569', bg:'rgba(71,85,105,.15)', border:'rgba(71,85,105,.4)', icon:'close', description:'Servicio cancelado', final:true },
-});
+};
+
+// Keep literal marker colors for map providers; text and surfaces follow the theme.
+export const TRANSPORT_STATES = Object.freeze(Object.fromEntries(Object.entries(states).map(([key, meta]) => [key, Object.freeze({
+  ...meta,
+  textColor: `var(--transport-${key}-text)`,
+  bg: `var(--transport-${key}-bg)`,
+})])));
 
 export const RECOMMENDED_STATE_FLOW = Object.freeze({
   pendiente:'confirmado', confirmado:'espera_carga', espera_carga:'cargando',
@@ -22,5 +31,10 @@ export const RECOMMENDED_STATE_FLOW = Object.freeze({
 
 export function transportStateMeta(value) {
   const key = String(value || '').toLowerCase();
-  return TRANSPORT_STATES[key] || { label:key ? key.replace(/_/g,' ') : 'Sin estado', color:'#475569', bg:'rgba(71,85,105,.15)', border:'rgba(71,85,105,.4)', icon:'clock', description:'Estado no catalogado', final:false };
+  return TRANSPORT_STATES[key] || { ...TRANSPORT_STATES.cancelado, label:key ? key.replace(/_/g,' ') : 'Sin estado', icon:'clock', description:'Estado no catalogado', final:false };
+}
+
+export function transportStateStyle(value) {
+  const meta = transportStateMeta(value);
+  return { color: meta.textColor, background: meta.bg, border: `1px solid ${meta.border}` };
 }

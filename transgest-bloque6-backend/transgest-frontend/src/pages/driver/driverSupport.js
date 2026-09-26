@@ -12,7 +12,7 @@ import { TRANSPORT_STATES } from "../../utils/transportStateCatalog";
 
 
 const EC = Object.fromEntries(Object.entries(TRANSPORT_STATES)
-  .map(([key, state]) => [key, { l:state.label, c:state.color, bg:state.bg }]));
+  .map(([key, state]) => [key, { l:state.label, c:state.textColor, bg:state.bg }]));
 
 const PASOS_KEY = id => `tms_chofer_pasos_${id}`;
 const LEGACY_SOLICITUDES_KEY = "tms_solicitudes_mecanico";

@@ -1,0 +1,50 @@
+/* Opaque badge surfaces keep text contrast independent of the company palette. */
+:root {
+  --transport-pendiente-text: #475569;
+  --transport-pendiente-bg: #f1f5f9;
+  --transport-confirmado-text: #1d4ed8;
+  --transport-confirmado-bg: #eff6ff;
+  --transport-espera_carga-text: #854d0e;
+  --transport-espera_carga-bg: #fef9c3;
+  --transport-cargando-text: #6d28d9;
+  --transport-cargando-bg: #f5f3ff;
+  --transport-en_curso-text: #9a3412;
+  --transport-en_curso-bg: #fff7ed;
+  --transport-espera_descarga-text: #86198f;
+  --transport-espera_descarga-bg: #fdf4ff;
+  --transport-descarga-text: #5b21b6;
+  --transport-descarga-bg: #f5f3ff;
+  --transport-entregado-text: #065f46;
+  --transport-entregado-bg: #ecfdf5;
+  --transport-facturado-text: #065f46;
+  --transport-facturado-bg: #ecfdf5;
+  --transport-incidencia-text: #991b1b;
+  --transport-incidencia-bg: #fef2f2;
+  --transport-cancelado-text: #475569;
+  --transport-cancelado-bg: #f1f5f9;
+}
+
+:root[data-theme="dark"] {
+  --transport-pendiente-text: #cbd5e1;
+  --transport-pendiente-bg: #1e293b;
+  --transport-confirmado-text: #93c5fd;
+  --transport-confirmado-bg: #172554;
+  --transport-espera_carga-text: #fde047;
+  --transport-espera_carga-bg: #422006;
+  --transport-cargando-text: #c4b5fd;
+  --transport-cargando-bg: #2e1065;
+  --transport-en_curso-text: #fdba74;
+  --transport-en_curso-bg: #431407;
+  --transport-espera_descarga-text: #f0abfc;
+  --transport-espera_descarga-bg: #4a044e;
+  --transport-descarga-text: #ddd6fe;
+  --transport-descarga-bg: #2e1065;
+  --transport-entregado-text: #6ee7b7;
+  --transport-entregado-bg: #022c22;
+  --transport-facturado-text: #6ee7b7;
+  --transport-facturado-bg: #022c22;
+  --transport-incidencia-text: #fca5a5;
+  --transport-incidencia-bg: #450a0a;
+  --transport-cancelado-text: #cbd5e1;
+  --transport-cancelado-bg: #1e293b;
+}

@@ -60,7 +60,7 @@ const ESTADOS = {
   cancelada: { l: "Cancelada", c: "#ef4444" },
   revisada: { l: "En revisión", c: "#3b82f6" },
 };
-const PEDIDO_ESTADOS = Object.fromEntries(Object.entries(TRANSPORT_STATES).map(([key, meta]) => [key, { l: meta.label, c: meta.color, bg: meta.bg, border: meta.border }]));
+const PEDIDO_ESTADOS = Object.fromEntries(Object.entries(TRANSPORT_STATES).map(([key, meta]) => [key, { l: meta.label, c: meta.textColor, bg: meta.bg, border: meta.border }]));
 
 const ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE = new Set([
   "en_curso",
@@ -954,7 +954,7 @@ export default function PortalClientes() {
                       <div style={{ fontWeight: 800, color: "var(--text)", marginTop: 4 }}>{displayOrderLocation(p, "carga")} -> {displayOrderLocation(p, "descarga")}</div>
                       {p.referencia_cliente && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>Ref. cliente: {p.referencia_cliente}</div>}
                     </div>
-                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: "var(--text)", background: estado.bg, border: `1px solid ${estado.border}` }}>{estado.l}</span>
+                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: estado.c, background: estado.bg, border: `1px solid ${estado.border}` }}>{estado.l}</span>
                   </div>
 
                   <PortalArrival orderId={p.id}/>
@@ -1236,7 +1236,7 @@ export default function PortalClientes() {
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
                       <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 13, fontWeight: 800 }}>{e.l}</span>
                       {pedidoEstado && (
-                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:`${pedidoEstado.c}18`, border:`1px solid ${pedidoEstado.c}30`, fontSize:13, fontWeight:800 }}>
+                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:pedidoEstado.bg, border:`1px solid ${pedidoEstado.border}`, fontSize:13, fontWeight:800 }}>
                           Viaje: {pedidoEstado.l}
                         </span>
                       )}

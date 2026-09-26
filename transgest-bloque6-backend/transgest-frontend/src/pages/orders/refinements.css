@@ -4,3 +4,6 @@
 .waybill-modal{flex-wrap:nowrap!important;min-height:0;overflow:hidden}
 .waybill-modal>div{min-width:0;flex-shrink:0}
 .waybill-modal>.waybill-modal-body{min-height:0;flex:1 1 auto}
+
+.order-inbox{padding:16px;margin-bottom:20px;min-width:0;overflow-wrap:anywhere}.order-inbox h3{margin:0 0 8px}.order-inbox p{margin:8px 0;color:var(--text3);line-height:1.5}.order-inbox label{display:grid;gap:6px}.order-inbox button{white-space:normal;overflow-wrap:anywhere;max-width:100%}.order-inbox-content{min-width:0}.order-inbox [role=alert]{color:var(--red)}
+@media(max-width:640px){.order-inbox{padding:12px}.order-inbox-content [style*="grid-template-columns"]{grid-template-columns:minmax(0,1fr)!important}}

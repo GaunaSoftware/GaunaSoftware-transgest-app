@@ -1,3 +1,5 @@
+import OrderAiInbox, {notifyInboxChanged} from './orders/OrderAiInbox';
+import {getOrderInbox} from '../services/api';
 import TransportDocumentVersions from './TransportDocumentVersions';
 import { buildWaybillHtml, waybillLocation } from '../utils/waybillDocument';
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
@@ -2326,6 +2328,8 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
   const [draggingFile, setDraggingFile] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
   const [voiceListening, setVoiceListening] = useState(false);
+  const previewRef = useRef(null);
+  useEffect(()=>{ if(preview){previewRef.current?.focus();previewRef.current?.scrollIntoView({block:"start"});} },[preview]);
   const fileInputRef = useRef(null);
   const speechSupported = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
@@ -2375,8 +2379,8 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     try {
       const data = await getAiInboxRuns(8);
       setRuns(Array.isArray(data) ? data : []);
-    } catch {
-      setRuns([]);
+    } catch (e) {
+      setError(e.message || "No se pudo cargar el historial de análisis.");
     } finally {
       setRunsLoading(false);
     }
@@ -2384,7 +2388,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
 
   useEffect(() => {
     cargarHistorialIA();
-    getAiInboxStatus().then(setAiStatus).catch(() => setAiStatus(null));
+    getAiInboxStatus().then(setAiStatus).catch(e => setError(e.message));
   }, [cargarHistorialIA]);
 
   async function interpretar() {
@@ -2412,6 +2416,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
         })),
       });
       setPreview(data);
+      notifyInboxChanged();
       cargarHistorialIA();
     } catch(e) {
       setError("No se pudo interpretar el pedido: " + (e.message || "verifica los datos pegados."));
@@ -2482,10 +2487,9 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     recognition.start();
   }
 
-  return (
-    <div style={embedded ? {width:"100%"} : {position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:embedded ? "100%" : "min(640px,96vw)",maxHeight:embedded ? "none" : "92vh",overflowY:embedded ? "visible" : "auto",boxSizing:"border-box"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:6}}>Bandeja IA de pedidos</div>
+  const content = (
+      <div className="order-inbox-content">
+        <OrderAiInbox revision={preview?.inbox_id} onOpenOrder={onCreado} onPrepared={data=>{setPreview(data);setArchivos([]);setError('');}}/>
         <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>
           Pega el email, WhatsApp u orden de carga. La bandeja detecta cliente, ruta, matricula, tarifa, conflictos y huecos antes de abrir el pedido.
         </div>
@@ -2573,7 +2577,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
                 {voiceListening ? "Escuchando..." : "Dictar pedido"}
               </button>
             )}
-            <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+            <textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)}
               placeholder={"Ej: Cliente: Transportes Garcia\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancia: palets fruta\nPeso: 24000 kg\nPrecio: 850 EUR\nReferencia: OC-1234"}
               style={{width:"100%",minHeight:132,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
           </div>
@@ -2590,12 +2594,12 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.doc,.docx,.rtf,.odt,.ppt,.pptx,.xls,.xlsx,application/pdf,text/plain,message/rfc822,text/html,text/csv,application/xml,image/jpeg,image/png,image/webp,application/msword,application/rtf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.docx,.xlsx"
               onChange={handleFile}
               style={{display:"none"}}
             />
             <div style={{fontSize:18,fontWeight:800,marginBottom:8,color:"var(--text)"}}>{fileLoading ? "Leyendo documento..." : "Seleccionar documentos"}</div>
-            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>PDF, Word, Excel, PowerPoint, email, texto o imagen</div>
+            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>PDF, Word DOCX, Excel XLSX, email EML, texto o imagen</div>
             <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
               Los PDF con texto se leen en el servidor. Imagenes y PDF escaneados usan la IA documental configurada para la empresa.
             </div>
@@ -2623,7 +2627,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
                 ))}
               </div>
             )}
-            <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+            <textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)}
               placeholder={"Opcional: pega aqui el cuerpo del email o texto adicional si el documento es escaneado."}
               style={{width:"100%",minHeight:92,marginTop:14,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box",textAlign:"left"}}/>
           </div>
@@ -2638,7 +2642,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
         </div>
         {error && <div style={{color:"var(--red)",fontSize:12,marginBottom:10}}>{error}</div>}
         {preview && (
-          <div>
+          <div ref={previewRef} tabIndex={-1} aria-label="Pedido interpretado para revisar">
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10,flexWrap:"wrap"}}>
               <div style={{fontSize:12,fontWeight:700,color:"var(--green)"}}>Pedido interpretado - revisa y confirma</div>
               <div style={{display:"inline-flex",alignItems:"center",gap:8}}>
@@ -2695,12 +2699,15 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
             </div>
             {archivos.length > 0 && (
               <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:8,padding:"8px 12px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
-                Se adjuntaran {archivos.length} documento(s) al guardar el pedido. Quedaran trazados como origen Bandeja IA.
+                Los originales se conservan en la bandeja. Los PDF, imágenes y documentos de Office también se adjuntarán al guardar el pedido.
               </div>
             )}
-            <button onClick={()=>onCreado({
+            <button onClick={async()=>{
+              if(preview.pedido_id){try{onCreado(await getPedido(preview.pedido_id));}catch(e){setError(e.message);}return;}
+              onCreado({
               ...(pedidoPreview || {}),
               _ai_meta: {
+                inbox_id: preview.inbox_id,
                 source: preview.source?.type || "bandeja_ia",
                 filename: preview.source?.filename || archivos.map(a => a.name).join(", ") || null,
                 confidence: Math.round(Math.min(100, Number(preview.confidence || 0))),
@@ -2711,22 +2718,22 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
                 visual_provider: preview.source?.ai_visual?.provider || null,
                 visual_ok: Boolean(preview.source?.ai_visual?.ok),
               },
-              _ai_docs: archivos.map(a => ({
+              _ai_docs: archivos.filter(a=>/\.(pdf|png|jpg|jpeg|webp|docx|xlsx)$/i.test(a.name)).map(a => ({
                 nombre: a.name,
                 tipo: inferPedidoDocTipo(a.name),
                 file_base64: a.base64,
                 file_mime: a.mediaType || "application/pdf",
                 file_size_kb: a.sizeKb,
               })),
-            })}
+            });}}
               style={{padding:"9px 18px",borderRadius:7,border:"none",background:"var(--green)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-              Continuar con estos datos
+              {preview.pedido_id ? "Ver pedido ya creado" : "Revisar y completar el pedido"}
             </button>
           </div>
         )}
       </div>
-    </div>
   );
+  return embedded ? content : <WorkspaceModal title="Bandeja IA de pedidos" width={980} onClose={onClose} closeOnBackdrop={false}>{content}</WorkspaceModal>;
 }
 
 
@@ -7702,6 +7709,11 @@ async function guardar() {
   setSaving(true);
   try {
     const payload = buildPedidoUpdatePayload(form);
+    if(!editando?.id && payload.ai_metadata?.inbox_id){
+      const reviewed=await confirmDialog({title:'Crear pedido desde la bandeja',message:'Confirma que has revisado cliente, paradas, fechas, mercancía y precio de este formulario.',confirmText:'He revisado: crear pedido',cancelText:'Seguir revisando'});
+      if(!reviewed){setSaving(false);return;}
+      payload.ai_metadata={...payload.ai_metadata,human_reviewed:true};
+    }
 
     if (form.vehiculo_id) {
       const veh = vehiculosLocal.find(v => v.id === form.vehiculo_id);
@@ -7729,6 +7741,7 @@ async function guardar() {
       notify("Pedido guardado con aviso de festivo aceptado. Gerencia queda notificada.", "success");
     }
 
+    if(payload.ai_metadata?.inbox_id)notifyInboxChanged();
     const pedidoId = pedidoGuardado?.id || editando?.id;
     const esNuevoPedido = !editando?.id;
 
@@ -8840,6 +8853,13 @@ export default function Pedidos() {
   const empresaPlan = getEmpresaPlanLocal();
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
   const aiDisponible = planHasFeature(empresaPlan, "ai");
+  const [inboxCount,setInboxCount]=useState(null);
+  useEffect(()=>{
+    if(!aiDisponible)return;let active=true;
+    const refresh=()=>getOrderInbox({summary:true}).then(data=>{if(active)setInboxCount(data.counts.filter(row=>!['creado','descartado'].includes(row.state)).reduce((n,row)=>n+row.count,0));}).catch(()=>{if(active)setInboxCount(null);});
+    refresh();window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
+    return()=>{active=false;window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
+  },[aiDisponible]);
   const [focusPedido] = useState(() => readPedidosFocus());
   // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de
   // estado, busqueda...). Si no se limpia aqui, vive en memoria toda la sesion y
@@ -10217,7 +10237,7 @@ export default function Pedidos() {
 
   return (
     <div className="orders-page">
-      <OrdersWorkspace vehicles={vehiculos}
+      <OrdersWorkspace vehicles={vehiculos} inboxAction={aiDisponible&&canEdit?()=>setAiCreando(true):null} inboxCount={inboxCount}
         items={pedidosVisibles} allItems={pedidosConMeta} loading={loading} error={loadError} reload={() => cargar()}
         clients={clientes} drivers={choferes} labels={LABEL_ESTADO}
         serverPage={page} serverPages={totalPages} totalCount={totalCount} setServerPage={setPage}

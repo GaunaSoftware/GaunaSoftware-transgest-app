@@ -32,7 +32,7 @@ async function main(){
  const company=crypto.randomUUID(),user=crypto.randomUUID();const password='Audit-Isolated-'+crypto.randomBytes(10).toString('hex');
  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'AUDITORÍA LOCAL','B00000000','audit@example.invalid','enterprise','activa')",[company]);
  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente de pruebas','audit@example.invalid',$3,'gerente',true)",[user,company,await req('bcryptjs').hash(password,10)]);
- const express=req('express'),app=express();app.use(express.json({limit:'12mb'}));req('./middleware/asyncErrors')(logger);
+ const express=req('express'),app=express();app.use('/api/v1/inbound/orders',req('./routes/orderInboxInbound'));app.use(express.json({limit:'12mb'}));req('./middleware/asyncErrors')(logger);
  // Exercise the actual production module boundaries, not authentication alone.
  const authMiddleware=req('./middleware/auth');
  const boundarySource=code.slice(code.indexOf('function pedidosAuthUnlessPublic'),code.indexOf('safeUse(`${api}/auth`'));
@@ -325,6 +325,7 @@ async function main(){
    evidence.controlTowerFlow=await require('./audit_control_tower_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,password});
    evidence.operationalModel=await require('./audit_operational_model.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    evidence.groupagePlan=await require('./audit_groupage_plan.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
+   evidence.orderInbox=await require('./audit_inbox_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client});
    evidence.driverJourney=await require('./audit_driver_journey.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,driver,vehicle});
    await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});
    await call('Rechazar km de cierre inferiores','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:9000});

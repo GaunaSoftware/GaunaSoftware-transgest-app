@@ -6,6 +6,7 @@ const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
 const transportDocuments = require("../services/transportDocumentVersions");
+const orderInbox = require("../services/orderInbox");
 const express = require("express");
 const { syncOrderIncidents } = require('../services/agendaIncidents');
 const { body, validationResult } = require("express-validator");
@@ -3910,10 +3911,11 @@ function parseZipEntries(buffer) {
     let data = Buffer.alloc(0);
     try {
       if (method === 0) data = raw;
-      else if (method === 8) data = zlib.inflateRawSync(raw);
+      else if (method === 8) data = zlib.inflateRawSync(raw, { maxOutputLength: 4 * 1024 * 1024 });
     } catch {
       data = Buffer.alloc(0);
     }
+    if(entries.length >= 300 || entries.reduce((sum,entry)=>sum+entry.data.length,0)+data.length>12*1024*1024) throw Object.assign(Error("Contenido del documento demasiado grande"),{status:413});
     entries.push({ name, data });
     offset = dataEnd;
   }
@@ -3935,14 +3937,27 @@ function xmlToPlainText(xml = "") {
   );
 }
 
-function extractOfficeZipText(buffer, name = "") {
-  const lower = String(name || "").toLowerCase();
-  const entries = parseZipEntries(buffer);
-  if (!entries.length) return "";
-  const wanted = lower.endsWith(".xlsx")
-    ? entries.filter(e => /xl\/sharedStrings\.xml$|xl\/worksheets\/sheet\d+\.xml$/i.test(e.name))
-    : entries.filter(e => /word\/document\.xml$|word\/header\d+\.xml$|word\/footer\d+\.xml$/i.test(e.name));
-  return cleanAiDocumentText(wanted.map(e => xmlToPlainText(e.data.toString("utf8"))).filter(Boolean).join("\n")).slice(0, 16000);
+async function extractOfficeZipText(buffer, name = "") {
+  require('../services/importParser').inspectZip(buffer, { maxUncompressed: 12 * 1024 * 1024, maxEntry: 4 * 1024 * 1024 });
+  if (String(name).toLowerCase().endsWith('.xlsx')) {
+    const workbook = new (require('exceljs').Workbook)();
+    await workbook.xlsx.load(buffer);
+    const lines = []; let rows = 0;
+    for (const sheet of workbook.worksheets) sheet.eachRow(row => {
+      if (++rows > 2000 || row.cellCount > 70) throw Object.assign(Error('La orden Excel supera 2.000 filas o 70 columnas. Divide el documento.'), {status: 422});
+      const values = [];
+      row.eachCell(cell => {
+        if (cell.formula) throw Object.assign(Error('La orden contiene fórmulas. Sustitúyelas por valores.'), {status: 422});
+        values.push(cell.value instanceof Date ? cell.value.toISOString().slice(0,10) : cell.text);
+      });
+      lines.push(values.join(values.length === 2 ? ': ' : ' '));
+    });
+    return cleanAiDocumentText(lines.join('\n')).slice(0,16000);
+  }
+  const zip = await require('jszip').loadAsync(buffer);
+  const names = Object.keys(zip.files).filter(n=>/word\/document\.xml$|word\/header\d+\.xml$|word\/footer\d+\.xml$/i.test(n));
+  const texts = await Promise.all(names.map(async n=>xmlToPlainText(await zip.file(n).async('string'))));
+  return cleanAiDocumentText(texts.join('\n')).slice(0,16000);
 }
 
 async function extractAiAttachmentText(attachment = {}) {
@@ -8111,6 +8126,36 @@ router.put("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
   }
 });
 
+router.use('/ai-inbox', GERENTE_O_TRAFICO, require('../middleware/auth').requirePlanFeature('ai'), require('../middleware/auth').requireModulePermission('pedidos'), (req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
+router.get('/ai-inbox/entries',async(req,res)=>{
+ try{
+  const company=req.empresaId||req.user.empresa_id;
+  const states=['nuevo','revisar','listo','creado','descartado','error'];
+  const state=String(req.query.state||'');if(state&&!states.includes(state))return res.status(400).json({error:'Estado no válido'});
+  const page=Math.max(1,Math.min(100000,parseInt(req.query.page,10)||1));
+  const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
+  const counts=(await db.query('SELECT state,COUNT(*)::int AS count FROM ai_inbox_items WHERE empresa_id=$1 GROUP BY state',[company])).rows;
+  res.json({items:rows,counts,page,page_size:25,inbound:orderInbox.inboundConfiguration(company)});
+ }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/ai-inbox/entries/:entry',async(req,res)=>{
+ try{res.json(await orderInbox.get(db,req.empresaId||req.user.empresa_id,req.params.entry));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.post('/ai-inbox/entries',async(req,res)=>{
+ try{res.status(201).json(await orderInbox.receive(db,req.empresaId||req.user.empresa_id,req.user.id,req.body));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.patch('/ai-inbox/entries/:entry',async(req,res)=>{
+ try{res.json(await orderInbox.changeState(db,req.empresaId||req.user.empresa_id,req.params.entry,req.user.id,req.body));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/ai-inbox/entries/:entry/attachments/:index',async(req,res)=>{
+ try{
+  const item=await orderInbox.get(db,req.empresaId||req.user.empresa_id,req.params.entry,{payload:true});
+  if(!/^\d+$/.test(req.params.index))return res.status(404).json({error:'Adjunto no encontrado'});
+  const file=item.payload.attachments[Number(req.params.index)];if(!file)return res.status(404).json({error:'Adjunto no encontrado'});
+  res.set('X-Content-Type-Options','nosniff');res.set('Content-Type',file.mediaType);res.set('Content-Disposition',`attachment; filename="documento"; filename*=UTF-8''${encodeURIComponent(file.name)}`);res.send(Buffer.from(file.base64,'base64'));
+ }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+
 router.get("/ai-inbox/runs", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     await ensureColaboradorWorkflowSchema();
@@ -8147,12 +8192,13 @@ router.get("/ai-inbox/status", GERENTE_O_TRAFICO, async (req, res) => {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const iaConfig = await getPedidoAiRuntimeConfig(empresaId);
     res.json({
+      inbound: orderInbox.inboundConfiguration(empresaId),
       basic_available: true,
       visual_available: Boolean(iaConfig.apiKey),
       provider: iaConfig.provider || "local",
       model: iaConfig.model || null,
       provider_configured_from: iaConfig.apiKey ? (iaConfig.source || "configuracion") : null,
-      supported_basic_documents: ["pdf_texto", "doc", "docx", "rtf", "odt", "xls", "xlsx", "csv", "tsv", "txt", "eml", "html", "xml", "json"],
+      supported_basic_documents: ["pdf_texto", "docx", "xlsx", "csv", "tsv", "txt", "eml", "html", "xml", "json"],
       supported_visual_documents: ["jpg", "jpeg", "png", "webp", "pdf_escaneado"],
       mode_label: iaConfig.apiKey ? "Documentos + IA visual" : "Extraccion local",
       guidance: iaConfig.apiKey
@@ -8166,6 +8212,15 @@ router.get("/ai-inbox/status", GERENTE_O_TRAFICO, async (req, res) => {
 
 router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
+  let inboxEntry, analysis;
+  let sourceAttachments = [];
+  try {
+    inboxEntry = req.body?.inbox_id
+      ? await orderInbox.get(db,empresaId,req.body.inbox_id)
+      : await orderInbox.receive(db,empresaId,req.user.id,req.body);
+    analysis = await orderInbox.claim(db,empresaId,inboxEntry.id,req.user.id);
+    if(analysis.replay)return res.json({...analysis.item.result,inbox_id:inboxEntry.id,inbox_state:analysis.item.state,duplicate:true,pedido_id:analysis.item.pedido_id});
+    req.body = await orderInbox.expandEmails(analysis.item.payload);
   const textoOriginal = String(req.body?.texto || req.body?.text || "").trim();
   const attachments = Array.isArray(req.body?.attachments)
     ? req.body.attachments.slice(0, 8).map(a => ({
@@ -8186,15 +8241,13 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     .slice(0, 20000);
   const hasAiAttachment = attachments.some(a => a.base64);
   const hasDocumentAttachment = attachments.some(a => a.base64) || attachmentTexts.length > 0;
-  const sourceAttachments = attachments.map(({ base64, ...a }) => a);
+  sourceAttachments = attachments.map(({ base64, ...a }) => a);
   if ((!texto || texto.length < 12) && !hasDocumentAttachment) {
-    return res.status(400).json({ error: "Pega texto o sube un PDF/DOCX/XLSX/TXT/email de la orden para generar el borrador." });
+    throw Object.assign(Error("Pega texto o sube un documento legible para generar el borrador."),{status:400});
   }
   if (texto.length > 20000) {
     return res.status(400).json({ error: "El texto es demasiado largo. Resume o pega solo la orden de carga." });
   }
-  try {
-    await ensureColaboradorWorkflowSchema();
     let draft = extractAiPedidoDraft(texto);
     let tarifaUnitariaDetectada = Boolean(draft._tarifa_unitaria_detectada);
     const issues = [];
@@ -8379,7 +8432,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       suggestions,
       error: visualAi.used && !visualAi.parsed ? "Respuesta IA sin JSON interpretable" : "",
     });
-    res.json({
+    const result = {
       source: {
         type: req.body?.source || "texto",
         filename: req.body?.filename || null,
@@ -8402,8 +8455,11 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
         ? "Completa los campos bloqueantes y revisa tarifa/asignacion antes de guardar."
         : "Revisa el borrador y guardalo si los datos son correctos.",
       operational_summary: operationalSummary,
-    });
+    };
+    const saved = await orderInbox.finish(db,empresaId,inboxEntry.id,analysis.token,req.user.id,result);
+    res.json({...result,inbox_id:saved.id,inbox_state:saved.state});
   } catch (e) {
+    if(analysis?.token)await orderInbox.finish(db,empresaId,inboxEntry.id,analysis.token,req.user.id,null,e.message).catch(()=>{});
     await logAiInboxRun({
       empresaId,
       userId: req.user?.id || null,
@@ -8415,7 +8471,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       attachments: sourceAttachments,
       error: e.message || "No se pudo interpretar el pedido",
     });
-    res.status(500).json({ error: e.message || "No se pudo interpretar el pedido" });
+    res.status(e.status || 500).json({ error: e.message || "No se pudo interpretar el pedido", inbox_id: inboxEntry?.id || null });
   }
 });
 
@@ -8629,6 +8685,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    if(req.body.ai_metadata?.inbox_id && (!require('../middleware/auth').planHasFeature(req.user.plan,'ai') || !['gerente','trafico'].includes(req.user.rol)))return res.status(403).json({error:'No puedes crear pedidos desde esta bandeja.'});
     const plannerCreation=req.body.workspace==='planner';
     if(plannerCreation){
       if(!require('../services/companyProducts').moduleAvailable(req.user?.productos,'planner'))return res.status(403).json({error:'Planner no está habilitado para tu empresa.'});
@@ -8684,8 +8741,11 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
     }
 
     let pedidoCreado = null;
+    let inboxReplayed = false;
     let remolqueMatCreado = null;
     await db.transaction(async (client) => {
+      const inboxCreation = await orderInbox.lockForCreation(client,empresaId,req.user.id,req.body.ai_metadata,req.body);
+      if(inboxCreation?.replay){pedidoCreado=inboxCreation.replay;inboxReplayed=true;return;}
       await assertClienteAdmiteNuevoPedido(client, req, cliente_id, importeInicial);
       // Resolver el remolque efectivo para este pedido
       const remolqueSolicitado = remolque_id_manual || remolque_id || null;
@@ -8969,9 +9029,11 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         origen: pedido.origen || origen || null,
         destino: pedido.destino || destino || null,
       }, req.user?.rol || "usuario", req.user?.id || null, client);
+      if(inboxCreation)await orderInbox.created(client,empresaId,inboxCreation.id,req.user.id,pedido.id,inboxCreation.creationHash);
       pedidoCreado = pedido;
       remolqueMatCreado = remolque_mat;
     });
+    if(inboxReplayed)return res.json({...pedidoCreado,inbox_duplicate:true});
     // Assignment can confirm the order during creation, without going through
     // PATCH /estado. Reconcile its incidents after the transaction commits.
     await syncOrderIncidents({ empresaId, pedidoId:pedidoCreado.id })
@@ -9038,7 +9100,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
           cliente: e.cliente || null,
         });
       }
-      res.status(500).json({ error: e.message || "No se pudo crear el pedido" });
+      res.status(e.status>=400&&e.status<500?e.status:500).json({ error: e.message || "No se pudo crear el pedido" });
     }
   }
 );

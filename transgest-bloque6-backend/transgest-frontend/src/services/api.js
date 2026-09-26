@@ -573,6 +573,8 @@ export const interpretarPedidoIA = (data) =>
   apiFetch("/pedidos/ai-inbox/parse", { method:"POST", body:data, silentSuccess:true });
 export const getAiInboxRuns = (limit = 30) =>
   apiFetch(`/pedidos/ai-inbox/runs?limit=${encodeURIComponent(limit)}`, { silentSuccess:true });
+export const getOrderInbox = ({page=1,state='',summary=false}={}) => apiFetch(`/pedidos/ai-inbox/entries?page=${page}&state=${encodeURIComponent(state)}${summary?'&summary=true':''}`,{silentSuccess:true});
+export const changeOrderInboxState = (id,body) => apiFetch(`/pedidos/ai-inbox/entries/${id}`,{method:'PATCH',body,silentSuccess:true});
 export const getAiInboxStatus = () =>
   apiFetch("/pedidos/ai-inbox/status", { silentSuccess:true });
 export const getPlanificacionCargaIA = (id) =>

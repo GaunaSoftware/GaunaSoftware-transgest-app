@@ -107,6 +107,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookRoutes);
+app.use("/api/v1/inbound/orders", require("./routes/orderInboxInbound"));
 app.use(express.json({
   limit: process.env.REQUEST_BODY_LIMIT || "12mb",
   verify: (req, _res, buf) => {

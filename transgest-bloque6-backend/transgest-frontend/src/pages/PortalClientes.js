@@ -958,7 +958,7 @@ export default function PortalClientes() {
                   </div>
 
                   <PortalArrival orderId={p.id}/>
-                  <div className="portal-timeline" style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
+                  <div className="portal-timeline" role="group" aria-label="Progreso del envío" tabIndex={0} style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
                     {TIMELINE.map(([k, label], i) => {
                       const done = i <= stIdx;
                       const curr = i === stIdx;

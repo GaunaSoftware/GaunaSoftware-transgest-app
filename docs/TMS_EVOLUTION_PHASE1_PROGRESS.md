@@ -89,3 +89,29 @@ El fallo de `resumen_mes` anotado en la línea base queda corregido. Se reproduj
 La prueba verifica tres servicios propios (600 € netos, 60 € de costes registrados): una factura borrador y una emitida después del corte dejan 300 € pendientes; una emitida el último día del mes cuenta como facturada. Los servicios de otra empresa no alteran las cifras y el rol tráfico continúa sin acceder a este resumen económico.
 
 `node scripts/intelligence_regression_check.js` falló antes con `08P01` y pasa tras la corrección. El banco HTTP completo vuelve a terminar con salida 0 y ahora exige que cada herramienta de Intelligence termine correctamente; ya no oculta el error en un JSON `ok:false` mientras declara éxito global. Las cinco herramientas pasan con datos sintéticos. Esta prueba no consume cuota ni consulta a un proveedor de IA externo; no demuestra disponibilidad de OpenAI en producción.
+
+## Carta de porte, aislamiento documental y Portal — 26/09/2026
+
+Se han reproducido y corregido los siguientes defectos adicionales del bloque 1.2/1.9:
+
+- La carta de porte usaba el literal legacy «Población pendiente» aunque su parada tuviera población y dirección. La vista y la presentación imprimible reutilizan `displayOrderLocation()` y conservan la dirección explícita en otra línea. El generador existente se extrae a `waybillDocument.js`; no crea otro modelo documental ni cambia documentos archivados.
+- La fecha de carga vacía se sustituía por el día de impresión. Ahora permanece sin informar. Los textos insertados en HTML se escapan y las imágenes solo admiten datos raster en base64. Tres regresiones fallaron antes de la corrección: ubicación, HTML inyectado y fecha inventada; después pasan.
+- Con referencias legacy inconsistentes a maestros de otra empresa, la carta podía resolver su cliente, conductor o vehículo. Los joins de la carta y del contexto DeCA quedan limitados también por `empresa_id`. La entrada de compatibilidad `carta_porte.js` delega en el mismo handler autorizado de Pedidos.
+- La lectura del DeCA de un pedido ajeno devolvía 403 pero antes generaba su número de orden de carga. Se verifica ahora la asignación antes de construir el contexto documental. La regresión HTTP reprodujo el número `OC-2026-0002` donde debía permanecer NULL; tras la corrección no hay mutación.
+- El banco HTTP comprueba **58 peticiones del flujo del chófer**: conserva las 52 anteriores y añade referencias cruzadas, rechazo sin efectos y compatibilidad documental. Datos sintéticos PGlite, con dos empresas y varios conductores; no se han alterado datos reales.
+
+La prueba visual descubrió un defecto CSS previo: a 390 px el contenedor flex de la carta envolvía su cuerpo en una segunda columna fuera de pantalla. La regla queda acotada a `.waybill-modal`, con cuerpo desplazable y acciones visibles. Tras corregirlo, el modal mide 365 px y no presenta desbordamiento horizontal; su cuerpo tiene 498 px visibles y 680 px de contenido desplazable. También se revisó la vista a 1440 px.
+
+El Portal Cliente se abrió con una cuenta sintética vinculada solo al cliente del pedido QA. Muestra un único envío y «CASTELLÓN → ALBORAYA» en lista, seguimiento y detalle. A 390 px los estados se solapaban: se fija un mínimo por paso y se permite desplazamiento horizontal dentro de la secuencia, accesible con teclado. El documento completo no desborda el ancho del viewport. La vista de escritorio se comprobó a 1440 px. Las consultas que requieren servicios de geocodificación externos no se validan con este banco aislado.
+
+Backend `npm run check` y `npm run audit:regression`: salida 0. La primera ejecución del check detectó que el test aislado `driver_expenses_check.cjs` no suministraba la consulta previa de autorización; se actualizó su simulación y se añadió la comprobación de que un acceso denegado no construye el contexto. El banco HTTP real ya verificaba correctamente el comportamiento con PGlite.
+
+No se declara una certificación legal, prueba de impresión física ni revisión en un teléfono real. No se han modificado snapshots ni documentos fiscales emitidos. Este ajuste no necesita migraciones nuevas. Siguen pendientes la separación del estado operativo legacy y los trabajos específicos de las fases 2–17.
+
+## Ubicaciones coherentes en el Dashboard — 26/09/2026
+
+El mismo recorrido visual mostró literales de ubicación antiguos en la operativa en curso, agenda y pedidos recientes del Dashboard, y en el rótulo de la parada principal del editor. Estas superficies reutilizan ahora la presentación canónica de ubicaciones, sin modificar los datos guardados. La búsqueda en pendientes de cierre consulta la población que se muestra. Dos pruebas nuevas reprodujeron los fallos antes del cambio y pasan después: representación del Dashboard sin literales pendientes y búsqueda por población estructurada. En navegador se comprobó el pedido sintético con Castellón y Alboraya en operativa, agenda y tabla del Dashboard.
+
+Frontend: `npm run check`, 36 suites / 102 pruebas y build estándar con salida 0 tras todos los cambios de este bloque. También se compiló con `REACT_APP_LOCAL_SERVER=true` para la comprobación visual aislada. Una ejecución previa del build heredó `CI=true` de Jest y terminó con salida 1 al convertir las advertencias ESLint preexistentes en errores; con la configuración estándar (`CI=false`) compila correctamente. No se han silenciado ni presentado como corregidas esas advertencias.
+
+Se mantienen separadas las comprobaciones de la interfaz, el banco HTTP sintético y las pruebas de servicios externos. No hay push, merge ni despliegue por este avance.

@@ -1,3 +1,4 @@
+import { displayOrderLocation } from '../../utils/orderTown';
 import PendingClosures from "./PendingClosures";
 import { dashboardAssignment } from "../orders/quickInfo";
 import { useEffect, useRef, useState } from "react";
@@ -30,7 +31,7 @@ export default function LiveOperations({ initialItems, onSnapshot, openOrder }) 
     {error&&<p role="alert">{error}</p>}
     <div className="dashboard-live-states">{states.map(([key,label])=><button key={key} className={filter===key?'is-active':''} onClick={()=>setFilter(filter===key?'todos':key)} aria-pressed={filter===key}><strong>{active.filter(p=>p.estado===key).length}</strong><span>{label}</span></button>)}</div>
     <div className="dashboard-live-heading"><Select label="Filtrar operativa" value={filter} onChange={e=>setFilter(e.target.value)}><option value="todos">Todos los estados operativos</option>{states.map(([key,label])=><option key={key} value={key}>{label}</option>)}</Select><span>{shown.length} de {active.filter(p=>filter==='todos'||p.estado===filter).length} pedidos</span></div>
-    {shown.length?<div className="dashboard-live-list">{shown.map(p=><button key={p.id} onClick={()=>openOrder({pedido_id:p.id,numero:p.numero})}><strong className="dashboard-live-number">{p.numero||'Pedido'}</strong><span className="dashboard-live-client">{p.cliente_nombre||'Sin cliente'}</span><span className="dashboard-live-route">{p.origen||'—'} → {p.destino||'—'}</span><small className="dashboard-live-detail">{dashboardAssignment(p)}</small><span className="dashboard-live-status" title={incidentDescription(p)}><TransportStateBadge state={p.estado}/></span></button>)}</div>:<EmptyState title="Sin pedidos en este estado"/>}
+    {shown.length?<div className="dashboard-live-list">{shown.map(p=><button key={p.id} onClick={()=>openOrder({pedido_id:p.id,numero:p.numero})}><strong className="dashboard-live-number">{p.numero||'Pedido'}</strong><span className="dashboard-live-client">{p.cliente_nombre||'Sin cliente'}</span><span className="dashboard-live-route">{displayOrderLocation(p,'carga')} → {displayOrderLocation(p,'descarga')}</span><small className="dashboard-live-detail">{dashboardAssignment(p)}</small><span className="dashboard-live-status" title={incidentDescription(p)}><TransportStateBadge state={p.estado}/></span></button>)}</div>:<EmptyState title="Sin pedidos en este estado"/>}
     <PendingClosures orders={items} openOrder={openOrder}/>
   </div></Card>;
 }

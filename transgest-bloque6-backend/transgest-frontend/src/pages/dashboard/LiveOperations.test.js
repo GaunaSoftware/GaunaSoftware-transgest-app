@@ -1,9 +1,11 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import LiveOperations from './LiveOperations';
+import DashboardWorkspace from './DashboardWorkspace';
 import { dashboardAssignment } from '../orders/quickInfo';
 
 jest.mock('../../services/api', () => ({ getPedidosTodos: jest.fn() }));
+jest.mock('../../context/AuthContext', () => ({useAuth:()=>({puedeVer:()=>true,puedeEditar:()=>true})}));
 jest.mock('../../ui', () => ({
   ...jest.requireActual('../../ui'),
   Card: ({children}) => <div>{children}</div>,
@@ -24,4 +26,15 @@ test('dashboard treats an external collaborator as an assignment without an inte
   expect(dashboardAssignment({...order,matricula_colaborador:'1234 ABC'})).toBe('Asignado a Transportes QA · 1234 ABC');
   expect(dashboardAssignment({})).toContain('Sin asignar');
   expect(dashboardAssignment({vehiculo_matricula:'1234 ABC',chofer_nombre:'Ana',chofer_apellidos:'García'})).toBe('1234 ABC · Ana García');
+});
+
+test('dashboard and live operations use structured locations without rewriting the order', () => {
+  const today=new Date().toISOString().slice(0,10);
+  const order={id:'locations',numero:'QA-LOC',estado:'confirmado',fecha_carga:today,origen:'Población pendiente',destino:'Población desconocida',puntos_carga:[{ciudad:'Castellón',direccion:'Polígono Norte 4'}],puntos_descarga:[{ciudad:'Alboraya',direccion:'Calle Puerto 2'}]};
+  const noop=()=>{};
+  const html=renderToStaticMarkup(<DashboardWorkspace pedidos={[order]} facturas={[]} vehiculos={[]} choferes={[]} alertas={[]} tareas={[]} loadErrors={[]} onSnapshot={noop} openOrder={noop} navigate={noop} stateMeta={()=>({label:'Confirmado'})}/>);
+  expect(html).toContain('CASTELLÓN');
+  expect(html).toContain('ALBORAYA');
+  expect(html).not.toMatch(/Población (pendiente|desconocida)/);
+  expect(order.origen).toBe('Población pendiente');
 });

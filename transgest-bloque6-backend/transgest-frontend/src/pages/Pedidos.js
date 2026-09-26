@@ -1,3 +1,4 @@
+import { buildWaybillHtml, waybillLocation } from '../utils/waybillDocument';
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import OrderNotesFields from "./orders/editor/OrderNotesFields";
 import OrderEditorShell, { OrderSection } from "./orders/editor/OrderEditorShell";
@@ -4263,7 +4264,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
       </datalist>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
         <span style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase"}}>{tipo === "carga" ? "Carga principal" : "Descarga principal"}</span>
-        <span style={{fontSize:11,color:"var(--text5)"}}>-&gt; {mainLugar||"Sin direccion"} - {mainFecha||"Sin fecha"}{mainHora?` - ${mainHora}`:""}</span>
+        <span style={{fontSize:11,color:"var(--text5)"}}>-&gt; {displayOrderLocation(form,tipo)} - {mainFecha||"Sin fecha"}{mainHora?` - ${mainHora}`:""}</span>
       </div>
 
       {stopsOrdenados.length > 0 && (
@@ -8450,6 +8451,8 @@ useEffect(() => {
 // CartaPorteModal - Genera y muestra la Carta de Porte / CMR / Albaran
 // ---------------------------------------------------------------------------
 function CartaPorteModal({ data, onClose }) {
+  const origen = waybillLocation(data, 'carga');
+  const destino = waybillLocation(data, 'descarga');
   const docNumero = data.carta_porte_numero || data.numero || "";
   const pedidoNumero = data.pedido_numero || data.numero || "";
   const cargaPrincipalGeo = parseStops(data.puntos_carga)[0] || {};
@@ -8532,218 +8535,7 @@ function CartaPorteModal({ data, onClose }) {
   }
 
   function generarHTML() {
-    const d = data;
-    const anexosHtml = anexosConArchivo.length ? `
-<div class="page-break"></div>
-<h1>Anexos de la carta de porte / DCD</h1>
-<div style="font-size:10px;color:#555;text-align:center;margin-bottom:12px">
-  Albaranes, POD o CMR subidos al viaje una vez firmados.
-</div>
-${anexosConArchivo.map((a, idx) => `
-  <div class="box anexo-box">
-    <h2>Anexo ${idx + 1}: ${a.etiqueta || a.tipo || "Documento adjunto"}</h2>
-    <div class="grid3" style="margin-bottom:8px">
-      <div><div class="lbl">Nombre</div><div class="val">${a.nombre || "-"}</div></div>
-      <div><div class="lbl">Tipo</div><div class="val">${a.tipo || "-"}</div></div>
-      <div><div class="lbl">Fecha subida</div><div class="val">${a.created_at ? new Date(a.created_at).toLocaleString("es-ES") : "-"}</div></div>
-    </div>
-    ${a.data_url
-      ? `<img src="${a.data_url}" class="anexo-img" alt="${a.nombre || "Anexo"}"/>`
-      : `<div class="anexo-pdf">PDF adjunto al expediente DCD: ${a.nombre || "Documento"}${a.size_kb ? ` (${a.size_kb} KB)` : ""}</div>`}
-  </div>
-`).join("")}` : "";
-    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>${documentoTitulo} - ${docNumero}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}
-  h1{font-size:16px;font-weight:700;text-align:center;letter-spacing:1px;margin-bottom:4px}
-  h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;color:#1e3a5f;border-bottom:1px solid #1e3a5f;padding-bottom:3px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #1e3a5f}
-  .empresa{flex:1}
-  .doc-info{text-align:right;min-width:180px}
-  .doc-num{font-size:20px;font-weight:700;color:#1e3a5f}
-  .doc-label{font-size:9px;color:#666;letter-spacing:1px;text-transform:uppercase}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
-  .box{border:1px solid #ccc;border-radius:4px;padding:10px}
-  .lbl{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
-  .val{font-size:11px;font-weight:600}
-  .val-big{font-size:14px;font-weight:700;color:#1e3a5f}
-  table{width:100%;border-collapse:collapse;margin-bottom:12px}
-  th{background:#1e3a5f;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
-  td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}
-  .firma-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:20px}
-  .firma-box{border:1px solid #ccc;border-radius:4px;padding:10px;min-height:80px}
-  .firma-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-  .firma-line{margin-top:50px;border-top:1px solid #999;font-size:9px;color:#666;padding-top:3px}
-  .status{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700}
-  .badge-ok{background:#d1fae5;color:#065f46}
-  .badge-warn{background:#fef3c7;color:#92400e}
-  .cmr-note{border-color:var(--accent);background:#f0fdfa;margin-bottom:12px}
-  .cmr-note h2{color:var(--accent);border-bottom-color:var(--accent)}
-  .page-break{break-before:page;page-break-before:always}
-  .anexo-box{margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
-  .anexo-img{display:block;max-width:100%;max-height:920px;margin:10px auto 0;border:1px solid #ddd;object-fit:contain}
-  .anexo-pdf{border:1px dashed #999;border-radius:4px;padding:14px;background:#f8fafc;color:#334155;font-size:12px}
-  @media print{@page{margin:1cm}body{padding:0}}
-</style></head><body>
-<div class="header">
-  <div class="empresa">
-    <div style="font-size:18px;font-weight:700;color:#1e3a5f">${d.empresa_nombre||"-"}</div>
-    <div style="color:#555">CIF: ${d.empresa_cif||"-"} - ${d.empresa_direccion||""} - Tel: ${d.empresa_telefono||"-"}</div>
-    <div style="color:#555">${d.empresa_email||""}</div>
-  </div>
-  <div class="doc-info">
-    <div class="doc-label">${documentoTitulo}</div>
-    <div class="doc-num">${docNumero||"-"}</div>
-    <div style="font-size:10px;color:#555;margin-top:4px">Pedido: ${pedidoNumero||"-"}</div>
-    <div style="font-size:10px;color:#555;margin-top:4px">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>
-    <div style="margin-top:6px">
-      <span class="status ${["entregado","facturado"].includes(d.estado)?"badge-ok":"badge-warn"}">${(d.estado||"").toUpperCase()}</span>
-    </div>
-  </div>
-</div>
-
-${isCmrInternacional ? `<div class="box cmr-note">
-  <h2>CMR internacional</h2>
-  <div class="grid3" style="margin-bottom:0">
-    <div><div class="lbl">CP / poblacion / provincia carga</div><div class="val">${origenPostalGeo || origenGeo || "-"}</div></div>
-    <div><div class="lbl">CP / poblacion / provincia entrega</div><div class="val">${destinoPostalGeo || destinoGeo || "-"}</div></div>
-    <div><div class="lbl">Regimen</div><div class="val">Transporte internacional por carretera sujeto al Convenio CMR cuando proceda</div></div>
-  </div>
-  <div style="margin-top:8px;font-size:10px;color:#134e4a">
-    Verifica remitente, transportista, destinatario, lugar y fecha de toma de mercancia, lugar de entrega, descripcion, bultos, marcas/numeros, peso/cantidad, gastos, instrucciones y documentos entregados.
-  </div>
-</div>` : ""}
-
-<div class="grid2">
-  <div class="box">
-    <h2>Transportista (Porteador)</h2>
-    <div class="lbl">Empresa</div><div class="val">${d.empresa_nombre||"-"}</div>
-    <div class="lbl" style="margin-top:6px">CIF</div><div class="val">${d.empresa_cif||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Direccion</div><div class="val">${d.empresa_direccion||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Telefono / Email</div>
-    <div class="val">${d.empresa_telefono||"-"} - ${d.empresa_email||"-"}</div>
-  </div>
-  <div class="box">
-    <h2>Remitente / Cliente</h2>
-    <div class="lbl">Empresa / Persona</div><div class="val">${d.cliente_nombre||"-"}</div>
-    <div class="lbl" style="margin-top:6px">CIF / NIF</div><div class="val">${d.cliente_cif||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Direccion</div><div class="val">${d.cliente_dir||d.cliente_ciudad||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Telefono / Email</div>
-    <div class="val">${d.cliente_tel||"-"} - ${d.cliente_email||"-"}</div>
-  </div>
-</div>
-
-<div class="grid2">
-  <div class="box">
-    <h2>Origen (Carga)</h2>
-    <div class="val-big">${d.origen||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Pais / provincia</div>
-    <div class="val">${origenGeo || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Codigo postal / poblacion / provincia</div>
-    <div class="val">${origenPostalGeo || "-"}</div>
-    <div class="lbl" style="margin-top:8px">Fecha de carga</div>
-    <div class="val">${new Date(d.fecha_carga||Date.now()).toLocaleDateString("es-ES")}${d.hora_carga?" - "+d.hora_carga:""}</div>
-    ${d.ventana_carga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_carga}</div>`:""}
-    ${d.referencia_cliente?`<div class="lbl" style="margin-top:4px">Ref. cliente</div><div class="val">${d.referencia_cliente}</div>`:""}
-  </div>
-  <div class="box">
-    <h2>Destino (Descarga)</h2>
-    <div class="val-big">${d.destino||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Pais / provincia</div>
-    <div class="val">${destinoGeo || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Codigo postal / poblacion / provincia</div>
-    <div class="val">${destinoPostalGeo || "-"}</div>
-    <div class="lbl" style="margin-top:8px">Fecha de entrega</div>
-    <div class="val">${d.fecha_entrega?new Date(d.fecha_entrega).toLocaleDateString("es-ES"):"-"}${d.hora_descarga?" - "+d.hora_descarga:""}</div>
-    ${d.ventana_descarga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_descarga}</div>`:""}
-  </div>
-</div>
-
-<h2>Mercancia</h2>
-<table>
-  <thead><tr>
-    <th style="width:40%">Descripcion</th><th>Bultos</th><th>Peso (kg)</th>
-    <th>Volumen (m3)</th><th>ML</th><th>Tipo carga</th><th>Valor</th>
-  </tr></thead>
-  <tbody><tr>
-    <td>${d.mercancia||"-"}</td>
-    <td>${d.bultos||"-"}</td>
-    <td>${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"}</td>
-    <td>${d.volumen||"-"}</td>
-    <td>${d.metros_lineales||"-"}</td>
-    <td>${d.tipo_carga||"-"}</td>
-    <td>${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</td>
-  </tr></tbody>
-</table>
-
-${isCmrInternacional ? `<div class="grid2">
-  <div class="box">
-    <h2>Documentos / Aduanas</h2>
-    <div class="lbl">Documentos entregados al transportista</div>
-    <div class="val">${d.documentos_aduaneros || d.condiciones_adicionales || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Instrucciones del remitente</div>
-    <div class="val">${d.instrucciones_aduaneras || d.notas || "-"}</div>
-  </div>
-  <div class="box">
-    <h2>Reservas y gastos</h2>
-    <div class="lbl">Reservas del transportista</div>
-    <div class="val">${d.reservas_transportista || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Gastos / porte</div>
-    <div class="val">${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</div>
-  </div>
-</div>` : ""}
-
-<div class="grid3">
-  <div class="box">
-    <h2>Vehiculo Tractor</h2>
-    <div class="val-big">${d.veh_matricula||"-"}</div>
-    <div class="val" style="color:#555">${[d.veh_marca,d.veh_modelo].filter(Boolean).join(" ")||""}</div>
-  </div>
-  <div class="box">
-    <h2>Remolque / Semirremolque</h2>
-    <div class="val-big">${d.rem_matricula||"-"}</div>
-  </div>
-  <div class="box">
-    <h2>Chofer</h2>
-    <div class="val-big">${[d.chofer_nombre,d.chofer_apellidos].filter(Boolean).join(" ")||"-"}</div>
-    ${d.chofer_dni?`<div class="lbl" style="margin-top:4px">DNI/NIE</div><div class="val">${d.chofer_dni}</div>`:""}
-    ${d.chofer_tel?`<div class="lbl" style="margin-top:4px">Telefono</div><div class="val">${d.chofer_tel}</div>`:""}
-  </div>
-</div>
-
-${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><div style="white-space:pre-line">${d.notas}</div></div>`:""}
-
-<div class="firma-row">
-  <div class="firma-box">
-    <div class="firma-label">Firma Remitente</div>
-    ${firmas.remitente
-      ? `<img src="${firmas.remitente}" style="max-width:100%;max-height:60px;margin-top:4px"/>`
-      : `<div class="firma-line">Nombre y sello</div>`}
-  </div>
-  <div class="firma-box">
-    <div class="firma-label">Firma Chofer / Transportista</div>
-    ${firmas.chofer
-      ? `<img src="${firmas.chofer}" style="max-width:100%;max-height:60px;margin-top:4px"/>`
-      : `<div class="firma-line">Nombre y sello</div>`}
-  </div>
-  <div class="firma-box">
-    <div class="firma-label">Firma Destinatario</div>
-    ${firmas.destinatario
-      ? `<img src="${firmas.destinatario}" style="max-width:100%;max-height:60px;margin-top:4px"/>
-         <div style="font-size:9px;color:#555;margin-top:3px">${firmaNombre||""}</div>
-         <div style="font-size:9px;color:#555;">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>`
-      : `<div class="firma-line">Nombre, sello y fecha de recepcion</div>`}
-  </div>
-</div>
-
-<div style="text-align:center;margin-top:16px;font-size:9px;color:#999;border-top:1px solid #eee;padding-top:8px">
-  Documento generado por TransGest TMS - ${new Date().toLocaleString("es-ES")}
-</div>
-${anexosHtml}
-</body></html>`;
+    return buildWaybillHtml({data, docNumero, pedidoNumero, documentoTitulo, isCmrInternacional, origenGeo, destinoGeo, origenPostalGeo, destinoPostalGeo, anexosConArchivo, firmas, firmaNombre});
   }
 
   const O = {
@@ -8766,18 +8558,18 @@ ${anexosHtml}
 
   return (
     <div style={O.overlay} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={O.modal}>
+      <div className="waybill-modal" role="dialog" aria-modal="true" aria-label={`${documentoTitulo} - ${docNumero}`} style={O.modal}>
         <div style={O.header}>
           <div>
             <div style={{fontWeight:800,fontSize:16,color:"var(--text)"}}>{documentoTitulo} - {docNumero}</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
-              Pedido {pedidoNumero} · {d.origen} -> {d.destino} · {fmtD(d.fecha_carga)}
+              Pedido {pedidoNumero} · {origen.label} → {destino.label} · {fmtD(d.fecha_carga)}
             </div>
           </div>
           <button onClick={onClose} style={{...O.btn,background:"var(--bg4)",color:"var(--text3)",padding:"6px 12px"}}>Cerrar</button>
         </div>
 
-        <div style={O.body}>
+        <div className="waybill-modal-body" style={O.body}>
           {isCmrInternacional && (
             <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
               <div style={{fontSize:12,fontWeight:800,color:"var(--accent)"}}>CMR internacional</div>
@@ -8787,12 +8579,14 @@ ${anexosHtml}
             </div>
           )}
           {/* Preview compacto */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginBottom:14}}>
             {[
               {l:"Transportista", v:d.empresa_nombre||"-"},
               {l:"Cliente / Remitente", v:d.cliente_nombre||"-"},
-              {l:"Origen", v:d.origen||"-"},
-              {l:"Destino", v:d.destino||"-"},
+              {l:"Origen", v:origen.label},
+              {l:"Destino", v:destino.label},
+              {l:"Dirección de carga", v:origen.address || "-"},
+              {l:"Dirección de descarga", v:destino.address || "-"},
               {l:"Pais / provincia carga", v:origenGeo || "-"},
               {l:"Pais / provincia descarga", v:destinoGeo || "-"},
               {l:"CP / poblacion carga", v:origenPostalGeo || "-"},
@@ -8806,7 +8600,7 @@ ${anexosHtml}
               {l:"Peso / Bultos", v:`${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"} - ${d.bultos||"-"} bultos`},
               {l:"Importe", v:fmt2(d.importe)},
             ].map(({l,v})=>(
-              <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px"}}>
+              <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",minWidth:0,overflowWrap:"anywhere"}}>
                 <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3}}>{l}</div>
                 <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{v}</div>
               </div>

@@ -1,3 +1,4 @@
+import { displayOrderLocation } from '../../utils/orderTown';
 import { useState } from 'react';
 import { Badge, Button, EmptyState, Icon, Modal, SearchInput, Select } from '../../ui';
 import { pendingClosureRows, filterPendingClosures } from './closureQueue';
@@ -59,7 +60,7 @@ export default function PendingClosures({ orders, openOrder }) {
         </div>
         <div className="closure-review-columns" aria-hidden="true"><span>Pedido y ruta</span><span>Fecha pendiente</span><span>Situación registrada</span><span/></div>
         {shown.length ? <ul className="closure-review-list">{shown.map(({order, date, days, dateLabel}) => <li key={order.id}>
-          <div className="closure-review-order"><strong>{order.numero || 'Pedido sin número'}</strong><span>{order.cliente_nombre || 'Cliente sin indicar'}</span><small title={`${order.origen || 'Origen sin indicar'} → ${order.destino || 'Destino sin indicar'}`}>{order.origen || 'Origen sin indicar'} → {order.destino || 'Destino sin indicar'}</small></div>
+          <div className="closure-review-order"><strong>{order.numero || 'Pedido sin número'}</strong><span>{order.cliente_nombre || 'Cliente sin indicar'}</span><small title={`${displayOrderLocation(order,'carga')} → ${displayOrderLocation(order,'descarga')}`}>{displayOrderLocation(order,'carga')} → {displayOrderLocation(order,'descarga')}</small></div>
           <div className="closure-review-date"><span>{days === 1 ? 'Hace 1 día' : `Hace ${days} días`}</span><time dateTime={date}>{dateText(date)}</time><small>{dateLabel}</small></div>
           <div className="closure-review-reason"><Badge tone={order.estado === 'incidencia' ? 'danger' : 'neutral'}>{status[order.estado] || order.estado || 'Sin estado'}</Badge><p title={order.incidencia_descripcion || ''}>{order.incidencia_descripcion || (order.estado === 'incidencia' ? 'Revisar incidencia sin descripción.' : 'Entrega pendiente de confirmar.')}</p></div>
           <Button className="closure-review-action" aria-label={`Revisar ${order.numero || 'pedido'}`} onClick={() => reviewOrder(order)}>Revisar <Icon name="chevron" size={14}/></Button>

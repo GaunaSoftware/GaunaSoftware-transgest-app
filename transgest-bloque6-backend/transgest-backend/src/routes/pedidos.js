@@ -5,6 +5,7 @@ const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
+const transportDocuments = require("../services/transportDocumentVersions");
 const express = require("express");
 const { syncOrderIncidents } = require('../services/agendaIncidents');
 const { body, validationResult } = require("express-validator");
@@ -864,6 +865,7 @@ function normalizeChoferPasosPayload(value = {}) {
     "dcd_disponible",
   ];
   const next = {};
+  if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(v=>typeof v==='string'&&UUID_RE.test(v)).slice(0,100);
   for (const key of boolKeys) {
     if (source[key] !== undefined) next[key] = Boolean(source[key]);
   }
@@ -2159,9 +2161,29 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
   const repositorio = await getDocumentoControlRepositorioByPedido(ctx.pedido.id, empresaId).catch(() => null);
   const regulatoryCore = await getPedidoRegulatoryCoreSummary(ctx.pedido.id, empresaId).catch(() => null);
+  const versions = await transportDocuments.list(db,empresaId,ctx.pedido.id);
+  const shipments = (await db.query('SELECT id,referencia FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at,id',[empresaId,ctx.pedido.id])).rows;
+  const current = versions.find(v=>v.estado==='activa');
+  if (current) {
+    payload.documento = {...current.payload.documento,sistema:'qr_url'};
+    payload.status = {...payload.status,ready:true,summary:`DeCA ${current.source==='external'?'externo':'TransGest'} · versión ${current.version}`,faltantes:[],version_id:current.id};
+    payload.remision = {...payload.remision,download_url:current.public_url+'&download=1'};
+  } else if (repositorio?.pdf_base64) {
+    payload.documento = {...(repositorio.payload?.documento || payload.documento),soporte_url:'',qr_url:''};
+    payload.status = {...payload.status,ready:false,summary:'Original anterior conservado en el expediente privado. Emite una versión administrativa para su consulta pública.'};
+    payload.remision = {...payload.remision,download_url:''};
+  } else {
+    payload.documento = {...payload.documento,soporte_url:'',qr_url:''};
+    payload.status = {...payload.status,ready:false,summary:'DeCA pendiente de emitir o adjuntar antes del transporte.',faltantes:transportDocuments.requiredFields(payload.documento)};
+    payload.remision = {...payload.remision,download_url:''};
+  }
   const qrDataUrl = await buildDocumentoControlQrDataUrl(payload.documento).catch(() => "");
   return {
     ...payload,
+    versiones: versions.map(({payload: archivedPayload,...metadata})=>metadata),
+    envios: shipments,
+    consolidacion_permitida:ctx.empresa?.documento_control?.permitir_consolidado===true,
+    puntos_envio: require('../services/driverStops').driverStops(ctx.pedido).map(p=>({id:p.id,tipo:p.tipo,label:p.label})),
     qr: {
       url: payload.documento?.qr_url || payload.documento?.soporte_url || "",
       data_url: qrDataUrl,
@@ -2336,140 +2358,23 @@ async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userI
   return rows[0] || null;
 }
 
-async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado" }) {
-  await ensureDocumentoControlRepositorioSchema();
-  const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
-  if (!ctx?.pedido) return null;
-  const payload = buildDocumentoControlPayload({
-    empresaId,
-    pedido: ctx.pedido,
-    empresa: ctx.empresa,
-    cliente: ctx.cliente,
-    colaborador: ctx.colaborador,
-    appBaseUrl,
-  });
-  const expedienteData = await getPedidoDocumentoControlExpedienteData(ctx.pedido.id, empresaId);
-  attachDocumentoControlAnexos(payload, expedienteData.documentos);
-  const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
-  const expediente = buildDocumentoControlExpediente(payload, {
-    ...expedienteData,
-    firma: {
-      firma_fecha: ctx.pedido?.firma_fecha || null,
-      firma_nombre: ctx.pedido?.firma_nombre || "",
-      firma_hash: ctx.pedido?.firma_hash || "",
-      firma_evidencia: ctx.pedido?.firma_evidencia || null,
-    },
-    postSignatureIntegrity,
-  });
-  const exportData = buildDocumentoControlStructuredExport(payload);
-  const html = await buildDocumentoControlHtml({
-    documento: payload.documento,
-    empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-    generatedAt: new Date().toISOString(),
-    autoPrint: false,
-  });
-  const generatedAt = new Date().toISOString();
-  const pdf = await generateDocumentoControlPdf({
-    documento: payload.documento,
-    empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-    generatedAt,
-  });
-  const payloadHash = sha256Hex(stableJson({ payload, expediente, exportData }));
-  const htmlHash = sha256Hex(html);
-  const filename = buildDocumentoControlFilename(payload.documento);
-  const exportFilename = buildDocumentoControlExportFilename(payload.documento);
-  const publicExpiresAt = buildDocumentoControlPublicExpiresAt(ctx.pedido);
-  const { rows } = await db.query(`
-    INSERT INTO documento_control_repositorio
-      (empresa_id,pedido_id,codigo_control,pedido_numero,cliente_nombre,estado,activo,payload,expediente,export_json,html,filename,pdf_base64,pdf_mime,pdf_filename,pdf_hash_sha256,public_activo,public_expires_at,created_metadata,updated_metadata,export_filename,payload_hash_sha256,html_hash_sha256,archivado_at,archivado_por,retencion_minima_hasta,retencion_politica)
-    VALUES
-      ($1,$2,$3,$4,$5,'archivado',false,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,true,$15,$16::jsonb,$16::jsonb,$17,$18,$19,NOW(),$20,(CURRENT_DATE + INTERVAL '1 year')::date,'minimo_1_ano')
-    ON CONFLICT (empresa_id,pedido_id)
-    DO UPDATE SET
-      codigo_control=EXCLUDED.codigo_control,
-      pedido_numero=EXCLUDED.pedido_numero,
-      cliente_nombre=EXCLUDED.cliente_nombre,
-      estado='archivado',
-      activo=false,
-      payload=EXCLUDED.payload,
-      expediente=EXCLUDED.expediente,
-      export_json=EXCLUDED.export_json,
-      html=EXCLUDED.html,
-      filename=EXCLUDED.filename,
-      pdf_base64=EXCLUDED.pdf_base64,
-      pdf_mime=EXCLUDED.pdf_mime,
-      pdf_filename=EXCLUDED.pdf_filename,
-      pdf_hash_sha256=EXCLUDED.pdf_hash_sha256,
-      public_activo=CASE
-        WHEN documento_control_repositorio.public_desactivado_at IS NULL THEN true
-        ELSE documento_control_repositorio.public_activo
-      END,
-      public_expires_at=GREATEST(COALESCE(documento_control_repositorio.public_expires_at, EXCLUDED.public_expires_at), EXCLUDED.public_expires_at),
-      updated_metadata=EXCLUDED.updated_metadata,
-      export_filename=EXCLUDED.export_filename,
-      payload_hash_sha256=EXCLUDED.payload_hash_sha256,
-      html_hash_sha256=EXCLUDED.html_hash_sha256,
-      archivado_at=COALESCE(documento_control_repositorio.archivado_at, NOW()),
-      archivado_por=COALESCE(documento_control_repositorio.archivado_por, EXCLUDED.archivado_por),
-      retencion_minima_hasta=COALESCE(documento_control_repositorio.retencion_minima_hasta, EXCLUDED.retencion_minima_hasta),
-      retencion_politica='minimo_1_ano',
-      updated_at=NOW()
-    RETURNING id,empresa_id,pedido_id,codigo_control,estado,activo,filename,pdf_filename,payload_hash_sha256,html_hash_sha256,pdf_hash_sha256,public_activo,public_expires_at,archivado_at,retencion_minima_hasta
-  `, [
-    empresaId,
-    pedidoId,
-    payload.documento?.codigo_control || "",
-    ctx.pedido?.numero || "",
-    ctx.cliente?.nombre || ctx.pedido?.cliente_nombre || "",
-    JSON.stringify(payload),
-    JSON.stringify(expediente),
-    JSON.stringify(exportData),
-    html,
-    filename,
-    pdf.base64,
-    pdf.mime,
-    pdf.filename,
-    pdf.hash_sha256,
-    publicExpiresAt,
-    JSON.stringify(pdf.metadata || {}),
-    exportFilename,
-    payloadHash,
-    htmlHash,
-    userId || null,
-  ]);
-  const repo = rows[0] || null;
-  if (repo) {
-    await syncPedidoRegulatoryCore({
-      empresaId,
-      pedidoId,
-      payload,
-      structuredExport: exportData,
-      repository: repo,
-      userId: userId || null,
-      reason: motivo,
-    }).catch(e => logger.warn("No se pudo sincronizar nucleo regulatorio:", e.message));
-    await insertDocumentoControlRepoHistory(repo, {
-      motivo,
-      pdf_metadata: pdf.metadata || {},
-      public_expires_at: repo.public_expires_at || publicExpiresAt,
-      retencion_minima_hasta: repo.retencion_minima_hasta,
-    }, userId || null, "archivar").catch(() => {});
-    await logPedidoEvento(pedidoId, empresaId, "documento_control.archivado", {
-      motivo,
-      repositorio_id: repo.id,
-      codigo_control: repo.codigo_control,
-      estado: repo.estado,
-      activo: repo.activo,
-      payload_hash_sha256: repo.payload_hash_sha256,
-      html_hash_sha256: repo.html_hash_sha256,
-      pdf_hash_sha256: repo.pdf_hash_sha256,
-      public_activo: repo.public_activo,
-      public_expires_at: repo.public_expires_at,
-      retencion_minima_hasta: repo.retencion_minima_hasta,
-      retencion_politica: "minimo_1_ano",
-    }, "sistema", userId || null).catch(() => {});
+async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null }) {
+  // Signatures, uploads and closing a journey must never regenerate its DeCA.
+  const versions = await transportDocuments.list(db, empresaId, pedidoId);
+  if (!["generacion_manual", "creacion_app_chofer_dcd"].includes(motivo)) {
+    if (motivo === "viaje_finalizado" && versions.length) {
+      await db.query(`INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,created_by,reason)
+        SELECT d.empresa_id,d.id,'service_completed',p.descarga_real_at,$3,'Cierre registrado del servicio'
+        FROM transport_document_versions d JOIN pedidos p ON p.empresa_id=d.empresa_id AND p.id=d.pedido_id
+        WHERE d.empresa_id=$1 AND d.pedido_id=$2 AND p.descarga_real_at IS NOT NULL
+          AND NOT EXISTS(SELECT 1 FROM transport_document_events e WHERE e.empresa_id=d.empresa_id AND e.document_id=d.id AND e.event='service_completed')`, [empresaId,pedidoId,userId]);
+    }
+    return versions[0] || null;
   }
-  return repo;
+  const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
+  if (!ctx) return null;
+  const payload = buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl});
+  return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:appBaseUrl,expectedUpdatedAt:ctx.pedido.updated_at});
 }
 
 async function ensurePedidoOrdenCargaSchema() {
@@ -3625,129 +3530,34 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) => {
+function sendTransportOriginal(res, bytes, filename, hash, download = false) {
+  res.setHeader('X-Robots-Tag','noindex, nofollow, noarchive');
+  res.setHeader('Cache-Control','private, no-store');
+  res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('Content-Type','application/pdf');
+  res.setHeader('Content-Disposition',`${download?'attachment':'inline'}; filename="${String(filename||'DeCA.pdf').replace(/[^a-zA-Z0-9_.-]/g,'_')}"`);
+  res.setHeader('X-Document-SHA256',hash);
+  return res.send(bytes);
+}
+router.get('/public/documento-version/:versionId', async (req,res) => {
   try {
-    const empresaId = req.params.empresaId;
-    const pedidoId = req.params.pedidoId;
-    if (!verifyPublicToken({ empresaId, pedidoId, token: req.query.token })) {
-      return res.status(403).send("Token no valido");
-    }
-    if (!verifyPublicVerificationCode({ empresaId, pedidoId, code: req.query.verify })) {
-      return res.status(403).send("Codigo de verificacion no valido");
-    }
-    const archived = await getDocumentoControlRepositorioByPedido(pedidoId, empresaId).catch(() => null);
-    const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
-    if (!ctx?.pedido) return res.status(404).send("Pedido no encontrado");
-    const isDownload = ["1", "true", "yes"].includes(String(req.query.download || "").toLowerCase());
-    const isPrint = ["1", "true", "yes"].includes(String(req.query.print || "").toLowerCase());
-    const wantsHtml = isPrint || ["html", "1", "true"].includes(String(req.query.html || req.query.format || "").toLowerCase());
-    if (archived?.html || archived?.pdf_base64) {
-      const publicExpired = archived.public_expires_at && new Date(archived.public_expires_at).getTime() < Date.now();
-      if (archived.public_activo === false || publicExpired) {
-        await logPedidoEvento(pedidoId, empresaId, "documento_control.publico_bloqueado", {
-          source: "public_documento_control_repositorio",
-          repositorio_id: archived.id,
-          codigo_control: archived.codigo_control || null,
-          public_activo: archived.public_activo,
-          public_expires_at: archived.public_expires_at,
-          motivo: archived.public_activo === false ? "desactivado" : "caducado",
-          user_agent: String(req.get("user-agent") || "").slice(0, 180),
-        }, "publico").catch(() => {});
-        return res.status(410).send("La descarga publica del DeCA ya no esta activa. Solicita el documento a la empresa transportista.");
-      }
-      const eventoArchivado = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
-      await logPedidoEvento(pedidoId, empresaId, eventoArchivado, {
-        source: "public_documento_control_repositorio",
-        repositorio_id: archived.id,
-        codigo_control: archived.codigo_control || null,
-        archived: true,
-        estado_repositorio: archived.estado,
-        activo: archived.activo,
-        print: isPrint,
-        download: isDownload,
-        user_agent: String(req.get("user-agent") || "").slice(0, 180),
-      }, "publico");
-      res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-      res.setHeader("Cache-Control", "private, no-store");
-      res.setHeader("X-DCD-Repository-State", archived.estado || "archivado");
-      res.setHeader("X-DCD-Archived", "true");
-      res.setHeader("X-DCD-Public-Expires-At", archived.public_expires_at || "");
-      const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
-      const livePayload = buildDocumentoControlPublicPayload(attachDocumentoControlAnexos(buildDocumentoControlPayload({
-        empresaId,
-        pedido: ctx.pedido,
-        empresa: ctx.empresa,
-        cliente: ctx.cliente,
-        colaborador: ctx.colaborador,
-        appBaseUrl: publicBaseUrl(req),
-      }), expedienteData.documentos));
-      if (!wantsHtml) {
-        const pdf = await generateDocumentoControlPdf({
-          documento: livePayload.documento,
-          empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-          generatedAt: new Date().toISOString(),
-          publicView: true,
-        });
-        res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
-        res.setHeader("Content-Type", pdf.mime);
-        return res.send(pdf.buffer);
-      }
-      if (isDownload) {
-        res.setHeader("Content-Disposition", `attachment; filename="${archived.filename || "documento-control.html"}"`);
-      }
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(await buildDocumentoControlHtml({
-        documento: livePayload.documento,
-        empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-        generatedAt: new Date().toISOString(),
-        autoPrint: isPrint,
-        publicView: true,
-      }));
-    }
-    const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
-    const payload = buildDocumentoControlPublicPayload(attachDocumentoControlAnexos(buildDocumentoControlPayload({
-      empresaId,
-      pedido: ctx.pedido,
-      empresa: ctx.empresa,
-      cliente: ctx.cliente,
-      colaborador: ctx.colaborador,
-      appBaseUrl: publicBaseUrl(req),
-    }), expedienteData.documentos));
-    const eventoDcd = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
-    await logPedidoEvento(pedidoId, empresaId, eventoDcd, {
-      source: "public_documento_control",
-      codigo_control: payload.documento?.codigo_control || null,
-      print: isPrint,
-      download: isDownload,
-      user_agent: String(req.get("user-agent") || "").slice(0, 180),
-    }, "publico");
-    if (isDownload) {
-      res.setHeader("Content-Disposition", `attachment; filename="${buildDocumentoControlFilename(payload.documento)}"`);
-    }
-    res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-    res.setHeader("Cache-Control", "private, no-store");
-    if (!wantsHtml) {
-      const pdf = await generateDocumentoControlPdf({
-        documento: payload.documento,
-        empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-        generatedAt: new Date().toISOString(),
-        publicView: true,
-      });
-      res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
-      res.setHeader("Content-Type", pdf.mime);
-      return res.send(pdf.buffer);
-    }
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(await buildDocumentoControlHtml({
-      documento: payload.documento,
-      empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-      generatedAt: new Date().toISOString(),
-      autoPrint: isPrint,
-      publicView: true,
-    }));
-  } catch (e) {
-    res.status(500).send(e.message);
-  }
+    const row = await transportDocuments.publicOriginal(db,req.params.versionId,req.query.token);
+    if (!row) return res.status(404).send('Documento no encontrado');
+    return sendTransportOriginal(res,row.pdf,row.filename,row.pdf_hash,req.query.download==='1');
+  } catch(e) { res.status(e.status||500).send(e.status?e.message:'No se pudo consultar el original'); }
+});
+router.get("/public/documento-control/:empresaId/:pedidoId", async (req,res) => {
+  try {
+    const {empresaId,pedidoId}=req.params;
+    if (!verifyPublicToken({empresaId,pedidoId,token:req.query.token}) || !verifyPublicVerificationCode({empresaId,pedidoId,code:req.query.verify})) return res.status(403).send('Enlace no válido');
+    const archived = await getDocumentoControlRepositorioByPedido(pedidoId,empresaId);
+    if (!archived?.pdf_base64) return res.status(404).send('No existe un PDF original archivado. Tráfico debe emitir una versión.');
+    // The legacy archive contains the private PDF (payment terms and internal
+    // checklist). It must not become public when replacing live regeneration.
+    // Keep its original available to the company; issue a new administrative
+    // version, with its own QR, for public access.
+    return res.status(410).send('Este archivo anterior se conserva en el expediente privado. Solicita a la empresa la versión administrativa con su nuevo QR.');
+  } catch(e) { res.status(e.status||500).send('No se pudo consultar el original'); }
 });
 
 router.use(authenticate);
@@ -6841,6 +6651,7 @@ router.get("/:id/colaborador/preview", GERENTE_O_TRAFICO, async (req, res) => {
 
 router.get("/:id/documento-control-digital", async (req, res) => {
   try {
+    if (!['gerente','trafico','administrativo','chofer'].includes(req.user?.rol)) return res.status(403).json({error:'No tienes permiso para consultar el documento'});
     const empresaId = req.empresaId || req.user.empresa_id;
     // Authorize before constructing context, which can allocate document numbers.
     if (req.user?.rol === "chofer") {
@@ -6853,11 +6664,71 @@ router.get("/:id/documento-control-digital", async (req, res) => {
     if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, ctx.pedido))) {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
-    if(req.user?.rol==='chofer' && !await (async()=>{const d=(await getPedidoChoferPasos(req.params.id,empresaId)).data;return d.carga_ok||Object.values(d.paradas||{}).some(s=>s.tipo==='carga'&&s.carga_ok);})()) return res.status(409).json({error:'El documento estará disponible cuando marques la carga como finalizada.'});
     res.json(await buildPedidoDocumentoControlResponse(req, ctx, empresaId));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+async function authorizeTransportDocument(req,res) {
+  const empresaId=req.empresaId||req.user.empresa_id;
+  if (!['gerente','trafico','administrativo','chofer'].includes(req.user?.rol)) {res.status(403).json({error:'No tienes permiso para consultar el expediente'});return null;}
+  const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+  if (!order) {res.status(404).json({error:'Pedido no encontrado'});return null;}
+  if (req.user.rol==='chofer' && !await usuarioPuedeGestionarPedido(req,order)) {res.status(403).json({error:'No puedes acceder a este pedido'});return null;}
+  return empresaId;
+}
+router.get('/:id/expediente-transporte.zip',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {
+    await ensureDocumentoControlRepositorioSchema();
+    const buffer=await require('../services/transportDossier').dossier(db,req.empresaId||req.user.empresa_id,req.params.id);
+    res.setHeader('Content-Type','application/zip');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename=expediente-transporte.zip');res.send(buffer);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/:id/firma/historial',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const rows=(await db.query(`SELECT e.id,e.operation_id,e.replaces_id,e.package_hash,e.created_at,o.parada_id,o.version,o.payload->>'operacion' AS operacion,e.payload->'identidad' AS identidad,a.reason AS anulacion
+      FROM signature_evidence e JOIN operacion_evidencias o ON o.empresa_id=e.empresa_id AND o.id=e.operation_id
+      LEFT JOIN signature_evidence_annulments a ON a.empresa_id=e.empresa_id AND a.signature_id=e.id
+      WHERE e.empresa_id=$1 AND o.pedido_id=$2 ORDER BY e.created_at DESC`,[empresaId,req.params.id])).rows;
+    res.json(rows);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/:id/firma/:evidenceId/justificante.pdf',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const row=(await db.query('SELECT e.receipt_pdf,e.receipt_hash FROM signature_evidence e JOIN operacion_evidencias o ON o.empresa_id=e.empresa_id AND o.id=e.operation_id WHERE e.empresa_id=$1 AND o.pedido_id=$2 AND e.id=$3',[empresaId,req.params.id,req.params.evidenceId])).rows[0];
+    if(!row)return res.status(404).json({error:'Justificante no encontrado'});
+    const bytes=Buffer.from(row.receipt_pdf);if(transportDocuments.hash(bytes)!==row.receipt_hash)throw Error('Fallo de integridad');
+    sendTransportOriginal(res,bytes,'justificante-firmado.pdf',row.receipt_hash,true);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/:id/documento-control-digital/versiones/:versionId/pdf',async(req,res)=>{
+  try {
+    const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const row=await transportDocuments.read(db,empresaId,req.params.id,req.params.versionId);
+    if(!row)return res.status(404).json({error:'Versión no encontrada'});
+    const bytes=Buffer.from(row.pdf);
+    if(transportDocuments.hash(bytes)!==row.pdf_hash)return res.status(500).json({error:'Fallo de integridad del original'});
+    return sendTransportOriginal(res,bytes,row.filename,row.pdf_hash,true);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.post('/:id/documento-control-digital/externo',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {
+    const empresaId=req.empresaId||req.user.empresa_id;
+    const ctx=await getPedidoDocumentoControlContext(req.params.id,empresaId);
+    if(!ctx)return res.status(404).json({error:'Pedido no encontrado'});
+    const payload=buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl:publicBaseUrl(req)});
+    await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId:req.body.envio_id,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicBaseUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt:ctx.pedido.updated_at});
+    res.json(await buildPedidoDocumentoControlResponse(req,ctx,empresaId));
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code,fields:e.fields});}
+});
+
+router.post('/:id/envios',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {
+    await require('../services/transportShipments').declare(db,{empresaId:req.user.empresa_id,pedidoId:req.params.id,operationId:req.body.client_operation_uuid,rows:req.body.envios,actorId:req.user.id});
+    const ctx=await getPedidoDocumentoControlContext(req.params.id,req.user.empresa_id);
+    res.json(await buildPedidoDocumentoControlResponse(req,ctx,req.user.empresa_id));
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
 router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (req, res) => {
@@ -6871,6 +6742,9 @@ router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (
       appBaseUrl: publicBaseUrl(req),
       userId: req.user?.id || null,
       motivo: "generacion_manual",
+      envioId: req.body?.envio_id || null,
+      consolidated: req.body?.consolidado === true,
+      versionReason: req.body?.motivo || null,
     });
     const refreshed = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     res.json({
@@ -6879,7 +6753,7 @@ router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (
       ...(await buildPedidoDocumentoControlResponse(req, refreshed || ctx, empresaId)),
     });
   } catch (e) {
-    res.status(500).json({ error: e.message || "No se pudo generar el DeCA" });
+    res.status(e.status || 500).json({ error: e.message || "No se pudo generar el DeCA", code:e.code, fields:e.fields });
   }
 });
 
@@ -10122,151 +9996,51 @@ router.post("/:id/gps", async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /pedidos/:id/firma - guardar firma digital por rol y actualizar DCD
-router.post("/:id/firma", async (req, res) => {
-  try {
-    const empresaId = req.user && req.user.empresa_id;
-    await ensureColaboradorWorkflowSchema();
-    const { firma_destinatario, firma_nombre } = req.body;
-    const firmaImagen = firma_destinatario || req.body?.firma || req.body?.firma_png || req.body?.firma_data_url;
-    const firmaRol = normalizeFirmaRol(req.body?.rol || req.body?.firma_rol || "destinatario");
-    if (!firmaImagen) return res.status(400).json({ error: "Firma requerida" });
-    const { rows: pedidoRows } = await db.query(
-      `SELECT id, numero, origen, destino, fecha_carga, fecha_descarga, fecha_entrega,
-              vehiculo_id, chofer_id, chofer2_id, estado::text AS estado,
-              firma_evidencia, puntos_carga, puntos_descarga, mercancia, bultos, peso_kg
-         FROM pedidos
-        WHERE id=$1 AND empresa_id=$2
-        LIMIT 1`,
-      [req.params.id, empresaId]
-    );
-    const pedido = pedidoRows[0];
-    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
-      return res.status(403).json({ error: "No puedes firmar este pedido" });
-    }
-
-    let signedStop=null;
-    if(req.body.parada_id){
-      await assertDriverWorkday(req);
-      const helpers=require('../services/driverStops');
-      signedStop=helpers.driverStops(pedido).find(s=>s.id===req.body.parada_id);
-      const steps=(await getPedidoChoferPasos(pedido.id,empresaId)).data;
-      if(!signedStop || (signedStop.tipo==='carga'?'cargador':'destinatario')!==firmaRol)return res.status(409).json({error:'La firma no corresponde a esta parada.'});
-      const data=helpers.stopData(signedStop,steps,helpers.driverStops(pedido));
-      if(helpers.activeDriverStop(pedido,steps)?.id!==signedStop.id)return res.status(409).json({error:'Esta parada ya está cerrada o aún no es la parada actual.'});
-      if(signedStop.tipo==='carga'?!(data.mercancia_confirmada&&data.albaran_carga):!(data.descarga_ok&&data.albaran_descarga))return res.status(409).json({error:'Completa los datos y el albarán de esta parada antes de firmar.'});
-      signedStop={...signedStop,mercancia:data.mercancia_cargada,bultos:data.mercancia_palets,peso_kg:data.mercancia_peso_kg};
-    }
-    const firmadoAt = new Date().toISOString();
-    const firmaHash = sha256Hex(firmaImagen);
-    const pedidoContext = buildFirmaPedidoContext(pedido);
-    const defaultNombre = firmaRol === "chofer" ? "Chofer" : firmaRol === "cargador" ? "Cargador" : "Destinatario";
-    const evidenciaBase = {
-      version: "transgest-firma-evidencia-2026.05",
-      estado: "evidencia_interna_pre_eidas",
-      provider: "transgest_internal",
-      required_level_target: "firma electronica avanzada eIDAS",
-      pedido_id: pedido.id,
-      pedido_numero: pedido.numero,
-      ruta: { origen: pedido.origen || "", destino: pedido.destino || "" },
-      fechas: {
-        carga: pedido.fecha_carga || null,
-        descarga: pedido.fecha_descarga || pedido.fecha_entrega || null,
-      },
-      parada: signedStop,
-      pedido_context: pedidoContext,
-      pedido_context_hash_sha256: sha256Hex(stableJson(pedidoContext)),
-      firmante: {
-        nombre: String(firma_nombre || defaultNombre).trim(),
-        rol: firmaRol,
-      },
-      firma: {
-        algoritmo_hash: "SHA-256",
-        hash: firmaHash,
-        formato: String(firmaImagen).startsWith("data:image/") ? "data_url_image" : "desconocido",
-        data_url: String(firmaImagen).startsWith("data:image/") ? firmaImagen : "",
-      },
-      captura: {
-        ip: req.ip || req.headers["x-forwarded-for"] || "",
-        user_agent: req.get("user-agent") || "",
-        actor_tipo: req.user?.rol || "usuario",
-        actor_id: req.user?.id || null,
-        source: req.body?.source || (req.user?.rol === "chofer" ? "app_chofer" : "pedidos"),
-      },
-      firmado_at: firmadoAt,
-    };
-    const evidencia = {
-      ...evidenciaBase,
-      integrity_hash_sha256: sha256Hex(stableJson(evidenciaBase)),
-    };
-    const evidenciaMulti = mergeFirmaEvidencia(pedido.firma_evidencia || null, firmaRol, evidencia);
-    if(signedStop) evidenciaMulti.paradas={...(pedido.firma_evidencia?.paradas||{}),[signedStop.id]:evidencia};
-
-    const roleSetSql = {
-      cargador: "firma_cargador = $1, firma_cargador_nombre = $2, firma_cargador_fecha = $5",
-      chofer: "firma_chofer = $1, firma_chofer_nombre = $2, firma_chofer_fecha = $5",
-      destinatario: "firma_destinatario = $1, firma_nombre = $2, firma_fecha = $5, firma_hash = $7",
-    }[firmaRol];
-
-    const firmaParams = [
-      firmaImagen,
-      evidencia.firmante.nombre || defaultNombre,
-      req.params.id,
-      empresaId,
-      firmadoAt,
-      JSON.stringify(evidenciaMulti),
-    ];
-    if (firmaRol === "destinatario") firmaParams.push(firmaHash);
-
-    const { rows } = await db.query(`
-      UPDATE pedidos
-      SET ${roleSetSql},
-          firma_evidencia = $6::jsonb,
-          updated_at = NOW()
-      WHERE id = $3 AND empresa_id = $4
-      RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_cargador_fecha, firma_cargador_nombre, firma_chofer_fecha, firma_chofer_nombre, firma_evidencia
-    `, firmaParams);
-
-    await logPedidoEvento(req.params.id, empresaId, `firma.${firmaRol}_registrada`, {
-      firma_rol: firmaRol,
-      firma_nombre: evidencia.firmante.nombre,
-      firma_hash: firmaHash,
-      integrity_hash_sha256: evidencia.integrity_hash_sha256,
-      pedido_context_hash_sha256: evidencia.pedido_context_hash_sha256,
-      estado: evidencia.estado,
-      source: evidencia.captura.source,
-    }, req.user?.rol || "usuario", req.user?.id || null);
-
-    const pedidoId = req.params.id;
-    const actorId = req.user?.id || null;
-    const appBaseUrl = publicBaseUrl(req);
-    setImmediate(() => {
-      getPedidoDocumentoControlContext(pedidoId, empresaId)
-        .then(ctx => ctx ? archivarDocumentoControlPedido({
-          pedidoId,
-          empresaId,
-          appBaseUrl,
-          userId: actorId,
-          motivo: `firma_${firmaRol}`,
-        }) : null)
-        .catch(repoErr => logger.warn("No se pudo actualizar el repositorio DCD tras firma:", repoErr.message));
+// SignatureProvider boundary: immutable operation receipt and local evidence.
+async function signatureAuthorization(req,res) {
+  const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return null;
+  await assertDriverWorkday(req);
+  const access=req.user.rol==='chofer'?await getChoferAccessForUser(req.user,empresaId):null;
+  const authorize=access?o=>access.choferIds.some(id=>id===String(o.chofer_id||'')||id===String(o.chofer2_id||''))||(!o.chofer_id&&!o.chofer2_id&&access.vehiculoIds.includes(String(o.vehiculo_id||''))):()=>true;
+  return {empresaId,authorize,actorId:req.user.id,pedidoId:req.params.id,allowCorrection:['gerente','trafico'].includes(req.user.rol)};
+}
+router.post('/:id/firma/preparar',async(req,res)=>{
+  try {const args=await signatureAuthorization(req,res);if(!args)return;
+    res.json(await require('../services/localEvidenceSignatureProvider').prepare(db,{...args,stopId:req.body.parada_id,reserva:req.body.reserva||{},correctionId:req.body.correccion_de}));
+  } catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.get('/:id/firma/operaciones/:operationId/pdf',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const row=(await db.query('SELECT pdf,pdf_hash FROM operacion_evidencias WHERE empresa_id=$1 AND pedido_id=$2 AND id=$3',[empresaId,req.params.id,req.params.operationId])).rows[0];
+    if(!row)return res.status(404).json({error:'Justificante no encontrado'});
+    const bytes=Buffer.from(row.pdf);if(transportDocuments.hash(bytes)!==row.pdf_hash)throw Error('Fallo de integridad');
+    sendTransportOriginal(res,bytes,'justificante-para-firma.pdf',row.pdf_hash);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.post('/:id/firma',async(req,res)=>{
+  try {const args=await signatureAuthorization(req,res);if(!args)return;
+    const capture={ip:req.ip||'',user_agent:String(req.get('user-agent')||'').slice(0,600),actor_id:req.user.id,actor_rol:req.user.rol,
+      session_id:req.user.jti||transportDocuments.hash(String(req.get('authorization')||'')).slice(0,32),platform:String(req.body.platform||'').slice(0,80),app_version:String(req.body.app_version||'').slice(0,80)};
+    res.json(await require('../services/localEvidenceSignatureProvider').sign(db,{...args,request:req.body,capture}));
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.post('/:id/firma/:evidenceId/anular',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {const empresaId=req.empresaId||req.user.empresa_id,reason=String(req.body.motivo||'').trim();
+    if(!reason)return res.status(422).json({error:'Indica el motivo de anulación'});
+    const result=await db.transaction(async tx=>{
+      const order=(await tx.query('SELECT id,firma_evidencia FROM pedidos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,req.params.id])).rows[0];
+      if(!order)return null;
+      const row=(await tx.query('SELECT s.id,s.payload,o.parada_id FROM signature_evidence s JOIN operacion_evidencias o ON o.empresa_id=s.empresa_id AND o.id=s.operation_id WHERE s.empresa_id=$1 AND o.pedido_id=$2 AND s.id=$3',[empresaId,req.params.id,req.params.evidenceId])).rows[0];
+      if(!row)return null;
+      await tx.query('INSERT INTO signature_evidence_annulments(empresa_id,signature_id,reason,created_by) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[empresaId,row.id,reason,req.user.id]);
+      const ev=order.firma_evidencia||{};
+      if(ev.paradas?.[row.parada_id]?.id===row.id)delete ev.paradas[row.parada_id];
+      for(const key of Object.keys(ev.firmas||{}))if(ev.firmas[key]?.id===row.id)delete ev.firmas[key];
+      await tx.query('UPDATE pedidos SET firma_evidencia=$3,updated_at=NOW() WHERE empresa_id=$1 AND id=$2',[empresaId,order.id,JSON.stringify(ev)]);
+      return {ok:true};
     });
-
-    res.json({ ok: true, firma_rol: firmaRol, repositorio_pendiente: true, ...rows[0] });
-  } catch(e) {
-    logger.error("Error guardando firma de pedido:", {
-      message: e.message,
-      code: e.code,
-      pedido_id: req.params.id,
-      user_id: req.user?.id || null,
-      rol: req.user?.rol || null,
-    });
-    if (e.status) return res.status(e.status).json({ error: e.message, code: e.code || undefined });
-    if (e.code === "22001") return res.status(400).json({ error: "La firma o la evidencia generada supera el tamano permitido. Vuelve a firmar con un trazo mas simple.", code: e.code });
-    if (e.code === "22P02") return res.status(400).json({ error: "Alguno de los datos de firma no tiene formato valido. Refresca el viaje y vuelve a intentarlo.", code: e.code });
-    res.status(500).json({ error: e.message || "No se pudo guardar la firma del pedido" });
-  }
+    if(!result)return res.status(404).json({error:'Firma no encontrada'});res.json(result);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
 });
 
 router.get("/:id/firma/evidencia", GERENTE_O_TRAFICO, async (req, res) => {

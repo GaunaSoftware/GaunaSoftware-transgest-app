@@ -2453,13 +2453,15 @@ export default function Empresa() {
                 <input style={S.inp} value={empresa.documento_control?.dominio_url || ""} onChange={fdc("dominio_url")} placeholder="https://miempresa.transgest.app" disabled={!esGerente}/>
               </div>
               <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text3)",fontWeight:700,padding:"8px 0"}}>
-                <input type="checkbox" checked={!!empresa.documento_control?.dominio_comunicado} onChange={fdc("dominio_comunicado")} disabled={!esGerente}/>
-                Dominio comunicado al Ministerio
+                <input type="checkbox" checked={!!empresa.documento_control?.permitir_consolidado} onChange={fdc("permitir_consolidado")} disabled={!esGerente}/>
+                Permitir DeCA consolidado con los mismos cargador y transportista
               </label>
             </div>
             <div style={{marginTop:12}}>
               <label style={S.lbl}>Observaciones internas</label>
-              <textarea style={{ ...S.inp, height:70, resize:"vertical" }} value={empresa.documento_control?.observaciones || ""} onChange={fdc("observaciones")} placeholder="Ej: mientras no este comunicado el dominio, usar codigo numerico." disabled={!esGerente}/>
+              <textarea style={{ ...S.inp, height:70, resize:"vertical" }} value={empresa.documento_control?.observaciones || ""} onChange={fdc("observaciones")} placeholder="Notas internas de configuración; no se publican en el DeCA." disabled={!esGerente}/>
+              <label style={S.lbl}>Observaciones públicas del DeCA</label>
+              <textarea style={{ ...S.inp, height:70, resize:"vertical" }} value={empresa.documento_control?.observaciones_publicas || ""} onChange={fdc("observaciones_publicas")} placeholder="Solo información que pueda figurar en el documento accesible mediante QR." disabled={!esGerente}/>
             </div>
           </div>
 

@@ -1,3 +1,4 @@
+import OperationSignature from './OperationSignature';
 import { driverStops, stopData, stopDone, activeDriverStop } from "./driverStops";
 import DriverTripCard from './DriverTripCard';
 import { transportStateKey } from '../../utils/transportStateCatalog';
@@ -15,7 +16,7 @@ import { confirmDialog, notify } from "../../services/notify";
 
 
 
-import { normalizeChoferPasos, esViajeCisterna, leerPasosViaje, guardarPasosViaje, createDriverOfflineActions, esErrorOffline, capturarUbicacionActual, FirmaCanvas, ModalIncidencia, EscanerAlbaran, segundosDesdeIso, fmtDuracionSegundos, EC, PROTOCOLO_CISTERNA } from "./driverSupport";
+import { normalizeChoferPasos, esViajeCisterna, leerPasosViaje, guardarPasosViaje, createDriverOfflineActions, esErrorOffline, capturarUbicacionActual, ModalIncidencia, EscanerAlbaran, segundosDesdeIso, fmtDuracionSegundos, EC, PROTOCOLO_CISTERNA } from "./driverSupport";
 const quantityInput=value=>value==null||value===''?'':Number.isFinite(Number(value))?String(Number(value)):String(value);
 function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expanded = false, onExpandedChange, onFoto, featured = false, journeyStopId }){
   const [{encolarOffline, queueOfflineCriticalAction}] = useState(createDriverOfflineActions);
@@ -35,9 +36,9 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     ? {...currentData,carga_iniciada:true,carga_proceso:true,carga_ok:true,albaran_carga:true,firma_cargador:true}
     : activeStop?currentData:allSteps;
   const [tick,         setTick]         = useState(0);
-  const cargaFinalizada = !!allSteps.carga_ok || Object.values(allSteps.paradas||{}).some(s=>s.tipo==="carga"&&s.carga_ok);
   const [docControl,   setDocControl]   = useState(null);
   const [docControlLoading, setDocControlLoading] = useState(false);
+  const [docControlError,setDocControlError] = useState('');
   const [choferDocs,   setChoferDocs]   = useState([]);
   const [qrVisible, setQrVisible] = useState(false);
   const [firmandoCargador, setFirmandoCargador] = useState(false);
@@ -100,26 +101,27 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   const cargarDocumentoControl = useCallback(async () => {
-    if(!cargaFinalizada)return null;
     setDocControlLoading(true);
+    setDocControlError('');
     try {
       const data = await getPedidoDocumentoControl(pedido.id);
       setDocControl(data || null);
       return data || null;
-    } catch {
+    } catch (error) {
+      setDocControlError(error.message||'No se pudo consultar el documento.');
       setDocControl(null);
       return null;
     } finally {
       setDocControlLoading(false);
     }
-  }, [pedido.id,cargaFinalizada]);
+  }, [pedido.id]);
 
   useEffect(() => {
     let alive = true;
-    if (!expanded || !cargaFinalizada) return undefined;
+    if (!expanded) return undefined;
     cargarDocumentoControl().then(data => { if (!alive) return; if (data) setDocControl(data); });
     return () => { alive = false; };
-  }, [expanded, cargaFinalizada, cargarDocumentoControl]);
+  }, [expanded, cargarDocumentoControl]);
 
   const docControlSupportUrl = docControl?.documento?.soporte_url || docControl?.soporte_url || "";
   const dcd = docControl?.documento || null;
@@ -127,8 +129,9 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const dcdCargas = Array.isArray(dcd?.cargas) ? dcd.cargas : [];
   const dcdDescargas = Array.isArray(dcd?.descargas) ? dcd.descargas : [];
   const dcdReady = !!docControl?.status?.ready;
-  const dcdRevisado = !!pasos.dcd_revisado;
-  const dcdDisponible = !!pasos.dcd_disponible || !!pasos.dcd_revisado;
+  const activeVersions=(docControl?.versiones||[]).filter(v=>v.estado==='activa');
+  const dcdRevisado = !!allSteps.dcd_revisado&&activeVersions.length>0&&activeVersions.every(v=>allSteps.dcd_versiones_revisadas?.includes(v.id));
+  const dcdDisponible = !!allSteps.dcd_disponible;
   const dcdOperativoOk = dcdReady && dcdRevisado && dcdDisponible;
   const requiereProtocoloCisterna = esViajeCisterna(pedido);
   const protocoloCisternaCompletado = !requiereProtocoloCisterna || PROTOCOLO_CISTERNA.every(step => pasos[step.key]);
@@ -186,19 +189,21 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function marcarDcdRevisado() {
-    const data = docControl || await cargarDocumentoControl();
+    const data = await cargarDocumentoControl();
     if (!data?.documento) {
       notify("No se pudo cargar el DCD. Revisa la conexión o avisa a tráfico.", "warning");
       return;
     }
     if (!data?.status?.ready) {
-      notify("El DCD aun tiene datos pendientes. Puedes consultarlo, pero tráfico debe completarlo.", "warning");
+      notify("El DeCA está pendiente. Tráfico debe emitirlo o adjuntarlo antes de salir.", "warning");
+      return;
     }
     registrarDcdEvento("consultado");
     registrarDcdEvento("revisado");
     await persistirPasos({
       dcd_revisado:true,
       dcd_disponible:true,
+      dcd_versiones_revisadas:(data.versiones||[]).filter(v=>v.estado==='activa').map(v=>v.id),
       dcd_revisado_at:new Date().toISOString(),
       dcd_disponible_at:new Date().toISOString(),
     }, { silent:true });
@@ -206,24 +211,17 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function confirmarDcdAntesDeSalir() {
-    const data = docControl || await cargarDocumentoControl();
-    if (!data?.documento) {
-      const ok = await confirmDialog({
-        title: "DCD no disponible",
-        message: "No se ha podido cargar el documento de control digital. Puedes continuar para no bloquear la operativa, pero quedara pendiente para tráfico.",
-        confirmText: "Continuar igualmente",
-        cancelText: "Revisar",
-        tone: "warning",
-      });
-      return ok;
+    const data = await cargarDocumentoControl();
+    if (!data?.status?.ready) {
+      notify(data?.status?.summary||'No se ha podido comprobar el DeCA. Revisa la conexión o avisa a tráfico antes de salir.','warning');
+      return false;
     }
-    if (pasos.dcd_revisado && pasos.dcd_disponible && data?.status?.ready) return true;
+    const ids=(data.versiones||[]).filter(v=>v.estado==='activa').map(v=>v.id);
+    if (allSteps.dcd_revisado && allSteps.dcd_disponible && ids.length&&ids.every(id=>allSteps.dcd_versiones_revisadas?.includes(id))) return true;
     const ok = await confirmDialog({
-      title: data?.status?.ready ? "Confirmar DCD" : "DCD con datos pendientes",
-      message: data?.status?.ready
-        ? "Antes de salir, confirma que has revisado el DCD y lo llevas disponible en el móvil o impreso."
-        : "El DCD esta pendiente de revisión interna. Puedes continuar con aviso, pero informa a tráfico si necesitas el soporte definitivo.",
-      confirmText: data?.status?.ready ? "Lo llevo revisado" : "Continuar con aviso",
+      title: "Confirmar DeCA",
+      message: "Antes de salir, confirma que has revisado los DeCA vigentes de los envíos y los llevas disponibles en el móvil o impresos.",
+      confirmText: "Los llevo revisados",
       cancelText: "Volver",
       tone: data?.status?.ready ? "success" : "warning",
     });
@@ -232,6 +230,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     await persistirPasos({
       dcd_revisado:true,
       dcd_disponible:true,
+      dcd_versiones_revisadas:ids,
       dcd_revisado_at:new Date().toISOString(),
       dcd_disponible_at:new Date().toISOString(),
     }, { silent:true });
@@ -325,7 +324,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     onActualizar();
   }
 
-  async function registrarFirmaCargador(dataURL, firmaNombre) {
+  async function registrarFirmaCargador(dataURL, firmaNombre, evidence) {
     const firmaPayload = {
       ...(activeStop?{parada_id:activeStop.id}:{}),
       rol: "cargador",
@@ -340,7 +339,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       await persistirPasos({ firma_cargador:true, firma_cargador_at:new Date().toISOString() }, { silent:true });
       cargarDocumentoControl().then(fresh=>{if(fresh)setDocControl(fresh);}).catch(()=>{});
       setFirmandoCargador(false);
-      notify("Firma del remitente registrada en el DCD.", "success");
+      notify("Firma de carga guardada en su justificante.", "success");
       onActualizar();
     } catch(err) {
       if (esErrorOffline(err)) {
@@ -356,7 +355,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         onActualizar();
         return;
       }
-      notify(err.message || "No se pudo registrar la firma del remitente.", "error");
+      throw err;
     }
   }
 
@@ -580,7 +579,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     finally{setLoading(false);}
   }
 
-  async function registrarFirma(dataURL, firmaNombre){
+  async function registrarFirma(dataURL, firmaNombre, evidence){
     const firmaPayload = {
       ...(activeStop?{parada_id:activeStop.id}:{}),
       firma_destinatario: dataURL,
@@ -610,7 +609,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         onActualizar();
         return;
       }
-      notify(err.message || "No se pudo completar la firma por un problema en el servidor.", "error");
+      throw err;
     }
   }
 
@@ -828,7 +827,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             </div>
           )}
 
-          {cargaFinalizada && <div className="driver-dcd-panel" style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
+          {<div className="driver-dcd-panel" style={{background:"var(--bg4)",border:"1px solid var(--border)",borderRadius:10,padding:12,marginBottom:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
               <div>
                 <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>Documento de control digital</div>
@@ -842,6 +841,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                 {dcdOperativoOk ? "Disponible" : dcdReady ? "Listo" : "Pendiente"}
               </div>
             </div>
+            {docControlError&&<p role="alert">{docControlError} <button onClick={cargarDocumentoControl}>Reintentar</button></p>}
             {docControl?.documento && (
               <>
                 <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>
@@ -907,8 +907,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   </div>
                 )}
                 {Array.isArray(docControl.status?.faltantes) && docControl.status.faltantes.length > 0 && (
-                  <div className="tg-driver-dcd-internal" style={{fontSize:14,color:"#f59e0b",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.2)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
-                    Faltan datos: {docControl.status.faltantes.slice(0, 3).join(" | ")}{docControl.status.faltantes.length > 3 ? "..." : ""}
+                  <div role="status" style={{fontSize:14,color:"var(--text)",background:"rgba(245,158,11,.08)",border:"1px solid rgba(245,158,11,.2)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                    Faltan datos: {docControl.status.faltantes.join(" | ")}
                   </div>
                 )}
                 {docControl?.remision && (
@@ -918,6 +918,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   </div>
                 )}
                 {docControlSupportUrl && <DriverDcdActions onView={()=>abrirDocumentoControl(false)} onQr={verQrDocumentoControl} onShare={compartirDocumentoControl} onPrint={()=>abrirDocumentoControl(true)} onDownload={descargarDocumentoControl} onReview={marcarDcdRevisado} reviewed={dcdOperativoOk}/>}
+                {activeVersions.length>1&&<ul>{activeVersions.map((v,i)=><li key={v.id}>DeCA envío {i+1} · versión {v.version} <button onClick={()=>verArchivoProtegido(`/pedidos/${pedido.id}/documento-control-digital/versiones/${v.id}/pdf`).catch(error=>notify(error.message,'error'))}>Abrir original</button></li>)}</ul>}
               </>
             )}
           </div>}
@@ -1058,9 +1059,9 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
         </div>
       )}
 
-      {firmando&&<FirmaCanvas pedido={{...pedido,destino:activeStop?.label||pedido.destino,mercancia:pasos.mercancia_cargada||pedido.mercancia}} onFirma={registrarFirma} onCancel={()=>setFirmando(false)}/>}
+      {firmando&&<OperationSignature paradaId={activeStop?.id} pedido={{...pedido,destino:activeStop?.label||pedido.destino,mercancia:pasos.mercancia_cargada||pedido.mercancia}} onFirma={registrarFirma} onCancel={()=>setFirmando(false)}/>}
       {firmandoCargador&&(
-        <FirmaCanvas
+        <OperationSignature paradaId={activeStop?.id}
           pedido={{...pedido,origen:activeStop?.label||pedido.origen,mercancia:pasos.mercancia_cargada||pedido.mercancia}}
           title="Firma del remitente"
           onFirma={registrarFirmaCargador}

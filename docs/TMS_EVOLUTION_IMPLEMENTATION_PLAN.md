@@ -21,7 +21,7 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 2 Modelo operativo | Base aditiva y adaptador probados | `TMS_EVOLUTION_PHASE2_MODEL.md`; pendiente identificar explícitamente envíos múltiples, no inferirlos |
 | 3 Mesa de tráfico/grupajes | Primera integración funcional probada | `TMS_EVOLUTION_PHASE3_TRAFFIC.md`; mantener sus límites, especialmente replanificación, carretera real, costes y concurrencia |
 | 4 Chófer multiparada | Integración de viajes materializados probada | `TMS_EVOLUTION_PHASE4_DRIVER.md`; legacy preservado, Android/dispositivo pendiente |
-| 5 DeCA/carta de porte/expediente | Siguiente bloque | Fuentes externa/TransGest, versión/PDF inmutables, disponibilidad previa, firmas por operación, justificantes y expediente; no reutilizar firma de perfil |
+| 5 DeCA/carta de porte/expediente | Núcleo implementado y probado; límites de cierre documentados | `TMS_EVOLUTION_PHASE5_DOCUMENTS.md`: originales inmutables, envíos explícitos/consolidación optativa, correcciones de firmas abiertas/cerradas, ZIP, contrato eCMR preparatorio y app. Restan transición legacy, vías de salida anteriores y validaciones externas |
 | 6 Tracking/ETA/geofencing | Pendiente de contrastar e implementar | Reutilizar GPS y sus fechas; sin ETA ni llegadas inventadas |
 | 7 Android/Play Store | Pendiente de contrastar y validar | Reutilizar Capacitor; permisos, offline y dispositivos, sin publicar ni inventar credenciales de firma |
 | 8 Bandeja IA | Pendiente de contrastar e implementar | Canonicalización y confirmación humana |
@@ -35,4 +35,4 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 16 Integration Registry | Pendiente de contrastar e implementar | Contratos y capacidades reales de proveedores |
 | 17 Multiempresa | Pendiente de contrastar e implementar | Membresías, permisos y autorización efectiva; no confiar solo en parámetros o JWT |
 
-Antes de dar una fase por terminada, revisar todos sus requisitos del encargo original y resolver o identificar expresamente cada límite heredado. Los documentos 0–4 constituyen evidencia de lo realizado, no una certificación global. El siguiente bloque autorizado es fase 5; no hay que pedir de nuevo permiso para implementarlo.
+Antes de dar una fase por terminada, revisar todos sus requisitos del encargo original y resolver o identificar expresamente cada límite heredado. Los documentos 0–5 constituyen evidencia de lo realizado, no una certificación global. El usuario ha autorizado terminar las fases pendientes; no hay que pedir permiso otra vez para implementar. Continuar por los pendientes de fase 5 antes de declarar su cierre; no presentar como terminadas las fases 6–17 por existir módulos anteriores.

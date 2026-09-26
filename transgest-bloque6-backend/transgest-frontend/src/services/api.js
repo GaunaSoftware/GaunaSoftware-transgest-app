@@ -509,7 +509,12 @@ export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-r
 export const desvincularPedidoRetorno = (id) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"DELETE" });
 export const getPedidoRentabilidadPredictiva = (id) => apiFetch(`/pedidos/${id}/rentabilidad-predictiva`);
 export const getPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital`);
-export const generarPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/generar`, { method:"POST", body:{}, silentSuccess:true });
+export const generarPedidoDocumentoControl = (id, data={}) => apiFetch(`/pedidos/${id}/documento-control-digital/generar`, { method:"POST", body:data, silentSuccess:true });
+export const adjuntarDecaExterno = (id,data) => apiFetch(`/pedidos/${id}/documento-control-digital/externo`, {method:"POST",body:data,silentSuccess:true});
+export const declararEnviosPedido = (id,data) => apiFetch(`/pedidos/${id}/envios`, {method:"POST",body:data,silentSuccess:true});
+export const prepararFirmaOperacion = (id,data) => apiFetch(`/pedidos/${id}/firma/preparar`, {method:"POST",body:data,silentSuccess:true});
+export const getFirmasOperacion = id => apiFetch(`/pedidos/${id}/firma/historial`);
+export const anularFirmaOperacion = (id,evidenceId,motivo) => apiFetch(`/pedidos/${id}/firma/${evidenceId}/anular`,{method:'POST',body:{motivo},silentSuccess:true});
 export const getPedidoDocumentoControlExport = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/export`);
 export const getPedidoDocumentoControlFirmaPaquete = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/firma-paquete`);
 export const getPedidoRegulatoryCoreExport = (id, params = {}) =>

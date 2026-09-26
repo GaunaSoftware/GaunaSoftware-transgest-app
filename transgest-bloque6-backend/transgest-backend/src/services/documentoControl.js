@@ -7,6 +7,8 @@ const DOC_CONTROL_DEFAULTS = {
   dominio_url: "",
   dominio_comunicado: false,
   usar_orden_carga_como_soporte: true,
+  permitir_consolidado: false,
+  observaciones_publicas: "",
   observaciones: "",
 };
 
@@ -931,9 +933,9 @@ function buildDocumentoControlSignatures(pedido = {}) {
       imagen: pedido?.firma_cargador || "",
     }),
     chofer: pick("chofer", {
-      nombre: pedido?.firma_chofer_nombre || pedido?.chofer_firma_base_nombre || [pedido?.conductor_efectivo_nombre, pedido?.conductor_efectivo_apellidos].filter(Boolean).join(" ").trim() || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
-      fecha: pedido?.firma_chofer_fecha || pedido?.chofer_firma_base_fecha || "",
-      imagen: pedido?.firma_chofer || pedido?.chofer_firma_base || "",
+      nombre: pedido?.firma_chofer_nombre || [pedido?.conductor_efectivo_nombre, pedido?.conductor_efectivo_apellidos].filter(Boolean).join(" ").trim() || [pedido?.chofer_nombre, pedido?.chofer_apellidos].filter(Boolean).join(" ").trim(),
+      fecha: pedido?.firma_chofer_fecha || "",
+      imagen: pedido?.firma_chofer || "",
     }),
     destinatario: pick("destinatario", {
       nombre: pedido?.firma_nombre || "",
@@ -1116,6 +1118,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       cache_policy: "no-store",
     },
     observaciones: pedido?.notas || pedido?.condiciones_adicionales || config.observaciones || "",
+    observaciones_publicas: config.observaciones_publicas || "",
     condiciones: {
       forma_pago_interna: formatClientPaymentTerms(empresa),
       reembolso_contra_entrega: cleanCmrOptionalField(pedido?.reembolso_contra_entrega || pedido?.cash_on_delivery || ""),
@@ -1185,7 +1188,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     { key: "cargador_email", ok: hasEmail(documento.cargador_contractual.email), label: "Email valido del cargador", category: "datos_maestros", required: false },
     { key: "transportista_nombre", ok: hasText(documento.transportista_efectivo.nombre), label: "Transportista efectivo identificado", category: "datos_maestros" },
     { key: "transportista_nif", ok: hasText(documento.transportista_efectivo.nif), label: "NIF del transportista efectivo", category: "datos_maestros" },
-    { key: "transportista_domicilio", ok: hasText(documento.transportista_efectivo.domicilio), label: "Domicilio del transportista efectivo", category: "datos_maestros" },
+    { key: "transportista_domicilio", ok: hasText(documento.transportista_efectivo.domicilio), label: "Domicilio del transportista efectivo", category: "datos_maestros", required: false },
     { key: "transportista_contacto", ok: hasText(documento.transportista_efectivo.contacto), label: "Contacto del transportista", category: "datos_maestros", required: false },
     { key: "transportista_email", ok: hasEmail(documento.transportista_efectivo.email), label: "Email valido del transportista", category: "datos_maestros", required: false },
     { key: "origen", ok: hasText(documento.origen.direccion), label: "Origen con direccion", category: "operativa" },
@@ -1195,15 +1198,14 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     { key: "peso", ok: !!documento.mercancia.peso_kg, label: "Peso o magnitud del envio", category: "mercancia" },
     { key: "bultos", ok: hasText(documento.mercancia.bultos), label: "Bultos/unidades del envio", category: "mercancia", required: false },
     { key: "fecha", ok: hasText(documento.fecha_transporte), label: "Fecha de transporte", category: "operativa" },
-    { key: "hora_carga", ok: hasText(documento.horarios.hora_carga) || hasText(documento.horarios.ventana_carga), label: "Hora o ventana de carga", category: "operativa" },
-    { key: "hora_descarga", ok: hasText(documento.horarios.hora_descarga) || hasText(documento.horarios.ventana_descarga), label: "Hora o ventana de descarga", category: "operativa" },
+    { key: "hora_carga", ok: hasText(documento.horarios.hora_carga) || hasText(documento.horarios.ventana_carga), label: "Hora o ventana de carga", category: "operativa", required: false },
+    { key: "hora_descarga", ok: hasText(documento.horarios.hora_descarga) || hasText(documento.horarios.ventana_descarga), label: "Hora o ventana de descarga", category: "operativa", required: false },
     { key: "vehiculo", ok: hasText(documento.vehiculo.tractora), label: "Matricula del vehiculo tractor", category: "vehiculo" },
     { key: "remolque", ok: hasText(documento.vehiculo.remolque), label: "Matricula de remolque si aplica", category: "vehiculo", required: false },
     { key: "chofer_nombre", ok: hasText(documento.chofer.nombre), label: "Conductor efectivo identificado", category: "vehiculo", required: false },
     { key: "chofer_dni", ok: hasText(documento.chofer.dni), label: "DNI/NIE del conductor efectivo", category: "vehiculo", required: false },
     { key: "operativa_carga", ok: Array.isArray(documento.condiciones.operativa_carga), label: "Operativa de carga documentada", category: "condiciones", required: false },
-    { key: "ecmr_internacional", ok: documento.cmr_tipo !== "internacional" || buildEcmrConsignmentNote(documento).missing_fields.length === 0, label: "eCMR internacional con datos CMR minimos", category: "interoperabilidad" },
-    { key: "firma_avanzada", ok: false, label: "Proveedor de firma avanzada eIDAS integrado", category: "firma", required: false },
+    { key: "ecmr_internacional", ok: documento.cmr_tipo !== "internacional" || buildEcmrConsignmentNote(documento).missing_fields.length === 0, label: "Revisión adicional de carta de porte internacional", category: "interoperabilidad", required: false },
     { key: "efti_platform", ok: false, label: "Preparado para plataforma eFTI/e-CMR certificada", category: "interoperabilidad", required: false },
     { key: "diwass_annex_vii", ok: !wasteSignals.detected || wasteSignals.cross_border_hint, label: "Revision DIWASS/eAnnex VII si hay residuos transfronterizos", category: "interoperabilidad", required: false },
     { key: "cumplimiento_operativo", ok: complianceSignals.avisos.length === 0, label: "Revision ADR/ZBE/tacografo/cabotaje si hay senales", category: "cumplimiento", required: false },
@@ -1212,7 +1214,6 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   if (config.sistema === "qr_url") {
     checks.push(
       { key: "dominio_url", ok: /^https:\/\//i.test(config.dominio_url || publicUrl || ""), label: "Dominio HTTPS configurado", category: "sistema" },
-      { key: "dominio_comunicado", ok: !!config.dominio_comunicado, label: "Dominio comunicado al Ministerio", category: "sistema", required: false },
       { key: "qr_public_url", ok: !!publicUrl, label: "URL publica para QR", category: "sistema" },
     );
   }
@@ -1242,8 +1243,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       faltantes,
       avisos,
       normativa: {
-        soporte: config.sistema === "qr_url" ? "QR con URL en dominio HTTPS comunicado" : "Codigo numerico para remision DeCA/PDF-A",
-        pdf: "PDF/A maximo 4 MB cuando se remita a inspeccion mediante codigo numerico.",
+        soporte: config.sistema === "qr_url" ? "QR con URL HTTPS directa a la versión PDF" : "QR y PDF digital nativo",
+        pdf: "PDF digital nativo de hasta 5 MB; metadatos de creación y modificación. Resolución de 5 de junio de 2026.",
         documento_control_obligatorio_desde: "2026-10-05",
         diwass_eannex_vii_entrada_vigor: "2026-05-21",
         diwass_eannex_vii_transicion_hasta: "2026-12-31",
@@ -1252,12 +1253,12 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
     },
     remision: {
       canal: config.sistema === "qr_url" ? "qr_url" : "codigo_numerico",
-      etiqueta: config.sistema === "qr_url" ? "QR con URL HTTPS comunicada" : "Codigo numerico / soporte imprimible",
+      etiqueta: config.sistema === "qr_url" ? "QR con URL HTTPS de la versión" : "Codigo numerico / soporte imprimible",
       filename: buildDocumentoControlFilename(documento),
       download_url: documento.soporte_url ? `${documento.soporte_url}${documento.soporte_url.includes("?") ? "&" : "?"}download=1` : "",
       instrucciones: config.sistema === "qr_url"
-        ? "Mantener disponible el soporte en dominio HTTPS comunicado y accesible mediante QR o URL."
-        : "Usar soporte imprimible y conservar version apta para remision/archivo. Para inspeccion por codigo, preparar PDF/A maximo 4 MB.",
+        ? "Mantener disponible el PDF original por HTTPS y QR durante el transporte. Conservarlo al menos un año; no se exige comunicar previamente el dominio."
+        : "Utilizar PDF digital nativo de hasta 5 MB con QR y descarga directa HTTPS. Conservar el original y sus versiones.",
     },
   };
 }

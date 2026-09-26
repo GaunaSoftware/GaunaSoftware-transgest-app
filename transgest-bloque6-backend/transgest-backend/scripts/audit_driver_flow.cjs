@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { driverStops } = require('../src/services/driverStops');
+const signOperation=require('./synthetic_sign_operation.cjs');
 
 // Called only by the isolated audit harness, with an already open synthetic workday.
 module.exports = async function auditDriverFlow({ base, fetch, db, managerToken, driverToken, company, client, driver, vehicle, password }) {
@@ -25,7 +26,7 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.ok(loadIncident?.explanation && loadIncident?.recommended_action, 'An overdue load explains its cause and action in Agenda');
   const trip = await request('GET', `/pedidos/${order.id}`);
   const [load, unload] = driverStops(trip);
-  await request('GET', `/pedidos/${order.id}/documento-control-digital`, null, 409);
+  await request('GET', `/pedidos/${order.id}/documento-control-digital`);
   const patch = (stop, data) => request('PATCH', `/pedidos/${order.id}/chofer-pasos`, { parada_id: stop.id, ...data });
   await patch(load, { carga_iniciada: true }); // Positioning does not require a ready DeCA.
   await request('POST', `/pedidos/${order.id}/gps`, { lat: 39.47, lng: -0.37 });
@@ -37,12 +38,23 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   const file = await fetch(`${base}/pedidos/${order.id}/chofer-docs/${doc.id}/archivo`, { headers: { Authorization: `Bearer ${driverToken}` } });
   assert.equal(file.status, 200); assert.match(file.headers.get('content-type'), /application\/pdf/);
   assert.equal(Buffer.from(await file.arrayBuffer()).subarray(0, 4).toString(), '%PDF'); checks++;
-  const signature = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const signature=require('./synthetic_signature_fixture.cjs')();
   await patch(load, { albaran_carga: true });
-  await request('POST', `/pedidos/${order.id}/firma`, { parada_id: load.id, rol: 'cargador', firma_nombre: 'Firmante sintético', firma: signature });
+  await signOperation(request, `/pedidos/${order.id}/firma`, load.id);
   await patch(load, { firma_cargador: true });
   await patch(load, { carga_ok: true });
   const loadedTrip = await request('GET', `/pedidos/${order.id}`);
+  const emitted = await request('POST',`/pedidos/${order.id}/documento-control-digital/generar`,{motivo:'Emisión del ensayo sintético'},200,managerToken);
+  assert.equal(emitted.versiones.length,1,'Version history must reach the UI');
+  const original=emitted.versiones[0];
+  assert.equal(original.payload,undefined,'History does not duplicate the whole payload');
+  const download=async(url,token,status=200)=>{const response=await fetch(base+url,{headers:token?{Authorization:`Bearer ${token}`}:{}});assert.equal(response.status,status,url);checks++;return {body:Buffer.from(await response.arrayBuffer()),headers:response.headers};};
+  const originalBytes=(await download(`/pedidos/${order.id}/documento-control-digital/versiones/${original.id}/pdf`,driverToken)).body;
+  assert.equal(crypto.createHash('sha256').update(originalBytes).digest('hex'),original.pdf_hash);
+  const publicPath=new URL(original.public_url);const publicRoute=publicPath.pathname.replace('/api/v1','')+publicPath.search;
+  assert.deepEqual((await download(publicRoute)).body,originalBytes,'Public QR serves the exact authorized PDF');
+  const repeated=await request('POST',`/pedidos/${order.id}/documento-control-digital/generar`,{},200,managerToken);
+  assert.equal(repeated.versiones.length,1,'Repeated issue preserves the version');
   assert.equal(loadedTrip.estado, 'en_curso', 'The legacy state remains compatible');
   assert.equal(loadedTrip.estado_operativo?.codigo, 'cargado', 'Loading completion is not departure');
   for (const endpoint of ['/pedidos', '/pedidos/resumen-lista']) {
@@ -54,6 +66,9 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
     FROM usuarios WHERE empresa_id=$2 AND email='audit@example.invalid'`, [crypto.randomUUID(),company,client.id]);
   const portalLogin = await request('POST', '/auth/login', { email:'progress-portal@example.invalid', password });
   const portalOrders = await request('GET', '/portal-cliente/pedidos', null, 200, portalLogin.token);
+  await request('GET',`/pedidos/${order.id}/documento-control-digital`,null,403,portalLogin.token);
+  await download(`/pedidos/${order.id}/expediente-transporte.zip`,portalLogin.token,403);
+  await download(`/pedidos/${order.id}/documento-control-digital/versiones/${original.id}/pdf`,portalLogin.token,403);
   assert.equal(portalOrders.find(p => p.id === order.id)?.estado_operativo?.codigo, 'cargado');
   assert.equal(portalOrders.some(p => 'precio_colaborador' in p || 'importe' in p || 'paradas' in p), false, 'Portal progress exposes no internal economics or raw driver evidence');
   assert.equal((await agenda()).some(e => e.id===loadIncident.id), false, 'Completing the load hides its active incident');
@@ -61,6 +76,8 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await request('GET', `/pedidos/${order.id}/documento-control-digital`);
   await request('POST', `/pedidos/${order.id}/documento-control-digital/evento`, { action: 'consultado' });
   await request('GET', `/pedidos/${order.id}/carta-porte`);
+  await request('PATCH',`/pedidos/${order.id}/chofer-pasos`,{parada_id:unload.id,viaje_iniciado:true},409);
+  await request('PATCH',`/pedidos/${order.id}/chofer-pasos`,{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[original.id]});
   await patch(unload, { viaje_iniciado: true });
   assert.equal((await request('GET', `/pedidos/${order.id}`)).estado_operativo?.codigo, 'en_transito');
   await patch(unload, { posicionado_descarga: true });
@@ -71,7 +88,7 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.ok(finishedUnloading.descarga_real_at, 'Finalizar la última descarga debe registrar la fecha real antes de firmar');
   assert.notEqual(finishedUnloading.estado, 'entregado', 'La descarga física no sustituye la firma de entrega');
   await patch(unload, { albaran_descarga: true });
-  await request('POST', `/pedidos/${order.id}/firma`, { parada_id: unload.id, rol: 'destinatario', firma_nombre: 'Receptor sintético', firma: signature });
+  await signOperation(request, `/pedidos/${order.id}/firma`, unload.id);
   await patch(unload, { firma_entrega: true });
   const beforeRetry = (await db.query('SELECT COUNT(*)::int AS n FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2', [order.id, company])).rows[0].n;
   await patch(unload, { firma_entrega: true });
@@ -80,6 +97,16 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.equal(done.estado, 'entregado'); assert.ok(done.carga_real_at && done.descarga_real_at);
   assert.equal(new Date(done.fecha_carga_planificada).toISOString().slice(0, 10), plannedLoad);
   assert.equal(new Date(done.fecha_descarga_planificada).toISOString().slice(0, 10), plannedDelivery);
+  // Real PDF -> immutable archive -> ZIP, without the screen's event pagination.
+  for(let i=0;i<85;i++)await db.query("INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,detalle) VALUES($1,$2,'qa.expediente','sistema',$3)",[order.id,company,JSON.stringify({synthetic:true,index:i})]);
+  const bundle=await download(`/pedidos/${order.id}/expediente-transporte.zip`,managerToken);
+  const zip=await require('jszip').loadAsync(bundle.body),manifest=JSON.parse(await zip.file('manifest.json').async('string'));
+  assert.equal(manifest.empresa_id,company);assert.equal(manifest.missing.length,0);
+  assert.deepEqual(await zip.file(`DeCA/${original.id}-v1.pdf`).async('nodebuffer'),originalBytes);
+  assert.ok(JSON.parse(await zip.file('Eventos/historico.json').async('string')).length>85);
+  assert.equal(manifest.files.filter(f=>/Firmas\/.*justificante.pdf$/.test(f.name)).length,2);
+  for(const f of manifest.files)assert.equal(crypto.createHash('sha256').update(await zip.file(f.name).async('nodebuffer')).digest('hex'),f.sha256);
+  await download(`/pedidos/${order.id}/expediente-transporte.zip`,driverToken,403);
 
   const otherDriver = crypto.randomUUID(), otherTrip = crypto.randomUUID(), otherCompany = crypto.randomUUID(), foreignTrip = crypto.randomUUID(), foreignClient = crypto.randomUUID();
   await db.query("INSERT INTO choferes(id,empresa_id,nombre,apellidos) VALUES($1,$2,'Otro','Sintético')", [otherDriver, company]);
@@ -91,6 +118,9 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'Empresa aislada sintética','B00000009','tenant-b@example.invalid','enterprise','activa')", [otherCompany]);
   await db.query("INSERT INTO clientes(id,empresa_id,nombre) VALUES($1,$2,'Cliente aislado sintético')", [foreignClient, otherCompany]);
   await db.query("INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado) VALUES($1,$2,$3,'OTRA-EMPRESA','confirmado')", [foreignTrip, otherCompany, foreignClient]);
+  await download(`/pedidos/${foreignTrip}/expediente-transporte.zip`,managerToken,404);
+  await download(`/pedidos/${foreignTrip}/documento-control-digital/versiones/${original.id}/pdf`,managerToken,404);
+  await download(`/pedidos/${otherTrip}/documento-control-digital/versiones/${original.id}/pdf`,driverToken,403);
   for (const [id, status] of [[otherTrip, 403], [foreignTrip, 404]]) {
     for (const [method, suffix, body] of [
       ['GET', '', null], ['GET', '/chofer-pasos', null], ['PATCH', '/chofer-pasos', { parada_id: load.id, carga_iniciada: true }],

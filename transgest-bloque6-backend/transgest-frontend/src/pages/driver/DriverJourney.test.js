@@ -12,8 +12,12 @@ test('one journey opens the next order in the saved stop sequence and keeps an a
   await act(async()=>root.render(<DriverJourney pedidos={orders}/>));
   expect(host.textContent).toContain('Próxima parada · 2/2');expect(host.querySelector('[aria-current="step"]').textContent).toContain('Murcia');
   await act(async()=>host.querySelector('button').click());expect(host.querySelector('[data-testid="active-stop"]').textContent).toBe('PED-B:b-load');
-  getPedidoChoferPasos.mockRejectedValue(new Error('Acceso denegado'));
+  const calls=getPedidoChoferPasos.mock.calls.length;
   await act(async()=>root.render(<DriverJourney pedidos={[...orders]}/>));
+  expect(getPedidoChoferPasos.mock.calls.length).toBe(calls);
+  expect(host.querySelector('[data-testid="active-stop"]').textContent).toBe('PED-B:b-load');
+  getPedidoChoferPasos.mockRejectedValue(new Error('Acceso denegado'));
+  await act(async()=>root.render(<DriverJourney pedidos={orders.map(o=>({...o,updated_at:'changed'}))}/>));
   expect(host.querySelector('[role="alert"]').textContent).toContain('Acceso denegado');expect(host.querySelector('[data-testid="active-stop"]')).toBeNull();
  }finally{await act(async()=>root.unmount());host.remove();}
 });

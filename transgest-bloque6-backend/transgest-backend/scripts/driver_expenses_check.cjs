@@ -51,13 +51,13 @@ async function main(){
  assert.equal((await db.query('SELECT remolque_id FROM vehiculos WHERE id=$1',[nextTruck])).rows[0].remolque_id,trailer);
  assert.equal(Number(j.km_acumulados)+workday.validateOdometer(1010,j.km_tramo_inicio)-Number(j.km_tramo_inicio),35,'distance combines truck segments');
  assert.equal((await call('post','/app/gastos',{...base,solicitud_id:id(13)})).code,409,'stale truck cannot receive expense');
- // DCD is unavailable to the assigned driver until loading is completed, but remains available to dispatch.
+ // DeCA is available before loading; assignment is still authorized before side effects.
  let loaded=false,allowed=true,built=0,contexts=0,dcdHandler;
  const pedidoSource=fs.readFileSync(path.join(__dirname,'../src/routes/pedidos.js'),'utf8');
  const dcdScope={db:{query:async(sql,params)=>{assert.match(sql,/FROM pedidos WHERE id=\$1 AND empresa_id=\$2/);assert.deepEqual(Array.from(params),[id(20),company]);return{rows:[{id:id(20),chofer_id:driver}]};}},router:{get:(p,h)=>dcdHandler=h},getPedidoDocumentoControlContext:async(order,tenant)=>{contexts++;assert.equal(tenant,company);return{pedido:{id:order}};},usuarioPuedeGestionarPedido:async()=>allowed,getPedidoChoferPasos:async()=>({data:{carga_ok:loaded}}),buildPedidoDocumentoControlResponse:async()=>{built++;return{ok:true};}};
- vm.runInNewContext(pedidoSource.slice(pedidoSource.indexOf('router.get("/:id/documento-control-digital",'),pedidoSource.indexOf('router.post("/:id/documento-control-digital/generar",')),dcdScope);
+ vm.runInNewContext(pedidoSource.slice(pedidoSource.indexOf('router.get("/:id/documento-control-digital",'),pedidoSource.indexOf('async function authorizeTransportDocument(')),dcdScope);
  const readDcd=async rol=>{const res={code:200,status(n){this.code=n;return this;},json(x){this.body=x;return this;}};await dcdHandler({empresaId:company,user:{rol},params:{id:id(20)}},res);return res;};
- assert.equal((await readDcd('chofer')).code,409);assert.equal(built,0);loaded=true;assert.equal((await readDcd('chofer')).code,200);allowed=false;const beforeDenied=contexts;assert.equal((await readDcd('chofer')).code,403);assert.equal(contexts,beforeDenied,'Denied requests cannot build context or allocate numbers');loaded=false;assert.equal((await readDcd('gerente')).code,200);
+ assert.equal((await readDcd('chofer')).code,200);assert.equal(built,1);loaded=true;assert.equal((await readDcd('chofer')).code,200);allowed=false;const beforeDenied=contexts;assert.equal((await readDcd('chofer')).code,403);assert.equal(contexts,beforeDenied,'Denied requests cannot build context or allocate numbers');loaded=false;assert.equal((await readDcd('gerente')).code,200);
  console.log('PASS PostgreSQL driver expenses: validation, tickets, tenant isolation, external restrictions, idempotency, base completion, totals; midday truck change, odometer segments, rollback and trailer transfer.');
  }finally{await pg.close();}
 }

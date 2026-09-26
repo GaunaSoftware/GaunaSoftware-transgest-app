@@ -5,14 +5,15 @@ import { TarjetaViaje } from './DriverTrip';
 export default function DriverJourney({pedidos, fallback, onActualizar, jornadaInfo, onAbrirJornada, onFoto}) {
   const [context,setContext]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[reload,setReload]=useState(0),[open,setOpen]=useState(false);
   const firstId=pedidos[0]?.id;
+  const revision=JSON.stringify(pedidos);
   useEffect(()=>{
     let alive=true;setLoading(true);setError('');
-    getPedidoChoferPasos(firstId).then(result=>{if(alive)setContext(result.viaje_operativo||null);})
+    getPedidoChoferPasos(firstId).then(result=>{if(alive)setContext(result.viaje_operativo?{...result.viaje_operativo,requestedOrder:firstId}:null);})
       .catch(err=>{if(alive)setError(err.message||'No se pudo cargar el plan del viaje.');}).finally(()=>{if(alive)setLoading(false);});
     return ()=>{alive=false;};
-  },[firstId,reload,pedidos]);
+  },[firstId,reload,revision]);
   if(error)return <div role="alert" className="driver-stops-summary">{error} <button onClick={()=>setReload(value=>value+1)}>Reintentar</button></div>;
-  if(loading)return <p role="status">Consultando las paradas del viaje…</p>;
+  if(loading&&context?.requestedOrder!==firstId)return <p role="status">Consultando las paradas del viaje…</p>;
   if(!context)return fallback;
   const next=context.proxima_parada,order=pedidos.find(item=>item.id===next?.pedido_id);
   const refresh=()=>{setReload(value=>value+1);onActualizar?.();};

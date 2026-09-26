@@ -97,6 +97,7 @@ async function saveStop(db,{pedidoId,empresaId,choferId,patch,actorId,authorize}
     if(operation)await journeyService.recordStop(client,{empresaId,pedidoId,actorId,operation,patch,merged,order,now});
     return merged;
   }
+  if(patch.viaje_iniciado&&!current.paradas?.[patch.parada_id]?.viaje_iniciado)await require('./transportDocumentVersions').assertDeparture(client,empresaId,order,current);
   if(patch.firma_cargador||patch.firma_entrega){
    const evidence=order.firma_evidencia?.paradas?.[patch.parada_id];
    if(!evidence?.firma?.hash)reject('Registra primero la firma de esta parada.');

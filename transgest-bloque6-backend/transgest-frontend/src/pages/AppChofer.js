@@ -101,16 +101,6 @@ export default function AppChofer(){
   useEffect(()=>{ cargar(); },[cargar]);
   useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)getChoferJornadaApp().then(setJornadaInfo).catch(()=>{});},60000);return()=>clearInterval(timer);},[user?.id]);
 
-  useEffect(() => {
-    const chofer = jornadaInfo?.chofer;
-    if (user?.rol === "chofer" && chofer?.id && !chofer?.firma_base) {
-      setFirmaBaseForzada(true);
-      setFirmaBaseOpen(true);
-    } else if (chofer?.firma_base) {
-      setFirmaBaseForzada(false);
-    }
-  }, [jornadaInfo?.chofer, user?.rol]);
-
   async function guardarFirmaBaseChofer(firma) {
     try {
       await guardarChoferFirmaBaseApp(firma);
@@ -596,7 +586,7 @@ export default function AppChofer(){
           chofer={jornadaInfo?.chofer || {}}
           user={user || {}}
           onCambiarFirma={() => {
-            setFirmaBaseForzada(!jornadaInfo?.chofer?.firma_base);
+            setFirmaBaseForzada(false);
             setFirmaBaseOpen(true);
           }}
         />
@@ -609,7 +599,7 @@ export default function AppChofer(){
       {firmaBaseOpen && (
         <FirmaLaboralCanvas
           title="Firma del chófer"
-          detail="Firma en la pantalla para guardar tu firma base en la ficha de chofer. Se usara en documentos internos cuando corresponda."
+          detail="Firma en la pantalla para guardar tu firma base en la ficha de chofer. No se utiliza como firma de transportes."
           defaultName={`${jornadaInfo?.chofer?.nombre || user?.nombre || ""} ${jornadaInfo?.chofer?.apellidos || ""}`.trim()}
           onFirma={guardarFirmaBaseChofer}
           onCancel={()=>setFirmaBaseOpen(false)}

@@ -1,0 +1,10 @@
+.operation-signature button { min-height:44px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg3); color:var(--text); font:inherit; font-weight:600; cursor:pointer; }
+.operation-signature button:disabled { opacity:.55; cursor:default; }
+.operation-signature-actions button { flex:1; white-space:nowrap; }
+@media(max-width:480px) { .operation-signature-actions .operation-signature-confirm { flex-basis:100%; } }
+.operation-signature .operation-signature-confirm { background:var(--accent); color:#fff; border-color:var(--accent); }
+.operation-signature input:not([type=checkbox]), .operation-signature select, .operation-signature textarea { min-height:44px; padding:10px; border:1px solid var(--border); border-radius:8px; background:var(--bg3); color:var(--text); font-size:16px; }
+.operation-signature dt { font-weight:700; margin-top:10px; }
+.operation-signature dd { margin:3px 0 8px; }
+.operation-signature h2 { margin-top:0; }
+.operation-signature label { line-height:1.45; }

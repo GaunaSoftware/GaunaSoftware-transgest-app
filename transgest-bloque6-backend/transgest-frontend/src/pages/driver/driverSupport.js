@@ -39,6 +39,7 @@ export function restoreDriverSteps(id, previous) {
 function normalizeChoferPasos(value = {}) {
   const source = value && typeof value === "object" ? value : {};
   const next = {};
+  if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(v=>typeof v==='string').slice(0,100);
   [
     "carga_iniciada",
     "carga_proceso",

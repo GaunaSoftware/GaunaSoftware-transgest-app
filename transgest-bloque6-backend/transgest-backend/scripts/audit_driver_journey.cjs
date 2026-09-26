@@ -1,3 +1,4 @@
+const signOperation=require('./synthetic_sign_operation.cjs');
 const assert=require('node:assert/strict'),crypto=require('node:crypto');
 module.exports=async function({base,fetch,db,managerToken,driverToken,company,driver,vehicle}){
  assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);let checks=0;
@@ -19,8 +20,8 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company,dr
  await patch(first,{carga_proceso:true});
  await patch(first,{mercancia_confirmada:true,mercancia_cargada:'Sacos sintéticos',mercancia_palets:2,mercancia_peso_kg:100});
  await patch(first,{albaran_carga:true});
- const signature='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
- await call('POST',`/pedidos/${first.pedido_id}/firma`,{parada_id:first.parada_legacy_id,rol:'cargador',firma_nombre:'Firmante sintético',firma:signature});
+ const signature=require('./synthetic_signature_fixture.cjs')();
+ await signOperation(call, `/pedidos/${first.pedido_id}/firma`, first.parada_legacy_id);
  await patch(first,{firma_cargador:true});await patch(first,{carga_ok:true});
  await patch(second,{carga_iniciada:true}); // Same truck; first child is in transit.
  context=(await call('GET',`/pedidos/${first.pedido_id}/chofer-pasos`)).viaje_operativo;

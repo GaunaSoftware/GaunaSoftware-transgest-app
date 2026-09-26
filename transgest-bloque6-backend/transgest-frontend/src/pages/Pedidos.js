@@ -1,3 +1,4 @@
+import TransportDocumentVersions from './TransportDocumentVersions';
 import { buildWaybillHtml, waybillLocation } from '../utils/waybillDocument';
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import OrderNotesFields from "./orders/editor/OrderNotesFields";
@@ -37,7 +38,7 @@ import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPed
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
-         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
+         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, setClienteMercanciaHabitual, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken, revocarColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
@@ -4970,20 +4971,6 @@ ${bloqueCombustible}
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  async function generarDeCADocControl() {
-    if (!pedido?.id) return;
-    try {
-      setDocControlLoading(true);
-      const data = await generarPedidoDocumentoControl(pedido.id);
-      setDocControl(data || null);
-      notify("DeCA generado y archivado en repositorio.", "success");
-    } catch (e) {
-      notify(e.message || "No se pudo generar el DeCA.", "error");
-    } finally {
-      setDocControlLoading(false);
-    }
-  }
-
   async function descargarExportDocControl() {
     if (!pedido?.id) return;
     try {
@@ -5215,6 +5202,7 @@ ${bloqueCombustible}
         </div>
 
         <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
+          <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
@@ -5223,14 +5211,6 @@ ${bloqueCombustible}
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {docControl?.documento && (
-                <button
-                  onClick={generarDeCADocControl}
-                  disabled={docControlLoading}
-                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:docControlLoading?"rgba(148,163,184,.12)":"rgba(16,185,129,.10)",color:docControlLoading?"var(--text5)":"#10b981",fontSize:12,fontWeight:700,cursor:docControlLoading?"wait":"pointer"}}>
-                  {docControlLoading ? "Generando..." : "Generar DeCA"}
-                </button>
-              )}
               {docControlSupportUrl && (
                 <button
                   onClick={()=>abrirSoporteDocControl(false)}

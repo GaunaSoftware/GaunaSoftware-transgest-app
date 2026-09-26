@@ -82,5 +82,21 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
     ]) await request(method, `/pedidos/${id}${suffix}`, body, status);
   }
   assert.equal((await db.query('SELECT estado,ultima_posicion,firma_evidencia FROM pedidos WHERE id=$1', [otherTrip])).rows[0].estado, 'confirmado');
+  assert.equal((await db.query('SELECT orden_carga_numero FROM pedidos WHERE id=$1',[otherTrip])).rows[0].orden_carga_numero,null,'A denied document read must not generate a document number');
+  // Simulate inconsistent legacy references: tenant filtering must also cover joins.
+  const foreignDriver=crypto.randomUUID(), foreignVehicle=crypto.randomUUID(), mixedTrip=crypto.randomUUID();
+  await db.query("INSERT INTO choferes(id,empresa_id,nombre,apellidos) VALUES($1,$2,'FOREIGN-PRIVATE-DRIVER','Sintético')",[foreignDriver,otherCompany]);
+  await db.query("INSERT INTO vehiculos(id,empresa_id,matricula) VALUES($1,$2,'FOREIGN-PRIVATE')",[foreignVehicle,otherCompany]);
+  await db.query("INSERT INTO pedidos(id,empresa_id,cliente_id,chofer_id,vehiculo_id,remolque_id,numero,estado) VALUES($1,$2,$3,$4,$5,$5,'REF-LEGACY-SINTETICA','entregado')",[mixedTrip,company,foreignClient,foreignDriver,foreignVehicle]);
+  const mixedCarta=await request('GET',`/pedidos/${mixedTrip}/carta-porte`,null,200,managerToken);
+  for(const field of ['cliente_nombre','cliente_cif','chofer_nombre','chofer_dni','veh_matricula','rem_matricula']) {
+    assert.equal(mixedCarta[field],null,`Carta de porte must not resolve cross-tenant ${field}`);
+  }
+  const mixedDcd=await request('GET',`/pedidos/${mixedTrip}/documento-control-digital`,null,200,managerToken);
+  assert.doesNotMatch(JSON.stringify(mixedDcd),/Cliente aislado sintético|FOREIGN-PRIVATE/,'DeCA must not resolve foreign master data');
+  const legacyCarta=await request('GET',`/legacy-pedidos/${mixedTrip}/carta-porte`,null,200,managerToken);
+  assert.deepEqual(legacyCarta,await request('GET',`/pedidos/${mixedTrip}/carta-porte`,null,200,managerToken),'Compatibility entry point must retain payload and authorization');
+  await request('GET',`/legacy-pedidos/${otherTrip}/carta-porte`,null,403);
+  await request('GET',`/legacy-pedidos/${foreignTrip}/carta-porte`,null,404);
   return { passed: true, httpChecks: checks, writes: 'synthetic_only', coverage: 'driver lifecycle, workday, documents, signature, GPS, dates, retry and cross-driver/tenant rejection' };
 };

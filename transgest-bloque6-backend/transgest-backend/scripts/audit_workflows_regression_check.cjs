@@ -36,11 +36,14 @@ async function main(){
  // Exercise the actual production module boundaries, not authentication alone.
  const authMiddleware=req('./middleware/auth');
  const boundarySource=code.slice(code.indexOf('function pedidosAuthUnlessPublic'),code.indexOf('safeUse(`${api}/auth`'));
- const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp})',authMiddleware);
+ const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission})',authMiddleware);
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.use('/api/v1/auth',auth);
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
+ app.use('/api/v1/portal-cliente',authMiddleware.authenticate,boundaries.portalClientePermission,req('./routes/cliente_portal'));
+ // Exercise the compatibility router separately; production registers it after pedidos.
+ app.use('/api/v1/legacy-pedidos',boundaries.pedidosAuthUnlessPublic,req('./routes/carta_porte'));
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
@@ -376,7 +379,11 @@ async function main(){
   const qaClient=await call('Cliente limpio para QA visual','POST','/clientes',{nombre:'Cliente QA visual',cif:'B87654321',direccion:'Calle de Ensayo 2',cp:'46002',ciudad:'Valencia',codigo_postal:'46002',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'visual@example.invalid',telefono:'960000002',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias'});
   const qaOrder=await call('Pedido libre para QA visual','POST','/pedidos',{cliente_id:qaClient.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-26',fecha_descarga:'2026-09-27',tipo_carga:'completa',importe:400,mercancia:'Mercancía sintética'});
   require('node:assert/strict').ok(qaClient.id && qaOrder.id,'Browser QA fixture must be complete');
-  console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
+  await db.query("UPDATE pedidos SET origen='Población pendiente',destino='Población desconocida',puntos_carga=$1::jsonb,puntos_descarga=$2::jsonb WHERE id=$3 AND empresa_id=$4",[
+    JSON.stringify([{nombre:'Almacén de prueba',ciudad:'Castellón',direccion:'Polígono Norte 4',codigo_postal:'12006',pais:'España'}]),
+    JSON.stringify([{nombre:'Destino de prueba',ciudad:'Alboraya',direccion:'Calle Puerto 2',codigo_postal:'46120',pais:'España'}]),qaOrder.id,company]);
+  await db.query("INSERT INTO usuarios(id,empresa_id,cliente_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,$3,'Cliente de pruebas','portal@example.invalid',$4,'cliente',true)",[crypto.randomUUID(),company,qaClient.id,await req('bcryptjs').hash(password,10)]);
+  console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',portalEmail:'portal@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
   await new Promise(resolve=>process.once('SIGINT',resolve));
  }
  }finally{await new Promise(r=>server.close(r));}

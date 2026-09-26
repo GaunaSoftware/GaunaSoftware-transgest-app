@@ -1964,7 +1964,7 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
            co.id AS colaborador_ref_id, co.nombre AS colaborador_nombre, co.cif AS colaborador_cif, co.email AS colaborador_email, co.telefono AS colaborador_telefono, co.contacto_nombre AS colaborador_contacto,
            TRIM(BOTH ' ' FROM CONCAT_WS(' ', co.calle, co.num_ext)) AS colaborador_direccion, co.codigo_postal AS colaborador_cp, co.ciudad AS colaborador_ciudad, co.provincia AS colaborador_provincia, co.pais AS colaborador_pais
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
     LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
     LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
@@ -1979,7 +1979,7 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
            v.matricula AS veh_matricula, r.matricula AS rem_matricula,
            NULL AS colaborador_ref_id, NULL AS colaborador_nombre, NULL AS colaborador_cif, NULL AS colaborador_email, NULL AS colaborador_telefono, NULL AS colaborador_contacto, NULL AS colaborador_direccion, NULL AS colaborador_cp, NULL AS colaborador_ciudad, NULL AS colaborador_provincia, NULL AS colaborador_pais
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
     LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
     LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
@@ -6768,6 +6768,12 @@ router.get("/:id/colaborador/preview", GERENTE_O_TRAFICO, async (req, res) => {
 router.get("/:id/documento-control-digital", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
+    // Authorize before constructing context, which can allocate document numbers.
+    if (req.user?.rol === "chofer") {
+      const { rows } = await db.query("SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
+      if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+      if (!(await usuarioPuedeGestionarPedido(req, rows[0]))) return res.status(403).json({ error: "No puedes acceder a este pedido" });
+    }
     const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
     if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, ctx.pedido))) {
@@ -9883,7 +9889,7 @@ router.delete("/:id/factura", async (req, res) => {
 
 
 // GET /pedidos/:id/carta-porte
-router.get("/:id/carta-porte", async (req, res) => {
+async function getCartaPorte(req, res) {
   try {
     const empresaId = req.user && req.user.empresa_id;
     const { rows } = await db.query(`
@@ -9904,10 +9910,10 @@ router.get("/:id/carta-porte", async (req, res) => {
         v.modelo       AS veh_modelo,       v.modelo       AS vehiculo_modelo,
         r2.matricula   AS rem_matricula,    r2.matricula   AS remolque_matricula
       FROM pedidos p
-      LEFT JOIN clientes  c   ON c.id  = p.cliente_id
-      LEFT JOIN choferes  ch  ON ch.id = p.chofer_id
-      LEFT JOIN vehiculos v   ON v.id  = p.vehiculo_id
-      LEFT JOIN vehiculos r2  ON r2.id = p.remolque_id
+      LEFT JOIN clientes  c   ON c.id  = p.cliente_id AND c.empresa_id=p.empresa_id
+      LEFT JOIN choferes  ch  ON ch.id = p.chofer_id AND ch.empresa_id=p.empresa_id
+      LEFT JOIN vehiculos v   ON v.id  = p.vehiculo_id AND v.empresa_id=p.empresa_id
+      LEFT JOIN vehiculos r2  ON r2.id = p.remolque_id AND r2.empresa_id=p.empresa_id
       WHERE p.id = $1 AND p.empresa_id = $2
     `, [req.params.id, empresaId]);
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
@@ -9958,7 +9964,8 @@ router.get("/:id/carta-porte", async (req, res) => {
       albaranes_adjuntos_count: documentosAnexos.length,
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
-});
+}
+router.get("/:id/carta-porte", getCartaPorte);
 
 // POST /pedidos/:id/gps - guardar ultima posicion enviada por chofer
 router.post("/:id/gps", async (req, res) => {
@@ -10280,6 +10287,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
+router.getCartaPorte = getCartaPorte;
 router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox };
 
 module.exports = router;

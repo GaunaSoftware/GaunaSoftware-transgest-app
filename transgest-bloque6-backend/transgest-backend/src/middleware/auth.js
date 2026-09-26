@@ -177,6 +177,8 @@ function isChoferPedidosOperationalPath(req) {
   if (method === "GET" && /^\/chofer\/[^/]+\/historial-vehiculos$/.test(path)) return true;
   if (method === "GET" && /^\/[^/]+$/.test(path)) return true;
   if (["GET", "POST", "PATCH"].includes(method) && /^\/[^/]+\/(documento-control-digital|chofer-pasos|chofer-docs|estado|gps|firma)(\/|$)/.test(path)) return true;
+  if(method==='GET'&&/^\/[^/]+\/tracking$/.test(path))return true;
+  if(method==='POST'&&/^\/[^/]+\/tracking\/eta$/.test(path))return true;
   if (method === "GET" && /^\/[^/]+\/(eventos|carta-porte)$/.test(path)) return true;
   return false;
 }

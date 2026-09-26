@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Button } from '../../ui';
 import { getControlTowerFlow } from '../../services/api';
 import { displayOrderLocation } from '../../utils/orderTown';
+import VehicleTrackingPanel from '../../components/VehicleTrackingPanel';
 
 export default function ControlTowerFlowDetails({ selection, onClose, onSelect }) {
   const [page, setPage] = useState(1);
@@ -9,6 +10,7 @@ export default function ControlTowerFlowDetails({ selection, onClose, onSelect }
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
+  const [tracking,setTracking]=useState(null);
   useEffect(() => {
     let active = true;
     setLoading(true); setResult(null); setError('');
@@ -29,12 +31,12 @@ export default function ControlTowerFlowDetails({ selection, onClose, onSelect }
       <p role="status">{result.total} viajes · Página {page} de {totalPages}</p>
       {!result.items.length && <p>No hay viajes en este estado. Los estados pueden haber cambiado desde la última actualización.</p>}
       <div style={{ display: 'grid', gap: 8 }}>
-        {result.items.map(trip => <button key={trip.id} type="button" onClick={() => onSelect(trip)}
+        {result.items.map(trip => <div key={trip.id}><button type="button" onClick={() => onSelect(trip)}
           style={{ textAlign: 'left', border: '1px solid var(--border)', background: 'var(--bg3)', color: 'var(--text)', borderRadius: 10, padding: 12, overflowWrap: 'anywhere' }}>
           <strong>{trip.numero || 'Pedido'} · {trip.cliente_nombre || 'Cliente'}</strong>
           <div>{trip.vehiculo_matricula || trip.colaborador_nombre || 'Sin matrícula'}</div>
           <div>{displayOrderLocation(trip, 'carga')} → {displayOrderLocation(trip, 'descarga')}</div>
-        </button>)}
+        </button><Button onClick={()=>setTracking(tracking===trip.id?null:trip.id)}>{tracking===trip.id?'Ocultar seguimiento':'Ver seguimiento'}</Button>{tracking===trip.id&&<VehicleTrackingPanel pedidoId={trip.id}/>}</div>)}
       </div>
       {selection.remote && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
         <Button disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Anterior</Button>

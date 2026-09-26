@@ -22,7 +22,7 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 3 Mesa de tráfico/grupajes | Primera integración funcional probada | `TMS_EVOLUTION_PHASE3_TRAFFIC.md`; mantener sus límites, especialmente replanificación, carretera real, costes y concurrencia |
 | 4 Chófer multiparada | Integración de viajes materializados probada | `TMS_EVOLUTION_PHASE4_DRIVER.md`; legacy preservado, Android/dispositivo pendiente |
 | 5 DeCA/carta de porte/expediente | Núcleo implementado y probado; límites de cierre documentados | `TMS_EVOLUTION_PHASE5_DOCUMENTS.md`: originales inmutables, envíos explícitos/consolidación optativa, correcciones de firmas abiertas/cerradas, ZIP, contrato eCMR preparatorio y app. Restan transición legacy, vías de salida anteriores y validaciones externas |
-| 6 Tracking/ETA/geofencing | Pendiente de contrastar e implementar | Reutilizar GPS y sus fechas; sin ETA ni llegadas inventadas |
+| 6 Tracking/ETA/geofencing | Implementación local y regresiones verificadas; integración exterior pendiente | `TMS_EVOLUTION_PHASE6_TRACKING.md`: captura verificada, señal obsoleta, ETA por carretera a demanda, geocercas auditadas y permisos. Planner sujeto al consentimiento de fases 10–11; dispositivo/proveedor real pendiente |
 | 7 Android/Play Store | Pendiente de contrastar y validar | Reutilizar Capacitor; permisos, offline y dispositivos, sin publicar ni inventar credenciales de firma |
 | 8 Bandeja IA | Pendiente de contrastar e implementar | Canonicalización y confirmación humana |
 | 9 Importador 2.0 | Pendiente de contrastar e implementar | Reutilizar importador existente; sin tratamiento exclusivo de TLM ni efectos sobre históricos |

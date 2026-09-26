@@ -53,6 +53,7 @@ import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
+import VehicleTrackingPanel from "../components/VehicleTrackingPanel";
 import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
 
 import { pedidoOriginalMonth } from "../utils/pedidoBillingMonth";
@@ -6494,6 +6495,7 @@ function buildPedidoMapPoints(pedido = {}, choferPasos = null) {
 }
 
 function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
+  const [trackingPosition,setTrackingPosition]=useState(null);
   const mapPoints = buildPedidoMapPoints(pedido, choferPasos);
   if (!mapPoints.length) return null;
   const pasos = getPedidoMapaPasos(pedido, choferPasos);
@@ -6507,7 +6509,7 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
     : estado;
   const mapStateMeta = transportStateMeta(pedido?.estado_operativo ? pedido : mapState);
   const currentLabel = pasos.posicionado_descarga && mapState === "espera_descarga" ? "En punto de descarga" : mapStateMeta.label;
-  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{displayOrderLocation(pedido, "carga")} → {displayOrderLocation(pedido, "descarga")}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
+  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{displayOrderLocation(pedido, "carga")} → {displayOrderLocation(pedido, "descarga")}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={pedido.id?trackingPosition:getPedidoVehiclePosition(pedido)} stableFrame/></div><VehicleTrackingPanel pedidoId={pedido.id} onPosition={setTrackingPosition}/></OrderSection>;
   return (
     <div className={`tg-pedido-map-section ${compact ? "order-editor-map" : ""}`} style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
@@ -6519,7 +6521,8 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
           {currentLabel}
         </span>
       </div>
-      <RutaMapa compact={compact} key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame />
+      <RutaMapa compact={compact} key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={pedido.id?trackingPosition:getPedidoVehiclePosition(pedido)} stableFrame />
+      <VehicleTrackingPanel pedidoId={pedido.id} onPosition={setTrackingPosition}/>
       {!compact && <>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (

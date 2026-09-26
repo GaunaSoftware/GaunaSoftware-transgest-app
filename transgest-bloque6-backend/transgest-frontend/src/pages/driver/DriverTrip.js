@@ -923,7 +923,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
             )}
           </div>}
 
-          <details className="driver-map-disclosure"><summary>Mapa, paradas y posición del vehículo</summary><DriverTripMap pedido={pedido} pasos={allSteps} chofer={jornadaInfo?.chofer}/></details>
+          <details className="driver-map-disclosure"><summary>Mapa, paradas y posición del vehículo</summary><DriverTripMap pedido={pedido} pasos={allSteps} onArrival={stop=>marcarPaso(stop.tipo==="carga"?"carga_iniciada":"posicionado_descarga")}/></details>
 
           {timerActual && (
             <div style={{

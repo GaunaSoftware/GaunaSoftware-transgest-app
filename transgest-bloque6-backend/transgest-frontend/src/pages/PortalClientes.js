@@ -1,4 +1,5 @@
 import PortalArrival from '../components/PortalArrival';
+import VehicleTrackingPanel from '../components/VehicleTrackingPanel';
 import { useCallback, useEffect, useState } from "react";
 import {
   actualizarPortalClienteSolicitud,
@@ -945,6 +946,7 @@ export default function PortalClientes() {
 
         {!loading && ["inicio", "seguimiento"].includes(tab) && (
           <PortalTracking pedidos={trackingPedidos.map(p => ({ ...p, origen: displayOrderLocation(p, "carga"), destino: displayOrderLocation(p, "descarga") }))} selected={trackingPedido ? { ...trackingPedido, origen: displayOrderLocation(trackingPedido, "carga"), destino: displayOrderLocation(trackingPedido, "descarga") } : null} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={PEDIDO_ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
+            {trackingPedido&&!isProviderPortal&&<VehicleTrackingPanel pedidoId={trackingPedido.id} customer/>}
             {!trackingPedido ? <Empty text={q || trackingEstado ? "No hay viajes que coincidan con estos filtros." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
               const estado = PEDIDO_ESTADOS[transportStateKey(p)] || PEDIDO_ESTADOS.pendiente;
               const surface = estadoClienteSurface(p, true);
@@ -986,7 +988,7 @@ export default function PortalClientes() {
                     <Mini label="Tractora" value={p.vehiculo_matricula || p.matricula_colaborador || "Pendiente"} />
                     <Mini label="Remolque" value={p.remolque_matricula || p.remolque_matricula_colaborador || "Pendiente"} />
                     <Mini label="Chofer" value={[p.chofer_nombre, p.chofer_dni ? `DNI ${p.chofer_dni}` : "", p.chofer_telefono ? `Tel. ${p.chofer_telefono}` : ""].filter(Boolean).join(" - ") || "Pendiente"} />
-                    <Mini label="Ubicacion" value={p.ubicacion_actual || p.ultima_posicion || "Pendiente de GPS"} />
+                    <Mini label="Última ubicación registrada" value={p.ubicacion_actual || p.ultima_posicion || "Pendiente de GPS"} />
                   </div>
                   <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap", alignItems:"center" }}>
                     <button style={S.btn} onClick={() => verPedidoEventos(p.id)} disabled={loadingPedidoEventos === p.id}>

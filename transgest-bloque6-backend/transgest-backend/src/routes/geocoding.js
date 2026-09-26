@@ -601,12 +601,22 @@ async function handleRoute(req, res, next) {
   }
 }
 
+// Reuse the configured road engines for tracking. Never return the straight-line
+// fallback as a duration/ETA. Called explicitly, not on each position poll.
+async function trackingRoute(empresaId,points){
+  await ensureSchema();
+  let route=await routeOrsHgv(empresaId,points).catch(()=>null);
+  if(!route)route=await routeOsrm(points).catch(()=>null);
+  return route;
+}
+
 router.get("/resolve", handleResolve);
 router.get("/route", handleRoute);
 router.post("/route", handleRoute);
 router.get("/distance", handleRoute);
 router.initializeSchema = ensureSchema;
 router.handleRoute = handleRoute;
+router.trackingRoute = trackingRoute;
 router._test = { candidateCompatibleWithLocal, countryHintFromRaw, resolvePlace, normalizeRoutePoint };
 
 module.exports = router;

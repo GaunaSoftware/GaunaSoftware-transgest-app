@@ -29,7 +29,12 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await request('GET', `/pedidos/${order.id}/documento-control-digital`);
   const patch = (stop, data) => request('PATCH', `/pedidos/${order.id}/chofer-pasos`, { parada_id: stop.id, ...data });
   await patch(load, { carga_iniciada: true }); // Positioning does not require a ready DeCA.
-  await request('POST', `/pedidos/${order.id}/gps`, { lat: 39.47, lng: -0.37 });
+  await request('POST', `/pedidos/${order.id}/gps`, { lat: 39.47, lng: -0.37, recorded_at:new Date().toISOString() });
+  await request('POST', `/pedidos/${order.id}/gps`, { lat: null, lng: -0.37 },422);
+  const tracking=await request('GET', `/pedidos/${order.id}/tracking`);
+  assert.equal(tracking.can_configure,false);assert.equal(tracking.status,'reciente');
+  await request('PUT',`/pedidos/${order.id}/tracking/config`,{stale_seconds:120},403);
+  await request('PUT',`/pedidos/${order.id}/tracking/config`,{stale_seconds:120},200,managerToken);
   await patch(load, { carga_proceso: true });
   await patch(load, { mercancia_confirmada: true, mercancia_cargada: 'Mercancía sintética', mercancia_palets: '2', mercancia_peso_kg: '100' });
   const doc = await request('POST', `/pedidos/${order.id}/chofer-docs`, { nombre: 'albaran-sintetico.pdf', tipo: 'albaran',
@@ -66,6 +71,9 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
     FROM usuarios WHERE empresa_id=$2 AND email='audit@example.invalid'`, [crypto.randomUUID(),company,client.id]);
   const portalLogin = await request('POST', '/auth/login', { email:'progress-portal@example.invalid', password });
   const portalOrders = await request('GET', '/portal-cliente/pedidos', null, 200, portalLogin.token);
+  const portalTracking=await request('GET',`/portal-cliente/pedidos/${order.id}/tracking`,null,200,portalLogin.token);
+  assert.equal(portalTracking.can_configure,false);assert.equal(portalTracking.configuration,undefined);assert.equal(portalTracking.arrival,undefined);
+  await request('GET',`/pedidos/${order.id}/tracking`,null,403,portalLogin.token);
   await request('GET',`/pedidos/${order.id}/documento-control-digital`,null,403,portalLogin.token);
   await download(`/pedidos/${order.id}/expediente-transporte.zip`,portalLogin.token,403);
   await download(`/pedidos/${order.id}/documento-control-digital/versiones/${original.id}/pdf`,portalLogin.token,403);
@@ -121,12 +129,18 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await download(`/pedidos/${foreignTrip}/expediente-transporte.zip`,managerToken,404);
   await download(`/pedidos/${foreignTrip}/documento-control-digital/versiones/${original.id}/pdf`,managerToken,404);
   await download(`/pedidos/${otherTrip}/documento-control-digital/versiones/${original.id}/pdf`,driverToken,403);
+  await request('GET',`/portal-cliente/pedidos/${foreignTrip}/tracking`,null,404,portalLogin.token);
+  const privateClient=crypto.randomUUID(),privateOrder=crypto.randomUUID();
+  await db.query("INSERT INTO clientes(id,empresa_id,nombre) VALUES($1,$2,'Otro cliente privado')",[privateClient,company]);
+  await db.query("INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado) VALUES($1,$2,$3,'PRIVADO-OTRO-CLIENTE','confirmado')",[privateOrder,company,privateClient]);
+  await request('GET',`/portal-cliente/pedidos/${privateOrder}/tracking`,null,404,portalLogin.token);
   for (const [id, status] of [[otherTrip, 403], [foreignTrip, 404]]) {
     for (const [method, suffix, body] of [
       ['GET', '', null], ['GET', '/chofer-pasos', null], ['PATCH', '/chofer-pasos', { parada_id: load.id, carga_iniciada: true }],
       ['GET', '/chofer-docs', null], ['POST', '/chofer-docs', { nombre: 'documento.pdf', tipo: 'albaran', file_base64: 'JVBERg==' }],
       ['POST', '/gps', { lat: 40, lng: -3 }], ['POST', '/firma', { firma: signature, firma_nombre: 'No autorizado' }],
       ['GET', '/documento-control-digital', null], ['GET', '/carta-porte', null], ['GET', '/eventos', null],
+      ['GET','/tracking',null], ['POST','/tracking/eta',{}],
       ['PATCH', '/estado', { estado: 'en_curso' }],
     ]) await request(method, `/pedidos/${id}${suffix}`, body, status);
   }

@@ -9930,70 +9930,43 @@ async function getCartaPorte(req, res) {
 }
 router.get("/:id/carta-porte", getCartaPorte);
 
-// POST /pedidos/:id/gps - guardar ultima posicion enviada por chofer
-router.post("/:id/gps", async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user.empresa_id;
-    const lat = Number(req.body.lat);
-    const lng = Number(req.body.lng);
-    const velocidad = Number.isFinite(Number(req.body.velocidad)) ? Number(req.body.velocidad) : null;
-    const odometro = Number.isFinite(Number(req.body.odometro_km ?? req.body.km_actuales)) ? Number(req.body.odometro_km ?? req.body.km_actuales) : null;
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return res.status(400).json({ error: "Coordenadas no validas" });
+// GPS and tracking retain the existing company/driver authorization boundary.
+router.get('/:id/tracking',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({...await require('../services/vehicleTracking').snapshot(db,empresaId,order),can_configure:['gerente','trafico'].includes(req.user.rol)});
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.put('/:id/tracking/config',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {res.json(await require('../services/vehicleTracking').saveConfiguration(db,req.empresaId||req.user.empresa_id,req.params.id,req.body,req.user.id));}
+  catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.post('/:id/tracking/eta',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    const tracking=require('../services/vehicleTracking'),state=await tracking.snapshot(db,empresaId,order);
+    if(state.position&&state.next_stop?.coordinates){
+      const route=await require('./geocoding').trackingRoute(empresaId,[state.position,state.next_stop.coordinates]);
+      state.eta=tracking.roadEta(state,route);
     }
-
-    const { rows: pedidosRows } = await db.query(
-      "SELECT id, vehiculo_id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
-      [req.params.id, empresaId]
-    );
-    const pedido = pedidosRows[0];
-    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
-      return res.status(403).json({ error: "No puedes actualizar la posicion de este pedido" });
-    }
-
-    const posicion = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-    const { rows } = await db.query(
-      `UPDATE pedidos
-       SET ultima_posicion=$1, posicion_ts=NOW()
-       WHERE id=$2 AND empresa_id=$3
-       RETURNING id, ultima_posicion, posicion_ts`,
-      [posicion, req.params.id, empresaId]
-    );
-    if (pedido.vehiculo_id) {
-      await db.query(
-        `UPDATE vehiculos
-         SET ubicacion_actual=$1,
-             ubicacion_fuente='app_chofer',
-             ubicacion_ts=NOW(),
-             gps_lat=$2,
-             gps_lng=$3,
-             km_actuales=COALESCE($4, km_actuales)
-         WHERE id=$5 AND empresa_id=$6`,
-        [`GPS ${posicion}`, lat, lng, odometro, pedido.vehiculo_id, empresaId]
-      ).catch(e => logger.warn("No se pudo actualizar GPS del vehiculo:", e.message));
-      await db.query(
-        `INSERT INTO gps_position_log
-          (empresa_id,vehiculo_id,provider,external_id,lat,lng,ubicacion,velocidad_kmh,odometro_km,raw,recorded_at)
-         VALUES ($1,$2,'app_chofer',NULL,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
-        [
-          empresaId,
-          pedido.vehiculo_id,
-          lat,
-          lng,
-          `GPS ${posicion}`,
-          velocidad,
-          odometro,
-          JSON.stringify({
-            source: "pedido_gps",
-            pedido_id: pedido.id,
-            chofer_user_id: req.user?.id || null,
-          }),
-        ]
-      ).catch(e => logger.warn("No se pudo registrar posicion GPS del vehiculo:", e.message));
-    }
-    res.json({ ok: true, ...rows[0] });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    res.setHeader('Cache-Control','private, no-store');res.json(state);
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.post('/:id/gps',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    await assertDriverWorkday(req);
+    const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    if(!order.vehiculo_id)return res.status(422).json({error:'Asigna la tractora antes de registrar su posición'});
+    if(['entregado','facturado','cancelado'].includes(order.estado))return res.status(409).json({error:'No se registra ubicación de un servicio cerrado'});
+    const tracking=require('../services/vehicleTracking'),p=tracking.position(req.body);
+    const result=await tracking.record(db,{empresaId,vehiculoId:order.vehiculo_id,provider:'app_chofer',input:req.body,raw:{source:'pedido_gps',pedido_id:order.id,chofer_user_id:req.user.id}});
+    await db.query('UPDATE pedidos SET ultima_posicion=$3,posicion_ts=$4 WHERE empresa_id=$1 AND id=$2 AND (posicion_ts IS NULL OR posicion_ts<=$4::timestamptz)',[empresaId,order.id,`${p.lat},${p.lng}`,p.recorded_at]);
+    res.json(result);
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
 // SignatureProvider boundary: immutable operation receipt and local evidence.

@@ -1502,6 +1502,17 @@ router.get('/pedidos/:id/muelle', requireCliente, async (req,res,next)=>{
   }catch(error){next(error);}
 });
 
+router.get('/pedidos/:id/tracking',requireCliente,async(req,res)=>{
+  try {
+    const eid=empresaId(req),order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND cliente_id=$2 AND id=$3',[eid,req.user.cliente_id,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    const state=await require('../services/vehicleTracking').snapshot(db,eid,order);
+    // Same customer/order boundary as its existing tracking. Never return other
+    // groupage orders, internal configuration or a position after completion.
+    const {configuration,arrival,...publicState}=state;
+    res.setHeader('Cache-Control','private, no-store');res.json({...publicState,can_configure:false,can_eta:false});
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
 router.get("/pedidos/:id/albaranes", requireCliente, async (req, res) => {
   const pedido = await db.query(
     "SELECT id FROM pedidos WHERE id=$1 AND empresa_id=$2 AND cliente_id=$3",

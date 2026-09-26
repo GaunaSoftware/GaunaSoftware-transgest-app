@@ -827,16 +827,6 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
   }
   if (vehiculoTieneGpsExterno(chofer) && freshGps(await externalGpsTimestamp(empresaId,chofer.vehiculo_id))) return res.json({ ok:true, skipped:"gps_externo_reciente" });
 
-  const lat = Number(req.body?.lat);
-  const lng = Number(req.body?.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return res.status(400).json({ error: "Ubicacion GPS no valida" });
-  }
-  const velocidadKmh = req.body?.velocidad_kmh == null ? null : Number(req.body.velocidad_kmh);
-  const accuracyM = req.body?.accuracy_m == null ? null : Number(req.body.accuracy_m);
-  const recordedAt = req.body?.recorded_at ? new Date(req.body.recorded_at) : new Date();
-  const recordedIso = Number.isFinite(recordedAt.getTime()) ? recordedAt.toISOString() : new Date().toISOString();
-
   const open = await db.query(
     `SELECT * FROM chofer_jornadas
       WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta'
@@ -850,58 +840,10 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
     return res.json({ ok: true, skipped: "jornada_pausada" });
   }
 
-  const ubicacion = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  const { rows } = await db.query(
-    `UPDATE vehiculos
-        SET ubicacion_actual=$1,
-            ubicacion_fuente='app_chofer',
-            ubicacion_ts=$2::timestamptz,
-            gps_lat=$3,
-            gps_lng=$4,
-            gps_provider=CASE
-              WHEN gps_provider IS NULL OR gps_provider='' OR gps_provider='manual' THEN 'app_chofer'
-              ELSE gps_provider
-            END,
-            updated_at=NOW()
-      WHERE id=$5
-        AND empresa_id=$6
-        AND (
-          gps_provider IS NULL
-          OR gps_provider=''
-          OR gps_provider IN ('manual','app_chofer')
-          OR NULLIF(TRIM(COALESCE(gps_external_id,'')), '') IS NULL
-          OR NOT EXISTS (SELECT 1 FROM gps_position_log g WHERE g.vehiculo_id=vehiculos.id AND g.empresa_id=vehiculos.empresa_id AND g.provider NOT IN ('app_chofer','manual') AND g.recorded_at BETWEEN NOW()-INTERVAL '5 minutes' AND NOW()+INTERVAL '1 minute')
-        )
-      RETURNING id, matricula, ubicacion_actual, ubicacion_ts, gps_lat, gps_lng, gps_provider`,
-    [ubicacion, recordedIso, lat, lng, chofer.vehiculo_id, empresaId]
-  );
-  const vehiculo = rows[0];
-  if (!vehiculo) return res.json({ ok: true, skipped: "gps_externo_configurado" });
-
-  await db.query(
-    `INSERT INTO gps_position_log
-      (empresa_id, vehiculo_id, provider, external_id, lat, lng, ubicacion, velocidad_kmh, odometro_km, raw, recorded_at)
-     VALUES ($1,$2,'app_chofer',$3,$4,$5,$6,$7,NULL,$8::jsonb,$9::timestamptz)`,
-    [
-      empresaId,
-      chofer.vehiculo_id,
-      `chofer:${chofer.id}`,
-      lat,
-      lng,
-      ubicacion,
-      Number.isFinite(velocidadKmh) ? velocidadKmh : null,
-      JSON.stringify({
-        source: "app_chofer",
-        usuario_id: req.user?.id || null,
-        chofer_id: chofer.id,
-        jornada_id: jornada.id,
-        accuracy_m: Number.isFinite(accuracyM) ? accuracyM : null,
-      }),
-      recordedIso,
-    ]
-  ).catch(() => {});
-
-  res.json({ ok: true, vehiculo });
+  try {
+    const result=await require('../services/vehicleTracking').record(db,{empresaId,vehiculoId:chofer.vehiculo_id,provider:'app_chofer',input:req.body,externalId:`chofer:${chofer.id}`,raw:{source:'app_chofer',usuario_id:req.user.id,chofer_id:chofer.id,jornada_id:jornada.id}});
+    res.json(result);
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
 router.get("/vacaciones", GERENTE_O_TRAFICO, async (req, res) => {

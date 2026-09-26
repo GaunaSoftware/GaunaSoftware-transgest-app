@@ -220,8 +220,9 @@ export default function AppChofer(){
           lng: pos.lng,
           accuracy_m: Number.isFinite(pos.accuracy_m) ? Number(pos.accuracy_m.toFixed(1)) : null,
           velocidad_kmh: Number.isFinite(pos.speed_mps) && pos.speed_mps >= 0 ? Number((pos.speed_mps * 3.6).toFixed(1)) : null,
-          recorded_at: new Date().toISOString(),
-        }).then(result=>{if(result?.ok && !result?.skipped) setJornadaInfo(prev=>prev?{...prev,chofer:{...prev.chofer,gps_lat:pos.lat,gps_lng:pos.lng,ubicacion_ts:new Date().toISOString()}}:prev);}).catch(()=>setGpsSeguimientoEstado({active:false,text:"No se pudo enviar la ubicación. Revisa la conexión."}));
+          heading: pos.heading,
+          recorded_at: pos.captured_at,
+        }).then(result=>{if(result?.ok && !result?.skipped) setJornadaInfo(prev=>prev?{...prev,chofer:{...prev.chofer,gps_lat:pos.lat,gps_lng:pos.lng,ubicacion_ts:pos.captured_at}}:prev);}).catch(()=>setGpsSeguimientoEstado({active:false,text:"No se pudo enviar la ubicación. Revisa la conexión."}));
         },
         () => {
           setGpsSeguimientoEstado({ active: false, text: "Permiso de ubicación denegado o no disponible." });

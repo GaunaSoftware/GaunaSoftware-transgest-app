@@ -1177,6 +1177,10 @@ export async function descargarFirmaEntregaEvidenciaInforme(id) {
 }
 export const actualizarGpsPedido = (id, data) =>
   apiFetch(`/pedidos/${id}/gps`, { method: "POST", body: data });
+export const getPedidoTracking = id => apiFetch(`/pedidos/${id}/tracking`,{silentError:true});
+export const getPortalPedidoTracking = id => apiFetch(`/portal-cliente/pedidos/${id}/tracking`,{silentError:true});
+export const calcularPedidoEta = id => apiFetch(`/pedidos/${id}/tracking/eta`,{method:'POST',body:{},timeoutMs:35000});
+export const guardarPedidoTrackingConfig = (id,data) => apiFetch(`/pedidos/${id}/tracking/config`,{method:'PUT',body:data});
 export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 

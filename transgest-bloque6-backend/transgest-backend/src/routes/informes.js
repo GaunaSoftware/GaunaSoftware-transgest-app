@@ -1,4 +1,5 @@
 const { cacheMiddleware } = require("../services/cache");
+const { readFlowPopulation, summarizeFlow, readFlowPage } = require('../services/controlTowerFlow');
 const express = require("express");
 const db      = require("../services/db");
 const { financialPedidosCte, periodRange, reportRange, ratio, metric, reportMetadata, validInvoiceSql } = require("../services/financialKpis");
@@ -10,7 +11,7 @@ const { ensureRegulatoryCoreSchema } = require("../services/regulatoryCore");
 
 const router = express.Router();
 router.use((req, res, next) => {
-  if (req.path === "/control-tower") return next();
+  if (req.path === "/control-tower" || req.path === "/control-tower/flujo") return next();
   if (req.path === "/copiloto-operativo") return next();
   if (req.path === "/cargas-retorno") return next();
   if (req.path === "/cumplimiento-europeo") return next();
@@ -497,7 +498,7 @@ function estadoPedidoLabel(estado) {
   const labels = {
     pendiente: "Pendiente",
     confirmado: "Confirmado",
-    en_curso: "En ruta",
+    en_curso: "En curso",
     descarga: "En descarga",
     entregado: "Entregado",
     facturado: "Facturado",
@@ -3076,6 +3077,16 @@ router.get("/cobros", async (req, res) => {
   res.json({ pendientes: pendientes.rows, ratioMensual: ratioMensual.rows });
 });
 
+router.get('/control-tower/flujo', authenticate, GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    res.json(await readFlowPage(db, req.user?.empresa_id, {
+      estado: req.query.estado, page: req.query.page, pageSize: req.query.page_size,
+    }));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo cargar el flujo operativo' });
+  }
+});
+
 router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20), async (req, res) => {
   try {
     const empresaId = req.user?.empresa_id;
@@ -3330,19 +3341,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       )
     `;
 
-    const [flujo, viajesFlujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
-      safeRows(db.query(`
-        SELECT
-          COALESCE(NULLIF(p.estado::text,''),'pendiente') AS estado,
-          COUNT(*)::int AS total
-        FROM pedidos p
-        WHERE p.empresa_id=$1
-          AND p.factura_id IS NULL
-          AND p.estado::text NOT IN ('cancelado','facturado')
-          AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
-              BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
-        GROUP BY COALESCE(NULLIF(p.estado::text,''),'pendiente')
-      `, [empresaId])),
+    const [flowPopulation, viajesFlujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
+      readFlowPopulation(db, empresaId),
       safeRows(db.query(`
         SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga,
                p.origen_pais, p.origen_provincia, p.destino_pais, p.destino_provincia,
@@ -3368,7 +3368,7 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
           AND p.factura_id IS NULL
           AND p.estado::text NOT IN ('cancelado','facturado')
           AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
-              BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
+              BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date - 2 AND (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date + 10
         ORDER BY COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
         LIMIT 160
       `, [empresaId])),
@@ -3606,11 +3606,12 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
     }, { todas: items.length, hoy: 0, riesgos: 0, rentabilidad: 0, recursos: 0, documentos: 0, incidencias: incidenciaItems.length });
 
     const k = kpiRows[0] || {};
-    const flujoMap = new Map((flujo || []).map(r => [String(r.estado || "pendiente"), Number(r.total || 0)]));
+    const flowSummary = summarizeFlow(flowPopulation);
+    const flujoMap = new Map(flowSummary.legacy.map(r => [r.estado, r.total]));
     const flujoOperativo = [
       ["pendiente", "Pendientes"],
       ["confirmado", "Confirmados"],
-      ["en_curso", "En ruta"],
+      ["en_curso", "En curso"],
       ["descarga", "Descarga"],
       ["entregado", "Entregados"],
       ["incidencia", "Incidencias"],
@@ -3713,6 +3714,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       resumen,
       vistas,
       flujo_operativo: flujoOperativo,
+      flujo_operativo_v2: flowSummary.estados,
+      flujo_alcance: flowSummary.alcance,
       viajes_por_estado: viajesPorEstado,
       recursos: recursosResumen,
       visibilidad: visibilidadResumen,

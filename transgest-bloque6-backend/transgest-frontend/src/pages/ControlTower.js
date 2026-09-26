@@ -1,9 +1,11 @@
+import { displayOrderLocation } from '../utils/orderTown';
 import { PageHeader } from "../ui";
 import "./operations/operations.css";
 import { useEffect, useMemo, useState } from "react";
 import { getControlTower } from "../services/api";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import { TRANSPORT_STATES, transportStateMeta } from "../utils/transportStateCatalog";
+import ControlTowerFlowDetails from './operations/ControlTowerFlowDetails';
 
 const S = {
   page: { flex:1, padding:"22px 26px", fontFamily:"'DM Sans',sans-serif" },
@@ -26,6 +28,12 @@ function navegar(view) {
   window.dispatchEvent(new CustomEvent("tms:navegar", { detail: view }));
 }
 
+function enfocarPedido(focus) {
+  setRuntimeFocus('tms_pedidos_focus', focus);
+  window.dispatchEvent(new CustomEvent('tms:pedidos-focus', { detail: focus }));
+  navegar('pedidos');
+}
+
 function abrirItem(item) {
   if (!item) return;
   const focus = {
@@ -41,8 +49,7 @@ function abrirItem(item) {
     description: item.description || "",
   };
   if ((item.view === "pedidos" || item.view === "gestion_trafico") && focus.pedido_id) {
-    setRuntimeFocus("tms_pedidos_focus", focus);
-    navegar("pedidos");
+    enfocarPedido(focus);
     return;
   }
   if (item.view === "pedidos" || item.view === "gestion_trafico") {
@@ -81,8 +88,7 @@ function abrirAccion(item, action) {
   };
   const targetView = action.view || item.view || "excepciones";
   if ((targetView === "gestion_trafico" || targetView === "pedidos") && focus.pedido_id) {
-    setRuntimeFocus("tms_pedidos_focus", focus);
-    navegar("pedidos");
+    enfocarPedido(focus);
     return;
   }
   if (targetView === "gestion_trafico" || targetView === "pedidos") {
@@ -106,7 +112,8 @@ function abrirAccion(item, action) {
 function abrirViajeEnTrafico(trip, extra = {}) {
   if (!trip) return;
   const route = trip.route || parseRouteFromItem(trip || {});
-  setRuntimeFocus("tms_pedidos_focus", {
+  enfocarPedido({
+    numero: trip.numero || trip.pedido_numero || "",
     pedido_id: trip.entity_id || trip.id || trip.pedido_id || "",
     source: "control_tower",
     action: extra.action || "Abrir viaje",
@@ -117,7 +124,6 @@ function abrirViajeEnTrafico(trip, extra = {}) {
     title: trip.title || `Viaje ${trip.numero || trip.pedido_numero || ""}`.trim(),
     description: trip.description || `${trip.cliente_nombre || "Cliente"} - ${route.origen || trip.origen || "-"} -> ${route.destino || trip.destino || "-"}`,
   });
-  navegar("pedidos");
 }
 
 function TowerItem({ item }) {
@@ -230,8 +236,8 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
 function parseRouteFromItem(item = {}) {
   const text = [item.ruta, item.route, item.description, item.title].filter(Boolean).join(" ");
   const match = String(text).match(/([A-ZÁÉÍÓÚÜÑ0-9 .,'/-]{2,})\s*(?:>|->|→|a)\s*([A-ZÁÉÍÓÚÜÑ0-9 .,'/-]{2,})/i);
-  const origen = item.origen || match?.[1]?.trim() || "";
-  const destino = item.destino || match?.[2]?.replace(/\s+-\s+.*/, "").trim() || "";
+  const origen = item.puntos_carga ? displayOrderLocation(item, 'carga') : item.origen || match?.[1]?.trim() || "";
+  const destino = item.puntos_descarga ? displayOrderLocation(item, 'descarga') : item.destino || match?.[2]?.replace(/\s+-\s+.*/, "").trim() || "";
   return { origen, destino };
 }
 
@@ -340,7 +346,7 @@ export default function ControlTower() {
   const resumen = data?.resumen || {};
   const kpis = data?.kpis || {};
   const vistas = data?.vistas || {};
-  const flujo = Array.isArray(data?.flujo_operativo) ? data.flujo_operativo : [];
+  const flujo = data?.flujo_operativo_v2 || data?.flujo_operativo || [];
   const viajesPorEstado = useMemo(
     () => data?.viajes_por_estado && typeof data.viajes_por_estado === "object" ? data.viajes_por_estado : {},
     [data]
@@ -360,8 +366,8 @@ export default function ControlTower() {
   function abrirEstadoFlujo(row) {
     const key = row?.key || "";
     const trips = Array.isArray(viajesPorEstado[key]) ? viajesPorEstado[key] : [];
-    if (!trips.length) return;
-    setStatusPicker({ ...row, trips });
+    if (!trips.length && !data?.flujo_operativo_v2) return;
+    setStatusPicker({ ...row, trips, remote: !!data?.flujo_operativo_v2 });
   }
 
   function seleccionarViajeFlujo(trip) {
@@ -425,59 +431,20 @@ export default function ControlTower() {
         </div>
       </div>
 
-      {statusPicker && (
-        <div
-          style={{position:"fixed",inset:0,zIndex:420,background:"rgba(15,23,42,.58)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-          onMouseDown={e=>e.target===e.currentTarget && setStatusPicker(null)}
-        >
-          <div style={{width:"min(680px,96vw)",maxHeight:"82vh",overflowY:"auto",background:"var(--card-bg)",border:"1px solid var(--border)",borderRadius:14,padding:18,boxShadow:"0 24px 70px rgba(15,23,42,.24)"}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:12}}>
-              <div>
-                <div style={{fontFamily:"'Syne',sans-serif",fontSize:18,fontWeight:900,color:"var(--text)"}}>{statusPicker.label}</div>
-                <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>Selecciona un viaje para abrirlo en Mesa de trafico con este filtro.</div>
-              </div>
-              <button onClick={() => setStatusPicker(null)} style={{border:"1px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",borderRadius:8,width:34,height:34,fontSize:18,fontWeight:900,cursor:"pointer"}}>x</button>
-            </div>
-            <div style={{display:"grid",gap:8}}>
-              {statusPicker.trips.map(trip => (
-                <button
-                  key={trip.id}
-                  type="button"
-                  onClick={() => seleccionarViajeFlujo(trip)}
-                  style={{
-                    textAlign:"left",
-                    border:"1px solid var(--border)",
-                    background:"var(--bg3)",
-                    borderRadius:10,
-                    padding:"10px 12px",
-                    cursor:"pointer",
-                    fontFamily:"'DM Sans',sans-serif",
-                  }}
-                >
-                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
-                    <span style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{trip.numero || "Pedido"} - {trip.cliente_nombre || "Cliente"}</span>
-                    <span style={{fontSize:11,fontWeight:900,color:"var(--accent-xl)",whiteSpace:"nowrap"}}>{trip.vehiculo_matricula || trip.colaborador_nombre || "Sin matricula"}</span>
-                  </div>
-                  <div style={{fontSize:12,color:"var(--text4)",marginTop:4}}>
-                    {trip.origen || "-"} - {trip.destino || "-"}{trip.fecha_carga ? ` - ${String(trip.fecha_carga).slice(0,10)}` : ""}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {statusPicker && <ControlTowerFlowDetails key={statusPicker.key} selection={statusPicker}
+        onClose={() => setStatusPicker(null)} onSelect={seleccionarViajeFlujo} />}
 
       {!loading && data && (
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
+            {data.flujo_alcance && <p style={{ color: 'var(--text4)', fontSize: 12 }}>{data.flujo_alcance.definicion} {data.flujo_alcance.sin_desglose > 0 && `${data.flujo_alcance.sin_desglose} viajes en curso sin eventos suficientes para distinguir carga de salida.`}</p>}
             <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || ""} onStatusClick={abrirEstadoFlujo} />
             {mapItem && <MapMovedPanel item={mapItem} />}
             <div style={{...S.card}}>
               <div style={S.sec}>Flota, recursos y señales</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
                 <MetricBox label="Disponibles" value={recursos.disponibles} detail={`${recursos.choferes_activos || 0} choferes activos`} color="var(--green)" />
-                <MetricBox label="En ruta" value={recursos.en_ruta} detail="Chóferes ocupados" color="var(--accent-xl)" />
+                <MetricBox label="Ocupados en viaje" value={recursos.en_ruta} detail="Chóferes ocupados" color="var(--accent-xl)" />
                 <MetricBox label="Vacaciones" value={recursos.vacaciones} detail={`${recursos.solicitudes_vacaciones || 0} solicitudes`} color="#8b5cf6" />
                 <MetricBox label="GPS OK" value={visibilidad.gps_ok} detail={`${visibilidad.gps_enlazados || 0} enlazados`} color="var(--green)" />
                 <MetricBox label="Sin señal" value={visibilidad.gps_sin_senal} detail="Revisar localización" color="#f97316" />

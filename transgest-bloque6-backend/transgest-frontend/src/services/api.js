@@ -821,6 +821,7 @@ export const getEmisionesOperativas = (period="90d") => apiFetch(`/informes/emis
 export const getDatosMaestrosReadiness = () => apiFetch("/informes/datos-maestros-readiness", { silentSuccess:true, silentError:true });
 export const getCumplimientoEuropeo = (days=45) => apiFetch(`/informes/cumplimiento-europeo?days=${encodeURIComponent(days)}`, { silentSuccess:true, silentError:true });
 export const getControlTower = (period="7d") => apiFetch(`/informes/control-tower?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getControlTowerFlow = (estado, page=1) => apiFetch(`/informes/control-tower/flujo?estado=${encodeURIComponent(estado)}&page=${encodeURIComponent(page)}`, { silentSuccess:true, silentError:true });
 export const getExcepcionesOperativas = () => apiFetch("/informes/excepciones", { silentSuccess:true, silentError:true });
 export const actualizarExcepcionOperativa = (key, data) => apiFetch(`/informes/excepciones/${encodeURIComponent(key)}`, { method:"PATCH", body:data });
 export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=${encodeURIComponent(limit)}`, { silentSuccess:true, silentError:true });

@@ -1604,52 +1604,13 @@ function buildPortalProveedorOperativa(pedido = {}, pasos = {}) {
   };
 }
 
-async function actualizarEstadoPedidoPortal(pedidoId, empresaId, nextEstado) {
-  if (!nextEstado) return;
-  await db.query(
-    `UPDATE pedidos
-        SET estado=$1,
-            updated_at=NOW()
-      WHERE id=$2 AND empresa_id=$3`,
-    [nextEstado, pedidoId, empresaId]
-  ).catch(() => {});
-  if (isColaboradorAccessTerminalState(nextEstado)) {
-    await db.query(
-      "UPDATE colaborador_liquidacion_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2 AND expires_at>NOW()",
-      [pedidoId, empresaId]
-    ).catch(() => {});
-  }
-}
-
 async function savePortalProveedorChoferPasos({ pedidoId, empresaId, patch = {}, colaboradorId = null }) {
-  const current = await getPortalProveedorChoferPasos(pedidoId, empresaId);
-  const nextData = {
-    ...current,
-    ...normalizePortalChoferPasosPayload(patch),
-    updated_at: new Date().toISOString(),
-  };
-  await db.query(
-    `INSERT INTO pedido_chofer_pasos (pedido_id, empresa_id, chofer_id, data, updated_at)
-     VALUES ($1,$2,NULL,$3,NOW())
-     ON CONFLICT (pedido_id) DO UPDATE
-       SET data=EXCLUDED.data,
-           updated_at=NOW()`,
-    [pedidoId, empresaId, JSON.stringify(nextData)]
-  );
-  if (patch.carga_ok || patch.descarga_ok) {
-    await db.query(
-      `UPDATE pedidos
-          SET carga_real_at=CASE WHEN $3::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END,
-              descarga_real_at=CASE WHEN $4::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END
-        WHERE id=$1 AND empresa_id=$2`,
-      [pedidoId, empresaId, !!patch.carga_ok, !!patch.descarga_ok]
-    );
-  }
-  await logPedidoEventoPortal(pedidoId, empresaId, "colaborador_portal.operativa_actualizada", {
-    colaborador_id: colaboradorId,
-    pasos: nextData,
+  const result = await require('../services/supplierProgress').saveSupplierProgress(db, {
+    pedidoId, empresaId, colaboradorId, patch: normalizePortalChoferPasosPayload(patch),
   });
-  return normalizePortalChoferPasosPayload(nextData);
+  await require('../services/agendaIncidents').syncOrderIncidents({empresaId,pedidoId})
+    .catch(error => require('../services/logger').warn('No se pudo reconciliar Agenda tras el paso del colaborador: '+error.message));
+  return { ...normalizePortalChoferPasosPayload(result.data), estado_pedido: result.estado };
 }
 
 async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
@@ -1662,7 +1623,6 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
   const pasos = await getPortalProveedorChoferPasos(pedido.id, pedido.empresa_id);
   const now = new Date().toISOString();
   let patch = null;
-  let nextEstado = null;
   const action = String(body?.action || "");
   if (action === "guardar_conductor") {
     const conductor = body?.conductor && typeof body.conductor === "object" ? body.conductor : {};
@@ -1735,7 +1695,6 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
   switch (String(action || "")) {
     case "posicionar_carga":
       patch = { carga_iniciada: true, carga_iniciada_at: now };
-      if (!["en_curso", "descarga", "entregado"].includes(String(pedido.estado || "").toLowerCase())) nextEstado = "en_curso";
       break;
     case "iniciar_carga":
       if (!pasos.carga_iniciada) throw Object.assign(new Error("Primero marca posicionado en carga."), { status: 409 });
@@ -1748,7 +1707,6 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
     case "iniciar_viaje":
       if (!pasos.albaran_carga) throw Object.assign(new Error("Sube el albaran de carga antes de iniciar el viaje."), { status: 409 });
       patch = { viaje_iniciado: true, viaje_iniciado_at: now };
-      nextEstado = "en_curso";
       break;
     case "posicionar_descarga":
       if (!pasos.carga_ok) throw Object.assign(new Error("Primero finaliza la carga."), { status: 409 });
@@ -1757,7 +1715,6 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
     case "iniciar_descarga":
       if (!pasos.posicionado_descarga) throw Object.assign(new Error("Marca antes el posicionamiento en descarga."), { status: 409 });
       patch = { descarga_iniciada: true, descarga_iniciada_at: now };
-      nextEstado = "descarga";
       break;
     case "finalizar_descarga":
       if (!pasos.descarga_iniciada) throw Object.assign(new Error("Primero marca descarga iniciada."), { status: 409 });
@@ -1766,7 +1723,7 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
     default:
       throw Object.assign(new Error("Accion operativa no valida"), { status: 400 });
   }
-  if (nextEstado) await actualizarEstadoPedidoPortal(pedido.id, pedido.empresa_id, nextEstado);
+  // Progress and its state are committed together after rechecking assignment.
   const saved = await savePortalProveedorChoferPasos({
     pedidoId: pedido.id,
     empresaId: pedido.empresa_id,
@@ -1776,11 +1733,11 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
   return {
     pedido: {
       ...pedido,
-      estado: nextEstado || pedido.estado,
+      estado: saved.estado_pedido || pedido.estado,
     },
     pasos: saved,
     workflow: buildPortalProveedorOperativa(
-      { ...pedido, estado: nextEstado || pedido.estado },
+      { ...pedido, estado: saved.estado_pedido || pedido.estado },
       saved
     ),
   };
@@ -2334,10 +2291,9 @@ router.post("/public/portal/:token/pedidos/:pedidoId/albaranes", express.json({ 
         patch: faseNormalizada === "descarga"
           ? { albaran_descarga: true, albaran_descarga_at: new Date().toISOString() }
           : { albaran_carga: true, albaran_carga_at: new Date().toISOString() },
-      }).catch(() => null);
+      });
       if (faseNormalizada === "descarga" && pasosActualizados?.descarga_ok) {
-        await actualizarEstadoPedidoPortal(ctx.pedido.id, ctx.pedido.empresa_id, "entregado");
-        accesoFinalizado = true;
+        accesoFinalizado = pasosActualizados.estado_pedido === "entregado";
       }
     }
     await notificarAlbaranProveedor(ctx.pedido.empresa_id, ctx.pedido, { id: ctx.token.colaborador_id, nombre: ctx.token.nombre }, { ...rows[0], skip_notificacion: isQaRequest(req) });

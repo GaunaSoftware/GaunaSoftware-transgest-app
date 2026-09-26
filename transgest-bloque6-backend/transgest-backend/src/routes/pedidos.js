@@ -1,3 +1,4 @@
+const { WRITABLE_STATES, ACTIVE_STATES, assertTransportTransition, stateFromProgress } = require('../services/transportTransitions');
 const { assertDriverWorkday } = require('../services/driverWorkday');
 const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
@@ -1780,14 +1781,8 @@ async function savePedidoChoferPasos({
       params.push(value);
       updates.push(`${sql}=$${params.length}`);
     };
-    let nextEstado = null;
-    if (patch.descarga_ok || nextData.descarga_ok) nextEstado = "entregado";
-    else if (patch.descarga_iniciada || nextData.descarga_iniciada) nextEstado = "descarga";
-    else if (patch.posicionado_descarga || patch.aviso_espera_descarga || nextData.posicionado_descarga || nextData.aviso_espera_descarga) nextEstado = "espera_descarga";
-    else if (patch.viaje_iniciado || patch.carga_ok || nextData.viaje_iniciado || nextData.carga_ok) nextEstado = "en_curso";
-    else if (patch.carga_iniciada || nextData.carga_iniciada) nextEstado = "cargando";
-    else if (patch.aviso_espera_carga || nextData.aviso_espera_carga) nextEstado = "espera_carga";
-    if (nextEstado && !["cancelado", "entregado"].includes(String(pedido.estado || "").toLowerCase())) {
+    const nextEstado = stateFromProgress(nextData, { deliveryComplete: nextData.descarga_ok === true });
+    if (nextEstado && !["cancelado", "entregado", "facturado"].includes(String(pedido.estado || "").toLowerCase())) {
       await assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino: nextEstado });
       addUpdate("estado", nextEstado);
     }
@@ -9091,7 +9086,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
 
 // PATCH /pedidos/:id/estado
 router.patch("/:id/estado",
-  body("estado").isIn(["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"]),
+  body("estado").isIn(WRITABLE_STATES),
   async (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -9118,6 +9113,7 @@ router.patch("/:id/estado",
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
     }
+    assertTransportTransition(rows[0].estado, estado, { actor: req.user?.rol, correction: req.user?.rol === 'gerente' });
     // Reintentos de una transición ya aplicada no deben generar de nuevo
     // eventos, correos ni automatismos de entrega. La incidencia se excluye:
     // un nuevo aviso en el mismo estado puede aportar información distinta.
@@ -9155,7 +9151,7 @@ router.patch("/:id/estado",
     // Proteccion: cuando el chofer ya esta haciendo los pasos del viaje (en curso),
     // nadie desde trafico/pedidos puede cambiarle el estado. Solo el propio chofer
     // (desde su app) o gerencia. Asi no se pisa el estado real del viaje.
-    const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
+    const ESTADOS_EN_CURSO_CHOFER = ACTIVE_STATES;
     if (
       ESTADOS_EN_CURSO_CHOFER.includes(String(rows[0].estado || "").toLowerCase()) &&
       req.user?.rol !== "chofer" &&

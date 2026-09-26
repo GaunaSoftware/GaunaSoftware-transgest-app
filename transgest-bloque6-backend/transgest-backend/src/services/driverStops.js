@@ -1,3 +1,4 @@
+const { stateFromStop, assertTransportTransition } = require('./transportTransitions');
 const list=value=>{try{const data=Array.isArray(value)?value:JSON.parse(value||'[]');return Array.isArray(data)?data.filter(item=>item&&typeof item==='object'&&!Array.isArray(item)):[];}catch{return [];}};
 function driverStops(order) {
  return [['carga',list(order.puntos_carga),order.origen],['descarga',list(order.puntos_descarga),order.destino]].flatMap(([type,items,fallback])=>{
@@ -68,7 +69,9 @@ function mergeStop(order,all,patch) {
   const delivered=unloads.map(s=>paradas[s.id]).filter(d=>d?.mercancia_confirmada);
   if(delivered.reduce((sum,d)=>sum+number(d.mercancia_peso_kg),0)>goods.peso_kg+0.01||delivered.reduce((sum,d)=>sum+number(d.mercancia_palets),0)>goods.bultos)reject('La suma de las descargas supera la mercancía cargada. Revisa las cantidades.');
  }
- const state=completeDelivery?'entregado':stop.tipo==='descarga'?(next.firma_entrega?'en_curso':next.descarga_iniciada?'descarga':next.posicionado_descarga?'espera_descarga':'en_curso'):next.carga_ok?'en_curso':next.carga_proceso?'cargando':'espera_carga';
+ const state=stateFromStop(stop,next,completeDelivery);
+ assertTransportTransition(order.estado,state);
+
  return {data:result,goods,state,stop,unloadingComplete:unloads.every(s=>paradas[s.id]?.descarga_ok)};
 }
 async function saveStop(db,{pedidoId,empresaId,choferId,patch}) {

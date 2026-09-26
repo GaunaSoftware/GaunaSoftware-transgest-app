@@ -81,3 +81,11 @@ Reejecución tras recuperar la sesión de Codex: backend `npm run check` y `npm 
 No queda pendiente el E2E de escritura del bloque 1.9 listado originalmente: lo cubre el banco sintético descrito. Siguen pendientes pruebas de cámara/Android real, offline y firma reforzada de sus fases específicas. No se han convertido estados históricos, avisos manuales o incidencias legacy sin causa verificable.
 
 La fase 1 sigue abierta por la consolidación del estado operativo y las comprobaciones documentales restantes. Este cierre de regresiones no declara terminada toda la evolución.
+
+## Regresión detectada en Intelligence — 26/09/2026
+
+El fallo de `resumen_mes` anotado en la línea base queda corregido. Se reprodujo con una prueba SQL real en PGlite: el CTE financiero común usaba `$3` para el corte de facturas y la herramienta solo enviaba dos parámetros. Ahora envía el último día del mes solicitado y lo devuelve explícitamente como `fecha_corte`, sin cambiar las fórmulas del servicio común.
+
+La prueba verifica tres servicios propios (600 € netos, 60 € de costes registrados): una factura borrador y una emitida después del corte dejan 300 € pendientes; una emitida el último día del mes cuenta como facturada. Los servicios de otra empresa no alteran las cifras y el rol tráfico continúa sin acceder a este resumen económico.
+
+`node scripts/intelligence_regression_check.js` falló antes con `08P01` y pasa tras la corrección. El banco HTTP completo vuelve a terminar con salida 0 y ahora exige que cada herramienta de Intelligence termine correctamente; ya no oculta el error en un JSON `ok:false` mientras declara éxito global. Las cinco herramientas pasan con datos sintéticos. Esta prueba no consume cuota ni consulta a un proveedor de IA externo; no demuestra disponibilidad de OpenAI en producción.

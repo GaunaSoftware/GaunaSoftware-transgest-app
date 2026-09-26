@@ -29,7 +29,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
 import PortalPointPicker from "../components/PortalPointPicker";
-import { TRANSPORT_STATES, transportStateMeta } from "../utils/transportStateCatalog";
+import { TRANSPORT_STATES, transportStateMeta, transportStateKey } from "../utils/transportStateCatalog";
 import { displayOrderLocation } from "../utils/orderTown";
 
 import { PortalHeader, PortalOverview, PortalTracking, PortalHelp } from "./portal/PortalWorkspace";
@@ -140,7 +140,11 @@ function estadoClienteSurface(estado, isPedido = false) {
 const TIMELINE = [
   ["pendiente", "Pendiente"],
   ["confirmado", "Confirmado"],
-  ["en_curso", "En camino"],
+  ["espera_carga", "Espera de carga"],
+  ["cargando", "Cargando"],
+  ["cargado", "Cargado"],
+  ["en_transito", "En tránsito"],
+  ["espera_descarga", "Espera de descarga"],
   ["descarga", "Descarga"],
   ["entregado", "Entregado"],
 ];
@@ -579,7 +583,7 @@ export default function PortalClientes() {
   const reprogramacionesPendientes = solicitudes.filter(s => s.fecha_propuesta && (!s.decision_cliente || s.decision_cliente === "pendiente"));
   const movimientosSolicitudes = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
   const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado", "chofer_nombre", "chofer_dni", "chofer_telefono"]));
-  const trackingPedidos = pedidosFiltrados.filter(p => !trackingEstado || p.estado === trackingEstado);
+  const trackingPedidos = pedidosFiltrados.filter(p => !trackingEstado || transportStateKey(p) === trackingEstado);
   const trackingPedido = trackingPedidos.find(p => p.id === trackingId) || trackingPedidos[0] || null;
   const facturasFiltradas = facturas.filter(f => matchesSearch(f, q, ["numero", "estado", "forma_pago"]));
   const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, [
@@ -941,10 +945,10 @@ export default function PortalClientes() {
 
         {!loading && ["inicio", "seguimiento"].includes(tab) && (
           <PortalTracking pedidos={trackingPedidos.map(p => ({ ...p, origen: displayOrderLocation(p, "carga"), destino: displayOrderLocation(p, "descarga") }))} selected={trackingPedido ? { ...trackingPedido, origen: displayOrderLocation(trackingPedido, "carga"), destino: displayOrderLocation(trackingPedido, "descarga") } : null} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={PEDIDO_ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
-            {!trackingPedido ? <Empty text={q ? "No hay viajes que coincidan con la búsqueda." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
-              const estado = PEDIDO_ESTADOS[p.estado] || PEDIDO_ESTADOS.pendiente;
-              const surface = estadoClienteSurface(p.estado, true);
-              const stIdx = p.estado === "facturado" ? TIMELINE.length - 1 : TIMELINE.findIndex(([k]) => k === p.estado);
+            {!trackingPedido ? <Empty text={q || trackingEstado ? "No hay viajes que coincidan con estos filtros." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
+              const estado = PEDIDO_ESTADOS[transportStateKey(p)] || PEDIDO_ESTADOS.pendiente;
+              const surface = estadoClienteSurface(p, true);
+              const stIdx = p.estado === "facturado" ? TIMELINE.length - 1 : TIMELINE.findIndex(([k]) => k === transportStateKey(p));
               const dcd = docControl[p.id];
               return (
                 <div className="portal-card" key={p.id} style={{ ...S.card, ...surface }}>

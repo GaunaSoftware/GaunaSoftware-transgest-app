@@ -1,4 +1,4 @@
-import { TRANSPORT_STATES, RECOMMENDED_STATE_FLOW, transportStateMeta } from './transportStateCatalog';
+import { TRANSPORT_STATES, RECOMMENDED_STATE_FLOW, transportStateMeta, transportStateKey } from './transportStateCatalog';
 import fs from 'fs';
 import path from 'path';
 
@@ -13,6 +13,18 @@ test('shared transport states keep incident and execution separate', () => {
   expect(TRANSPORT_STATES.colaborador).toBeUndefined();
   expect(RECOMMENDED_STATE_FLOW.cargando).toBe('en_curso');
   expect(transportStateMeta('estado_legacy').description).toBe('Estado no catalogado');
+});
+
+test('recorded progress distinguishes loading from departure without changing legacy state', () => {
+  const order = { estado:'en_curso', estado_operativo:{codigo:'cargado',estado_legacy:'en_curso',fuente:'pasos_chofer'} };
+  expect(transportStateKey(order)).toBe('cargado');
+  expect(transportStateMeta(order).label).toBe('Cargado');
+  expect(transportStateMeta({...order,estado_operativo:{codigo:'en_transito',estado_legacy:'en_curso'}}).label).toBe('En tránsito');
+  expect(transportStateMeta({estado:'en_curso'}).label).toBe('En curso');
+  expect(transportStateKey({...order,estado_operativo:{codigo:'unknown'}})).toBe('en_curso');
+  expect(TRANSPORT_STATES.cargado.readOnly).toBe(true);
+  expect(order.estado).toBe('en_curso');
+  expect(transportStateKey({...order,estado:'cancelado'})).toBe('cancelado');
 });
 
 test('every transport badge has readable text in both themes (at least 4.5:1)', () => {

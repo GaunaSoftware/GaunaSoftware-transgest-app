@@ -38,3 +38,12 @@ test('dashboard and live operations use structured locations without rewriting t
   expect(html).not.toMatch(/Población (pendiente|desconocida)/);
   expect(order.origen).toBe('Población pendiente');
 });
+
+test('live operations renders server progress and keeps the legacy filter compatible', () => {
+  const order={id:'loaded',numero:'QA-CARGADO',estado:'en_curso',estado_operativo:{codigo:'cargado',estado_legacy:'en_curso'},fecha_carga:'2099-01-01'};
+  const html=renderToStaticMarkup(<LiveOperations initialItems={[order]} onSnapshot={()=>{}} openOrder={()=>{}}/>);
+  expect(html).toContain('Cargado');
+  expect(html).toContain('salida hacia la descarga aún sin registrar');
+  expect(html).not.toContain('En tránsito');
+  expect(order.estado).toBe('en_curso');
+});

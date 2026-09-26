@@ -193,7 +193,7 @@ function PedidoMini({ pedido, onOpen, draggable = false, onDragStart, onDragOver
           <div style={{ fontFamily:"'JetBrains Mono',monospace", color:"var(--accent-xl)", fontSize:11, fontWeight:900, whiteSpace:"nowrap" }}>{pedido.numero || "Pedido"}</div>
           <div style={{ marginTop:2, fontSize:12, fontWeight:850, color:"var(--text)", lineHeight:1.25, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{pedido.ruta}</div>
         </div>
-        <StatusBadge estado={pedido.estado} />
+        <StatusBadge estado={pedido} />
       </div>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:6, fontSize:10, color:"var(--text4)" }}>
         <span>{pedido.momento === "descarga" ? "Descarga" : "Carga"} {hora}</span>

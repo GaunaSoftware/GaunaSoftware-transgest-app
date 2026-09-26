@@ -6525,7 +6525,7 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
     : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso" ? "en_curso"
     : pasos.carga_proceso || pasos.carga_iniciada ? "cargando"
     : estado;
-  const mapStateMeta = transportStateMeta(mapState);
+  const mapStateMeta = transportStateMeta(pedido?.estado_operativo ? pedido : mapState);
   const currentLabel = pasos.posicionado_descarga && mapState === "espera_descarga" ? "En punto de descarga" : mapStateMeta.label;
   if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{displayOrderLocation(pedido, "carga")} → {displayOrderLocation(pedido, "descarga")}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
   return (

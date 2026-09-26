@@ -889,7 +889,7 @@ function TripCard({
   onDragOverTrip = null,
   onDropTrip = null,
 }) {
-  const e = EC[pedido.estado] || EC.pendiente;
+  const e = transportStateMeta(pedido);
   const hasKmVacio = Number(pedido.km_vacio) > 0;
   const tieneConflictoDuro = conflictos.some(c => c.level === "hard");
   const tieneConflicto = conflictos.length > 0;
@@ -1912,7 +1912,7 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
           </div>
           <div><label style={lbl}>Estado</label>
             <select style={inp} value={form.estado||"pendiente"} onChange={f("estado")} disabled={bloquear}>
-              {Object.entries(EC).map(([v,d]) => <option key={v} value={v}>{d.label}</option>)}
+              {Object.entries(EC).filter(([,d]) => !d.readOnly).map(([v,d]) => <option key={v} value={v}>{d.label}</option>)}
             </select>
           </div>
           <div><label style={lbl}>KM ruta (cargado)</label>

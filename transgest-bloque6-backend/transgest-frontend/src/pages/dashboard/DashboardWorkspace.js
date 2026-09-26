@@ -61,7 +61,7 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     };
   }, [pedidos,facturas,vehiculos,choferes]);
   const link = (label,view) => puedeVer(view) ? <button className="dashboard-link" onClick={() => navigate(view)}>{label} <span aria-hidden="true">→</span></button> : null;
-  const status = p => <span title={incidentDescription(p)}><TransportStateBadge state={p.estado}/>{overdueOrder(p)&&<Badge tone="warning">Vencido</Badge>}</span>;
+  const status = p => <span title={incidentDescription(p)}><TransportStateBadge state={p}/>{overdueOrder(p)&&<Badge tone="warning">Vencido</Badge>}</span>;
   const quick = [
     ["Nuevo pedido","invoice","pedidos",true,() => openOrder({action:"nuevo"})],
     ["Asignar vehículo","truck","pedidos",true,() => navigate("pedidos")],

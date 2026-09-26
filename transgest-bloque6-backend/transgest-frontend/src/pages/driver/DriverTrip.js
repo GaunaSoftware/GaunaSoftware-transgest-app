@@ -1,5 +1,6 @@
 import { driverStops, stopData, stopDone, activeDriverStop } from "./driverStops";
 import DriverTripCard from './DriverTripCard';
+import { transportStateKey } from '../../utils/transportStateCatalog';
 import DriverDcdActions from './DriverDcdActions';
 import DriverTripMap from './DriverTripMap';
 import { openMobileDocument, shareMobileDocument } from '../../services/mobileRuntime';
@@ -43,7 +44,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     peso_kg: pedido.peso_kg || "",
     referencia: pedido.referencia_cliente || "",
   });
-  const e = EC[pedido.estado]||EC.pendiente;
+  const e = EC[transportStateKey(pedido)]||EC.pendiente;
   useEffect(()=>{
     const stop=activeStop;
     const saved=stop?stopData(stop,allSteps,stops):{};

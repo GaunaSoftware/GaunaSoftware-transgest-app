@@ -1078,7 +1078,7 @@ router.get("/pedidos", requireCliente, async (req, res) => {
       LIMIT 200`,
     [empresaId(req), req.user.cliente_id]
   );
-  res.json(rows);
+  res.json(await require('../services/transportProgress').withTransportProgress(db, empresaId(req), rows));
 });
 
 router.get("/facturas", requireCliente, async (req, res) => {

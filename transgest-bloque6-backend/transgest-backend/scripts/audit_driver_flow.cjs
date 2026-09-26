@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const { driverStops } = require('../src/services/driverStops');
 
 // Called only by the isolated audit harness, with an already open synthetic workday.
-module.exports = async function auditDriverFlow({ base, fetch, db, managerToken, driverToken, company, client, driver, vehicle }) {
+module.exports = async function auditDriverFlow({ base, fetch, db, managerToken, driverToken, company, client, driver, vehicle, password }) {
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);
   let checks = 0;
   async function request(method, url, body, status = 200, token = driverToken) {
@@ -42,12 +42,27 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await request('POST', `/pedidos/${order.id}/firma`, { parada_id: load.id, rol: 'cargador', firma_nombre: 'Firmante sintético', firma: signature });
   await patch(load, { firma_cargador: true });
   await patch(load, { carga_ok: true });
+  const loadedTrip = await request('GET', `/pedidos/${order.id}`);
+  assert.equal(loadedTrip.estado, 'en_curso', 'The legacy state remains compatible');
+  assert.equal(loadedTrip.estado_operativo?.codigo, 'cargado', 'Loading completion is not departure');
+  for (const endpoint of ['/pedidos', '/pedidos/resumen-lista']) {
+    const listing = await request('GET', `${endpoint}?q=${encodeURIComponent(order.numero)}`);
+    assert.equal(listing.data.find(p => p.id === order.id)?.estado_operativo?.codigo, 'cargado');
+  }
+  await db.query(`INSERT INTO usuarios(id,empresa_id,cliente_id,nombre,email,password_hash,rol,activo)
+    SELECT $1,$2,$3,'Portal sintético','progress-portal@example.invalid',password_hash,'cliente',true
+    FROM usuarios WHERE empresa_id=$2 AND email='audit@example.invalid'`, [crypto.randomUUID(),company,client.id]);
+  const portalLogin = await request('POST', '/auth/login', { email:'progress-portal@example.invalid', password });
+  const portalOrders = await request('GET', '/portal-cliente/pedidos', null, 200, portalLogin.token);
+  assert.equal(portalOrders.find(p => p.id === order.id)?.estado_operativo?.codigo, 'cargado');
+  assert.equal(portalOrders.some(p => 'precio_colaborador' in p || 'importe' in p || 'paradas' in p), false, 'Portal progress exposes no internal economics or raw driver evidence');
   assert.equal((await agenda()).some(e => e.id===loadIncident.id), false, 'Completing the load hides its active incident');
   assert.ok((await agenda(true)).find(e => e.id===loadIncident.id)?.resolved_at, 'The resolved incident remains in history');
   await request('GET', `/pedidos/${order.id}/documento-control-digital`);
   await request('POST', `/pedidos/${order.id}/documento-control-digital/evento`, { action: 'consultado' });
   await request('GET', `/pedidos/${order.id}/carta-porte`);
   await patch(unload, { viaje_iniciado: true });
+  assert.equal((await request('GET', `/pedidos/${order.id}`)).estado_operativo?.codigo, 'en_transito');
   await patch(unload, { posicionado_descarga: true });
   await patch(unload, { descarga_iniciada: true });
   await patch(unload, { mercancia_confirmada: true, mercancia_cargada: 'Mercancía sintética', mercancia_palets: '2', mercancia_peso_kg: '100' });
@@ -89,6 +104,8 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await db.query("INSERT INTO vehiculos(id,empresa_id,matricula) VALUES($1,$2,'FOREIGN-PRIVATE')",[foreignVehicle,otherCompany]);
   await db.query("INSERT INTO pedidos(id,empresa_id,cliente_id,chofer_id,vehiculo_id,remolque_id,numero,estado) VALUES($1,$2,$3,$4,$5,$5,'REF-LEGACY-SINTETICA','entregado')",[mixedTrip,company,foreignClient,foreignDriver,foreignVehicle]);
   const mixedCarta=await request('GET',`/pedidos/${mixedTrip}/carta-porte`,null,200,managerToken);
+  const mixedDetail=await request('GET',`/pedidos/${mixedTrip}`,null,200,managerToken);
+  for (const field of ['cliente_nombre','cliente_email','chofer_nombre','matricula']) assert.equal(mixedDetail[field],null,'Order detail must scope legacy joined references');
   for(const field of ['cliente_nombre','cliente_cif','chofer_nombre','chofer_dni','veh_matricula','rem_matricula']) {
     assert.equal(mixedCarta[field],null,`Carta de porte must not resolve cross-tenant ${field}`);
   }

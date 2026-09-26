@@ -320,7 +320,7 @@ async function main(){
    await call('Catálogo de clientes del chófer','GET','/pedidos/chofer/clientes');
    await call('Rechazar jornada sin confirmar conjunto','POST','/choferes/app/jornada/iniciar',{km_inicio:10000});
    await call('Iniciar jornada','POST','/choferes/app/jornada/iniciar',{...rig,km_inicio:10000});
-   evidence.driverFlow=await require('./audit_driver_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client,driver,vehicle});
+   evidence.driverFlow=await require('./audit_driver_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client,driver,vehicle,password});
    await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});
    await call('Rechazar km de cierre inferiores','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:9000});
    await call('Rechazar km de cierre iguales','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:10000});
@@ -379,9 +379,11 @@ async function main(){
   const qaClient=await call('Cliente limpio para QA visual','POST','/clientes',{nombre:'Cliente QA visual',cif:'B87654321',direccion:'Calle de Ensayo 2',cp:'46002',ciudad:'Valencia',codigo_postal:'46002',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'visual@example.invalid',telefono:'960000002',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias'});
   const qaOrder=await call('Pedido libre para QA visual','POST','/pedidos',{cliente_id:qaClient.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-26',fecha_descarga:'2026-09-27',tipo_carga:'completa',importe:400,mercancia:'Mercancía sintética'});
   require('node:assert/strict').ok(qaClient.id && qaOrder.id,'Browser QA fixture must be complete');
-  await db.query("UPDATE pedidos SET origen='Población pendiente',destino='Población desconocida',puntos_carga=$1::jsonb,puntos_descarga=$2::jsonb WHERE id=$3 AND empresa_id=$4",[
+  await db.query("UPDATE pedidos SET estado='en_curso',origen='Población pendiente',destino='Población desconocida',puntos_carga=$1::jsonb,puntos_descarga=$2::jsonb WHERE id=$3 AND empresa_id=$4",[
     JSON.stringify([{nombre:'Almacén de prueba',ciudad:'Castellón',direccion:'Polígono Norte 4',codigo_postal:'12006',pais:'España'}]),
     JSON.stringify([{nombre:'Destino de prueba',ciudad:'Alboraya',direccion:'Calle Puerto 2',codigo_postal:'46120',pais:'España'}]),qaOrder.id,company]);
+  // Explicit synthetic loaded fixture for visual QA; never applied to real orders.
+  await db.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[qaOrder.id,company,JSON.stringify({carga_ok:true})]);
   await db.query("INSERT INTO usuarios(id,empresa_id,cliente_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,$3,'Cliente de pruebas','portal@example.invalid',$4,'cliente',true)",[crypto.randomUUID(),company,qaClient.id,await req('bcryptjs').hash(password,10)]);
   console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',portalEmail:'portal@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
   await new Promise(resolve=>process.once('SIGINT',resolve));

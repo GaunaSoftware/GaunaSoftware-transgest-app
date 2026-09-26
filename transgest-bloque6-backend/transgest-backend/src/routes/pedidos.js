@@ -6072,7 +6072,7 @@ router.get("/", async (req, res) => {
   const limitN = parseInt(req.query.limit || 50);
 
   res.json({
-    data: rows.map(pedidoConImporteVisible),
+    data: (await require('../services/transportProgress').withTransportProgress(db, empresaId, rows)).map(pedidoConImporteVisible),
     pagination: {
       total,
       page: pageN,
@@ -6499,7 +6499,7 @@ router.get("/resumen-lista", async (req, res) => {
 
     const totalAproximado = offset + rows.length + (rows.length === limitN ? 1 : 0);
     res.json({
-      data: rows.map(pedidoConImporteVisible),
+      data: (await require('../services/transportProgress').withTransportProgress(db, empresaId, rows)).map(pedidoConImporteVisible),
       pagination: {
         total: totalAproximado,
         page: pageN,
@@ -7734,10 +7734,10 @@ router.get("/:id", async (req, res) => {
            ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
     LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
-    LEFT JOIN choferes ch ON ch.id=p.chofer_id
-    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id
+    LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, `
@@ -7750,9 +7750,9 @@ router.get("/:id", async (req, res) => {
            ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
-    LEFT JOIN choferes ch ON ch.id=p.chofer_id
-    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+    LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, [req.params.id, empresaId]);
@@ -7773,7 +7773,8 @@ router.get("/:id", async (req, res) => {
       WHERE pe.pedido_id=$1 AND p.empresa_id=$2`,
     [req.params.id, empresaId]
   );
-  res.json(normalizePedidoForClient({ ...rows[0], extracostes: extras.rows }));
+  const [withProgress] = await require('../services/transportProgress').withTransportProgress(db, empresaId, rows);
+  res.json(normalizePedidoForClient({ ...withProgress, extracostes: extras.rows }));
 });
 
 // POST /pedidos

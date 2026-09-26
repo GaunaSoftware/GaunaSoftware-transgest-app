@@ -324,6 +324,7 @@ async function main(){
    evidence.driverFlow=await require('./audit_driver_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client,driver,vehicle,password});
    evidence.controlTowerFlow=await require('./audit_control_tower_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,password});
    evidence.operationalModel=await require('./audit_operational_model.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
+   evidence.groupagePlan=await require('./audit_groupage_plan.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});
    await call('Rechazar km de cierre inferiores','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:9000});
    await call('Rechazar km de cierre iguales','POST','/choferes/app/jornada/cerrar',{...rig,km_fin:10000});

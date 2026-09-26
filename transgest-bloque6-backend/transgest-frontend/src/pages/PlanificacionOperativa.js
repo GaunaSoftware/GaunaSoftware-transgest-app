@@ -8,7 +8,7 @@ import GestionTrafico from "./GestionTrafico";
 const TABS = [
   { id: "cuadrante", label: "Cuadrante semanal" },
   { id: "plan_diario", label: "Plan diario" },
-  { id: "grupajes", label: "Agrupaciones" },
+  { id: "grupajes", label: "Grupajes" },
   { id: "optimizacion", label: "Optimización de rutas" },
 ];
 
@@ -70,8 +70,8 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {tab === "plan_diario" && <PlanDiario />}
-        {tab === "cuadrante" && <GestionTrafico initialVista="cuadrante" hideInternalTabs />}
-        {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs />}
+        {tab === "cuadrante" && <GestionTrafico initialVista="cuadrante" hideInternalTabs onViewChange={setTab} />}
+        {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs onViewChange={setTab} />}
         {tab === "optimizacion" && <GestionTrafico initialVista="optimizacion" hideInternalTabs />}
       </div>
     </div>

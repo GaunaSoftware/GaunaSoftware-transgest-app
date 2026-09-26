@@ -26,7 +26,7 @@ function legacyOperationalModel(order, progress={}) {
       planificacion:{fecha:date(stop.fecha||order[load?'fecha_carga_planificada':'fecha_descarga_planificada']||order[load?'fecha_carga':'fecha_descarga']),
         hora:time(stop.hora||order[load?'hora_carga':'hora_descarga']),ventana_inicio:time(stop.hora_desde||stop.hora_inicio),ventana_fin:time(stop.hora_hasta||stop.hora_fin),zona_horaria:'Europe/Madrid'},
       llegada_real_at:arrived,inicio_real_at:started,fin_real_at:finished,
-      estado:finished?'finalizada':started?'en_operacion':arrived?'posicionada':'pendiente',
+      estado:finished||data[load?'carga_ok':'descarga_ok']?'finalizada':started||data[load?'carga_proceso':'descarga_iniciada']?'en_operacion':arrived||data[load?'carga_iniciada':'posicionado_descarga']?'posicionada':'pendiente',
       incidencias:[],documentos:[],evidencias:[],
       referencias_legacy:{pedido_id:order.id,parada_id:stop.id,evidencia_disponible:!!order.firma_evidencia?.paradas?.[stop.id]},
       envios:simple?[{envio_id:envios[0].id,...goods}]:[]};
@@ -36,7 +36,7 @@ function legacyOperationalModel(order, progress={}) {
     advertencias:simple?['Representación compatible del pedido; no implica revisión jurídica del envío.']:['Las paradas no determinan qué mercancía va de cada origen a cada destino. Identifica los envíos antes de materializar.'],
     viajes:[{id:`legacy-viaje:${order.grupaje_id||order.id}`,estado:order.estado,estado_operativo:transportProgress(order,progress),
       ejecucion:order.colaborador_id?'subcontratada':order.vehiculo_id||order.chofer_id?'propia':'sin_asignar',
-      asignacion_snapshot:pick(order,['vehiculo_id','chofer_id','chofer2_id','remolque_id_manual','colaborador_id','matricula_colaborador','remolque_matricula_colaborador']),
+      asignacion_snapshot:pick(order,['vehiculo_id','chofer_id','chofer2_id','remolque_id','remolque_id_manual','matricula_manual','colaborador_id','matricula_colaborador','remolque_matricula_colaborador']),
       km_cargados:order.grupaje_id?null:numeric(order.km_ruta),km_vacios:order.grupaje_id?null:numeric(order.km_vacio),
       pedidos:[order.id],envios,paradas}]};
 }
@@ -56,7 +56,7 @@ async function readOperationalModel(db,empresaId,pedidoId) {
   const order=await loadOrder(db,empresaId,pedidoId);
   let trips;
   try {trips=(await db.query(`SELECT v.* FROM viajes_operativos v JOIN viaje_pedidos vp ON vp.empresa_id=v.empresa_id AND vp.viaje_id=v.id
-    WHERE vp.empresa_id=$1 AND vp.pedido_id=$2 ORDER BY v.created_at,v.id`,[empresaId,pedidoId])).rows;}
+    WHERE vp.empresa_id=$1 AND vp.pedido_id=$2 AND v.estado<>'cancelado' ORDER BY v.created_at,v.id`,[empresaId,pedidoId])).rows;}
   catch(error){if(error.code!=='42P01')throw error;trips=[];}
   if(!trips.length)return legacyOperationalModel(order,await loadProgress(db,empresaId,pedidoId));
   const ids=trips.map(trip=>trip.id);
@@ -81,7 +81,7 @@ async function materializeSimpleOrder(db,{empresaId,pedidoId,operationId,actorId
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:operativa:${operationId}`]);
     const byOperation=(await client.query('SELECT id,legacy_pedido_id FROM viajes_operativos WHERE empresa_id=$1 AND client_operation_uuid=$2',[empresaId,operationId])).rows[0];
     if(byOperation&&byOperation.legacy_pedido_id!==pedidoId)fail('El identificador de operación ya se usó para otro pedido','OPERATION_CONFLICT');
-    const existing=(await client.query('SELECT viaje_id FROM viaje_pedidos WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,pedidoId])).rows[0];
+    const existing=(await client.query("SELECT vp.viaje_id FROM viaje_pedidos vp JOIN viajes_operativos v ON v.id=vp.viaje_id AND v.empresa_id=vp.empresa_id WHERE vp.empresa_id=$1 AND vp.pedido_id=$2 AND v.estado<>'cancelado'",[empresaId,pedidoId])).rows[0];
     if(existing)return {viaje_id:existing.viaje_id,created:false};
     if(!['pendiente','confirmado'].includes(order.estado))fail('Solo se materializan pedidos aún no iniciados','ORDER_ALREADY_STARTED');
     const model=legacyOperationalModel(order,await loadProgress(client,empresaId,pedidoId));

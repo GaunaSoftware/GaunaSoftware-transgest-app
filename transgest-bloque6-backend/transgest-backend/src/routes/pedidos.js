@@ -6087,7 +6087,7 @@ router.get("/", async (req, res) => {
   const limitN = parseInt(req.query.limit || 50);
 
   res.json({
-    data: (await require('../services/transportProgress').withTransportProgress(db, empresaId, rows)).map(pedidoConImporteVisible),
+    data: (await require('../services/journeyProjection').withJourneyProjection(db, empresaId, await require('../services/transportProgress').withTransportProgress(db, empresaId, rows))).map(pedidoConImporteVisible),
     pagination: {
       total,
       page: pageN,
@@ -6293,66 +6293,118 @@ router.get("/disponibilidad", async (req, res) => {
 // (grupaje): les pone un grupaje_id comun y tipo_carga='grupaje'. Si alguno ya
 // esta en un grupaje, se reutiliza ese id. Luego aparecen como un solo grupo en
 // la pestana Grupajes, con sus cargas/descargas ordenables y asignables.
-router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
-    if (ids.length < 2) return res.status(400).json({ error: "Selecciona al menos 2 pedidos para agruparlos en un grupaje." });
-    const { rows } = await db.query(
-      "SELECT id, grupaje_id, factura_id FROM pedidos WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
-      [empresaId, ids]
-    );
-    if (rows.length !== ids.length) return res.status(404).json({ error: "Alguno de los pedidos no existe o no pertenece a la empresa." });
-    if (rows.some(p => p.factura_id)) return res.status(400).json({ error: "No se pueden agrupar pedidos ya facturados." });
-    const grupajeId = rows.map(p => p.grupaje_id).find(Boolean) || crypto.randomUUID();
-    // Grupaje provisional: se guarda y se ve como grupaje, pero queda marcado
-    // como no definitivo hasta que se confirme.
-    const esBorrador = req.body?.borrador === true || req.body?.borrador === "true";
-    await db.query(
-      "UPDATE pedidos SET grupaje_id=$1::uuid, tipo_carga='grupaje', grupaje_borrador=$4, updated_at=NOW() WHERE empresa_id=$2 AND id = ANY($3::uuid[])",
-      [grupajeId, empresaId, ids, esBorrador]
-    );
-    for (const id of ids) {
-      logPedidoEvento(id, empresaId, esBorrador ? "grupaje.borrador_guardado" : "grupaje.combinado", { grupaje_id: grupajeId, pedidos: ids }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
-    }
-    return res.json({ ok: true, grupaje_id: grupajeId, count: ids.length, borrador: esBorrador });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req,res,next)=>{
+ try{
+  const empresaId=req.user.empresa_id;
+  const ids=[...new Set((req.body?.pedido_ids||[]).map(normalizePedidoUuid).filter(Boolean))].sort();
+  if(ids.length<2)return res.status(400).json({error:'Selecciona al menos dos pedidos.'});
+  const result=await db.transaction(async tx=>{
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
+   const rows=(await tx.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[empresaId,ids])).rows;
+   if(rows.length!==ids.length)throw Object.assign(Error('Pedido no encontrado'),{status:404});
+   if(rows.some(p=>p.factura_id||!['pendiente','confirmado'].includes(p.estado)))throw Object.assign(Error('Solo se agrupan pedidos sin iniciar ni facturar.'),{status:409});
+   rows.forEach(order=>assertGroupageTrafficScope(req,order));
+   const groups=[...new Set(rows.map(p=>p.grupaje_id).filter(Boolean))];
+   if(groups.length>1)throw Object.assign(Error('Deshaz primero los grupajes que quieras reorganizar.'),{status:409});
+   const group=groups[0]||crypto.randomUUID();
+   if(groups.length){const siblings=(await tx.query('SELECT id FROM pedidos WHERE empresa_id=$1 AND grupaje_id=$2::uuid',[empresaId,group])).rows;if(siblings.some(p=>!ids.includes(p.id)))throw Object.assign(Error('Selecciona todos los pedidos del grupaje.'),{status:409});}
+   const existing=(await tx.query('SELECT id,client_operation_uuid,estado FROM viajes_operativos WHERE empresa_id=$1 AND legacy_grupaje_id=$2',[empresaId,group])).rows[0];
+   if(existing){
+    if(existing.client_operation_uuid===req.body.client_operation_uuid)return {ok:true,viaje_id:existing.id,grupaje_id:group,count:ids.length,borrador:existing.estado==='borrador',sin_cambios:true};
+    throw Object.assign(Error('El grupaje ya tiene un plan operativo. Edítalo desde su recorrido.'),{status:409});
+   }
+   await tx.query("UPDATE pedidos SET grupaje_id=$1::uuid,tipo_carga='grupaje',grupaje_borrador=true WHERE empresa_id=$2 AND id=ANY($3::uuid[])",[group,empresaId,ids]);
+   const draft=req.body?.borrador===true||req.body?.borrador==='true';
+   if(draft)return {ok:true,grupaje_id:group,count:ids.length,borrador:true};
+   return require('../services/groupagePlan').saveGroupagePlan(tx,{empresaId,grupajeId:group,operationId:req.body.client_operation_uuid||crypto.randomUUID(),actorId:req.user.id,confirm:true});
+  });res.json(result);
+ }catch(error){next(error);}
 });
-
-// POST /pedidos/grupaje/confirmar - pasa un grupaje de borrador a definitivo.
-router.post("/grupaje/confirmar", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const grupajeId = normalizePedidoUuid(req.body?.grupaje_id);
-    if (!grupajeId) return res.status(400).json({ error: "Indica el grupaje a confirmar." });
-    const { rows } = await db.query(
-      "UPDATE pedidos SET grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND grupaje_id=$2::uuid RETURNING id",
-      [empresaId, grupajeId]
-    );
-    if (!rows.length) return res.status(404).json({ error: "Grupaje no encontrado." });
-    for (const r of rows) {
-      logPedidoEvento(r.id, empresaId, "grupaje.confirmado", { grupaje_id: grupajeId }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
-    }
-    res.json({ ok: true, grupaje_id: grupajeId, count: rows.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /pedidos/grupaje/separar - saca pedidos de su grupaje.
-router.post("/grupaje/separar", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
-    if (!ids.length) return res.status(400).json({ error: "Sin pedidos." });
-    await db.query(
-      "UPDATE pedidos SET grupaje_id=NULL, grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
-      [empresaId, ids]
-    );
-    return res.json({ ok: true, count: ids.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+function assertGroupageTrafficScope(req, order) {
+  if (req.user.rol === 'trafico' && !traficoConfigMatchesPedido(req.user.trafico_config, order)) {
+    throw Object.assign(new Error('Pedido fuera de tu ámbito de tráfico.'), { status: 403 });
   }
+}
+async function checkGroupageScope(req, groupId, queryable=db) {
+  const rows = (await queryable.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND grupaje_id=$2::uuid', [req.user.empresa_id, groupId])).rows;
+  rows.forEach(order => assertGroupageTrafficScope(req, order));
+}
+router.post('/grupaje/:grupo/asignacion', GERENTE_O_TRAFICO, async(req,res,next)=>{
+  try {
+    const result = await db.transaction(tx => require('../services/journeyAssignment').assignGroupage(tx, {
+      empresaId:req.user.empresa_id, groupId:req.params.grupo, actorId:req.user.id,
+      operationId:req.body.client_operation_uuid, patch:req.body.asignacion||{},
+      authorize:order=>assertGroupageTrafficScope(req,order)
+    }));
+    res.json(result);
+  } catch(error) { res.status(error.status||500).json({error:error.message,code:error.code,advertencias:error.advertencias}); }
+});
+router.get('/grupaje/:grupo/costes',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{await checkGroupageScope(req,req.params.grupo);
+  const rows=(await db.query('SELECT c.* FROM viaje_costes c JOIN viajes_operativos v ON v.empresa_id=c.empresa_id AND v.id=c.viaje_id WHERE c.empresa_id=$1 AND v.legacy_grupaje_id=$2 ORDER BY c.fecha,c.id',[req.user.empresa_id,req.params.grupo])).rows;
+  res.set('Cache-Control','no-store').json({data:rows,definicion:'Costes netos registrados en el viaje. No duplicar gastos ya imputados en pedidos, tickets o facturas. Conciliación BI pendiente en fase 15.'});
+ }catch(error){next(error);}
+});
+router.post('/grupaje/:grupo/costes',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{const result=await db.transaction(async tx=>{
+  await checkGroupageScope(req,req.params.grupo,tx);
+  const trip=(await tx.query('SELECT id FROM viajes_operativos WHERE empresa_id=$1 AND legacy_grupaje_id=$2',[req.user.empresa_id,req.params.grupo])).rows[0];
+  if(!trip)throw Object.assign(Error('Guarda primero el plan del viaje.'),{status:409});
+  return require('../services/journeyCosts').recordJourneyCost(tx,{...req.body,empresaId:req.user.empresa_id,journeyId:trip.id,actorId:req.user.id,operationId:req.body.client_operation_uuid});
+ });res.json(result);}catch(error){next(error);}
+});
+router.get('/grupaje/:grupo/plan',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{await checkGroupageScope(req,req.params.grupo);
+  if(!normalizePedidoUuid(req.params.grupo))return res.status(400).json({error:'Grupaje no válido'});
+  res.set('Cache-Control','private, no-store');res.json(await require('../services/groupagePlan').readGroupagePlan(db,req.user.empresa_id,req.params.grupo));
+ }catch(error){next(error);}
+});
+router.post('/grupaje/:grupo/plan',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{
+  await checkGroupageScope(req,req.params.grupo);
+  const input={empresaId:req.user.empresa_id,grupajeId:req.params.grupo,operationId:req.body.client_operation_uuid,actorId:req.user.id,
+   version:req.body.version,sequence:req.body.paradas,layout:req.body.disposicion,route:req.body.ruta,confirm:req.body.confirmar===true};
+  res.json(await db.transaction(tx=>require('../services/groupagePlan').saveGroupagePlan(tx,input)));
+ }catch(error){next(error);}
+});
+router.post('/grupaje/confirmar',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{
+  const empresaId=req.user.empresa_id,group=normalizePedidoUuid(req.body?.grupaje_id);
+  if(!group)return res.status(400).json({error:'Indica el grupaje a confirmar.'});
+  const result=await db.transaction(async tx=>{
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage:${group}`]);
+   const previous=(await tx.query('SELECT id,version,estado FROM viajes_operativos WHERE empresa_id=$1 AND legacy_grupaje_id=$2',[empresaId,group])).rows[0];
+   await checkGroupageScope(req,group,tx);
+   if(previous?.estado==='confirmado')return {ok:true,viaje_id:previous.id,grupaje_id:group,version:previous.version,sin_cambios:true};
+   return require('../services/groupagePlan').saveGroupagePlan(tx,{empresaId,grupajeId:group,operationId:req.body.client_operation_uuid||crypto.randomUUID(),actorId:req.user.id,version:req.body.version??previous?.version,confirm:true});
+  });res.json(result);
+ }catch(error){next(error);}
+});
+router.post('/grupaje/separar',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{
+  const empresaId=req.user.empresa_id,ids=[...new Set((req.body?.pedido_ids||[]).map(normalizePedidoUuid).filter(Boolean))];
+  if(!ids.length)return res.status(400).json({error:'Sin pedidos.'});
+  const result=await db.transaction(async tx=>{
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
+   const orders=(await tx.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[empresaId,ids])).rows;
+   orders.forEach(order=>assertGroupageTrafficScope(req,order));
+   if(orders.length!==ids.length)throw Object.assign(Error('Pedido no encontrado'),{status:404});
+   if(orders.some(p=>!['pendiente','confirmado'].includes(p.estado)||p.factura_id))throw Object.assign(Error('No se separan pedidos iniciados o facturados.'),{status:409});
+   const normalized=(await tx.query('SELECT viaje_id FROM viaje_pedidos WHERE empresa_id=$1 AND pedido_id=ANY($2::uuid[]) AND activo',[empresaId,ids])).rows;
+   for(const journeyId of [...new Set(normalized.map(row=>row.viaje_id))]){
+    const linked=(await tx.query('SELECT pedido_id FROM viaje_pedidos WHERE empresa_id=$1 AND viaje_id=$2 AND activo',[empresaId,journeyId])).rows;
+    if(linked.some(row=>!ids.includes(row.pedido_id)))throw Object.assign(Error('Separa todos los pedidos del viaje conjuntamente.'),{status:409});
+    const journey=(await tx.query('SELECT * FROM viajes_operativos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,journeyId])).rows[0];
+    if(!['borrador','pendiente','confirmado'].includes(journey.estado))throw Object.assign(Error('El viaje ya está iniciado.'),{status:409});
+    const updated=(await tx.query("UPDATE viajes_operativos SET estado='cancelado',version=version+1,legacy_grupaje_id=NULL,updated_at=NOW() WHERE empresa_id=$1 AND id=$2 RETURNING *",[empresaId,journeyId])).rows[0];
+    await tx.query('UPDATE viaje_pedidos SET activo=false WHERE empresa_id=$1 AND viaje_id=$2',[empresaId,journeyId]);
+    await tx.query('INSERT INTO viaje_plan_versiones(empresa_id,viaje_id,version,snapshot,motivo,actor_id) VALUES($1,$2,$3,$4,$5,$6)',[empresaId,journeyId,updated.version,JSON.stringify({anterior:journey,pedidos:linked,estado:'cancelado'}),'Grupaje deshecho por tráfico',req.user.id]);
+   }
+   await tx.query('UPDATE pedidos SET grupaje_id=NULL,grupaje_borrador=false WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[empresaId,ids]);
+   return {ok:true,count:ids.length};
+  });res.json(result);
+ }catch(error){next(error);}
 });
 
 // GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
@@ -6459,7 +6511,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
              p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
              p.paralizacion_importe, p.paralizacion_moneda, p.paralizacion_norma, p.paralizacion_pais,
-             p.tipo_carga, p.tipo_viaje, p.factura_id,
+             p.tipo_carga, p.tipo_viaje, p.factura_id, p.grupaje_id, p.grupaje_borrador,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
@@ -6491,7 +6543,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
              p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
              p.paralizacion_importe, p.paralizacion_moneda, p.paralizacion_norma, p.paralizacion_pais,
-             p.tipo_carga, p.tipo_viaje, p.factura_id,
+             p.tipo_carga, p.tipo_viaje, p.factura_id, p.grupaje_id, p.grupaje_borrador,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
@@ -6514,7 +6566,7 @@ router.get("/resumen-lista", async (req, res) => {
 
     const totalAproximado = offset + rows.length + (rows.length === limitN ? 1 : 0);
     res.json({
-      data: (await require('../services/transportProgress').withTransportProgress(db, empresaId, rows)).map(pedidoConImporteVisible),
+      data: (await require('../services/journeyProjection').withJourneyProjection(db, empresaId, await require('../services/transportProgress').withTransportProgress(db, empresaId, rows))).map(pedidoConImporteVisible),
       pagination: {
         total: totalAproximado,
         page: pageN,
@@ -9663,7 +9715,9 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         throw Object.assign(new Error("El pedido ya está asignado a otro vehículo o colaborador. Actualiza la mesa y revisa su asignación."), {status:409});
       }
       await require('../services/plannerCargoGuard').assertCargoEditable(tx, empresaId, current.rows[0], body);
+      await require('../services/journeyAssignment').protectJourneyAssignment(tx,empresaId,current.rows[0],body);
       await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+      await require('../services/trafficAssignment').validateTrafficAssignment(tx, empresaId, current.rows[0], body, req.user.id);
       if ('colaborador_id' in body && String(body.colaborador_id || '') !== String(current.rows[0].colaborador_id || '')) {
         await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
         await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
@@ -9741,14 +9795,16 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     asociarPuntosInteresUsados(empresaId, pedidoActualizado.cliente_id, pedidoActualizado.puntos_carga, pedidoActualizado.puntos_descarga);
     res.json(pedidoActualizado);
   } catch(e) {
-    if (e.status) return res.status(e.status).json({error:e.message,code:e.code,requiere_confirmacion:e.requiere_confirmacion||e.code==='VEHICULO_EN_TALLER',vehiculos:e.vehiculos});
+    if (e.status) return res.status(e.status).json({error:e.message,code:e.code,requiere_confirmacion:e.requiere_confirmacion||e.code==='VEHICULO_EN_TALLER',vehiculos:e.vehiculos,advertencias:e.advertencias});
     if (e.code === '42703') {
       let updatedPedido = await db.transaction(async tx => {
         const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
         if (!current.rows[0]) return null;
         if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id)!==String(body.vehiculo_id)))) throw Object.assign(new Error("El pedido ya tiene una asignación. Actualiza la mesa."),{status:409});
         await require('../services/plannerCargoGuard').assertCargoEditable(tx, empresaId, current.rows[0], body);
-        await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+        await require('../services/journeyAssignment').protectJourneyAssignment(tx,empresaId,current.rows[0],body);
+      await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+        await require('../services/trafficAssignment').validateTrafficAssignment(tx, empresaId, current.rows[0], body, req.user.id);
         if ('colaborador_id' in body && String(body.colaborador_id || '') !== String(current.rows[0].colaborador_id || '')) {
           await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
           await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);

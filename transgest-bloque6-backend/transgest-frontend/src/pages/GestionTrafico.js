@@ -1,3 +1,9 @@
+import GroupageDraftBuilder from './traffic/GroupageDraftBuilder';
+import {trafficUnits} from '../utils/trafficUnits';
+import {assignGroupage} from '../services/api';
+import GroupageRouteEditor from './traffic/GroupageRouteEditor';
+import {madridDay,trafficWeek,visibleTrafficDays} from '../utils/trafficWeek';
+import WeeklyPendingPanel from './traffic/WeeklyPendingPanel';
 import RouteMapCanvas from "../components/RouteMapCanvas";
 import { routeGeometry } from "../utils/routeGeometry";
 import { driverOption } from "./orders/quickInfo";
@@ -815,16 +821,7 @@ a{color:var(--accent);word-break:break-all}@media print{@page{margin:1.05cm;size
   setTimeout(() => w.print(), 350);
 }
 
-function getWeekDays(anchor) {
-  const d = new Date(anchor);
-  const day = d.getDay() || 7;
-  d.setDate(d.getDate() - day + 1);
-  return Array.from({length:7}, (_, i) => {
-    const dt = new Date(d);
-    dt.setDate(d.getDate() + i);
-    return dt;
-  });
-}
+const getWeekDays = trafficWeek;
 
 function dateOnly(value) {
   return value ? String(value).slice(0, 10) : "";
@@ -898,6 +895,8 @@ function TripCard({
 
   return (
     <div
+      role="group" tabIndex={0} aria-label={pedido.numero}
+      onKeyDown={event=>{if(event.target===event.currentTarget&&['Enter',' '].includes(event.key)){event.preventDefault();onClick(pedido);}}}
       onClick={() => onClick(pedido)}
       draggable={draggable}
       onDragStart={(e2) => onDragStart?.(e2, pedido)}
@@ -948,7 +947,7 @@ function TripCard({
       )}
       {(pedido.grupaje_id || pedido.tipo_carga === "grupaje") && (
         <div title="Viaje combinado en grupaje" style={{display:"inline-flex",marginBottom:3,marginLeft:(pedido.pendiente_completar || String(pedido.tipo_viaje || "normal") !== "normal") ? 4 : 0,padding:"1px 5px",borderRadius:3,background:"rgba(16,185,129,.12)",border:"1px solid rgba(16,185,129,.30)",color:"#34d399",fontSize:9,fontWeight:900}}>
-          Carga completa
+          Grupaje
         </div>
       )}
       {tieneConflicto && (
@@ -1053,7 +1052,8 @@ function TripCard({
           </span>
         </div>
       )}
-      {(quickAction && onQuickState) || onCopyNextWeek || onDelayRequest ? (
+      {pedido._unidad_operativa&&<details onClick={event=>event.stopPropagation()}><summary>Ver pedidos internos</summary>{pedido._pedidos.map(child=><button key={child.id} onClick={()=>onClick(child)}>{child.numero} · {child.cliente_nombre}</button>)}<button onClick={()=>onClick(pedido)}>Abrir plan del grupaje</button></details>}
+      {!pedido._unidad_operativa&&((quickAction && onQuickState) || onCopyNextWeek || onDelayRequest) ? (
         <div className="traffic-responsive-flex" style={{marginTop:4,display:"flex",justifyContent:"flex-end",gap:6,flexWrap:"wrap"}}>
           {onDelayRequest && (
             <button
@@ -2350,7 +2350,7 @@ function RutaMapaVisual({ plan, remotePlan, onPreferencia, estado }) {
   </section>;
 }
 
-export default function GestionTrafico({ initialVista = "cuadrante", soloOptimizacion = false, hideInternalTabs = false }) {
+export default function GestionTrafico({ initialVista = "cuadrante", soloOptimizacion = false, hideInternalTabs = false, onViewChange = null }) {
   const { puedeEditar, user } = useAuth();
   const esModoChoferOptimizacion = soloOptimizacion || user?.rol === "chofer";
 
@@ -2401,14 +2401,16 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   const [resumenSemanaVisible, setResumenSemanaVisible] = useState(true);
   const [collapsedClienteGroups, setCollapsedClienteGroups] = useState({});
   const [vistaDia, setVistaDia] = useState(false);
+  const [showPastDays,setShowPastDays] = useState(false);
+  const [weeklyPendingOpen,setWeeklyPendingOpen] = useState(true);
   const [fechaDia,setFechaDia] = useState(new Date().toISOString().slice(0,10));
   const [filtroVehiculo,setFiltroVehiculo] = useState("");
   const [vistaMain, setVistaMain] = useState(esModoChoferOptimizacion ? "optimizacion" : initialVista);
   const autoAnchorAppliedRef = useRef(false);
 
   const dias = getWeekDays(anchor);
-  const diasVisibles = vistaDia ? dias.filter(d=>d.toISOString().slice(0,10)===fechaDia) : dias;
-  const today = new Date().toISOString().slice(0,10);
+  const today = madridDay();
+  const diasVisibles = vistaDia ? dias.filter(d=>d.toISOString().slice(0,10)===fechaDia) : visibleTrafficDays(dias,{showPast:showPastDays,today});
   const cargar = useCallback(async () => {
     setLoading(true);
     setLoadError("");
@@ -2546,7 +2548,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   // Pre-computed map: vehiculo_id -> pedidos[] for O(1) lookup in cuadrante
   const pedidosPorVehiculo = useMemo(() => {
     const map = {};
-    pedidos.forEach(p => {
+    trafficUnits(pedidos).forEach(p => {
       if (!p.vehiculo_id) return;
       if (!map[p.vehiculo_id]) map[p.vehiculo_id] = [];
       map[p.vehiculo_id].push(p);
@@ -2605,7 +2607,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     ).slice(0, 6);
   }, [pedidosSemana]);
   const conflictosOperativosSemana = useMemo(
-    () => buildOperationalConflictMap(pedidosSemana, vehiculos, choferes),
+    () => buildOperationalConflictMap(trafficUnits(pedidosSemana), vehiculos, choferes),
     [pedidosSemana, vehiculos, choferes]
   );
   const esPedidoCritico = useCallback((p) => {
@@ -2617,7 +2619,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     (!soloCompletar || p.pendiente_completar) &&
     (!soloCriticos || esPedidoCritico(p)),
   [filtroEst, soloCompletar, soloCriticos, esPedidoCritico]);
-  const pasaFiltrosOperativos = useCallback((p) => {
+  const pasaFiltrosOperativos = useCallback(function matches(p) {
+    if(p._unidad_operativa)return p._pedidos.some(matches);
     if (String(p?.estado || "").toLowerCase() === "cancelado") return false;
     if (!pasaFiltroEstado(p)) return false;
     if (soloSinAsignar && (p.vehiculo_id || p.colaborador_id || p.colaborador_nombre)) return false;
@@ -3145,6 +3148,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 
   async function abrirViaje(pedido) {
     if (!pedido?.id) return;
+    if(pedido._unidad_operativa){if(onViewChange)onViewChange("grupajes");else setVistaMain("grupajes");return;}
     // El detalle y la edicion del pedido viven en Pedidos: la mesa de trafico no
     // duplica el editor. Se abre el MISMO editor de Pedidos con foco en el pedido
     // (y en la incidencia si la tiene). La mesa queda para asignar/organizar rapido.
@@ -3549,7 +3553,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   }), [vehiculos]);
 
   const vehiculosVisibles = tractores.filter(v=>!filtroVehiculo||String(v.id)===filtroVehiculo);
-  const viajesSinAsignacion = pedidosSemana
+  const viajesSinAsignacion = trafficUnits(pedidos).filter(p=>fechaPedido(p)>=semanaInicio&&fechaPedido(p)<=semanaFin&&p.estado!=="cancelado")
     .filter(p => pasaFiltrosOperativos(p) && !p.vehiculo_id && !p.colaborador_id && !p.colaborador_nombre);
 
   const colaboradoresSemana = useMemo(() => {
@@ -3595,7 +3599,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       (!p.vehiculo_id || !p.chofer_id)
     ).length;
     return {
-      total: pedidosSemana.length,
+      total: trafficUnits(pedidosSemana).length,
       sinAsignacion: viajesSinAsignacion.length,
       sinAsignacionParcial,
       conflictos: Object.keys(conflictosOperativosSemana || {}).length,
@@ -3671,7 +3675,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   // â”€â”€ Count all trips per day for header â”€â”€
   function countDia(dia) {
     const dStr = dia.toISOString().slice(0,10);
-    return pedidos.filter(p => {
+    return trafficUnits(pedidos).filter(p => {
       if (!pasaFiltrosOperativos(p)) return false;
       const f = p.fecha_carga?.slice(0,10) || p.fecha_pedido?.slice(0,10) || "";
       return f === dStr;
@@ -3815,6 +3819,12 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       dia.toISOString().slice(0,10),
       choferes
     );
+    if(p.viaje_operativo){
+      if(dia.toISOString().slice(0,10)!==p.viaje_operativo.fecha_inicio){notify('Revisa las fechas de las paradas en el plan del grupaje antes de cambiar de día.','warning');return;}
+      if(!(await confirmDialog({title:'Asignar viaje completo',message:`Se asignarán los ${p.viaje_operativo.pedidos_count} pedidos del grupaje a ${vehiculo.matricula}.`,confirmText:'Asignar grupaje'})))return;
+      try{await assignGroupageWithReview(p.grupaje_id,assignmentPayload);await cargar();}catch(error){notify(error.message,'error');}
+      return;
+    }
     const nextForm = { ...p, ...assignmentPayload };
     if (
       String(p.vehiculo_id || "") === String(nextForm.vehiculo_id || "") &&
@@ -3867,14 +3877,21 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       });
       if (!seguir) return;
     }
+    if(!hardConflicts.length&&!warnings.length&&!(await confirmDialog({title:'Confirmar asignación',message:`Asignar ${p.numero||'pedido'} a ${vehiculo.matricula} el ${new Date(`${assignmentPayload.fecha_carga}T12:00:00`).toLocaleDateString('es-ES')}.`,confirmText:'Asignar'})))return;
     try {
       let actualizado;
       try {
         actualizado = await editarPedido(p.id, assignmentPayload);
       } catch (err) {
+        if(err?.data?.code==='ASSIGNMENT_REVIEW_REQUIRED') {
+          const accepted=await confirmDialog({title:'Revisión de disponibilidad y capacidad',message:err.message,confirmText:'Asignar con avisos',tone:'warning'});
+          if(!accepted)return;
+          actualizado=await editarPedido(p.id,{...assignmentPayload,asignacion_revisada:true});
+        } else {
         if (!isFestivoConfirmError(err) || !(await confirmFestivoDestino(err))) throw err;
         actualizado = await editarPedido(p.id, { ...assignmentPayload, festivo_confirmado: true });
         notify("Asignacion aceptada con aviso de festivo. Gerencia queda notificada.", "success");
+        }
       }
       syncPedidoLocal(
         p.id,
@@ -3896,7 +3913,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     if (!addTripCell) return [];
     const fecha = addTripCell.fecha;
     return sortTripsByOperationalPriority(pedidos.filter(p => {
-      if (!p?.id || pedidoTieneFacturaFinal(p)) return false;
+      if (!p?.id || p.viaje_operativo || pedidoTieneFacturaFinal(p)) return false;
       if (["cancelado", "facturado"].includes(String(p.estado || "").toLowerCase())) return false;
       if (p.colaborador_id || p.colaborador_nombre) return false;
       const sameCell = String(p.vehiculo_id || "") === String(addTripCell.vehiculo_id || "") && fechaPedido(p) === fecha;
@@ -4055,7 +4072,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       {!esModoChoferOptimizacion && !hideInternalTabs && <div className="traffic-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><div className="traffic-heading-actions"><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button><button onClick={()=>{setVistaMain("cuadrante");setSoloSinAsignar(true);}}>Revisar sin asignar</button></div></div>}
       {/* â”€â”€ Vista tabs â”€â”€ */}
       {!esModoChoferOptimizacion && !hideInternalTabs && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
-        {[["cuadrante","Cuadrante semanal"],["diario","Plan diario"],["grupajes","Agrupaciones"],["optimizacion","Optimización de rutas"]].map(([v,lbl])=>(
+        {[["cuadrante","Cuadrante semanal"],["diario","Plan diario"],["grupajes","Grupajes"],["optimizacion","Optimización de rutas"]].map(([v,lbl])=>(
           <button key={v} aria-pressed={v==="diario"?vistaMain==="cuadrante"&&vistaDia:vistaMain===v&&!vistaDia} onClick={()=>{setVistaMain(v==="diario"?"cuadrante":v);setVistaDia(v==="diario");if(v==="diario"){setFechaDia(new Date().toISOString().slice(0,10));setAnchor(new Date());}}}
             style={{padding:"5px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:700,cursor:"pointer",
               background:(v==="diario"?vistaDia:vistaMain===v&&!vistaDia)?"var(--accent)":"var(--bg4)",color:(v==="diario"?vistaDia:vistaMain===v&&!vistaDia)?"#fff":"var(--text4)"}}>
@@ -4710,6 +4727,9 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       </div>}
       {vistaMain==="cuadrante"&&vistaDia&&<label className="traffic-day-picker">Día del plan<input aria-label="Día del plan" type="date" value={fechaDia} onChange={e=>{setFechaDia(e.target.value);if(e.target.value)setAnchor(new Date(`${e.target.value}T12:00:00`));}}/></label>}
       {vistaMain==="cuadrante"&&diasVisibles.length>0&&<TrafficMobileBoard key={diasVisibles.map(d=>d.toISOString()).join(",")} vehicles={vehiculosVisibles} drivers={choferes} days={diasVisibles} getTrips={getTrips} unassigned={viajesSinAsignacion.filter(p=>diasVisibles.some(d=>d.toISOString().slice(0,10)===fechaPedido(p)))} collaborators={colaboradoresSemana} onOpen={abrirViaje} onAdd={abrirAnadirViaje} states={EC}/>}
+      {vistaMain==="cuadrante"&&!vistaDia&&dias.some(day=>day.toISOString().slice(0,10)===today)&&<label className="traffic-week-history"><input type="checkbox" checked={showPastDays} onChange={e=>setShowPastDays(e.target.checked)}/>Mostrar días anteriores</label>}
+      <div className="traffic-week-layout" style={{display:vistaMain==="cuadrante"?undefined:"none"}}>
+      <WeeklyPendingPanel orders={viajesSinAsignacion} open={weeklyPendingOpen} onToggle={()=>setWeeklyPendingOpen(v=>!v)} onOpen={abrirViaje} onDragStart={startTripDrag} canEdit={puedeEditar("pedidos")}/>
       <div className="tg-traffic-board" style={{ flex:1, overflowY:"auto", overflowX:"auto", maxHeight:"calc(100dvh - 210px)", minHeight:340, display:vistaMain==="cuadrante"?"block":"none" }}>
         <table style={{ borderCollapse:"collapse", tableLayout:"fixed", minWidth: COL_VEH + COL_DAY*diasVisibles.length }}>
           <colgroup>
@@ -4764,38 +4784,6 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
               </tr>
             )}
 
-            {viajesSinAsignacion.length > 0 && (
-              <tr style={{ borderBottom:"1px solid var(--border)" }}>
-                <td style={{
-                  padding:"12px 14px", borderRight:"1px solid var(--border)",
-                  verticalAlign:"top", background:"rgba(245,158,11,.08)",
-                  position:"sticky", left:0, zIndex:5,
-                  minWidth:COL_VEH, maxWidth:COL_VEH,
-                }}>
-                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:800, fontSize:15, color:"#f59e0b", marginBottom:4 }}>
-                    Sin asignación
-                  </div>
-                  <div style={{ fontSize:11, color:"var(--text4)", lineHeight:1.35 }}>
-                    Pedidos pendientes de vehículo, chofer o colaborador
-                  </div>
-                </td>
-                {diasVisibles.map((d, i) => {
-                  const dStr = d.toISOString().slice(0,10);
-                  const isToday = dStr === today;
-                  const trips = sortTripsByOperationalPriority(viajesSinAsignacion.filter(p => fechaPedido(p) === dStr));
-                  return (
-                    <td key={i} style={{
-                      padding:"5px 5px",
-                      verticalAlign:"top",
-                      borderRight:"1px solid var(--border2)",
-                      background: isToday ? "rgba(59,130,246,.03)" : "transparent",
-                    }}>
-                      {renderTripCards(trips, `ua:${dStr}`)}
-                    </td>
-                  );
-                })}
-              </tr>
-            )}
 
             {vehiculosVisibles
               .filter(v => {
@@ -5033,6 +5021,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
           </tbody>
         </table>
       </div>
+      </div>
 
       {/* â”€â”€ Modal ediciÃ³n â”€â”€ */}
       {addTripCell && (
@@ -5181,113 +5170,16 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
 // CUADRANTE EN CASCADA - Grupajes con drag & drop
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// Simple distance estimator between Spanish cities (lat/lon approximation)
-const CITY_COORDS = {
-  "MADRID":[40.42,-3.70],"BARCELONA":[41.39,2.17],"VALENCIA":[39.47,-0.38],
-  "SEVILLA":[37.39,-5.99],"ZARAGOZA":[41.65,-0.89],"BILBAO":[43.26,-2.93],
-  "MALAGA":[36.72,-4.42],"ALICANTE":[38.35,-0.48],"CORDOBA":[37.89,-4.78],
-  "GRANADA":[37.18,-3.60],"VALLADOLID":[41.65,-4.72],"MURCIA":[37.99,-1.13],
-  "PALMA":[39.57,2.65],"VIGO":[42.23,-8.72],"GIJON":[43.54,-5.66],
-  "TOLEDO":[39.86,-4.02],"BURGOS":[42.34,-3.70],"SALAMANCA":[40.97,-5.66],
-  "ALBACETE":[38.99,-1.86],"LOGRONO":[42.47,-2.45],"SANTANDER":[43.46,-3.81],
-  "PAMPLONA":[42.82,-1.64],"VITORIA":[42.85,-2.67],"SAN SEBASTIAN":[43.32,-1.98],
-  "ALCOY":[38.70,-0.47],"ELCHE":[38.27,-0.70],"CARTAGENA":[37.60,-0.99],
-  "JEREZ":[36.69,-6.14],"CADIZ":[36.53,-6.30],"HUELVA":[37.26,-6.95],
-  "BADAJOZ":[38.88,-6.97],"CACERES":[39.47,-6.37],"SEGOVIA":[40.95,-4.12],
-  "AVILA":[40.66,-4.69],"SORIA":[41.77,-2.47],"TERUEL":[40.34,-1.11],
-  "CUENCA":[40.07,-2.14],"GUADALAJARA":[40.63,-3.17],"HUESCA":[42.14,-0.41],
-  "LLEIDA":[41.61,0.63],"TARRAGONA":[41.12,1.25],"GIRONA":[41.98,2.82],
-};
-
-function getCityCoords(name) {
-  if (!name) return null;
-  const upper = name.toUpperCase().trim();
-  for (const [city, coords] of Object.entries(CITY_COORDS)) {
-    if (upper.includes(city) || city.includes(upper)) return coords;
+async function assignGroupageWithReview(groupId,patch){
+  try{return await assignGroupage(groupId,patch);}catch(error){
+    if(error?.data?.code!=='ASSIGNMENT_REVIEW_REQUIRED')throw error;
+    if(!(await confirmDialog({title:'Revisión del grupaje',message:error.message,confirmText:'Asignar con avisos',tone:'warning'})))return null;
+    return assignGroupage(groupId,{...patch,asignacion_revisada:true});
   }
-  return null;
-}
-
-function distKm([lat1,lon1], [lat2,lon2]) {
-  const R = 6371;
-  const dLat = (lat2-lat1)*Math.PI/180;
-  const dLon = (lon2-lon1)*Math.PI/180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-function paradasDePedidos(pedidos = []) {
-  const paradas = [];
-  (Array.isArray(pedidos) ? pedidos : []).forEach(p => {
-    if (!p) return;
-    paradas.push({ tipo:"carga",    ciudad:p.origen,  pedido:p, key:`c_${p.id}` });
-    paradas.push({ tipo:"descarga", ciudad:p.destino, pedido:p, key:`d_${p.id}` });
-  });
-  return paradas;
-}
-
-function sortParadasByProximity(pedidos) {
-  // Con 0-1 pedidos no hay nada que reordenar, pero hay que devolver PARADAS
-  // (carga+descarga), no los pedidos: el render espera parada.pedido. Devolver
-  // los pedidos aqui provocaba "Cannot read 'numero' of undefined" y dejaba la
-  // pestana de grupajes en blanco cuando un grupaje tenia un solo pedido.
-  if (!Array.isArray(pedidos) || pedidos.length <= 1) return paradasDePedidos(pedidos);
-  // Greedy nearest-neighbor: start from first carga, alternate carga/descarga by proximity
-  const paradas = paradasDePedidos(pedidos);
-
-  // Sort: first all cargas by proximity to each other, then all descargas
-  // Simple approach: sort cargas by proximity, keep carga-descarga pairs but order cargas by geography
-  const cargas    = paradas.filter(p=>p.tipo==="carga");
-  const descargas = paradas.filter(p=>p.tipo==="descarga");
-
-  // Sort cargas greedily
-  const sorted = [];
-  let remaining = [...cargas];
-  let lastCoords = null;
-
-  while (remaining.length > 0) {
-    let best = 0;
-    if (lastCoords) {
-      let minD = Infinity;
-      const currentCoords = lastCoords;
-      remaining.forEach((p, i) => {
-        const coords = getCityCoords(p.ciudad);
-        if (coords) {
-          const d = distKm(currentCoords, coords);
-          if (d < minD) { minD = d; best = i; }
-        }
-      });
-    }
-    const chosen = remaining.splice(best, 1)[0];
-    sorted.push(chosen);
-    lastCoords = getCityCoords(chosen.ciudad);
-  }
-
-  // After cargas, add descargas sorted by proximity to last carga
-  let lastDCoords = lastCoords;
-  let remDesc = [...descargas];
-  while (remDesc.length > 0) {
-    let best = 0;
-    if (lastDCoords) {
-      let minD = Infinity;
-      const currentDCoords = lastDCoords;
-      remDesc.forEach((p, i) => {
-        const coords = getCityCoords(p.ciudad);
-        if (coords) {
-          const d = distKm(currentDCoords, coords);
-          if (d < minD) { minD = d; best = i; }
-        }
-      });
-    }
-    const chosen = remDesc.splice(best, 1)[0];
-    sorted.push(chosen);
-    lastDCoords = getCityCoords(chosen.ciudad);
-  }
-
-  return sorted;
 }
 
 function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], allPedidos, onReload }) {
+  const {puedeEditar}=useAuth();
   // Group pedidos by grupaje_id
   const byGrupaje = useMemo(() => {
     const grouped = {};
@@ -5298,51 +5190,6 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
     });
     return grouped;
   }, [pedidos]);
-
-  const [paradasMap, setParadasMap] = useState(() => {
-    // Initialize each grupaje with proximity-sorted paradas
-    const m = {};
-    Object.entries(byGrupaje).forEach(([gid, peds]) => {
-      m[gid] = sortParadasByProximity(peds);
-    });
-    return m;
-  });
-
-  const [dragItem, setDragItem] = useState(null); // {gid, idx}
-
-  // Update when pedidos change
-  useEffect(() => {
-    setParadasMap(prev => {
-      const m = { ...prev };
-      Object.entries(byGrupaje).forEach(([gid, peds]) => {
-        if (!m[gid]) m[gid] = sortParadasByProximity(peds);
-      });
-      return m;
-    });
-  }, [byGrupaje]);
-
-  function onDragStart(gid, idx) {
-    setDragItem({ gid, idx });
-  }
-
-  function onDragOver(e, gid, idx) {
-    e.preventDefault();
-    if (!dragItem || dragItem.gid !== gid || dragItem.idx === idx) return;
-    setParadasMap(prev => {
-      const list = [...(prev[gid]||[])];
-      const [removed] = list.splice(dragItem.idx, 1);
-      list.splice(idx, 0, removed);
-      setDragItem({ gid, idx });
-      return { ...prev, [gid]: list };
-    });
-  }
-
-  function onDragEnd() { setDragItem(null); }
-
-  function resetOrder(gid) {
-    const peds = byGrupaje[gid] || [];
-    setParadasMap(prev => ({ ...prev, [gid]: sortParadasByProximity(peds) }));
-  }
 
   // ── Combinar / separar / asignar grupajes desde la propia pestana ──
   const [selGids, setSelGids] = useState([]);
@@ -5460,17 +5307,17 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
     if (!patch) { notify("Escribe una matricula, elige un chofer o un colaborador.", "info"); return; }
     setTrabajandoGrupaje(true);
     try {
-      const fallos = [];
-      for (const p of peds) {
-        try { await editarPedido(p.id, patch); } catch (err) { fallos.push(p.numero || p.id); }
-      }
-      notify(fallos.length ? `Asignado a ${peds.length - fallos.length} de ${peds.length}.` : `Asignado al grupaje (${peds.length} pedido/s).`, fallos.length ? "warning" : "success");
+      if(String(gid).startsWith('grupo:')){
+        const assigned=await assignGroupageWithReview(String(gid).slice(6),patch);
+        if(!assigned)return;
+      }else await editarPedido(peds[0].id,patch);
+      notify(`Asignado al grupaje (${peds.length} pedidos).`, 'success');
       setAsignaGid(""); setAsignaMat(""); setAsignaChofer(""); setAsignaColab(""); setCreandoColab(false); setNuevoColabNombre("");
       onReload?.();
-    } finally { setTrabajandoGrupaje(false); }
+    } catch(error){notify(error.message,"error");} finally { setTrabajandoGrupaje(false); }
   }
 
-  if (Object.keys(byGrupaje).length === 0) {
+  if (Object.keys(byGrupaje).length === 0 && !allPedidos?.length) {
     return (
       <div className="traffic-responsive-flex" style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12,color:"var(--text5)"}}>
         <div style={{width:22,height:22,borderRadius:6,background:"rgba(16,185,129,.12)",border:"1px solid rgba(16,185,129,.24)"}} />
@@ -5482,6 +5329,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+      <GroupageDraftBuilder orders={allPedidos||pedidos} onReload={onReload} canEdit={puedeEditar("pedidos")}/>
       <datalist id="tg-grupaje-tractoras">
         {tractorasGrupaje.map(v => <option key={v.id} value={v.matricula} />)}
       </datalist>
@@ -5525,7 +5373,6 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
 
       <div className="traffic-responsive-flex" style={{display:"flex",flexDirection:"column",gap:20}}>
         {Object.entries(byGrupaje).map(([gid, peds]) => {
-          const paradas = paradasMap[gid] || sortParadasByProximity(peds);
           // Find vehicle for this grupaje
           const primerPed = peds[0];
           const esGrupoReal = String(gid).startsWith("grupo:");
@@ -5571,10 +5418,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                       Deshacer grupaje
                     </button>
                   )}
-                  <button onClick={()=>resetOrder(gid)}
-                    style={{padding:"3px 10px",borderRadius:5,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text4)",fontSize:11,cursor:"pointer"}}>
-                    Reordenar por proximidad
-                  </button>
+
                 </div>
               </div>
               {asignaGid===gid && (
@@ -5622,77 +5466,8 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 </div>
               )}
 
-              {/* Ocupacion del remolque: solo tiene sentido si hay grupaje real */}
-              {esGrupoReal && (
-                <div style={{padding:"0 16px 12px"}}>
-                  <RemolqueGrupaje
-                    pedidos={peds}
-                    vehiculo={vehiculos.find(v => String(v.matricula || "").toUpperCase() === String(primerPed?.vehiculo_matricula || primerPed?.matricula || "").toUpperCase()) || null}
-                  />
-                </div>
-              )}
+              {esGrupoReal ? <GroupageRouteEditor groupId={String(gid).replace('grupo:','')} orders={peds} canEdit={puedeEditar("pedidos")} vehicle={vehiculos.find(v=>v.id===(primerPed?.remolque_id||veh?.remolque_id))||veh} onReload={onReload}/> : <div style={{padding:16}}><p>Selecciona este pedido y otros para preparar un grupaje.</p><RemolqueGrupaje pedidos={peds} vehiculo={veh}/></div>}
 
-              {/* Paradas */}
-              <div style={{padding:"8px 0"}}>
-                {paradas.map((parada, idx) => {
-                  const isCarga = parada.tipo === "carga";
-                  const isDragging = dragItem?.gid===gid && dragItem?.idx===idx;
-                  const coords = getCityCoords(parada.ciudad);
-
-                  return (
-                    <div className="traffic-responsive-flex" key={parada.key}
-                      draggable
-                      onDragStart={()=>onDragStart(gid,idx)}
-                      onDragOver={e=>onDragOver(e,gid,idx)}
-                      onDragEnd={onDragEnd}
-                      style={{
-                        display:"flex",alignItems:"center",gap:10,
-                        padding:"8px 16px",
-                        background:isDragging?"rgba(59,130,246,.1)":"transparent",
-                        borderBottom:"1px solid var(--border2)",
-                        cursor:"grab",
-                        opacity:isDragging?0.5:1,
-                        transition:"background .15s",
-                      }}>
-                      {/* Drag handle */}
-                      <span style={{color:"var(--text5)",fontSize:14,cursor:"grab",flexShrink:0}}>::</span>
-                      {/* Step number */}
-                      <span style={{
-                        minWidth:24,height:24,borderRadius:"50%",
-                        background:isCarga?"rgba(59,130,246,.15)":"rgba(16,185,129,.15)",
-                        color:isCarga?"var(--accent)":"var(--green)",
-                        fontSize:11,fontWeight:800,
-                        display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0
-                      }}>{idx+1}</span>
-                      {/* Type badge */}
-                      <span style={{
-                        padding:"2px 8px",borderRadius:10,fontSize:11,fontWeight:700,flexShrink:0,
-                        background:isCarga?"rgba(59,130,246,.12)":"rgba(16,185,129,.12)",
-                        color:isCarga?"var(--accent)":"var(--green)"
-                      }}>
-                        {isCarga?"CARGA":"DESCARGA"}
-                      </span>
-                      {/* City */}
-                      <span style={{fontWeight:700,fontSize:13,color:"var(--text)",flex:1}}>
-                        {parada.ciudad||"-"}
-                        {!coords&&<span style={{fontSize:10,color:"var(--text5)",fontWeight:400,marginLeft:6}}>(sin coord.)</span>}
-                      </span>
-                      {/* Pedido info */}
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontSize:11,fontWeight:700,color:"var(--text3)"}}>{parada.pedido.numero}</div>
-                        <div style={{fontSize:10,color:"var(--text5)"}}>
-                          {parada.pedido.cliente_nombre||""}
-                          {parada.pedido.peso_kg&&<span style={{marginLeft:4}}>{Number(parada.pedido.peso_kg).toLocaleString("es-ES")}kg</span>}
-                        </div>
-                        {isCarga&&parada.pedido.fecha_carga&&
-                          <div style={{fontSize:10,color:"var(--text5)"}}>{new Date(parada.pedido.fecha_carga).toLocaleDateString("es-ES")}</div>}
-                        {!isCarga&&parada.pedido.fecha_descarga&&
-                          <div style={{fontSize:10,color:"var(--text5)"}}>{new Date(parada.pedido.fecha_descarga).toLocaleDateString("es-ES")}</div>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           );
         })}

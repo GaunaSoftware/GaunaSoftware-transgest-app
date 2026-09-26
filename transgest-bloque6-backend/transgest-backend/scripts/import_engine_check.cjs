@@ -70,6 +70,9 @@ async function main() {
     }
     assert.equal((await batches.getBatch(a,second)).skipped_rows,3);
     assert.equal((await pg.query('SELECT count(*)::int AS n FROM clientes')).rows[0].n,1);
+    const changedSource = await upload(a,[{...input[0],normalized_data:{...input[0].normalized_data,nombre:'Cliente corregido'}}]);
+    assert.equal((await engine.simulate(a,changedSource)).review,1,'A source_id with different data must be reviewed, not silently skipped');
+    assert.equal((await pg.query('SELECT nombre FROM clientes WHERE empresa_id=$1',[a])).rows[0].nombre,'Cliente A');
     const costRows=[
       {entity_type:'Vehiculos',row_number:2,source_data:{source_id:'v1',matricula:'0009-LCZ'},normalized_data:{source_id:'v1',matricula:'0009-LCZ'},status:'valid'},
       {entity_type:'Gastos_Operativos',row_number:2,source_data:{source_id:'g1',tipo:'combustible_agregado',matricula:'0009LCZ',periodo_desde:'2026-08-01',importe:300},normalized_data:{source_id:'g1',tipo:'combustible_agregado',matricula:'0009LCZ',periodo_desde:'2026-08-01',importe:300},status:'valid'},

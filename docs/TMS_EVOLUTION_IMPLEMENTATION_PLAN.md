@@ -25,7 +25,7 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 6 Tracking/ETA/geofencing | Implementación local y regresiones verificadas; integración exterior pendiente | `TMS_EVOLUTION_PHASE6_TRACKING.md`: captura verificada, señal obsoleta, ETA por carretera a demanda, geocercas auditadas y permisos. Planner sujeto al consentimiento de fases 10–11; dispositivo/proveedor real pendiente |
 | 7 Android/Play Store | Implementado y compilado localmente; publicación no habilitada | `TMS_EVOLUTION_PHASE7_ANDROID.md`: FGS autorizado, push condicionado a Firebase, copias PDF privadas, deep links, diagnóstico y CI. AAB sin firma; faltan teléfono, Firebase real, política legal alojada y pista interna |
 | 8 Bandeja IA | Implementada y verificada localmente; correo externo condicionado | `TMS_EVOLUTION_PHASE8_AI_INBOX.md`: originales privados, deduplicación, estados, revisión humana y creación idempotente; falta configurar/verificar dominio y proveedor inbound real |
-| 9 Importador 2.0 | Pendiente de contrastar e implementar | Reutilizar importador existente; sin tratamiento exclusivo de TLM ni efectos sobre históricos |
+| 9 Importador 2.0 | Existente contrastado y defectos corregidos | `TMS_EVOLUTION_PHASE9_IMPORTER.md`: 15 formatos, lotes, históricos aislados, originales privados, revisión de identidad modificada, respuestas obsoletas y ensayo completo de 10.001 filas |
 | 10 Planner | Pendiente de contrastar e implementar | Separación de empresa transportista, stock y coste auditables |
 | 11 Network | Pendiente de contrastar e implementar | Intercambio expresamente autorizado y aislamiento de empresas |
 | 12 Facturas proveedor e IA | Pendiente de contrastar e implementar | Revisión y conciliación; no pagos automáticos |

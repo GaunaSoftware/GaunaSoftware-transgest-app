@@ -7,6 +7,7 @@ const express = require("express");
 const { syncOrderIncidents } = require('../services/agendaIncidents');
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
+const { hasRecordedCost } = require("../services/financialEconomics");
 const logger  = require("../services/logger");
 const crypto  = require("crypto");
 const zlib = require("zlib");
@@ -5173,19 +5174,27 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
   const ingresoParalizacion = Math.max(0, Number(pedido.importe_paralizacion || 0));
   const ingreso = roundMoney(ingresoBase + ingresoParalizacion);
   const esColaborador = Boolean(pedido.colaborador_id);
-  const costeColaborador = esColaborador ? Math.max(0, Number(pedido.precio_colaborador || 0)) : 0;
-  const costePropio = esColaborador ? 0 : [
+  const costeColaborador = Number(pedido.precio_colaborador || 0);
+  const costePropio = [
     pedido.coste_gasoil,
     pedido.coste_peajes,
     pedido.coste_dietas,
     pedido.coste_otros,
-  ].reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
+  ].reduce((sum, value) => sum + Number(value || 0), 0);
   const costeExtra = Array.isArray(extras)
-    ? extras.reduce((sum, x) => sum + Math.max(0, Number(x.importe || 0)), 0)
+    ? extras.reduce((sum, x) => sum + Number(x.importe || 0), 0)
     : 0;
-  const coste = roundMoney(costeColaborador + costePropio);
-  const margen = roundMoney(ingreso - coste);
-  const margenPct = ingreso > 0 ? roundMoney((margen / ingreso) * 100) : null;
+  const hayCosteRegistrado = hasRecordedCost({
+    precio_colaborador: pedido.precio_colaborador,
+    coste_gasoil: pedido.coste_gasoil,
+    coste_peajes: pedido.coste_peajes,
+    coste_dietas: pedido.coste_dietas,
+    coste_otros: pedido.coste_otros,
+    extracostes_importe: costeExtra,
+  }) || (Array.isArray(extras) && extras.some(x => Number(x.importe || 0) !== 0));
+  const coste = hayCosteRegistrado ? roundMoney(costeColaborador + costePropio + costeExtra) : null;
+  const margen = coste !== null && ingreso > 0 ? roundMoney(ingreso - coste) : null;
+  const margenPct = margen !== null ? roundMoney((margen / ingreso) * 100) : null;
   const kmRuta = Math.max(0, Number(pedido.km_ruta || 0));
   const estado = String(pedido.estado || "").toLowerCase();
   const hoy = new Date();
@@ -5203,7 +5212,8 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
 
   if (ingreso <= 0) push("sin_precio", "alta", "El pedido no tiene precio de venta usable.", "Completar precio cliente antes de aceptar o facturar.");
   if (esColaborador && costeColaborador <= 0) push("colaborador_sin_coste", "alta", "Hay colaborador asignado sin precio acordado.", "Registrar precio del colaborador.");
-  if (ingreso > 0 && margen < 0) push("margen_negativo", "critica", "El coste previsto supera al ingreso.", "Revisar precio, coste o alternativa de asignacion.");
+  if (!hayCosteRegistrado) push("sin_costes_registrados", "alta", "No hay costes registrados; el margen no es calculable.", "Registrar o confirmar los costes de este servicio.");
+  if (ingreso > 0 && margen !== null && margen < 0) push("margen_negativo", "critica", "El coste previsto supera al ingreso.", "Revisar precio, coste o alternativa de asignacion.");
   else if (ingreso > 0 && margenPct !== null && margenPct < 8) push("margen_bajo", "media", "El margen previsto esta por debajo del 8%.", "Revisar precio minimo rentable o buscar retorno.");
   if (kmRuta <= 0) push("sin_km", "media", "Faltan kilometros de ruta para evaluar EUR/km y coste real.", "Calcular o completar kilometros de ruta.");
   if ((estado === "entregado" || estado === "facturado") && Number(docs.albaranes || 0) === 0) {
@@ -5216,12 +5226,12 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
     push("cobro_vencido", "alta", "La factura vinculada esta vencida.", "Revisar reclamacion de cobro.");
   }
 
-  let decision = "aceptar";
-  let recomendacion = "Operacion viable con los datos actuales.";
-  if (riesgos.some(r => r.tipo === "sin_precio" || r.tipo === "colaborador_sin_coste" || r.tipo === "sin_km")) {
+  let decision = "revisar_costes";
+  let recomendacion = "Margen provisional basado solo en costes registrados; confirmar los gastos pendientes antes de aceptar.";
+  if (riesgos.some(r => ["sin_precio", "colaborador_sin_coste", "sin_costes_registrados", "sin_km"].includes(r.tipo))) {
     decision = "completar_datos";
-    recomendacion = "Completar datos economicos y kilometros antes de decidir.";
-  } else if (margen < 0) {
+    recomendacion = "Completar precio, costes y kilometros antes de decidir.";
+  } else if (margen !== null && margen < 0) {
     decision = "revisar_precio";
     recomendacion = "No aceptar en estas condiciones salvo ajuste de precio, coste o retorno compensatorio.";
   } else if (margenPct !== null && margenPct < 8) {
@@ -5229,7 +5239,7 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
     recomendacion = "Aceptar solo si hay retorno, urgencia comercial o posibilidad de recuperar esperas/extras.";
   } else if (riesgos.some(r => ["pod_pendiente", "posible_retraso", "cobro_vencido"].includes(r.tipo))) {
     decision = "vigilar_operacion";
-    recomendacion = "Operacion rentable, pero requiere seguimiento documental, operativo o de cobro.";
+    recomendacion = "Revisar los riesgos documentales, operativos o de cobro y completar costes pendientes.";
   }
 
   return {
@@ -5249,12 +5259,15 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
       propios: roundMoney(costePropio),
       extras_registrados: roundMoney(costeExtra),
       total: coste,
-      eur_km: kmRuta > 0 ? roundMoney(coste / kmRuta) : null,
+      eur_km: kmRuta > 0 && coste !== null ? roundMoney(coste / kmRuta) : null,
+      cobertura: hayCosteRegistrado ? "parcial" : "sin_datos",
+      definicion: "Costes directos registrados: colaborador, gasoil, peajes, dietas, otros y extras. No incluye costes no registrados.",
     },
     margen: {
       importe: margen,
       pct: margenPct,
-      color: margen < 0 ? "rojo" : margenPct !== null && margenPct < 8 ? "amarillo" : "verde",
+      color: margen !== null && margen < 0 ? "rojo" : "amarillo",
+      definicion: "Ingreso menos costes directos registrados; provisional hasta completar la cobertura.",
     },
     documentos: {
       albaranes: Number(docs.albaranes || 0),
@@ -7357,7 +7370,7 @@ router.get("/:id/rentabilidad-predictiva", GERENTE_O_TRAFICO, async (req, res) =
           WHERE pedido_id=$1
           ORDER BY id ASC`,
         [req.params.id]
-      ).catch(() => ({ rows: [] })),
+      ),
       db.query(
         `SELECT COUNT(*)::int AS documentos,
                 COUNT(*) FILTER (

@@ -6208,28 +6208,32 @@ function PedidoTimeline({ pedido, compact = false }) {
 function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!pedido?.id) return;
+    let active = true;
     setLoading(true);
+    setError(false);
     getPedidoRentabilidadPredictiva(pedido.id)
-      .then(res => setData(res && typeof res === "object" ? res : null))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+      .then(res => { if (active) setData(res && typeof res === "object" ? res : null); })
+      .catch(() => { if (active) { setData(null); setError(true); } })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [pedido?.id]);
 
   if (!pedido?.id) return null;
-  const color = data?.margen?.color === "rojo" ? "#ef4444" : data?.margen?.color === "amarillo" ? "#f59e0b" : "#10b981";
+  const color = data?.margen?.color === "rojo" ? "#ef4444" : "#f59e0b";
   const riesgos = Array.isArray(data?.riesgos) ? data.riesgos : [];
   const acciones = Array.isArray(data?.acciones) ? data.acciones : [];
-  const fmtRent = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtRent = n => Number(n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
         <div>
           <div style={{fontSize:12,fontWeight:800,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em"}}>Rentabilidad predictiva</div>
-          <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Decision economica con precio, costes, kilometros, documentos y riesgos operativos.</div>
+          <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Estimación con precio, costes registrados, kilómetros y riesgos operativos.</div>
         </div>
         {data?.decision && (
           <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:900,textTransform:"uppercase",color,background:`${color}16`,border:`1px solid ${color}30`}}>
@@ -6239,6 +6243,8 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
       </div>
       {loading ? (
         <div style={{fontSize:12,color:"var(--text5)"}}>Calculando rentabilidad...</div>
+      ) : error ? (
+        <div role="alert" style={{fontSize:12,color:"var(--danger)"}}>No se pudo consultar la rentabilidad. Vuelve a abrir el pedido para reintentar.</div>
       ) : !data || !(Number(data.ingreso?.total)>0 || Number(ingresoLive)>0) || !data.costes ? (
         <div style={{fontSize:12,color:"var(--text5)"}}>Sin datos suficientes para calcular rentabilidad.</div>
       ) : (
@@ -6249,18 +6255,22 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
             // desfasado. Recalculamos margen, margen % y EUR/km en consecuencia.
             const ingresoBackend = Number(data.ingreso?.total || 0);
             const ingresoTotal = Number.isFinite(ingresoLive) && ingresoLive > 0 ? ingresoLive : ingresoBackend;
-            const costeTotal = Number(data.costes?.total || 0);
-            const margenImporte = ingresoTotal - costeTotal;
-            const margenPct = ingresoTotal > 0 ? (margenImporte / ingresoTotal) * 100 : null;
-            const kmRef = (ingresoBackend > 0 && data.ingreso?.eur_km) ? ingresoBackend / Number(data.ingreso.eur_km) : null;
+            const costeTotal = data.costes.total == null ? null : Number(data.costes.total);
+            const margenImporte = costeTotal == null ? null : ingresoTotal - costeTotal;
+            const margenPct = margenImporte != null && ingresoTotal > 0 ? (margenImporte / ingresoTotal) * 100 : null;
+            const kmRef = Number(data.ruta?.km) || null;
             const eurKmLive = kmRef && kmRef > 0 ? ingresoTotal / kmRef : (data.ingreso?.eur_km ?? null);
-            const colorLive = margenImporte < 0 ? "#ef4444" : (margenPct != null && margenPct < 8) ? "#f59e0b" : color;
+            const colorLive = margenImporte != null && margenImporte < 0 ? "#ef4444" : color;
             return (
+          <>
+          <div role="status" style={{marginBottom:8,fontSize:11,color:"var(--text3)"}}>
+            {costeTotal == null ? "Sin costes registrados: el margen no es calculable." : "Margen provisional: solo incluye costes directos registrados; pueden faltar gastos."}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:8}}>
             {[
               ["Ingreso", `${fmtRent(ingresoTotal)} EUR`, "#10b981"],
-              ["Coste", `${fmtRent(costeTotal)} EUR`, "#f59e0b"],
-              ["Margen", `${fmtRent(margenImporte)} EUR`, colorLive],
+              ["Coste registrado", costeTotal == null ? "Sin datos" : `${fmtRent(costeTotal)} EUR`, "#f59e0b"],
+              ["Margen provisional", margenImporte == null ? "No calculable" : `${fmtRent(margenImporte)} EUR`, colorLive],
               ["Margen %", margenPct == null ? "-" : `${fmtRent(margenPct)}%`, colorLive],
               ["EUR/km", eurKmLive == null ? "-" : `${fmtRent(eurKmLive)}`, "var(--accent)"],
             ].map(([label,value,c]) => (
@@ -6270,6 +6280,7 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
               </div>
             ))}
           </div>
+          </>
             );
           })()}
           <div style={{marginTop:10,padding:"9px 11px",borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border2)",fontSize:12,color:"var(--text3)",lineHeight:1.45}}>

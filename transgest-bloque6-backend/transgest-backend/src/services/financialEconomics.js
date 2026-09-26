@@ -199,4 +199,4 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
       fuentes_sin_conciliar: { repostajes: fuelRows.length, gastos_chofer: driverRows.length, noches: nightRows.length,
         nominas: salaryRows.length, taller: repairsPeriod.length } } };
 }
-module.exports = { buildEconomics, physicalKm, costBreakdown, structureInPeriod };
+module.exports = { buildEconomics, physicalKm, costBreakdown, structureInPeriod, hasRecordedCost };

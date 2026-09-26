@@ -69,6 +69,18 @@ async function main(){
  const trailerLengthOrder=await call('Carga completa con remolque corto','POST','/pedidos',{cliente_id:client.id,remolque_id_manual:trailer.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',importe:400});
  require('node:assert/strict').equal(trailerLengthOrder.longitud_ocupada_mode,'auto');
  require('node:assert/strict').equal(Number(trailerLengthOrder.metros_lineales),12.4);
+ const withoutCosts=await call('Rentabilidad sin costes registrados','GET','/pedidos/'+trailerLengthOrder.id+'/rentabilidad-predictiva');
+ require('node:assert/strict').equal(withoutCosts.costes.total,null,'La ausencia de costes no equivale a cero');
+ require('node:assert/strict').equal(withoutCosts.margen.importe,null);
+ require('node:assert/strict').equal(withoutCosts.margen.pct,null);
+ require('node:assert/strict').equal(withoutCosts.decision,'completar_datos');
+ await db.query('UPDATE pedidos SET coste_gasoil=50 WHERE id=$1 AND empresa_id=$2',[trailerLengthOrder.id,company]);
+ await db.query('INSERT INTO pedido_extracostes(pedido_id,tipo,concepto,importe) VALUES($1,$2,$3,$4)',[trailerLengthOrder.id,'otro','Auditoría de coste',25]);
+ const withCosts=await call('Rentabilidad con coste y extra registrados','GET','/pedidos/'+trailerLengthOrder.id+'/rentabilidad-predictiva');
+ require('node:assert/strict').equal(Number(withCosts.costes.total),75);
+ require('node:assert/strict').equal(Number(withCosts.margen.importe),325);
+ require('node:assert/strict').equal(Number(withCosts.margen.pct),81.25);
+ require('node:assert/strict').equal(withCosts.costes.cobertura,'parcial');
  const manualLengthOrder=await call('Carga completa con longitud manual','POST','/pedidos',{cliente_id:client.id,remolque_id_manual:trailer.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',metros_lineales:7.2,importe:400});
  require('node:assert/strict').equal(manualLengthOrder.longitud_ocupada_mode,'manual');
  require('node:assert/strict').equal(Number(manualLengthOrder.carga_largo_m),7.2);

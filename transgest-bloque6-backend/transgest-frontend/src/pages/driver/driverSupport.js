@@ -1,3 +1,4 @@
+import { guardarPedidoChoferPasos } from "../../services/api";
 import DocumentScanner from "./DocumentScanner";
 import { leerArchivoComoDataUrl, cargarImagen, detectarRectanguloPapel, recortarCanvas, limpiarCanvasComoEscaner, prepararArchivoEscaner } from "./documentScan";
 import { useState, useRef } from "react";
@@ -418,7 +419,7 @@ function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", on
 }
 
 // Modal de incidencia
-function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
+function ModalIncidencia({ pedido, fase="ruta", parada, onClose, onGuardado }){
   const [{encolarOffline, queueOfflineCriticalAction}] = useState(createDriverOfflineActions);
   const [texto,setTexto]=useState("");
   const [archivo,setArchivo]=useState(null);
@@ -454,6 +455,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
     setGuardando(true);
     setError("");
     const incidenciaPayload = { incidencia: `[${faseLabel(fase)}] ${texto}` };
+    const stopPayload=parada?{parada_id:parada.id,incidencia_parada:incidenciaPayload.incidencia,client_operation_uuid:crypto.randomUUID(),observed_at:new Date().toISOString()}:null;
     let uploadPayload = null;
     try {
       if (doc) {
@@ -466,10 +468,11 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
           file_mime: doc.mime,
           file_size_kb: doc.sizeKb,
           notas: `${texto}\n\n${uploadEvidence.note}`,
-          metadata: uploadEvidence.evidence,
+          metadata: {...uploadEvidence.evidence,...(parada?{parada_id:parada.id}:{})},
         };
       }
-      await cambiarEstadoPedido(pedido.id, "incidencia", incidenciaPayload);
+      if(stopPayload)await guardarPedidoChoferPasos(pedido.id,stopPayload);
+      else await cambiarEstadoPedido(pedido.id, "incidencia", incidenciaPayload);
       if (doc) {
         await subirPedidoDocChofer(pedido.id, uploadPayload);
       }
@@ -478,7 +481,8 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
       if (esErrorOffline(err)) {
         try {
           queueOfflineCriticalAction({
-            tipo: "pedido_estado",
+            tipo: stopPayload?"pedido_chofer_pasos":"pedido_estado",
+            ...(stopPayload?{patch:stopPayload}:{}),
             pedido_id: pedido.id,
             estado: "incidencia",
             body: incidenciaPayload,

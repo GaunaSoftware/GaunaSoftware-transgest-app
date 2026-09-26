@@ -67,7 +67,7 @@ async function readOperationalModel(db,empresaId,pedidoId) {
     db.query('SELECT * FROM parada_envios WHERE empresa_id=$1 AND viaje_id=ANY($2::uuid[])',[empresaId,ids]),
   ]);
   return {version_contrato:1,origen:'materializado',empresa_id:empresaId,pedido_id:pedidoId,
-    cobertura:'snapshot_operativo',advertencias:['Snapshot operativo: los flujos legacy aún se consultan en Pedidos. No se reconstruyen asignaciones históricas.'],
+    cobertura:'snapshot_operativo',advertencias:['Plan operativo con confirmaciones por parada de la app del chófer; se conserva la proyección compatible en Pedidos. No se reconstruyen asignaciones históricas.'],
     viajes:trips.map(trip=>({...trip,pedidos:orders.rows.filter(row=>row.viaje_id===trip.id).map(row=>row.pedido_id),
       envios:shipments.rows.filter(row=>row.viaje_id===trip.id),
       paradas:stops.rows.filter(row=>row.viaje_id===trip.id).map(stop=>({...stop,envios:goods.rows.filter(row=>row.parada_id===stop.id)}))}))};

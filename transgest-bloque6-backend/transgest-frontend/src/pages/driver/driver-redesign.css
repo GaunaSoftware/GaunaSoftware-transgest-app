@@ -66,3 +66,5 @@
 .driver-trip-reference{display:grid;gap:4px;background:var(--accent-a10);padding:10px;border-radius:8px;overflow-wrap:anywhere}.driver-trip-reference small{color:var(--text4)}
 
 .driver-stops-summary{padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);margin-bottom:12px}.driver-stops-summary h3{margin:0 0 10px}.driver-stops-summary details{padding:10px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}.driver-stops-summary summary{cursor:pointer;line-height:1.5;font-size:14px}.driver-stops-summary p{font-size:14px;margin:8px 0;color:var(--text3)}
+
+.driver-stops-summary ol{padding-left:22px;margin:10px 0}.driver-stops-summary li{margin:8px 0;line-height:1.5;overflow-wrap:anywhere}.driver-stops-summary li[aria-current="step"]{font-weight:700;color:var(--primary,#0f766e)}

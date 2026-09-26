@@ -11,6 +11,7 @@ import { getOfflineOwner, writeOfflineQueue, markOfflineAttempt, queueSummary, r
 import { DriverHeader, DriverNavigation, DriverHome, DriverMore, DriverIcon, DriverHeading } from "./driver/DriverUI";
 
 import { leerOfflineQueue, prepararArchivoEscaner, capturarUbicacionActual, buildUploadEvidence, FirmaLaboralCanvas } from "./driver/driverSupport";
+import DriverJourney from "./driver/DriverJourney";
 import { TarjetaViaje } from "./driver/DriverTrip";
 import { SolicitudMecanico } from "./driver/DriverWorkshop";
 import { JornadaChofer, ConjuntoChofer } from "./driver/DriverWorkday";
@@ -522,7 +523,7 @@ export default function AppChofer(){
             </div>
           ):(
             <>
-              {filtradosConProxima.filter(p => ["en_curso","descarga"].includes(String(p.estado || "").toLowerCase())).length > 1 && (
+              {new Set(filtradosConProxima.filter(p => ["en_curso","descarga"].includes(String(p.estado || "").toLowerCase())).map(p=>p.viaje_operativo?.id||p.grupaje_id||p.id)).size > 1 && (
                 <div style={{marginBottom:10,padding:"10px 12px",borderRadius:10,border:"1px solid rgba(239,68,68,.25)",background:"rgba(239,68,68,.08)",color:"#b91c1c",fontSize:14,fontWeight:800}}>
                   Hay mas de un viaje activo asignado. Finaliza o corrige el viaje anterior antes de iniciar nuevos estados.
                 </div>
@@ -540,6 +541,7 @@ export default function AppChofer(){
                   onExpandedChange={(open)=>{setExpandedPedidoId(open ? p.id : null);window.scrollTo({top:0,behavior:"auto"});}}
                   onFoto={()=>setCameraModal(p.id)}
                 />);
+                if (bloque.pedidos[0]?.viaje_operativo?.id && bloque.pedidos[0]?.grupaje_id) return <DriverJourney key={bloque.key} pedidos={pedidos.filter(p=>p.viaje_operativo?.id===bloque.pedidos[0].viaje_operativo.id)} fallback={tarjetas} onActualizar={cargar} jornadaInfo={jornadaInfo} onAbrirJornada={()=>setTab("jornada")} onFoto={setCameraModal}/>;
                 if (!bloque.grupaje) return tarjetas;
                 const hechas = bloque.pedidos.filter(p => ["entregado","facturado"].includes(String(p.estado||"").toLowerCase())).length;
                 return (

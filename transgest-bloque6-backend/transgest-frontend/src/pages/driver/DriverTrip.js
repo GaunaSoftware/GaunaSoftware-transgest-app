@@ -16,7 +16,8 @@ import { confirmDialog, notify } from "../../services/notify";
 
 
 import { normalizeChoferPasos, esViajeCisterna, leerPasosViaje, guardarPasosViaje, createDriverOfflineActions, esErrorOffline, capturarUbicacionActual, FirmaCanvas, ModalIncidencia, EscanerAlbaran, segundosDesdeIso, fmtDuracionSegundos, EC, PROTOCOLO_CISTERNA } from "./driverSupport";
-function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expanded = false, onExpandedChange, onFoto, featured = false }){
+const quantityInput=value=>value==null||value===''?'':Number.isFinite(Number(value))?String(Number(value)):String(value);
+function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expanded = false, onExpandedChange, onFoto, featured = false, journeyStopId }){
   const [{encolarOffline, queueOfflineCriticalAction}] = useState(createDriverOfflineActions);
   const [firmando,     setFirmando]     = useState(false);
   const [incidencia,   setIncidencia]   = useState(false);
@@ -25,8 +26,10 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const [proximaCarga, setProximaCarga] = useState(null);
   const kmActuales = ""; // Odometer entry belongs to the workday. Preserve historical trip readings.
   const [allSteps, setPasos] = useState({});
+  const [remoteState,setRemoteState]=useState(null);
+  const [stepsLoading,setStepsLoading]=useState(true),[stepsError,setStepsError]=useState(''),[stepsReload,setStepsReload]=useState(0);
   const stops=driverStops(pedido);
-  const activeStop=activeDriverStop(pedido,allSteps);
+  const activeStop=journeyStopId?stops.find(stop=>stop.id===journeyStopId):activeDriverStop(pedido,allSteps);
   const currentData=activeStop?stopData(activeStop,allSteps,stops):{};
   const pasos=activeStop?.tipo==='descarga'
     ? {...currentData,carga_iniciada:true,carga_proceso:true,carga_ok:true,albaran_carga:true,firma_cargador:true}
@@ -40,16 +43,16 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const [firmandoCargador, setFirmandoCargador] = useState(false);
   const [mercanciaCarga, setMercanciaCarga] = useState({
     mercancia: pedido.mercancia || pedido.descripcion_carga || "",
-    palets: pedido.bultos || "",
-    peso_kg: pedido.peso_kg || "",
+    palets: quantityInput(pedido.bultos),
+    peso_kg: quantityInput(pedido.peso_kg),
     referencia: pedido.referencia_cliente || "",
   });
-  const e = EC[transportStateKey(pedido)]||EC.pendiente;
+  const e = EC[transportStateKey(remoteState||pedido)]||EC.pendiente;
   useEffect(()=>{
     const stop=activeStop;
     const saved=stop?stopData(stop,allSteps,stops):{};
     const single=stop&&stops.filter(s=>s.tipo===stop.tipo).length===1;
-    setMercanciaCarga({mercancia:saved.mercancia_cargada||stop?.mercancia||pedido.mercancia||'',palets:saved.mercancia_palets||stop?.bultos||(single?pedido.bultos:'')||'',peso_kg:saved.mercancia_peso_kg||stop?.peso_kg||(single?pedido.peso_kg:'')||''});
+    setMercanciaCarga({mercancia:saved.mercancia_cargada||stop?.mercancia||pedido.mercancia||'',palets:quantityInput(saved.mercancia_palets||stop?.bultos||(single?pedido.bultos:'')),peso_kg:quantityInput(saved.mercancia_peso_kg||stop?.peso_kg||(single?pedido.peso_kg:''))});
     // Move the editor to the next stop without copying the previous stop's quantities.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[activeStop?.id,pedido.id]);
@@ -64,22 +67,21 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     let alive = true;
     const local = leerPasosViaje(pedido.id);
     setPasos({});
+    setRemoteState(null);
+    setStepsLoading(true);setStepsError('');
     getPedidoChoferPasos(pedido.id)
       .then((payload) => {
         if (!alive) return;
         const remote = normalizeChoferPasos(payload?.data || payload || {});
-        if (Object.keys(remote).length) {
-          setPasos(guardarPasosViaje(pedido.id, remote));
-          return;
-        }
-        setPasos(local);
+        restoreDriverSteps(pedido.id,remote);setPasos(remote);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!alive) return;
-        setPasos(local);
-      });
+        if(esErrorOffline(error))setPasos(local);
+        setStepsError(error.message||'No se pudo comprobar el avance de la parada.');
+      }).finally(()=>{if(alive)setStepsLoading(false);});
     return () => { alive = false; };
-  }, [pedido.id]);
+  }, [pedido.id,stepsReload]);
 
   useEffect(() => {
     let alive = true;
@@ -239,12 +241,14 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   async function persistirPasos(patch, { silent = false } = {}) {
     const operational=Object.keys(patch).some(k=>!k.startsWith('dcd_')&&k!=='updated_at');
     const normalized = normalizeChoferPasos({...patch,...(operational&&activeStop?{parada_id:activeStop.id}:{})});
+    if(normalized.parada_id){normalized.client_operation_uuid=crypto.randomUUID();normalized.observed_at=new Date().toISOString();if(patch.event_location)normalized.event_location=patch.event_location;}
     const previous = leerPasosViaje(pedido.id);
     const optimisticPatch=normalized.parada_id?{paradas:{...previous.paradas,[normalized.parada_id]:{...currentData,...normalized}}}:normalized;
     const optimistic = guardarPasosViaje(pedido.id, optimisticPatch);
     if(!normalized.parada_id)setPasos(optimistic);
     try {
       const saved = await guardarPedidoChoferPasos(pedido.id, normalized);
+      if(saved.estado)setRemoteState({estado:saved.estado,estado_operativo:saved.estado_operativo});
       const remote = normalizeChoferPasos(saved?.data || saved || {});
       if (Object.keys(remote).length) {
         setPasos(guardarPasosViaje(pedido.id, remote));
@@ -280,8 +284,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
   async function marcarPaso(key, value=true) {
     if(!jornadaInfo?.jornada) {notify("Abre jornada antes de continuar el viaje.","warning");onAbrirJornada?.();throw new Error("Jornada cerrada");}
-    const patch = { [key]: value, [`${key}_at`]: new Date().toISOString(), ...patchKmParaPaso(key) };
-    return persistirPasos(patch, { silent: true });
+    setLoading(true);
+    try {
+    const location = ["carga_iniciada","carga_proceso","carga_ok","posicionado_descarga","descarga_iniciada","descarga_ok"].includes(key)?await capturarUbicacionActual():null;
+    const patch = { [key]: value, [`${key}_at`]: new Date().toISOString(), ...patchKmParaPaso(key), ...(location?{event_location:location}:{}) };
+    return await persistirPasos(patch, { silent: true });
+    } finally {setLoading(false);}
   }
 
   async function albaranSubido(key) {
@@ -444,7 +452,6 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     if (!(await confirmarDcdAntesDeSalir())) return;
     setLoading(true);
     try {
-      await cambiarEstadoPedido(pedido.id, "en_curso");
       await marcarPaso("viaje_iniciado");
       notify("Viaje iniciado hacia descarga.", "success");
     } catch (err) {
@@ -471,7 +478,6 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     }
     setLoading(true);
     try {
-      await cambiarEstadoPedido(pedido.id, "descarga");
       await marcarPaso("descarga_iniciada");
       onActualizar();
     } catch (err) {
@@ -728,7 +734,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
             {[
               ["Mercancía",pedido.mercancia||pedido.descripcion_carga||"-"],
-              ["Peso",pedido.peso_kg?(pedido.peso_kg+" kg"):"-"],
+              ["Peso",pedido.peso_kg!=null&&Number.isFinite(Number(pedido.peso_kg))?(Number(pedido.peso_kg).toLocaleString('es-ES')+" kg"):"-"],
               ["Bultos/Palets",pedido.bultos||"-"],
             ].map(([l,v])=>(
               <div key={l} style={{background:"var(--bg4)",borderRadius:7,padding:"8px 10px"}}>
@@ -937,7 +943,9 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           )}
 
           <section className="driver-stops-summary"><h3>Cargas y descargas</h3>{stops.map(stop=>{const data=stopData(stop,allSteps,stops);return <details key={stop.id} open={stop.id===activeStop?.id}><summary>{stop.tipo==='carga'?'Carga':'Descarga'} {stop.index+1} · {stop.label} · {stopDone(stop,data)?'Completada':stop.id===activeStop?.id?'Actual':'Pendiente'}</summary><p>{stop.fecha_carga||stop.fecha_descarga||stop.fecha||''} {stop.hora_carga||stop.hora_descarga||stop.hora||stop.ventana||''}</p>{(stop.referencia_cliente||stop.referencia)&&<p>Referencia: <strong>{stop.referencia_cliente||stop.referencia}</strong></p>}{data.mercancia_confirmada&&<p>{data.mercancia_cargada} · {data.mercancia_palets} bultos · {Number(data.mercancia_peso_kg).toLocaleString('es-ES')} kg</p>}</details>;})}</section>
-          {nextStep && (
+          {stepsLoading&&<p role="status">Comprobando el avance de esta parada…</p>}
+          {stepsError&&<p role="alert">{stepsError} <button onClick={()=>setStepsReload(value=>value+1)}>Reintentar</button></p>}
+          {nextStep && !stepsLoading && !stepsError && (
             <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.22)",borderRadius:10,padding:12,marginBottom:12}}>
               <div style={{fontWeight:900,fontSize:14,color:"var(--text)",marginBottom:4}}>{nextStep.label}</div>
               <div style={{fontSize:14,color:"var(--text5)",marginBottom:10,lineHeight:1.45}}>{nextStep.help}</div>
@@ -1059,7 +1067,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
           onCancel={()=>setFirmandoCargador(false)}
         />
       )}
-      {incidencia&&<ModalIncidencia pedido={pedido} fase={incidenciaFase} onClose={()=>setIncidencia(false)} onGuardado={()=>{setIncidencia(false);onActualizar();}}/>}
+      {incidencia&&<ModalIncidencia pedido={pedido} parada={activeStop} fase={incidenciaFase} onClose={()=>setIncidencia(false)} onGuardado={()=>{setIncidencia(false);onActualizar();}}/>}
       {qrVisible&&(
         <div className="driver-overlay" style={{position:"fixed",inset:0,background:"rgba(2,6,23,.96)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
           <div style={{width:"min(390px,94vw)",background:"#fff",color:"#111827",borderRadius:12,padding:18,textAlign:"center",boxShadow:"0 24px 80px rgba(0,0,0,.45)"}}>

@@ -69,19 +69,34 @@ function mergeStop(order,all,patch) {
   const delivered=unloads.map(s=>paradas[s.id]).filter(d=>d?.mercancia_confirmada);
   if(delivered.reduce((sum,d)=>sum+number(d.mercancia_peso_kg),0)>goods.peso_kg+0.01||delivered.reduce((sum,d)=>sum+number(d.mercancia_palets),0)>goods.bultos)reject('La suma de las descargas supera la mercancía cargada. Revisa las cantidades.');
  }
- const state=stateFromStop(stop,next,completeDelivery);
+ const state=patch.incidencia_parada?'incidencia':stateFromStop(stop,next,completeDelivery);
  assertTransportTransition(order.estado,state);
 
  return {data:result,goods,state,stop,unloadingComplete:unloads.every(s=>paradas[s.id]?.descarga_ok)};
 }
-async function saveStop(db,{pedidoId,empresaId,choferId,patch}) {
+async function saveStop(db,{pedidoId,empresaId,choferId,patch,actorId,authorize}) {
+ const journeyService=require('./driverJourney');
  return db.transaction(async client=>{
+  // Same first lock as traffic plan/assignment writers; serialize whole journeys.
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
   const order=(await client.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[pedidoId,empresaId])).rows[0];
   if(!order)reject('Pedido no encontrado.');
+  if(authorize&&!authorize(order))throw Object.assign(new Error('La asignación del viaje ha cambiado.'),{status:403,code:'DRIVER_ASSIGNMENT_CHANGED'});
+  const operation=await journeyService.beginOperation(client,{empresaId,pedidoId,operationId:patch.client_operation_uuid,patch});
+  if(operation?.result)return {...operation.result,idempotent:true};
   if(['cancelado','facturado'].includes(order.estado))reject('Este viaje ya no admite cambios operativos.');
   const current=(await client.query('SELECT data FROM pedido_chofer_pasos WHERE pedido_id=$1 AND empresa_id=$2',[pedidoId,empresaId])).rows[0]?.data||{};
-  const merged=mergeStop(order,current,patch);
-  if(merged.idempotent)return merged;
+  const journey=await journeyService.loadJourney(client,empresaId,pedidoId,{lock:true});
+  if(journey&&authorize&&journey.orders.some(item=>!authorize(item)))throw Object.assign(new Error('La asignación del grupaje ha cambiado.'),{status:403,code:'DRIVER_ASSIGNMENT_CHANGED'});
+  const target=journeyService.assertNextStop(journey,pedidoId,patch.parada_id);
+  const now=new Date().toISOString();
+  const effective=journeyService.serverPatch(patch,current.paradas?.[patch.parada_id]||{},now);
+  const merged=mergeStop(order,current,effective);
+  if(merged.idempotent){
+    // A new operation UUID retrying a completed stop still receives a receipt.
+    if(operation)await journeyService.recordStop(client,{empresaId,pedidoId,actorId,operation,patch,merged,order,now});
+    return merged;
+  }
   if(patch.firma_cargador||patch.firma_entrega){
    const evidence=order.firma_evidencia?.paradas?.[patch.parada_id];
    if(!evidence?.firma?.hash)reject('Registra primero la firma de esta parada.');
@@ -89,17 +104,19 @@ async function saveStop(db,{pedidoId,empresaId,choferId,patch}) {
   // Serialize assignment checks for the same truck/driver as well as the trip.
   const resources=[order.vehiculo_id,order.chofer_id,order.chofer2_id].filter(Boolean).sort();
   for(const resource of resources)await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:${resource}`]);
-  const other=(await client.query(`SELECT id,numero FROM pedidos WHERE empresa_id=$1 AND id<>$2 AND estado::text IN ('en_curso','descarga','cargando','espera_carga','espera_descarga') AND (($3::uuid IS NOT NULL AND vehiculo_id=$3) OR chofer_id=ANY($4::uuid[]) OR chofer2_id=ANY($4::uuid[])) LIMIT 1`,[empresaId,pedidoId,order.vehiculo_id||null,[order.chofer_id,order.chofer2_id].filter(Boolean)])).rows[0];
+  const other=(await client.query(`SELECT id,numero FROM pedidos WHERE empresa_id=$1 AND id<>$2 AND NOT(id=ANY($5::uuid[])) AND estado::text IN ('en_curso','descarga','cargando','espera_carga','espera_descarga') AND (($3::uuid IS NOT NULL AND vehiculo_id=$3) OR chofer_id=ANY($4::uuid[]) OR chofer2_id=ANY($4::uuid[])) LIMIT 1`,[empresaId,pedidoId,order.vehiculo_id||null,[order.chofer_id,order.chofer2_id].filter(Boolean),journey?.orders.map(item=>item.id)||[]])).rows[0];
   if(other)reject(`El vehículo o conductor tiene otro viaje activo (${other.numero||other.id}).`);
   await client.query(`INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,chofer_id,data,updated_at) VALUES($1,$2,$3,$4,NOW())
    ON CONFLICT(pedido_id) DO UPDATE SET data=EXCLUDED.data,chofer_id=COALESCE(EXCLUDED.chofer_id,pedido_chofer_pasos.chofer_id),updated_at=NOW()`,[pedidoId,empresaId,choferId,JSON.stringify(merged.data)]);
   await client.query('UPDATE pedidos SET estado=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3',[merged.state,pedidoId,empresaId]);
+  if(patch.incidencia_parada)await client.query("UPDATE pedidos SET incidencia_descripcion=$3,incidencia_tipo='operativa',incidencia_origen='chofer',incidencia_creada_at=NOW(),incidencia_creada_por=$4 WHERE id=$1 AND empresa_id=$2",[pedidoId,empresaId,patch.incidencia_parada,actorId||null]);
   if(patch.carga_ok)await client.query('UPDATE pedidos SET carga_real_at=COALESCE(carga_real_at,NOW()) WHERE id=$1 AND empresa_id=$2',[pedidoId,empresaId]);
   // Physical unloading and signed delivery are separate events. The global
   // descarga_ok compatibility flag represents signed completion of all stops.
   if(patch.descarga_ok&&merged.unloadingComplete)await client.query('UPDATE pedidos SET descarga_real_at=COALESCE(descarga_real_at,NOW()) WHERE id=$1 AND empresa_id=$2',[pedidoId,empresaId]);
   if(merged.goods)await client.query('UPDATE pedidos SET mercancia=$1,bultos=$2,peso_kg=$3,updated_at=NOW() WHERE id=$4 AND empresa_id=$5',[merged.goods.mercancia,merged.goods.bultos,merged.goods.peso_kg,pedidoId,empresaId]);
-  if(choferId)await client.query("UPDATE choferes SET estado=$1 WHERE id=$2 AND empresa_id=$3 AND COALESCE(estado,'disponible') NOT IN ('baja','vacaciones','ausencia')",[merged.state==='entregado'?'disponible':merged.state==='en_curso'?'en_ruta':merged.stop.tipo==='descarga'?'descargando':'carga',choferId,empresaId]);
+  await journeyService.recordStop(client,{empresaId,pedidoId,actorId,journey,target,operation,patch,merged,order,now});
+  if(choferId)await client.query("UPDATE choferes SET estado=$1 WHERE id=$2 AND empresa_id=$3 AND COALESCE(estado,'disponible') NOT IN ('baja','vacaciones','ausencia')",[merged.state==='entregado'&&(!journey||merged.journeyComplete)?'disponible':['en_curso','entregado'].includes(merged.state)?'en_ruta':merged.stop.tipo==='descarga'?'descargando':'carga',choferId,empresaId]);
   return merged;
  });
 }

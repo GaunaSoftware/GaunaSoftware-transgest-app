@@ -932,6 +932,12 @@ function normalizeChoferPasosPayload(value = {}) {
   }
   if(source.paradas && typeof source.paradas==='object') next.paradas=source.paradas;
   if(source.parada_id) next.parada_id=String(source.parada_id).slice(0,180);
+  if(source.parada_id){
+    if(source.incidencia_parada)next.incidencia_parada=String(source.incidencia_parada).trim().slice(0,3000);
+    if(source.client_operation_uuid)next.client_operation_uuid=String(source.client_operation_uuid);
+    if(source.observed_at)next.observed_at=String(source.observed_at);
+    if(source.event_location)next.event_location=source.event_location;
+  }
   return next;
 }
 
@@ -1735,11 +1741,12 @@ async function savePedidoChoferPasos({
   patch = {},
   actorTipo = "sistema",
   actorId = null,
+  authorize = null,
 }) {
   await ensureColaboradorWorkflowSchema();
   let stopResult=null;
   if(patch.parada_id){
-    const result=await require('../services/driverStops').saveStop(db,{pedidoId,empresaId,choferId,patch});
+    const result=await require('../services/driverStops').saveStop(db,{pedidoId,empresaId,choferId,patch,actorId,authorize});
     if(result.idempotent)return result.data;
     await logPedidoEvento(pedidoId,empresaId,'chofer_parada.actualizada',{parada_id:patch.parada_id,parada:result.data.paradas[patch.parada_id]},actorTipo,actorId);
     if(result.state==='entregado')await programarAutomatismosEntrega(pedidoId,empresaId,actorId,{});
@@ -5932,7 +5939,7 @@ router.get("/", async (req, res) => {
       i++;
     }
     if (access.vehiculoIds.length) {
-      ownClauses.push(`p.vehiculo_id = ANY($${i}::uuid[])`);
+      ownClauses.push(`(p.chofer_id IS NULL AND p.chofer2_id IS NULL AND p.vehiculo_id = ANY($${i}::uuid[]))`);
       params.push(access.vehiculoIds);
       i++;
     }
@@ -6451,7 +6458,7 @@ router.get("/resumen-lista", async (req, res) => {
         i++;
       }
       if (access.vehiculoIds.length) {
-        ownClauses.push(`p.vehiculo_id = ANY($${i++}::uuid[])`);
+        ownClauses.push(`(p.chofer_id IS NULL AND p.chofer2_id IS NULL AND p.vehiculo_id = ANY($${i++}::uuid[]))`);
         params.push(access.vehiculoIds);
       }
       where.push(`(${ownClauses.join(" OR ")})`);
@@ -7888,9 +7895,10 @@ router.get("/:id/chofer-pasos", async (req, res) => {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
     const payload = await getPedidoChoferPasos(req.params.id, empresaId);
+    payload.viaje_operativo=await require('../services/driverJourney').driverJourneyContext(db,empresaId,req.params.id,order=>usuarioPuedeGestionarPedido(req,order));
     res.json(payload);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status||500).json({ error: e.message,code:e.code });
   }
 });
 
@@ -7910,9 +7918,12 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
     const patch = normalizeChoferPasosPayload(req.body || {});
     if(req.user?.rol==='chofer'&&!patch.parada_id&&Object.keys(patch).some(key=>!key.startsWith('dcd_')&&key!=='updated_at')) {
       const existing=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
-      if(existing.paradas || require('../services/driverStops').driverStops(pedido).length>2)return res.status(409).json({error:'Actualiza la app para confirmar cada carga y descarga por separado.',code:'DRIVER_STOP_REQUIRED'});
+      if(existing.paradas || require('../services/driverStops').driverStops(pedido).length>2 || await require('../services/driverJourney').loadJourney(db,empresaId,req.params.id))return res.status(409).json({error:'Actualiza la app para confirmar cada carga y descarga por separado.',code:'DRIVER_STOP_REQUIRED'});
     }
     if(Object.keys(patch).some(key=>!key.startsWith("dcd_") && key!=="updated_at")) await assertDriverWorkday(req);
+    const driverAccess=req.user?.rol==='chofer'?await getChoferAccessForUser(req.user,empresaId):null;
+    const authorize=driverAccess?order=>driverAccess.choferIds.some(id=>id===String(order.chofer_id||'')||id===String(order.chofer2_id||''))
+      ||(!order.chofer_id&&!order.chofer2_id&&driverAccess.vehiculoIds.some(id=>id===String(order.vehiculo_id||''))):null;
     const saved = await savePedidoChoferPasos({
       pedidoId: req.params.id,
       empresaId,
@@ -7920,8 +7931,10 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
       patch,
       actorTipo: req.user?.rol === "chofer" ? "chofer" : "usuario",
       actorId: req.user?.id || null,
+      authorize,
     });
-    res.json({ ok: true, data: saved });
+    const currentOrder=(await db.query('SELECT estado,origen,destino,puntos_carga,puntos_descarga FROM pedidos WHERE id=$1 AND empresa_id=$2',[req.params.id,empresaId])).rows[0];
+    res.json({ ok: true, data: saved, estado:currentOrder?.estado, estado_operativo:currentOrder?require('../services/transportProgress').transportProgress(currentOrder,saved):null });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message, code: e.code || undefined, pedido_activo: e.pedido_activo || undefined });
   }
@@ -9181,6 +9194,9 @@ router.patch("/:id/estado",
     }
     if (req.user?.rol === "chofer" && !["espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","incidencia"].includes(estado)) {
       return res.status(403).json({ error: "El chofer no puede aplicar este estado" });
+    }
+    if(req.user?.rol==='chofer'&&estado!=='incidencia'&&(require('../services/driverStops').driverStops(rows[0]).length>2||await require('../services/driverJourney').loadJourney(db,empresaId,req.params.id))){
+      return res.status(409).json({error:'Confirma la acción en la parada correspondiente; no puedes completar el viaje con un estado global.',code:'DRIVER_STOP_REQUIRED'});
     }
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });

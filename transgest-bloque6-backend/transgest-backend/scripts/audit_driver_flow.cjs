@@ -84,6 +84,10 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   const otherDriver = crypto.randomUUID(), otherTrip = crypto.randomUUID(), otherCompany = crypto.randomUUID(), foreignTrip = crypto.randomUUID(), foreignClient = crypto.randomUUID();
   await db.query("INSERT INTO choferes(id,empresa_id,nombre,apellidos) VALUES($1,$2,'Otro','Sintético')", [otherDriver, company]);
   await db.query("INSERT INTO pedidos(id,empresa_id,numero,chofer_id,vehiculo_id,cliente_id,estado) VALUES($1,$2,'AJENO-SINTETICO',$3,$4,$5,'confirmado')", [otherTrip, company, otherDriver, vehicle.id, client.id]);
+  for(const endpoint of ['/pedidos','/pedidos/resumen-lista']){
+    const own=await request('GET',endpoint+'?q=AJENO-SINTETICO');
+    assert.equal(own.data.some(item=>item.id===otherTrip),false,'A shared truck must not expose another assigned driver’s order in the list');
+  }
   await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'Empresa aislada sintética','B00000009','tenant-b@example.invalid','enterprise','activa')", [otherCompany]);
   await db.query("INSERT INTO clientes(id,empresa_id,nombre) VALUES($1,$2,'Cliente aislado sintético')", [foreignClient, otherCompany]);
   await db.query("INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado) VALUES($1,$2,$3,'OTRA-EMPRESA','confirmado')", [foreignTrip, otherCompany, foreignClient]);

@@ -5,6 +5,7 @@ async function main(){
   const original=db.query;
   let order={id:'order',chofer_id:null,chofer2_id:null,vehiculo_id:'vehicle'};
   db.query=async(sql,params)=>{
+    if(sql.includes('to_regclass'))return {rows:[{name:null}]}; // Compatibility installation without the new graph.
     if(sql.includes('FROM pedidos WHERE')){assert.match(sql,/vehiculo_id/);assert.deepEqual(params,['order','tenant']);return {rows:order?[order]:[]};}
     if(sql.includes('FROM choferes')){assert.equal(params[0],'tenant');assert.doesNotMatch(sql,/LOWER\(TRIM\(nombre/);return {rows:[{id:'driver',vehiculo_id:'vehicle'}]};}
     if(sql.includes('FROM pedido_chofer_pasos'))return {rows:[{data:{carga_iniciada:true}}]};

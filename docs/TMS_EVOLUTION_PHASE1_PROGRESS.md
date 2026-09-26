@@ -1,6 +1,6 @@
 # TransGest TMS — progreso de fase 1
 
-Base: auditoría en `TMS_EVOLUTION_PHASE0_AUDIT.md`. La fase 1 **no está cerrada** y no autoriza avanzar a fase 2.
+Base: auditoría en `TMS_EVOLUTION_PHASE0_AUDIT.md`. La tabla inicial conserva el estado de las primeras comprobaciones; las ampliaciones siguientes actualizan su evidencia. El 26/09/2026 las puertas de regresión están en verde y permiten iniciar el modelo aditivo de fase 2. Los límites documentales, ETA, dispositivos e integraciones siguen pendientes en sus fases específicas; esto no declara finalizada ni publicable la evolución.
 
 | Bloque | Estado | Evidencia y siguiente paso |
 | --- | --- | --- |

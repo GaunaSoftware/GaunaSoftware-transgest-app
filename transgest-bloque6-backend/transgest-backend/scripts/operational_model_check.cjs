@@ -1,0 +1,68 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {PGlite}=require('@electric-sql/pglite');
+const {legacyOperationalModel,readOperationalModel,materializeSimpleOrder}=require('../src/services/operationalModel');
+async function main(){
+ const company=crypto.randomUUID(),other=crypto.randomUUID(),id=crypto.randomUUID(),pg=new PGlite();
+ const simple={id,empresa_id:company,estado:'confirmado',origen:'Valencia',destino:'Madrid',mercancia:'Sacos',peso_kg:1000,bultos:4,
+   km_ruta:360,km_vacio:10,importe:500,fecha_carga:'2026-10-25',hora_carga:'02:30',puntos_carga:[{id:'origin',direccion:'Calle A',ciudad:'Valencia',lat:39.4,lng:-0.3}],puntos_descarga:[{id:'destination',direccion:'Calle B',ciudad:'Madrid'}]};
+ let injectFailure=false;
+ const wrap=executor=>({query:(sql,args)=>{if(injectFailure&&sql.includes('INSERT INTO pedido_eventos'))throw Error('injected audit failure');return executor.query(sql,args);}});
+ const db={...wrap(pg),transaction:fn=>pg.transaction(tx=>fn(wrap(tx)))};
+ const save=(pedidoId=id,operationId=crypto.randomUUID(),empresaId=company)=>materializeSimpleOrder(db,{empresaId,pedidoId,operationId});
+ try {
+  const legacy=legacyOperationalModel(simple);
+  assert.equal(legacy.viajes[0].envios.length,1);assert.equal(legacy.viajes[0].paradas.length,2);
+  assert.equal(legacy.viajes[0].paradas[0].llegada_real_at,null,'Planned time is not an actual event, including DST');
+  assert.equal(legacy.viajes[0].paradas[0].planificacion.hora,'02:30');
+  const timed=legacyOperationalModel(simple,{carga_iniciada_at:'2026-10-25T01:30:00Z'});
+  assert.equal(timed.viajes[0].paradas[0].llegada_real_at,'2026-10-25T01:30:00.000Z');
+  assert.equal(timed.viajes[0].paradas[1].llegada_real_at,null);
+  assert.equal(legacyOperationalModel({...simple,fecha_carga:'2026-02-30',hora_carga:'25:60'}).viajes[0].paradas[0].planificacion.fecha,null);
+  assert.equal(legacyOperationalModel({...simple,fecha_carga:'2026-02-30',hora_carga:'25:60'}).viajes[0].paradas[0].planificacion.hora,null);
+  const multiple=legacyOperationalModel({...simple,puntos_descarga:[...simple.puntos_descarga,{id:'second',direccion:'C'}]},{carga_ok:true});
+  assert.equal(multiple.cobertura,'requiere_identificar_envios');assert.equal(multiple.viajes[0].envios.length,0);assert.equal(multiple.viajes[0].paradas.length,3);
+  assert.equal(legacyOperationalModel({...simple,grupaje_id:12}).viajes[0].km_cargados,null);
+  await pg.exec(`CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,estado text,origen text,destino text,mercancia text,peso_kg numeric,bultos numeric,km_ruta numeric,km_vacio numeric,importe numeric,fecha_carga date,hora_carga text,puntos_carga jsonb,puntos_descarga jsonb,vehiculo_id uuid);
+    CREATE TABLE pedido_chofer_pasos(pedido_id uuid,empresa_id uuid,data jsonb);
+    CREATE TABLE pedido_eventos(pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,actor_id uuid,detalle jsonb);
+    CREATE TABLE vehiculos(id uuid PRIMARY KEY,empresa_id uuid);`);
+  const insert=async(order)=>{const keys=Object.keys(order);await pg.query(`INSERT INTO pedidos(${keys.join(',')}) VALUES(${keys.map((_,i)=>'$'+(i+1)).join(',')})`,keys.map(key=>Array.isArray(order[key])?JSON.stringify(order[key]):order[key]));};
+  await insert(simple);
+  assert.equal((await readOperationalModel(db,company,id)).origen,'legacy','Compatible read before migration');
+  await assert.rejects(readOperationalModel(db,other,id),{status:404});
+  const sql=fs.readFileSync(path.join(__dirname,'migrations/20260926_operational_model.sql'),'utf8');
+  await pg.exec(sql);await pg.exec(sql);
+  const before=(await pg.query('SELECT * FROM pedidos WHERE id=$1',[id])).rows[0];
+  injectFailure=true;await assert.rejects(save(),/injected audit failure/);injectFailure=false;
+  assert.equal((await pg.query('SELECT COUNT(*)::int n FROM viajes_operativos')).rows[0].n,0,'Whole graph rolled back');
+  const op=crypto.randomUUID(),first=await save(id,op),retry=await save(id,op);
+  assert.equal(first.created,true);assert.deepEqual(retry,{viaje_id:first.viaje_id,created:false});
+  assert.deepEqual((await pg.query('SELECT * FROM pedidos WHERE id=$1',[id])).rows[0],before,'Commercial order untouched');
+  const model=await readOperationalModel(db,company,id);
+  assert.equal(model.viajes[0].envios.length,1);assert.equal(model.viajes[0].paradas.length,2);
+  assert.equal(model.viajes[0].paradas[0].envios[0].peso_kg,'1000');
+  assert.equal((await pg.query('SELECT COUNT(*)::int n FROM pedido_eventos')).rows[0].n,1);
+  const second=crypto.randomUUID();await insert({...simple,id:second});
+  await assert.rejects(save(second,op),{code:'OPERATION_CONFLICT'});
+  await assert.rejects(save(id,crypto.randomUUID(),other),{status:404});
+  const third=crypto.randomUUID();await insert({...simple,id:third,puntos_descarga:[...simple.puntos_descarga,{direccion:'C'}]});
+  await assert.rejects(save(third),{code:'SHIPMENT_MAPPING_REQUIRED'});
+  const started=crypto.randomUUID();await insert({...simple,id:started,estado:'en_curso'});await assert.rejects(save(started),{code:'ORDER_ALREADY_STARTED'});
+  await pg.query('INSERT INTO pedido_chofer_pasos VALUES($1,$2,$3)',[second,company,JSON.stringify({carga_iniciada_at:new Date().toISOString()})]);
+  await assert.rejects(save(second),{code:'ORDER_ALREADY_STARTED'});
+  await pg.query('DELETE FROM pedido_chofer_pasos WHERE pedido_id=$1',[second]);
+  const truck=crypto.randomUUID();await pg.query('INSERT INTO vehiculos VALUES($1,$2)',[truck,other]);await pg.query('UPDATE pedidos SET vehiculo_id=$1 WHERE id=$2',[truck,second]);
+  await assert.rejects(save(second),{code:'ASSIGNMENT_SCOPE'});
+  await pg.query('UPDATE vehiculos SET empresa_id=$1 WHERE id=$2',[company,truck]);
+  const actual=await save(second);await pg.query('UPDATE pedidos SET vehiculo_id=NULL WHERE id=$1',[second]);
+  assert.equal((await readOperationalModel(db,company,second)).viajes[0].asignacion_snapshot.vehiculo_id,truck,'Resource snapshot retained');
+  await assert.rejects(pg.query('INSERT INTO viaje_pedidos VALUES($1,$2,$3)',[other,first.viaje_id,id]),{code:'23503'});
+  const secondModel=await readOperationalModel(db,company,second),otherShipment=secondModel.viajes[0].envios[0].id;
+  await assert.rejects(pg.query('INSERT INTO viaje_envios VALUES($1,$2,$3,$4)',[company,first.viaje_id,otherShipment,second]),{code:'23503'},'Shipment must belong to a journey order');
+  await assert.rejects(pg.query('INSERT INTO parada_envios(empresa_id,viaje_id,parada_id,envio_id) VALUES($1,$2,$3,$4)',[company,actual.viaje_id,model.viajes[0].paradas[0].id,otherShipment]),{code:'23503'});
+  const outage={query:async()=>{throw Object.assign(Error('unavailable'),{code:'08006'});}};
+  await assert.rejects(readOperationalModel(outage,company,id),/unavailable/);
+  console.log('PASS operational model: repeatable migration, legacy/no fictitious shipments, explicit real times/DST, tenant graph constraints, resource history, retries, rollback and no commercial mutation.');
+ } finally {await pg.close();}
+}
+main().catch(error=>{console.error(error);process.exitCode=1;});

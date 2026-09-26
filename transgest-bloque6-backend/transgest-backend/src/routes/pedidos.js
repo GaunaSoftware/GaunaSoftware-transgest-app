@@ -1,4 +1,5 @@
 const { WRITABLE_STATES, ACTIVE_STATES, assertTransportTransition, stateFromProgress } = require('../services/transportTransitions');
+const { readOperationalModel, materializeSimpleOrder } = require('../services/operationalModel');
 const { assertDriverWorkday } = require('../services/driverWorkday');
 const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
@@ -3743,6 +3744,25 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) =>
 });
 
 router.use(authenticate);
+
+// Office-only graph: shared journeys may contain several customers/orders.
+// Driver/customer views must use their existing, individually authorized APIs.
+router.get('/:id/operativa', requireRole('gerente','trafico','administrativo','contable','visualizador'), async (req,res,next)=>{
+  try {
+    if(!UUID_RE.test(req.params.id))return res.status(400).json({error:'Identificador de pedido no válido'});
+    res.set('Cache-Control','private, no-store');
+    res.json(await readOperationalModel(db,req.user.empresa_id,req.params.id));
+  } catch(error){next(error);}
+});
+router.post('/:id/operativa', GESTION_PEDIDOS_ESCRITURA, async (req,res,next)=>{
+  try {
+    if(!UUID_RE.test(req.params.id))return res.status(400).json({error:'Identificador de pedido no válido'});
+    const result=await materializeSimpleOrder(db,{empresaId:req.user.empresa_id,pedidoId:req.params.id,
+      operationId:req.body?.client_operation_uuid,actorId:req.user.id});
+    res.set('Cache-Control','private, no-store');
+    res.status(result.created?201:200).json(result);
+  } catch(error){next(error);}
+});
 
 function getMissingColumn(error) {
   if (!error || error.code !== "42703") return null;

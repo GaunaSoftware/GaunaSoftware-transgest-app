@@ -1,0 +1,82 @@
+name: Android release (manual, no publicación)
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: VersionCode superior al último publicado
+        type: string
+        required: true
+      version_name:
+        description: Versión visible
+        type: string
+        required: true
+      enable_push:
+        description: Incluir configuración Firebase del proyecto autorizado
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    environment: android-release
+    defaults:
+      run:
+        working-directory: transgest-bloque6-backend/transgest-frontend
+    env:
+      TRANSGEST_ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+      TRANSGEST_ANDROID_VERSION_NAME: ${{ inputs.version_name }}
+      TRANSGEST_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+      TRANSGEST_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      TRANSGEST_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: transgest-bloque6-backend/transgest-frontend/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Validar versión y firma
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" && test -n "$TRANSGEST_ANDROID_STORE_PASSWORD" && test -n "$TRANSGEST_ANDROID_KEY_ALIAS" && test -n "$TRANSGEST_ANDROID_KEY_PASSWORD"
+          [[ "$TRANSGEST_ANDROID_VERSION_CODE" =~ ^[1-9][0-9]{0,8}$ ]]
+          [[ "$TRANSGEST_ANDROID_VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][a-zA-Z0-9]+)?$ ]]
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/transgest-upload.jks"
+          chmod 600 "$RUNNER_TEMP/transgest-upload.jks"
+          printf 'TRANSGEST_ANDROID_KEYSTORE=%s\n' "$RUNNER_TEMP/transgest-upload.jks" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Configuración Firebase opcional
+        if: inputs.enable_push
+        env:
+          GOOGLE_SERVICES_BASE64: ${{ secrets.ANDROID_GOOGLE_SERVICES_BASE64 }}
+        run: |
+          test -n "$GOOGLE_SERVICES_BASE64"
+          printf '%s' "$GOOGLE_SERVICES_BASE64" | base64 --decode > android/app/google-services.json
+      - run: npm test -- --watchAll=false --runInBand
+      - name: Construir y sincronizar la app de producción
+        env:
+          CI: 'false'
+        run: npm run mobile:android:prepare
+      - name: Compilar y probar Android
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:bundleRelease --no-daemon
+          jarsigner -verify app/build/outputs/bundle/release/app-release.aab | tee verified.txt
+          grep -q 'jar verified' verified.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transgest-android-${{ inputs.version_code }}
+          path: transgest-bloque6-backend/transgest-frontend/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 7
+      - name: Eliminar clave temporal del runner
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/transgest-upload.jks"

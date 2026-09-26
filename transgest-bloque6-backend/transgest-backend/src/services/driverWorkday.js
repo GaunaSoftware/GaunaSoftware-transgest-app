@@ -35,6 +35,7 @@ async function externalGpsTimestamp(empresaId, vehicleId) {
   const { rows } = await db.query(
     `SELECT recorded_at FROM gps_position_log WHERE empresa_id=$1 AND vehiculo_id=$2
       AND provider NOT IN ('app_chofer','manual') AND lat IS NOT NULL AND lng IS NOT NULL
+      AND raw->>'timestamp_source'='device'
       ORDER BY recorded_at DESC LIMIT 1`, [empresaId, vehicleId]
   );
   return rows[0]?.recorded_at || null;

@@ -1,7 +1,13 @@
 import {planHasFeature} from "../utils/planFeatures";
+import {listenDriverDeepLinks} from '../services/driverDeepLinks';
+import {enableMobilePush,disableMobilePush} from '../services/mobilePush';
 import DriverExpenses from "./driver/DriverExpenses";
+import DriverDownloadedDocuments from './driver/DriverDownloadedDocuments';
+import {hasNativeDocuments} from '../services/nativeDocuments';
+import NativeTrackingControls from './driver/NativeTrackingControls';
+import {hasNativeDriverTracking} from '../services/nativeDriverTracking';
 import { useState, useEffect, useRef, useCallback } from "react";
-import { getPedidos, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDocChofer, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
+import { getPedidos, getPedido, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDocChofer, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
 import { confirmDialog, notify } from "../services/notify";
@@ -44,6 +50,7 @@ export default function AppChofer(){
   const [loadError, setLoadError] = useState("");
   const [firmaBaseOpen, setFirmaBaseOpen] = useState(false);
   const [firmaBaseForzada, setFirmaBaseForzada] = useState(false);
+  useEffect(()=>{const stop=()=>{disableMobilePush().catch(()=>{});};window.addEventListener('tms:session-cleared',stop);return()=>{window.removeEventListener('tms:session-cleared',stop);stop();};},[]);
   useEffect(()=>{
     let disposed=false,remove=null;
     listenNativeBack(async()=>{
@@ -55,6 +62,14 @@ export default function AppChofer(){
     }).then(fn=>{if(disposed)fn();else remove=fn;});
     return()=>{disposed=true;remove?.();};
   },[tab,expandedPedidoId]);
+  useEffect(()=>{
+    let disposed=false,remove=null;
+    listenDriverDeepLinks(async id=>{
+      try{const order=await getPedido(id);if(disposed)return;setPedidos(previous=>previous.some(p=>p.id===id)?previous:[order,...previous]);updateTab(['entregado','facturado','cancelado'].includes(order.estado)?'historial':'activos');setExpandedPedidoId(id);}
+      catch(e){if(!disposed)notify(e.message||'No tienes acceso a este viaje.','error');}
+    }).then(fn=>{if(disposed)fn();else remove=fn;});
+    return()=>{disposed=true;remove?.();};
+  },[user?.id,user?.empresa_id]);
   const gpsSeguimientoRef = useRef({ lastSent: 0 });
   const offlineSyncRef = useRef(false);
   const cargaInicialRef = useRef(false);
@@ -161,6 +176,7 @@ export default function AppChofer(){
 
   // GPS app: se activa con jornada abierta y se pausa en descanso, pausa o fin.
   useEffect(()=>{
+    if(hasNativeDriverTracking())return; // Android starts only from the visible user control.
     const actividad = String(gpsJornadaActividad || "").toLowerCase();
     const provider = String(gpsChoferProvider || "").trim().toLowerCase();
     const externalId = String(gpsChoferExternalId || "").trim();
@@ -294,7 +310,7 @@ export default function AppChofer(){
     ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["historial","Historial"]]
     : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
 
-  const tabsChofer = [...baseTabsChofer.filter(([key])=> (key!=="solicitud"||workshopEnabled)&&(key!=="vacaciones"||leaveEnabled)),["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"]]:[])];
+  const tabsChofer = [...(hasNativeDocuments()?[["documentos","Documentos descargados"]]:[]),...baseTabsChofer.filter(([key])=> (key!=="solicitud"||workshopEnabled)&&(key!=="vacaciones"||leaveEnabled)),["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"]]:[])];
 
   useEffect(() => {
     const app = document.querySelector(".tg-app-chofer-page");
@@ -316,12 +332,16 @@ export default function AppChofer(){
   }
 
   async function pedirNotificaciones() {
+    if(hasNativeDriverTracking()){
+      try{if(notifPerm==='granted'){await disableMobilePush();setNotifPerm('default');notify('Notificaciones push desactivadas.');}else{await enableMobilePush(()=>setTab('avisos'));setNotifPerm('granted');notify('Notificaciones push activadas.');}}
+      catch(e){notify(e.message,'error');}return;
+    }
     if (!("Notification" in window)) return;
     const perm = await Notification.requestPermission();
     setNotifPerm(perm);
     if (perm === "granted") {
       new Notification("TransGest", {
-        body: "Las notificaciones estan activadas. Te avisaremos de nuevos pedidos.",
+        body: "Permiso concedido. En el navegador los avisos se consultan con la app abierta.",
         icon: "/favicon.ico",
       });
     }
@@ -397,6 +417,7 @@ export default function AppChofer(){
     <>
     <div className="tg-app-chofer-page">
       <DriverHeader user={user} tab={expandedPedidoId ? "detalle" : tab} onNavigate={setTab} onRefresh={()=>cargar({forceLoading:true})} unread={routeNotifications.length} loading={loading}/>
+      <NativeTrackingControls jornada={jornadaInfo?.jornada} vehicleId={jornadaInfo?.chofer?.vehiculo_id} onStatus={setGpsSeguimientoEstado} visible={tab==='jornada'||tab==='inicio'}/>
       {loadError && <div className="driver-load-error" role="alert"><span>{loadError}</span><button onClick={()=>cargar({forceLoading:true})}>Reintentar</button></div>}
 
       {/* Banner offline */}
@@ -501,7 +522,7 @@ export default function AppChofer(){
       )}
 
       {tab==="inicio" && <DriverHome externalDriver={!!user?.colaborador_id} pedidos={pedidos} jornada={jornadaInfo?.jornada} onNavigate={setTab} loading={loading} offline={offline} pending={offlineQueueSummary.total}/>}
-      {tab==="mas" && <DriverMore onRefresh={()=>cargar({forceLoading:true})} loading={loading} tabs={tabsChofer.filter(([id])=>!["activos","jornada"].includes(id))} onNavigate={setTab} onLogout={logout} onNotifications={pedirNotificaciones} notificationPermission={notifPerm}/>}
+      {tab==="mas" && <DriverMore onRefresh={()=>cargar({forceLoading:true})} loading={loading} tabs={tabsChofer.filter(([id])=>!["activos","jornada"].includes(id))} onNavigate={setTab} onLogout={logout} onNotifications={pedirNotificaciones} notificationPermission={notifPerm} nativeNotifications={hasNativeDriverTracking()}/>}
       {tab==="avisos" && routeNotifications.length===0 && <div className="driver-section-shell"><section className="driver-card"><DriverHeading icon="avisos" title="Avisos y rutas">Aquí encontrarás las rutas y avisos de tráfico disponibles para tu cuenta.</DriverHeading><p className="driver-empty">No hay avisos disponibles.</p></section></div>}
       {/* Lista viajes */}
       {["activos","historial"].includes(tab) && (
@@ -576,6 +597,7 @@ export default function AppChofer(){
         />
       )}
 
+      {tab==="documentos" && hasNativeDocuments() && <DriverDownloadedDocuments/>}
       {tab==="conjunto" && <ConjuntoChofer jornadaInfo={jornadaInfo} onRefresh={cargar}/>}
       {tab==="repostajes" && !user?.colaborador_id && <DriverExpenses jornadaInfo={jornadaInfo}/>}
       {tab==="jornada" && (

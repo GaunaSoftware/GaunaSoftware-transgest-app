@@ -46,6 +46,9 @@ credentials
 config
 *.pem
 *.key
+*.jks
+*.keystore
+**/google-services.json
 # Visual/browser test temporary profiles
 visual-check/
 **/visual-check/

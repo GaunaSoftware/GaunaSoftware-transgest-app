@@ -5,6 +5,7 @@ import { transportStateKey } from '../../utils/transportStateCatalog';
 import DriverDcdActions from './DriverDcdActions';
 import DriverTripMap from './DriverTripMap';
 import { openMobileDocument, shareMobileDocument } from '../../services/mobileRuntime';
+import { hasNativeDocuments } from '../../services/nativeDocuments';
 import { restoreDriverSteps } from './driverSupport';
 import { useState, useEffect, useCallback } from "react";
 import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, actualizarGpsPedido, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
@@ -918,7 +919,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                   </div>
                 )}
                 {docControlSupportUrl && <DriverDcdActions onView={()=>abrirDocumentoControl(false)} onQr={verQrDocumentoControl} onShare={compartirDocumentoControl} onPrint={()=>abrirDocumentoControl(true)} onDownload={descargarDocumentoControl} onReview={marcarDcdRevisado} reviewed={dcdOperativoOk}/>}
-                {activeVersions.length>1&&<ul>{activeVersions.map((v,i)=><li key={v.id}>DeCA envío {i+1} · versión {v.version} <button onClick={()=>verArchivoProtegido(`/pedidos/${pedido.id}/documento-control-digital/versiones/${v.id}/pdf`).catch(error=>notify(error.message,'error'))}>Abrir original</button></li>)}</ul>}
+                {activeVersions.length>0&&<ul>{activeVersions.map((v,i)=><li key={v.id}>DeCA envío {i+1} · versión {v.version} <button type="button" onClick={()=>verArchivoProtegido(`/pedidos/${pedido.id}/documento-control-digital/versiones/${v.id}/pdf`).catch(error=>notify(error.message,'error'))}>{hasNativeDocuments()?'Guardar y abrir original sin conexión':'Abrir original'}</button></li>)}</ul>}
               </>
             )}
           </div>}

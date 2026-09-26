@@ -54,9 +54,10 @@ async function evaluateGeofences(tx,company,vehicle,p,logId,now=Date.now()){
   if(event)await tx.query('INSERT INTO tracking_geofence_events(empresa_id,pedido_id,parada_id,position_id,event,observed_at,distance_m,radius_m,hysteresis_m) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING',[company,order.id,stop.id,logId,event,p.recorded_at,meters,radius_m,hysteresis_m]);
  }
 }
-async function record(db,{empresaId,vehiculoId,provider,input,externalId,raw={}}){
+async function record(db,{empresaId,vehiculoId,provider,input,externalId,raw={},authorize}){
  const p=position(input),key=hash(canonical({empresaId,vehiculoId,provider,p}));
  return db.transaction(async tx=>{
+  if(authorize)await authorize(tx);
   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:gps:${vehiculoId}`]);
   const vehicle=(await tx.query('SELECT id FROM vehiculos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,vehiculoId])).rows[0];
   if(!vehicle)fail('Vehículo no encontrado','VEHICLE_NOT_FOUND',404);

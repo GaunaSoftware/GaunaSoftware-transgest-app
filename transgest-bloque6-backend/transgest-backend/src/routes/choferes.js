@@ -816,6 +816,24 @@ router.post("/app/conjunto", requireChoferApp, async (req, res) => {
   }
 });
 
+router.get('/app/tracking-context',requireChoferApp,async(req,res)=>{
+  try {
+    const chofer=await resolveChoferApp(req);
+    const context=await require('../services/driverTrackingContext').driverTrackingContext(db,{empresaId:req.empresaId||req.user.empresa_id,chofer});
+    res.setHeader('Cache-Control','private, no-store');res.json(context);
+  }catch(e){res.status(500).json({error:'No se pudo verificar el contexto de seguimiento'});}
+});
+
+router.get('/app/push-status',requireChoferApp,(req,res)=>res.json({configured:require('../services/mobilePush').configured()}));
+router.post('/app/push-devices',requireChoferApp,async(req,res)=>{
+  try { const push=require('../services/mobilePush');if(!push.configured())return res.status(503).json({error:'Push no configurado. Los avisos siguen disponibles dentro de la app.'});res.json(await push.register(db,req.empresaId||req.user.empresa_id,req.user.id,req.body?.token)); }
+  catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo registrar el dispositivo'});}
+});
+router.delete('/app/push-devices/:id',requireChoferApp,async(req,res)=>{
+  try {res.json(await require('../services/mobilePush').unregister(db,req.empresaId||req.user.empresa_id,req.user.id,req.params.id));}
+  catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo desactivar el dispositivo'});}
+});
+
 router.post("/app/gps", requireChoferApp, async (req, res) => {
   await ensureChoferJornadaSchema();
   const empresaId = req.empresaId || req.user?.empresa_id;
@@ -836,12 +854,18 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
   );
   const jornada = open.rows[0];
   if (!jornada) return res.json({ ok: true, skipped: "jornada_cerrada" });
+  if(req.body?.jornada_id&&req.body.jornada_id!==jornada.id)return res.status(409).json({error:'La ubicación pertenece a otra jornada'});
   if (["pausa", "descanso", "fin"].includes(String(jornada.actividad_actual || "").toLowerCase())) {
     return res.json({ ok: true, skipped: "jornada_pausada" });
   }
 
   try {
-    const result=await require('../services/vehicleTracking').record(db,{empresaId,vehiculoId:chofer.vehiculo_id,provider:'app_chofer',input:req.body,externalId:`chofer:${chofer.id}`,raw:{source:'app_chofer',usuario_id:req.user.id,chofer_id:chofer.id,jornada_id:jornada.id}});
+    const result=await require('../services/vehicleTracking').record(db,{empresaId,vehiculoId:chofer.vehiculo_id,provider:'app_chofer',input:req.body,externalId:`chofer:${chofer.id}`,raw:{source:'app_chofer',usuario_id:req.user.id,chofer_id:chofer.id,jornada_id:jornada.id},authorize:async tx=>{
+      const driver=(await tx.query('SELECT vehiculo_id FROM choferes WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,chofer.id])).rows[0];
+      if(driver?.vehiculo_id!==chofer.vehiculo_id)throw Object.assign(Error('El conjunto del conductor ha cambiado'),{status:409});
+      const current=(await tx.query('SELECT estado,actividad_actual FROM chofer_jornadas WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,jornada.id])).rows[0];
+      if(current?.estado!=='abierta'||['pausa','descanso','fin'].includes(current.actividad_actual))throw Object.assign(Error('La jornada ya no permite registrar ubicación'),{status:409});
+    }});
     res.json(result);
   }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });

@@ -319,6 +319,16 @@ export async function descargarArchivoProtegido(path, fallbackName = "documento"
 
   const blob = await res.blob();
   const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el documento.');
+  if(blob.type.includes('pdf')){
+    const native=await import('./nativeDocuments');
+    if(getToken()!==token)throw new Error('La sesión ha cambiado.');
+    if(native.hasNativeDocuments()){
+      const saved=await native.saveNativePdf(blob,filename);
+      await native.openNativePdf(saved.id);
+      return {filename,size:blob.size,savedOffline:true};
+    }
+  }
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;
@@ -371,6 +381,16 @@ export async function verArchivoProtegido(path, fallbackName = "documento") {
 
   const blob = await res.blob();
   const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el documento.');
+  if(blob.type.includes('pdf')){
+    const native=await import('./nativeDocuments');
+    if(getToken()!==token)throw new Error('La sesión ha cambiado.');
+    if(native.hasNativeDocuments()){
+      const saved=await native.saveNativePdf(blob,filename);
+      await native.openNativePdf(saved.id);
+      return {filename,size:blob.size,savedOffline:true};
+    }
+  }
   const objectUrl = URL.createObjectURL(blob);
   const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
   if (!opened) {
@@ -743,6 +763,10 @@ export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POS
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
 export const borrarChofer   = (id)        => apiFetch(`/choferes/${id}`, { method:"DELETE" });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
+export const getDriverTrackingContext = () => apiFetch('/choferes/app/tracking-context');
+export const getMobilePushStatus = () => apiFetch('/choferes/app/push-status');
+export const registerMobilePushDevice = token => apiFetch('/choferes/app/push-devices',{method:'POST',body:{token},silentSuccess:true});
+export const unregisterMobilePushDevice = (id,token) => apiFetch(`/choferes/app/push-devices/${id}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`},silentSuccess:true,silentError:true,timeoutMs:5000});
 export const getChoferConjuntoApp = () => apiFetch("/choferes/app/conjunto");
 export const cambiarChoferConjuntoApp = (data) => apiFetch("/choferes/app/conjunto", { method:"POST", body:data, silentSuccess:true });
 export const guardarChoferFirmaBaseApp = (data) => apiFetch("/choferes/app/firma-base", { method:"POST", body:data, silentSuccess:true });

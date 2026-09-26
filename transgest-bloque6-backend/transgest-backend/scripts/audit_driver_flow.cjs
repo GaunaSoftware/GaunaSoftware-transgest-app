@@ -35,6 +35,9 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.equal(tracking.can_configure,false);assert.equal(tracking.status,'reciente');
   await request('PUT',`/pedidos/${order.id}/tracking/config`,{stale_seconds:120},403);
   await request('PUT',`/pedidos/${order.id}/tracking/config`,{stale_seconds:120},200,managerToken);
+  const nativeContext=await request('GET','/choferes/app/tracking-context');assert.equal(nativeContext.allowed,true);assert.equal(nativeContext.vehiculo_id,vehicle.id);
+  await request('POST','/choferes/app/gps',{vehiculo_id:vehicle.id,jornada_id:crypto.randomUUID(),lat:40,lng:-3},409);
+  const pushStatus=await request('GET','/choferes/app/push-status');assert.equal(pushStatus.configured,false,'Synthetic harness must not enable real push delivery');
   await patch(load, { carga_proceso: true });
   await patch(load, { mercancia_confirmada: true, mercancia_cargada: 'Mercancía sintética', mercancia_palets: '2', mercancia_peso_kg: '100' });
   const doc = await request('POST', `/pedidos/${order.id}/chofer-docs`, { nombre: 'albaran-sintetico.pdf', tipo: 'albaran',

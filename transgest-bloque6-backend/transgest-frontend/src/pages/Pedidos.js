@@ -2,6 +2,8 @@ import { TUTORIALS_ENABLED } from "../services/tutorialPolicy";
 import OrderAiInbox, {notifyInboxChanged} from './orders/OrderAiInbox';
 import {getOrderInbox} from '../services/api';
 import TransportDocumentVersions from './TransportDocumentVersions';
+import JourneyReplanning from './traffic/JourneyReplanning';
+import DetentionPanel from './traffic/DetentionPanel';
 import { buildWaybillHtml, waybillLocation } from '../utils/waybillDocument';
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import OrderNotesFields from "./orders/editor/OrderNotesFields";
@@ -8134,6 +8136,8 @@ useEffect(() => {
             )}
 
             <PedidoIncidenciaPanel pedido={form || editando} />
+            <JourneyReplanning pedido={editando} vehiculos={vehiculos} choferes={choferes} canEdit={canEdit} onApplied={onSaved}/>
+            <DetentionPanel pedido={editando} canEdit={canEdit} onApplied={onSaved}/>
             <div hidden={editorStep !== 1} className="order-editor-step">
             <PedidoMapaOperativo pedido={mapPedidoDraft || editando} choferPasos={choferPasosMapa} compact />
 

@@ -25,7 +25,7 @@ export function organizeSidebar(modules, financeTabs, role) {
     take("dashboard", "Dashboard"), take("agenda", "Agenda"), take("ia", "TransGest Intelligence"),
     group("nav_operaciones", "Operaciones", "pedidos", [
       take("pedidos", "Pedidos / tráfico"), take("gestion_trafico", "Mesa de tráfico"), take("control_tower", "Control Tower"),
-      take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"),
+      take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"), take("palets", "Gestión de almacén"),
     ]),
     group("nav_clientes", "Clientes", "clientes", [
       take("clientes", "Clientes"),
@@ -35,7 +35,9 @@ export function organizeSidebar(modules, financeTabs, role) {
     group("nav_finanzas", "Finanzas", "facturacion_grupo", [
       ...(finance ? financeTabs.map(tab => ({ id: `finance-${tab.value}`, label: tab.label, target: finance.id, financeTab: tab.value, icon: finance.icon })) : []),
       group("nav_informes", "Informes", "informes_grupo", [take("informes", "Informes de gestión"), take("explotacion", "Explotación"), take("objetivos", "Objetivos")]),
-      take("contabilidad", "Contabilidad"), take("gastos_estructura", "Gastos de estructura"), take("nominas", "Nóminas"), take("hojas_ruta", "Hojas de ruta"),
+      take("contabilidad", "Contabilidad"),
+      group("nav_costes", "Costes", "gastos_estructura", [take("gastos_estructura", "Gastos de estructura")]),
+      take("nominas", "Nóminas"), take("hojas_ruta", "Hojas de ruta"),
     ]),
     group("nav_gestion", "Gestión", "control_horario", [take("control_horario", "Control horario")]),
     group("nav_avisos", "Avisos", "avisos", [
@@ -48,7 +50,6 @@ export function organizeSidebar(modules, financeTabs, role) {
       take("empresa", "Mi empresa"), take("usuarios", "Usuarios y roles"),
       take("importacion", "Importación"), take("mi_cuenta", "Mi cuenta"),
     ]),
-    take("palets", "Gestión de almacén"),
   ].filter(Boolean);
   // Keep any future/unknown accessible leaves reachable without duplicating routes.
   const remaining = all.filter(item => !item.children?.length && !used.has(item.id));

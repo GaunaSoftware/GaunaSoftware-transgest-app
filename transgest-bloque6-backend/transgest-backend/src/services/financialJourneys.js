@@ -24,7 +24,7 @@ function reconcileJourneys({empresaId, orders, journeys=[], members=[], costs=[]
       if(!p)return;
       const share=shares[index], loaded=number(journey.km_cargados), empty=number(journey.km_vacios);
       p.bi_legs ||= [];
-      p.bi_legs.push({id:journey.id,fraccion:share,criterio:basis,cargados:share==null||loaded==null?null:loaded*share,vacios:share==null||empty==null?null:empty*share,asignacion:journey.asignacion_snapshot||{}});
+      p.bi_legs.push({id:journey.id,fraccion:share,criterio:basis,cargados:share==null||loaded==null?null:loaded*share,vacios:share==null||empty==null?null:empty*share,asignacion:journey.asignacion_snapshot||{},asignaciones_anteriores:(journey.relevos||[]).map(r=>r.anterior)});
       p.bi_journey_cost=(p.bi_journey_cost||0)+cents/100;
       p.bi_cost_recorded ||= includeCosts&&records.length>0;
       p.bi_unreconciled_cost=(p.bi_unreconciled_cost||0)+(includeCosts?0:(share==null?costCents/100:costCents/100*share));
@@ -40,7 +40,7 @@ function reconcileJourneys({empresaId, orders, journeys=[], members=[], costs=[]
     p.km_ruta=p.bi_legs.every(l=>l.cargados!=null)?p.bi_legs.reduce((n,l)=>n+l.cargados,0):null;
     p.km_vacio=p.bi_legs.every(l=>l.vacios!=null)?p.bi_legs.reduce((n,l)=>n+l.vacios,0):null;
     for(const key of ['vehiculo_id','chofer_id','remolque_id']){
-      const ids=[...new Set(p.bi_legs.map(l=>l.asignacion[key]||null))];
+      const ids=[...new Set(p.bi_legs.flatMap(l=>[l.asignacion,...(l.asignaciones_anteriores||[])].map(a=>a[key]||null)))];
       p[key]=ids.length===1?ids[0]:null;
       if(ids.length>1)p.bi_assignment_warning='Varios recursos históricos; no atribuible a uno solo.';
     }

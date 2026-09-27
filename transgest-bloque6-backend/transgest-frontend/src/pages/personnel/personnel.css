@@ -3,3 +3,12 @@
 @media(max-width:700px){.personnel-page{padding:16px 12px 80px!important}.personnel-heading h1{font-size:26px}.personnel-breadcrumb{font-size:12px}.personnel-metrics{gap:8px}.personnel-metrics article{padding:12px;gap:8px;align-items:flex-start}.personnel-metrics strong{font-size:20px}.personnel-tile{width:32px;height:36px}.personnel-overview aside{grid-template-columns:1fr}.personnel-responsive-grid{grid-template-columns:minmax(0,1fr)!important}.personnel-responsive-flex{flex-wrap:wrap}.personnel-page input,.personnel-page select,.personnel-page textarea{font-size:16px!important;min-width:0!important}.personnel-toolbar>*{max-width:100%}.personnel-overlay{align-items:flex-start!important;padding:8px!important}.personnel-overlay>div{padding:16px!important;max-height:calc(100dvh - 16px)!important;min-width:0!important}.personnel-pagination{flex-wrap:wrap}.personnel-nav{gap:0}.personnel-panel{padding:14px}}
 
 .personnel-page input[type=checkbox],.personnel-page input[type=radio]{width:18px!important;height:18px!important;min-height:18px!important;flex-shrink:0;accent-color:var(--accent);padding:0!important}.personnel-page label:has(>input[type=checkbox]){display:flex;align-items:center;gap:8px}
+
+.office-requests-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.office-requests h2{font-size:16px;margin:0 0 8px}.office-requests p{font-size:13px;color:var(--text4);line-height:1.5;margin:6px 0 12px}
+.office-requests label{display:block;font-size:13px;color:var(--text3);font-weight:600}.office-requests input{display:block;width:100%;margin:6px 0 12px}
+.office-request-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.office-requests summary{cursor:pointer;color:var(--accent-xl);font-size:13px;margin:16px 0 10px}
+.office-request-list{list-style:none;padding:0;margin:12px 0 0;max-height:380px;overflow:auto}.office-request-list li{border-top:1px solid var(--border);padding:12px 0;font-size:13px;overflow-wrap:anywhere}
+.office-request-status{display:inline-block;margin:6px 0 6px 8px;padding:4px 8px;border-radius:8px;background:var(--bg3);font-weight:700}.office-request-status.status-aprobada{color:var(--green)}.office-request-status.status-rechazada{color:var(--red,#cf4545)}.office-request-status.status-pendiente{color:var(--text3)}
+.office-request-actions{display:flex;gap:8px;flex-wrap:wrap}.office-requests form>button{background:var(--accent);color:#fff}
+@media(max-width:800px){.office-requests-grid{grid-template-columns:minmax(0,1fr)}}

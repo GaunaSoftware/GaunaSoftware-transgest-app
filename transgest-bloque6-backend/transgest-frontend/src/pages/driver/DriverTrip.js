@@ -29,9 +29,11 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const kmActuales = ""; // Odometer entry belongs to the workday. Preserve historical trip readings.
   const [allSteps, setPasos] = useState({});
   const [remoteState,setRemoteState]=useState(null);
+  const [journeyContext,setJourneyContext]=useState(null);
   const [stepsLoading,setStepsLoading]=useState(true),[stepsError,setStepsError]=useState(''),[stepsReload,setStepsReload]=useState(0);
   const stops=driverStops(pedido);
-  const activeStop=journeyStopId?stops.find(stop=>stop.id===journeyStopId):activeDriverStop(pedido,allSteps);
+  const plannedStopId=journeyStopId||(journeyContext?.proxima_parada?.pedido_id===pedido.id?journeyContext.proxima_parada.parada_legacy_id:null);
+  const activeStop=plannedStopId?stops.find(stop=>stop.id===plannedStopId):journeyContext?null:activeDriverStop(pedido,allSteps);
   const currentData=activeStop?stopData(activeStop,allSteps,stops):{};
   const pasos=activeStop?.tipo==='descarga'
     ? {...currentData,carga_iniciada:true,carga_proceso:true,carga_ok:true,albaran_carga:true,firma_cargador:true}
@@ -70,11 +72,13 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     const local = leerPasosViaje(pedido.id);
     setPasos({});
     setRemoteState(null);
+    setJourneyContext(null);
     setStepsLoading(true);setStepsError('');
     getPedidoChoferPasos(pedido.id)
       .then((payload) => {
         if (!alive) return;
         const remote = normalizeChoferPasos(payload?.data || payload || {});
+        setJourneyContext(payload?.viaje_operativo||null);
         restoreDriverSteps(pedido.id,remote);setPasos(remote);
       })
       .catch((error) => {
@@ -253,6 +257,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       if (Object.keys(remote).length) {
         setPasos(guardarPasosViaje(pedido.id, remote));
       }
+      if(normalized.parada_id)setStepsReload(value=>value+1);
       return remote;
     } catch (err) {
       if(!esErrorOffline(err)) { restoreDriverSteps(pedido.id,previous); setPasos(previous); notify(err.message || "No se pudo guardar el paso.","error"); throw err; }

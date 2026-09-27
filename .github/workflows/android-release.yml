@@ -24,6 +24,8 @@ jobs:
       run:
         working-directory: transgest-bloque6-backend/transgest-frontend
     env:
+      TRANSGEST_ANDROID_REQUIRE_SIGNING: 'true'
+      GENERATE_SOURCEMAP: 'false'
       TRANSGEST_ANDROID_VERSION_CODE: ${{ inputs.version_code }}
       TRANSGEST_ANDROID_VERSION_NAME: ${{ inputs.version_name }}
       TRANSGEST_ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}

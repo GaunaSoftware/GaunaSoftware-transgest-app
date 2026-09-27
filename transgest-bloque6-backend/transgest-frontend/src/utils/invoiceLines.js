@@ -2,6 +2,9 @@
 const cents = value => Math.round((Number(value) || 0) * 100);
 const line = (concepto, amount) => ({ concepto, cantidad: 1, precio_unit: amount / 100 });
 export function buildTransportInvoiceLines(orders, mode, concept) {
+  return [...transportLines(orders,mode,concept),...orders.filter(p=>cents(p.importe_paralizacion)>0).map(p=>({...line(`Paralización · ${p.numero||''}`,cents(p.importe_paralizacion)),paralizacion_pedido_id:p.id}))];
+}
+function transportLines(orders, mode, concept) {
   const parts = orders.map(order => ({ order, total: cents(order.importe), fuel: cents(order.importe_revision_combustible) }));
   const fuel = parts.reduce((sum, p) => sum + p.fuel, 0);
   const transport = parts.reduce((sum, p) => sum + p.total - p.fuel, 0);

@@ -196,6 +196,7 @@ async function ensureRouteOptimizationSchema() {
       await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_pedido ON route_optimizations(pedido_id, created_at DESC)");
       await db.query("CREATE INDEX IF NOT EXISTS idx_route_optimizations_empresa ON route_optimizations(empresa_id, created_at DESC)");
       await db.query("ALTER TABLE route_optimizations ADD COLUMN IF NOT EXISTS waypoint_coordinates JSONB NOT NULL DEFAULT '[]'::jsonb");
+      await db.query("ALTER TABLE route_optimizations ADD COLUMN IF NOT EXISTS constraint_review JSONB");
     })().catch(err => {
       routeOptimizationSchemaPromise = null;
       throw err;
@@ -250,10 +251,13 @@ function normalizeStops(stops) {
       date: raw.date || raw.fecha || null,
       time: raw.time || raw.hora || null,
       window: raw.window || raw.ventana || null,
+      id: cleanAddress(raw.id || ''), shipment_id: cleanAddress(raw.shipment_id || ''),
+      weight_kg: raw.weight_kg ?? null, service_min: raw.service_min ?? null,
+      window_start: raw.window_start || null, window_end: raw.window_end || null,
     };
   }).filter(stop => {
     if (!stop.address && !stop.google_maps_url && (stop.lat == null || stop.lng == null)) return false;
-    const key = `${stop.address || ""}|${stop.google_maps_url || ""}|${stop.lat || ""},${stop.lng || ""}`.toLowerCase();
+    const key = `${stop.id || ''}|${stop.address || ""}|${stop.google_maps_url || ""}|${stop.lat || ""},${stop.lng || ""}`.toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -463,6 +467,7 @@ async function routeLocal(stops, googleKey) {
     truck_aware: false,
     distance_km: route.distance ? Math.round(Number(route.distance) / 1000) : null,
     duration_min: route.duration ? Math.round(Number(route.duration) / 60) : null,
+    legs: (route.legs || []).map(l=>({duration_min:Number(l.duration)/60,distance_km:Number(l.distance)/1000})),
     waypoint_coordinates: coordinates.map(([lon, lat], idx) => ({ idx, lon, lat, address: stops[idx]?.address || "" })),
     geometry: route.geometry || null,
     steps: (route.legs || []).flatMap(l => l.steps || []).slice(0, 80),
@@ -505,6 +510,7 @@ async function routeOrs(stops, preference, truck, apiKey) {
     truck_aware: true,
     distance_km: summary.distance ? Math.round(summary.distance / 1000) : null,
     duration_min: summary.duration ? Math.round(summary.duration / 60) : null,
+    legs: (props.segments || []).map(l=>({duration_min:Number(l.duration)/60,distance_km:Number(l.distance)/1000})),
     waypoint_coordinates: coordinates.map(([lon, lat], idx) => ({ idx, lon, lat, address: stops[idx]?.address || "" })),
     geometry: data?.features?.[0]?.geometry || null,
     steps: props.segments?.flatMap(s => s.steps || []).slice(0, 80) || [],
@@ -540,6 +546,7 @@ async function routeHere(stops, preference, truck, apiKey) {
     truck_aware: true,
     distance_km: distance ? Math.round(distance / 1000) : null,
     duration_min: duration ? Math.round(duration / 60) : null,
+    legs: sections.map(l=>({duration_min:Number(l.summary?.duration)/60,distance_km:Number(l.summary?.length)/1000})),
     waypoint_coordinates: coordinates.map(([lon, lat], idx) => ({ idx, lon, lat, address: stops[idx]?.address || "" })),
     geometry: sections.map(s => s.polyline).filter(Boolean),
     steps: sections.flatMap(s => s.actions || []).slice(0, 120),
@@ -818,8 +825,15 @@ router.post("/optimize", async (req, res, next) => {
   try {
     const empresaId = req.user?.empresa_id;
     if (!empresaId) return res.status(400).json({ error: "Empresa no encontrada en sesion." });
-    const stops = normalizeStops(req.body?.stops);
+    let stops = normalizeStops(req.body?.stops);
     if (stops.length < 2) return res.status(400).json({ error: "Se necesitan al menos origen y destino." });
+    if(stops.length>100)return res.status(400).json({error:'Máximo 100 paradas por propuesta.'});
+    if(req.body?.pedido_id && !(await db.query('SELECT id FROM pedidos WHERE id=$1 AND empresa_id=$2',[req.body.pedido_id,empresaId])).rows.length)return res.status(404).json({error:'Pedido no encontrado para esta empresa.'});
+    if(req.body?.constraints){
+      require('../services/routeConstraints').validateRules(req.body.constraints);
+      if(stops.some(s=>s.weight_kg!=null&&(!Number.isFinite(Number(s.weight_kg))||Number(s.weight_kg)<0)))return res.status(400).json({error:'Peso de envío no válido.'});
+      if(req.body.propose_sequence===true)stops=require('../services/routeConstraints').proposeSequence(stops,req.body.constraints);
+    }
     const googleKey = (await resolveApiKey(empresaId, "google").catch(() => ({ key: "" }))).key || "";
 
     const requestedProvider = String(req.body?.provider || await configuredProvider(empresaId)).toLowerCase();
@@ -863,6 +877,7 @@ router.post("/optimize", async (req, res, next) => {
       ...result,
       key_source: keyInfo.source,
     };
+    if(req.body?.constraints)payload.constraint_review=require('../services/routeConstraints').evaluateConstraints(stops,result,req.body.constraints);
 
     if (req.body?.pedido_id) {
       try {
@@ -874,8 +889,8 @@ router.post("/optimize", async (req, res, next) => {
         if (!check.rows[0]) return res.status(404).json({ error: "Pedido no encontrado para esta empresa." });
         const saved = await db.query(
           `INSERT INTO route_optimizations
-            (empresa_id,pedido_id,provider,provider_label,preference,truck_aware,distance_km,duration_min,maps_url,stops,truck,waypoint_coordinates,geometry,steps,warning,created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15,$16)
+            (empresa_id,pedido_id,provider,provider_label,preference,truck_aware,distance_km,duration_min,maps_url,stops,truck,waypoint_coordinates,geometry,steps,warning,created_by,constraint_review)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15,$16,$17::jsonb)
            RETURNING id, created_at`,
           [
             empresaId,
@@ -894,6 +909,7 @@ router.post("/optimize", async (req, res, next) => {
             JSON.stringify(payload.steps || []),
             payload.warning,
             req.user?.id || null,
+            payload.constraint_review?JSON.stringify(payload.constraint_review):null,
           ]
         );
         payload.saved = { id: saved.rows[0].id, created_at: saved.rows[0].created_at };

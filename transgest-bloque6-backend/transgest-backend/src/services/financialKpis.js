@@ -63,6 +63,8 @@ function reportMetadata(range, metrics = {}) {
       'Los costes registrados pueden estar incompletos. Un cero por defecto no confirma ausencia de costes.'] };
 }
 // Periodo economico y costes registrados, sin alterar las fechas operativas.
+// The agreed transport amount excludes the separately recorded detention charge.
+const serviceIncome = p => money(p.importe)==null ? null : money(Number(p.importe)+Number(p.importe_paralizacion||0));
 const financialPedidosCte = `pedidos_bi AS (
   SELECT p.*,
     CASE WHEN p.estado::text IN ('entregado','facturado')
@@ -80,4 +82,4 @@ const financialPedidosCte = `pedidos_bi AS (
 
 
 
-module.exports = { financialPedidosCte, INVALID_INVOICE_STATES, isValidInvoice, validInvoiceSql, money, ratio, day, periodRange, reportRange, collectionAmounts, metric, reportMetadata };
+module.exports = { serviceIncome, financialPedidosCte, INVALID_INVOICE_STATES, isValidInvoice, validInvoiceSql, money, ratio, day, periodRange, reportRange, collectionAmounts, metric, reportMetadata };

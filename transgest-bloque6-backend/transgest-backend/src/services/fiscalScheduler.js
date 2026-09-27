@@ -27,11 +27,14 @@ async function runCycle() {
     for (const empresa of empresas) {
       try {
         cycleSummary.empresas += 1;
+        await db.transaction(client=>require('./verifactiWebhook').processReceipts(client,empresa.id));
         const result = await processPendingFiscalQueue({
             empresaId: empresa.id,
             actorUserId: null,
             limit: 25,
           });
+        await db.transaction(client=>require('./claveicon/outbox').recoverAcceptedInvoices(client,empresa.id));
+        await require('./accountingDelivery').processInternal(empresa.id);
         cycleSummary.accepted += Number(result.accepted || 0);
         cycleSummary.errors += Number(result.errors || 0);
         cycleSummary.processed += Number(result.total || 0);

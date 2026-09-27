@@ -1,0 +1,17 @@
+.journey-replanning{display:grid;gap:14px;color:var(--text)}
+.journey-replanning p{margin:0;color:var(--text4);line-height:1.5}
+.journey-replanning label{display:flex;flex-direction:column;gap:6px;min-width:0}
+.journey-replanning input:not([type=checkbox]),.journey-replanning select,.journey-replanning textarea{width:100%;min-width:0;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);box-sizing:border-box}
+.journey-replanning-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.journey-full{grid-column:1/-1}
+.journey-replanning .journey-check{flex-direction:row;align-items:center}
+.journey-replanning ol{list-style:none;padding:0;display:grid;gap:8px}
+.journey-replanning li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border:1px solid var(--border);border-radius:8px}
+.journey-replanning li>span{min-width:0;overflow-wrap:anywhere}
+.journey-replanning li>div{display:flex;flex-shrink:0;gap:4px}
+.journey-replanning small{display:block;color:var(--text4)}
+@media(max-width:540px){.journey-replanning-fields{grid-template-columns:minmax(0,1fr)}}
+
+.journey-table-scroll{overflow-x:auto;max-width:100%}
+.journey-table-scroll table{width:100%;border-collapse:collapse}
+.journey-table-scroll th,.journey-table-scroll td{padding:8px;text-align:left;border-bottom:1px solid var(--border)}

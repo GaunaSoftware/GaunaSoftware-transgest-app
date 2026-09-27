@@ -1,6 +1,7 @@
-import { PersonnelHeader } from "./personnel/PersonnelWorkspace";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getControlHorario, getControlHorarioResumen, getMiControlHorario, ficharControlHorario, editarControlHorario, controlHorarioCsvUrl, getControlHorarioConfig, saveControlHorarioConfig, getTeletrabajoSolicitudes, crearTeletrabajoSolicitud, resolverTeletrabajoSolicitud, getJornadaConfig, saveJornadaConfig } from "../services/api";
+import "./personnel/personnel.css";
+import OfficeLeaveRequests from "./personnel/OfficeLeaveRequests";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getControlHorario, getControlHorarioResumen, getMiControlHorario, ficharControlHorario, editarControlHorario, controlHorarioCsvUrl, getControlHorarioConfig, saveControlHorarioConfig, getJornadaConfig, saveJornadaConfig } from "../services/api";
 import { notify } from "../services/notify";
 import { useAuth } from "../context/AuthContext";
 
@@ -109,7 +110,7 @@ function pedirUbicacion() {
 export default function ControlHorario() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
-  const canManage = ["gerente", "contable", "administrativo"].includes(user?.rol);
+  const canManage = user?.rol === "gerente";
   const isGerente = user?.rol === "gerente";
   const showOwnClock = !isGerente;
   const [miJornada, setMiJornada] = useState(null);
@@ -126,30 +127,40 @@ export default function ControlHorario() {
   const [fichando, setFichando] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
   const [controlCfg, setControlCfg] = useState(null);
-  const [teletrabajo, setTeletrabajo] = useState([]);
-  const [teleForm, setTeleForm] = useState({ fecha: todayIso(), motivo: "" });
+  const [loadError, setLoadError] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const loadSequence = useRef(0);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleError, setScheduleError] = useState("");
   const [jornadaCfg, setJornadaCfg] = useState({ hora_entrada:"08:00", hora_salida:"17:00", pausa_min:60, extras_requieren_aprobacion:true });
 
   const cargar = useCallback(async () => {
-    setLoading(true);
+    const sequence = ++loadSequence.current;
+    setLoading(true); setLoadError("");
     try {
-      const [m, r, l] = await Promise.all([
-        showOwnClock ? getMiControlHorario().catch(() => null) : Promise.resolve(null),
-        getControlHorarioResumen({ desde, hasta }).catch(() => null),
-        getControlHorario({ desde, hasta }).catch(() => []),
+      const [m, r, l, cfg, jornada] = await Promise.all([
+        showOwnClock ? getMiControlHorario() : Promise.resolve(null),
+        getControlHorarioResumen({ desde, hasta }), getControlHorario({ desde, hasta }),
+        getControlHorarioConfig(), showOwnClock ? getJornadaConfig() : Promise.resolve(null),
       ]);
-      setMiJornada(m);
-      setResumen(r);
-      setItems(Array.isArray(l) ? l : []);
-      getControlHorarioConfig().then(setControlCfg).catch(() => {});
-      getTeletrabajoSolicitudes({ desde, hasta }).then(d=>setTeletrabajo(Array.isArray(d)?d:[])).catch(()=>{});
-      getJornadaConfig().then(d=>setJornadaCfg(p=>({...p,...(d||{})}))).catch(()=>{});
-    } finally {
-      setLoading(false);
-    }
-  }, [desde, hasta, showOwnClock]);
+      if (sequence !== loadSequence.current) return;
+      setMiJornada(m); setResumen(r); setItems(l); setControlCfg(cfg);
+      if (jornada) setJornadaCfg(jornada);
+      if (canManage) setEmployeeId(id => r.por_usuario?.some(u => u.usuario_id === id) ? id : (r.por_usuario?.find(u => u.rol !== "gerente")?.usuario_id || ""));
+    } catch (e) {
+      if (sequence === loadSequence.current) setLoadError(e.message || "No se pudo cargar el control horario. Reintenta antes de fichar.");
+    } finally { if (sequence === loadSequence.current) setLoading(false); }
+  }, [desde, hasta, showOwnClock, canManage]);
 
-  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { const requests = loadSequence; cargar(); return () => { requests.current++; }; }, [cargar, user?.id, user?.empresa_id]);
+  useEffect(() => {
+    if (!canManage || !employeeId) return undefined;
+    let current = true; setScheduleLoading(true); setScheduleError("");
+    getJornadaConfig({ usuario_id: employeeId }).then(data => { if (current) setJornadaCfg(data); })
+      .catch(e => { if (current) setScheduleError(e.message || "No se pudo cargar la jornada prevista."); })
+      .finally(() => { if (current) setScheduleLoading(false); });
+    return () => { current = false; };
+  }, [canManage, employeeId]);
   useEffect(() => {
     const id = setInterval(() => setNowTick(Date.now()), 30000);
     return () => clearInterval(id);
@@ -177,7 +188,7 @@ export default function ControlHorario() {
   }, [miJornadaLive]);
 
   async function fichar(accion) {
-    if (fichando || (accion === "entrada" && miJornadaLive?.salida_at)) return;
+    if (loading || loadError || fichando || (accion === "entrada" && miJornadaLive?.salida_at)) return;
     setFichando(true);
     try {
       let ubicacion_gps = null;
@@ -243,6 +254,7 @@ export default function ControlHorario() {
   }
 
   async function guardarAjuste() {
+    if (!canManage) return;
     try {
       await editarControlHorario(edit.id, edit);
       notify("Fichaje ajustado.", "success");
@@ -253,30 +265,10 @@ export default function ControlHorario() {
     }
   }
 
-  async function solicitarTeletrabajo() {
-    try {
-      await crearTeletrabajoSolicitud(teleForm);
-      notify("Solicitud de teletrabajo enviada.", "success");
-      setTeleForm({ fecha: todayIso(), motivo: "" });
-      await cargar();
-    } catch (e) {
-      notify(e.message || "No se pudo solicitar teletrabajo.", "error");
-    }
-  }
-
-  async function resolverTeletrabajo(id, estado) {
-    try {
-      await resolverTeletrabajoSolicitud(id, { estado });
-      notify("Solicitud actualizada.", "success");
-      await cargar();
-    } catch (e) {
-      notify(e.message || "No se pudo resolver la solicitud.", "error");
-    }
-  }
-
   async function guardarJornadaConfig() {
+    if (!canManage || !employeeId || scheduleLoading || scheduleError) return;
     try {
-      await saveJornadaConfig(jornadaCfg);
+      await saveJornadaConfig({ ...jornadaCfg, usuario_id: employeeId });
       notify("Jornada tipo guardada.", "success");
       await cargar();
     } catch (e) {
@@ -307,13 +299,14 @@ export default function ControlHorario() {
 
   return (
     <div className="personnel-page" style={{...S.page,padding:isMobile ? "14px 12px 96px" : S.page.padding,overflowX:"hidden"}}>
-      <PersonnelHeader active="control_horario"/>
-      <h2 style={S.title}>Control horario de oficina</h2>
-      <div style={S.sub}>Registro diario de jornada para personal interno, pausas, teletrabajo y revisión por gerencia/administración.</div>
+      <div className="personnel-breadcrumb">Gestión <span>›</span> <b>Control horario</b></div>
+      <h1 style={S.title}>Control horario</h1>
+      <div style={S.sub}>Fichaje de empleados, pausas y solicitudes de teletrabajo y vacaciones. Solo Gerencia puede ajustar los registros y la jornada prevista.</div>
+      {loadError && <div className="personnel-card" role="alert">{loadError} <button onClick={cargar}>Reintentar</button></div>}
       <div className="personnel-card" style={{...S.card,display:"grid",gap:6,borderColor:"var(--accent-border)",background:"linear-gradient(135deg,var(--accent-soft),var(--bg2))"}}>
-        <div style={{fontSize:12,fontWeight:900,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".06em"}}>Registro legal y privacidad</div>
+        <div style={{fontSize:12,fontWeight:900,color:"var(--accent-xl)",textTransform:"uppercase",letterSpacing:".06em"}}>Registro y privacidad</div>
         <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.55}}>
-          El fichaje registra entrada, salida y pausas con eventos trazables. La ubicación se solicita solo en el momento exacto de entrada/salida, sin seguimiento continuo. Los ajustes requieren motivo y quedan separados del registro original para auditoría.
+          El fichaje registra entrada, salida y pausas con eventos trazables. La ubicación se solicita solo en el momento exacto de entrada/salida, sin seguimiento continuo. Los ajustes de Gerencia requieren motivo y conservan los valores anteriores en el historial de auditoría.
         </div>
       </div>
 
@@ -330,11 +323,11 @@ export default function ControlHorario() {
         {showOwnClock && <div className="personnel-card" style={S.card}>
           <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
             <div>
-              <div style={{fontSize:12,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Mi jornada de hoy</div>
-              <div style={{fontSize:18,fontWeight:900,color:"var(--text)",marginTop:2}}>{estadoTexto}</div>
+              <div style={{fontSize:12,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Mi jornada</div>
+              <div style={{fontSize:18,fontWeight:900,color:"var(--text)",marginTop:2}}>{loading ? "Cargando jornada…" : loadError ? "Jornada no disponible" : estadoTexto}</div>
             </div>
             <div style={{textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"var(--accent-xl)"}}>
-              {minToClock(miJornadaLive?.trabajado_min)}
+              {loading || loadError ? "—" : minToClock(miJornadaLive?.trabajado_min)}
               <div style={{fontSize:12,color:"var(--text5)",fontFamily:"'DM Sans',sans-serif"}}>trabajado</div>
             </div>
           </div>
@@ -376,14 +369,16 @@ export default function ControlHorario() {
               </button>
             )}
           </div>
+          {!miJornadaLive?.salida_at && <>
           <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8,marginBottom:10}}>
-            <div><label style={S.lbl}>Modalidad</label><select aria-label="Modalidad" style={{...S.inp,width:"100%"}} value={modalidad} onChange={e=>setModalidad(e.target.value)}><option value="oficina">Oficina</option><option value="teletrabajo">Teletrabajo</option><option value="visita">Visita</option><option value="otro">Otro</option></select></div>
-            <div><label style={S.lbl}>Ubicación</label><input aria-label="Ubicación" style={{...S.inp,width:"100%"}} value={ubicacion} onChange={e=>setUbicacion(e.target.value)} placeholder="Oficina, casa, cliente..." /></div>
+            <div><label style={S.lbl}>Modalidad</label><select disabled={Boolean(miJornadaLive?.entrada_at)} aria-label="Modalidad" style={{...S.inp,width:"100%"}} value={modalidad} onChange={e=>setModalidad(e.target.value)}><option value="oficina">Oficina</option><option value="teletrabajo">Teletrabajo aprobado</option><option value="visita">Visita</option><option value="otro">Otro</option></select></div>
+            <div><label style={S.lbl}>Ubicación</label><input disabled={Boolean(miJornadaLive?.entrada_at)} aria-label="Ubicación" style={{...S.inp,width:"100%"}} value={ubicacion} onChange={e=>setUbicacion(e.target.value)} placeholder="Oficina, casa, cliente..." /></div>
           </div>
           <textarea aria-label="Notas de jornada, incidencia o disponibilidad..." style={{...S.inp,width:"100%",minHeight:68,boxSizing:"border-box"}} value={notas} onChange={e=>setNotas(e.target.value)} placeholder="Notas de jornada, incidencia o disponibilidad..." />
+          </>}
           <div className="personnel-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
             {acciones.map(([accion,label,color]) => (
-              <button key={accion} onClick={()=>fichar(accion)} disabled={fichando || (accion==="entrada" && miJornadaLive?.salida_at)} style={{...S.btn,background:color,color:"#fff",opacity:(fichando || (accion==="entrada" && miJornadaLive?.salida_at)) ? .55 : 1}}>
+              <button key={accion} onClick={()=>fichar(accion)} disabled={loading || Boolean(loadError) || fichando || (accion==="entrada" && miJornadaLive?.salida_at)} style={{...S.btn,background:color,color:"#fff",opacity:(fichando || (accion==="entrada" && miJornadaLive?.salida_at)) ? .55 : 1}}>
                 {label}
               </button>
             ))}
@@ -394,15 +389,15 @@ export default function ControlHorario() {
           <div className="personnel-responsive-flex" style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
             <div>
               <div style={{fontSize:12,color:"var(--text5)",fontWeight:900,textTransform:"uppercase",letterSpacing:".06em"}}>Resumen periodo</div>
-              <div style={{fontSize:18,fontWeight:900,color:"var(--text)"}}>{minToClock(resumenBase.trabajado_min)}</div>
+              <div style={{fontSize:18,fontWeight:900,color:"var(--text)"}}>{loading || loadError ? "—" : minToClock(resumenBase.trabajado_min)}</div>
             </div>
             {canManage && <button onClick={exportCsv} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)"}}>Exportar CSV</button>}
           </div>
           <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,1fr)",gap:8,marginBottom:12}}>
-            <Mini label="Jornadas" value={resumenBase.jornadas || 0} />
-            <Mini label="Abiertas" value={resumenBase.abiertas || 0} tone={Number(resumenBase.abiertas) ? "#f59e0b" : "var(--green)"} />
-            <Mini label="Pausas" value={minToClock(resumenBase.pausa_min)} />
-            <Mini label="Personas abiertas" value={abiertos.length} />
+            <Mini label="Jornadas" value={loading || loadError ? "—" : resumenBase.jornadas || 0} />
+            <Mini label="Abiertas" value={loading || loadError ? "—" : resumenBase.abiertas || 0} tone={Number(resumenBase.abiertas) ? "#f59e0b" : "var(--green)"} />
+            <Mini label="Pausas" value={loading || loadError ? "—" : minToClock(resumenBase.pausa_min)} />
+            <Mini label="Personas abiertas" value={loading || loadError ? "—" : abiertos.length} />
             {canManage && <Mini label="Fuera de base" value={revision.fueraBase} tone={revision.fueraBase ? "#ef4444" : "var(--green)"} />}
             {canManage && <Mini label="Teletrabajo" value={revision.tele} tone="var(--accent-xl)" />}
             {canManage && <Mini label="Justificantes" value={revision.pendientesJustificar} tone={revision.pendientesJustificar ? "#f59e0b" : "var(--green)"} />}
@@ -425,69 +420,39 @@ export default function ControlHorario() {
         </div>
       </div>
 
-      {isGerente && (
-        <div className="personnel-card personnel-responsive-grid" style={{...S.card,display:"grid",gridTemplateColumns:isMobile ? "1fr" : "repeat(3,1fr)",gap:10}}>
-          <Mini label="Ausencias" value="Revisar" tone="#f59e0b" />
-          <Mini label="Vacaciones oficina" value="Nominas" tone="var(--accent-xl)" />
-          <Mini label="Vacaciones choferes" value="Choferes" tone="var(--accent-xl)" />
-          <div style={{gridColumn:"1/-1",fontSize:12,color:"var(--text5)",lineHeight:1.45}}>
-            Los saldos de vacaciones se muestran desde los datos reales de Nominas y fichas de chofer. Si no hay datos cargados, no se estiman importes ni dias.
-          </div>
-        </div>
-      )}
-
-      <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "minmax(280px,1fr) minmax(280px,1fr)",gap:14,alignItems:"start"}}>
-        <div className="personnel-card" style={S.card}>
-          <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:8}}>Teletrabajo</div>
-          <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:isMobile ? "1fr" : "150px 1fr",gap:8,marginBottom:8}}>
-            <div><label style={S.lbl}>Día</label><input aria-label="Día" type="date" style={{...S.inp,width:"100%"}} value={teleForm.fecha} onChange={e=>setTeleForm(p=>({...p,fecha:e.target.value}))} /></div>
-            <div><label style={S.lbl}>Motivo</label><input aria-label="Motivo" style={{...S.inp,width:"100%"}} value={teleForm.motivo} onChange={e=>setTeleForm(p=>({...p,motivo:e.target.value}))} placeholder="Motivo o contexto..." /></div>
-          </div>
-          <button onClick={solicitarTeletrabajo} style={{...S.btn,background:"var(--accent)",color:"#fff",marginBottom:12}}>Solicitar teletrabajo</button>
-          <div style={{display:"grid",gap:6}}>
-            {teletrabajo.slice(0, canManage ? 8 : 4).map(s => (
-              <div className="personnel-responsive-flex" key={s.id} style={{borderTop:"1px solid var(--border)",paddingTop:7,fontSize:12,color:"var(--text3)",display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
-                <span>
-                  <b>{canManage ? (s.usuario_nombre || "Empleado") + " · " : ""}{s.fecha ? new Date(s.fecha).toLocaleDateString("es-ES") : "-"}</b>
-                  <span style={{color:s.estado==="aprobada"?"var(--green)":s.estado==="rechazada"?"#ef4444":"#f59e0b",fontWeight:900}}> · {s.estado}</span>
-                  {s.motivo ? <div style={{fontSize:12,color:"var(--text5)"}}>{s.motivo}</div> : null}
-                </span>
-                {canManage && s.estado === "pendiente" && (
-                  <span style={{display:"flex",gap:5}}>
-                    <button onClick={()=>resolverTeletrabajo(s.id,"aprobada")} style={{...S.btn,padding:"5px 8px",background:"rgba(16,185,129,.14)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>Aceptar</button>
-                    <button onClick={()=>resolverTeletrabajo(s.id,"rechazada")} style={{...S.btn,padding:"5px 8px",background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.25)"}}>Rechazar</button>
-                  </span>
-                )}
-              </div>
-            ))}
-            {!teletrabajo.length && <div style={{fontSize:12,color:"var(--text5)"}}>Sin solicitudes en el periodo.</div>}
-          </div>
-        </div>
-
-        <div className="personnel-card" style={S.card}>
-          <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:8}}>Jornada tipo</div>
-          <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.45,marginBottom:10}}>
-            La jornada fija sirve como referencia. Si se olvida apertura o cierre, se avisará, pero no contará como hora extra salvo ajuste/aprobación.
-          </div>
-          <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:isMobile ? "repeat(2,minmax(0,1fr))" : "repeat(4,1fr)",gap:8,alignItems:"end"}}>
-            <Field label="Entrada" type="time" value={jornadaCfg.hora_entrada} onChange={v=>setJornadaCfg(p=>({...p,hora_entrada:v}))} />
-            <Field label="Salida" type="time" value={jornadaCfg.hora_salida} onChange={v=>setJornadaCfg(p=>({...p,hora_salida:v}))} />
-            <Field label="Pausa min" type="number" value={jornadaCfg.pausa_min} onChange={v=>setJornadaCfg(p=>({...p,pausa_min:v}))} />
-            <button onClick={guardarJornadaConfig} style={{...S.btn,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",height:36}}>Guardar</button>
-          </div>
-          <label style={{display:"flex",gap:8,alignItems:"center",fontSize:12,color:"var(--text3)",marginTop:10}}>
-            <input type="checkbox" checked={jornadaCfg.extras_requieren_aprobacion !== false} onChange={e=>setJornadaCfg(p=>({...p,extras_requieren_aprobacion:e.target.checked}))} />
-            Las horas extra requieren aprobación
-          </label>
-        </div>
-      </div>
+      <OfficeLeaveRequests key={`${user?.empresa_id}:${user?.id}`} canManage={canManage} today={todayIso()}/>
+      <section className="personnel-card" style={S.card} aria-label="Jornada prevista">
+        <h2 style={{fontSize:16, marginTop:0}}>Jornada prevista</h2>
+        <p style={{fontSize:13,color:"var(--text4)"}}>Horario de referencia configurado por Gerencia. Los fichajes registran la hora real; no generan entradas o salidas automáticas.</p>
+        {canManage ? <>
+          <label style={S.lbl}>Empleado<select aria-label="Empleado para jornada prevista" style={{...S.inp,display:"block",width:"100%",marginTop:6,marginBottom:12}} value={employeeId} onChange={e=>setEmployeeId(e.target.value)}>
+            <option value="">Seleccionar empleado</option>
+            {(resumen?.por_usuario || []).filter(u=>u.rol!=="gerente").map(u=><option key={u.usuario_id} value={u.usuario_id}>{u.nombre} · {u.rol}</option>)}
+          </select></label>
+          {scheduleError && <p role="alert">{scheduleError}</p>}
+          {employeeId && !scheduleError && <fieldset disabled={scheduleLoading} style={{border:0,padding:0,margin:0}}>
+            <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,alignItems:"end"}}>
+              <Field label="Entrada prevista" type="time" value={jornadaCfg.hora_entrada} onChange={v=>setJornadaCfg(p=>({...p,hora_entrada:v}))}/>
+              <Field label="Salida prevista" type="time" value={jornadaCfg.hora_salida} onChange={v=>setJornadaCfg(p=>({...p,hora_salida:v}))}/>
+              <Field label="Pausa prevista (min)" type="number" value={jornadaCfg.pausa_min} onChange={v=>setJornadaCfg(p=>({...p,pausa_min:v}))}/>
+              <button onClick={guardarJornadaConfig}>Guardar jornada prevista</button>
+            </div>
+          </fieldset>}
+          <button onClick={fijarBaseEmpresa} style={{marginTop:12}}>Usar mi ubicación como base</button>
+          {gpsStatus && <p role="status">{gpsStatus}</p>}
+        </> : <div className="personnel-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+          <Mini label="Entrada prevista" value={loadError || loading ? "—" : jornadaCfg.hora_entrada}/>
+          <Mini label="Salida prevista" value={loadError || loading ? "—" : jornadaCfg.hora_salida}/>
+          <Mini label="Pausa prevista" value={loadError || loading ? "—" : minToClock(jornadaCfg.pausa_min)}/>
+        </div>}
+      </section>
 
       <div className="personnel-card" style={S.card}>
         <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:10}}>Jornadas registradas</div>
-        {loading ? <div style={{color:"var(--text4)",fontSize:12}}>Cargando...</div> : (
+        {loading ? <div role="status">Cargando…</div> : loadError ? <p>No se han podido consultar los fichajes.</p> : (
           <div style={{overflowX:"auto"}}>
             <div className="personnel-table"><table style={{width:"100%",borderCollapse:"collapse",minWidth:860}}>
-              <thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Usuario</th><th style={S.th}>Entrada</th><th style={S.th}>Salida</th><th style={S.th}>Pausa</th><th style={S.th}>Trabajado</th><th style={S.th}>Estado</th><th style={S.th}>Modalidad</th><th style={S.th}>Ubicación</th><th style={S.th}>Acciones</th></tr></thead>
+              <thead><tr><th style={S.th}>Fecha</th><th style={S.th}>Usuario</th><th style={S.th}>Entrada</th><th style={S.th}>Salida</th><th style={S.th}>Pausa</th><th style={S.th}>Trabajado</th><th style={S.th}>Estado</th><th style={S.th}>Modalidad</th><th style={S.th}>Ubicación</th>{canManage && <th style={S.th}>Acciones</th>}</tr></thead>
               <tbody>
                 {items.map(row => (
                   <tr key={row.id}>
@@ -504,17 +469,17 @@ export default function ControlHorario() {
                       {row.ubicacion_distancia_m != null && <div style={{color:"var(--text5)",fontSize:12}}>{row.ubicacion_distancia_m} m</div>}
                       {row.ubicacion && <div style={{color:"var(--text5)",fontSize:12}}>{row.ubicacion}</div>}
                     </td>
-                    <td style={S.td}>{canManage && <button onClick={()=>setEdit({...row, motivo:""})} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text)",border:"1px solid var(--border2)"}}>Editar</button>}</td>
+                    {canManage && <td style={S.td}><button onClick={()=>setEdit({...row, motivo:""})} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text)",border:"1px solid var(--border2)"}}>Editar</button></td>}
                   </tr>
                 ))}
-                {!items.length && <tr><td colSpan={10} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin fichajes en el periodo.</td></tr>}
+                {!items.length && <tr><td colSpan={canManage ? 10 : 9} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin fichajes en el periodo.</td></tr>}
               </tbody>
             </table></div>
           </div>
         )}
       </div>
 
-      {edit && (
+      {edit && canManage && (
         <div className="personnel-overlay personnel-responsive-flex" role="dialog" aria-modal="true" aria-label="Detalle y edición" style={{position:"fixed",inset:0,zIndex:300,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
           <div className="personnel-card" style={{...S.card,width:"100%",maxWidth:560,boxSizing:"border-box",margin:0}}>
             <div style={{fontSize:18,fontWeight:900,color:"var(--text)",marginBottom:4}}>Ajustar fichaje</div>
@@ -546,7 +511,7 @@ function Mini({ label, value, tone = "var(--text)" }) {
 }
 
 function Field({ label, value, onChange, type = "text" }) {
-  return <div><label style={S.lbl}>{label}</label><input aria-label={label} type={type} style={{...S.inp,width:"100%",boxSizing:"border-box"}} value={value || ""} onChange={e=>onChange(e.target.value)} /></div>;
+  return <div><label style={S.lbl}>{label}</label><input aria-label={label} type={type} style={{...S.inp,width:"100%",boxSizing:"border-box"}} value={value ?? ""} onChange={e=>onChange(e.target.value)} /></div>;
 }
 
 function toLocalInput(value) {

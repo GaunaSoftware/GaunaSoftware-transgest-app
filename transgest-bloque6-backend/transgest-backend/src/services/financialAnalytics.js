@@ -1,6 +1,6 @@
 // Read-only analytical adapter. Never writes invoices or connects to accounting/production services.
 const db = require('./db');
-const { financialPedidosCte, reportRange, money, ratio, day, isValidInvoice, collectionAmounts, metric, reportMetadata } = require('./financialKpis');
+const { serviceIncome, financialPedidosCte, reportRange, money, ratio, day, isValidInvoice, collectionAmounts, metric, reportMetadata } = require('./financialKpis');
 const { buildEconomics, physicalKm } = require('./financialEconomics');
 const num = v => Number(v || 0);
 const sum = (rows, key) => money(rows.reduce((n, r) => n + num(typeof key === 'function' ? key(r) : r[key]), 0));
@@ -11,7 +11,7 @@ function tractor(v, vehicles) {
   return !/remolque|dolly|lowboy/i.test(v.clase || v.tipo || '') && !/^R-|-R$/i.test(v.matricula || '') && !vehicles.some(t => t.remolque_id === v.id);
 }
 function orderTotals(orders) {
-  const income = sum(orders, 'importe'), cost = sum(orders, 'coste_operativo');
+  const income = sum(orders, serviceIncome), cost = sum(orders, 'coste_operativo');
   const physical = physicalKm(orders);
   const loaded = physical.cargados, empty = physical.vacios;
   const knownKm = orders.filter(p => num(p.km_ruta) > 0).length;
@@ -46,7 +46,7 @@ function buildAnalytics({ empresaId, range, orders = [], invoices = [], vehicles
     const amounts = collectionAmounts(sum(rows,'total'), sum(rows.filter(f=>f.estado==='cobrada'),'total'));
     return { id, name: rows[0].cliente_nombre || 'Sin cliente', total: amounts.total, nfact: rows.length, cobrado: amounts.cobrado, pendiente: amounts.saldo, cobro_pct: amounts.porcentaje };
   }).sort((a,b)=>b.total-a.total);
-  const routes = group(services, p => `${p.origen || 'Sin origen'} → ${p.destino || 'Sin destino'}`).map(([name, rows]) => ({ name, viajes: rows.length, importe: sum(rows,'importe'), ingreso_medio: ratio(sum(rows,'importe'), rows.length) })).sort((a,b)=>b.importe-a.importe);
+  const routes = group(services, p => `${p.origen || 'Sin origen'} → ${p.destino || 'Sin destino'}`).map(([name, rows]) => ({ name, viajes: rows.length, importe: sum(rows,serviceIncome), ingreso_medio: ratio(sum(rows,serviceIncome), rows.length) })).sort((a,b)=>b.importe-a.importe);
   const fleet = vehicles.filter(v=>tractor(v,vehicles)).map(v => {
     const rows = services.filter(p=>p.vehiculo_id===v.id);
     const costs = sum(repairs.filter(r=>r.vehiculo_id===v.id),'coste_total');
@@ -64,7 +64,7 @@ function buildAnalytics({ empresaId, range, orders = [], invoices = [], vehicles
   });
   const byDriver = drivers.map(c => {
     const rows = services.filter(p=>p.chofer_id===c.id || p.chofer2_id===c.id);
-    const weighted = rows.map(p=>({ ...p, importe:num(p.importe) * (p.chofer2_id ? (p.chofer_id === c.id ? num(p.reparto_chofer1 ?? 50) : 100-num(p.reparto_chofer1 ?? 50))/100 : 1) }));
+    const weighted = rows.map(p=>({ ...p, importe_paralizacion:0, importe:num(serviceIncome(p)) * (p.chofer2_id ? (p.chofer_id === c.id ? num(p.reparto_chofer1 ?? 50) : 100-num(p.reparto_chofer1 ?? 50))/100 : 1) }));
     return { id:c.id, nombre:`${c.nombre || ''} ${c.apellidos || ''}`.trim(), ...orderTotals(weighted) };
   });
   const visits = vehicles.map(v => {

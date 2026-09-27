@@ -8,7 +8,7 @@ router.use(requireRole('gerente','trafico','administrativo'));
 router.use(requireModulePermission('pedidos'));
 router.use(async(req,res,next)=>{try{await require('../services/plannerSchema').ensurePlannerSchema();next();}catch(e){next(e);}});
 const wrap=fn=>async(req,res,next)=>{try{await fn(req,res);}catch(e){if(e.status)return res.status(e.status).json({error:e.message});if(['22P02','23505'].includes(e.code))return res.status(409).json({error:'Identificador no válido o ya utilizado.'});next(e);}};
-router.get('/catalogo',wrap(async(req,res)=>res.json({scopes:consent.catalog,pendiente:{facturacion:'Intercambio de facturas sujeto a conciliación; no habilitado por esta conexión.'}})));
+router.get('/catalogo',wrap(async(req,res)=>res.json({scopes:consent.catalog})));
 router.get('/sugerencia',requireRole('gerente'),wrap(async(req,res)=>{const match=await consent.target(db,req.empresaId,req.query.colaborador_id);res.json({nombre:match.nombre,cif:match.cif,coincidencia:true,conectada:false});}));
 router.post('/invitaciones',requireRole('gerente'),wrap(async(req,res)=>res.status(201).json(await consent.invite(db,req.empresaId,req.user.id,req.body))));
 router.get('/invitaciones',requireRole('gerente'),wrap(async(req,res)=>res.json((await db.query(`SELECT n.id,n.scopes,n.created_at,n.expires_at,n.aceptada_at,n.revocada_at,p.numero,e.nombre AS destinatario FROM network_invitaciones n JOIN pedidos p ON p.id=n.pedido_id AND p.empresa_id=n.empresa_id JOIN empresas e ON e.id=n.transportista_empresa_id WHERE n.empresa_id=$1 ORDER BY n.created_at DESC LIMIT 100`,[req.empresaId])).rows)));
@@ -82,4 +82,7 @@ router.get('/auditoria/:id',requireRole('gerente'),wrap(async(req,res)=>{
  const link=(await db.query('SELECT id FROM planner_conexiones_transporte WHERE id::text=$1 AND (empresa_id=$2 OR transportista_empresa_id=$2)',[req.params.id,req.empresaId])).rows[0];if(!link)return res.status(404).json({error:'Conexión no encontrada.'});
  res.json({limite:100,datos:(await db.query('SELECT tipo,datos,created_at FROM network_eventos WHERE conexion_id=$1 ORDER BY created_at DESC LIMIT 100',[link.id])).rows});
 }));
+router.get('/facturacion/:id',requireRole('gerente'),requireModulePermission('facturacion'),wrap(async(req,res)=>res.json(await require('../services/networkBilling').list(db,req.empresaId,req.params.id))));
+router.post('/facturacion/:id/consentimiento',requireRole('gerente'),requireModulePermission('facturacion'),wrap(async(req,res)=>res.json(await require('../services/networkBilling').authorize(db,req.empresaId,req.user.id,req.params.id,req.body.autorizar))));
+router.post('/facturacion/:id/compartir',requireRole('gerente'),requireModulePermission('facturacion'),wrap(async(req,res)=>res.status(201).json(await require('../services/networkBilling').send(db,req.empresaId,req.user.id,req.params.id,req.body))));
 module.exports=router;

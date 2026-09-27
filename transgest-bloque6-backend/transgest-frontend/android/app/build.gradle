@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+if (System.getenv("TRANSGEST_ANDROID_REQUIRE_SIGNING") == "true") {
+    ["TRANSGEST_ANDROID_KEYSTORE", "TRANSGEST_ANDROID_STORE_PASSWORD", "TRANSGEST_ANDROID_KEY_ALIAS", "TRANSGEST_ANDROID_KEY_PASSWORD"].each { key ->
+        if (!System.getenv(key)) throw new GradleException("Falta la configuración de firma: " + key)
+    }
+}
+
+
 android {
     namespace = "com.gaunasoftware.transgest"
     compileSdk = rootProject.ext.compileSdkVersion

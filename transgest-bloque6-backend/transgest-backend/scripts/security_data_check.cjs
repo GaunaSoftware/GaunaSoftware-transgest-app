@@ -135,7 +135,7 @@ async function main() {
     assert.equal(ownPosition.data.updated,1,JSON.stringify(ownPosition.data));
     assert.equal((await pg.query('SELECT empresa_id FROM gps_position_log')).rows[0].empresa_id,A);
 
-    await pg.exec(`CREATE TABLE factura_envios_fiscales(id UUID DEFAULT gen_random_uuid(),empresa_id UUID,sistema TEXT,response JSONB,created_at TIMESTAMPTZ DEFAULT NOW())`);
+    await pg.exec(`CREATE TABLE factura_envios_fiscales(id UUID DEFAULT gen_random_uuid(),empresa_id UUID,sistema TEXT,response JSONB,provider_uuid TEXT,created_at TIMESTAMPTZ DEFAULT NOW())`);
     await pg.query("INSERT INTO factura_envios_fiscales(empresa_id,sistema,response) VALUES($1,'verifactu',$2)",[B,JSON.stringify({provider_uuid:'existing-B-provider-uuid'})]);
     const fiscalQueue=require('../src/services/fiscalQueueState');
     assert.equal(await fiscalQueue.findLatestQueueItemByProviderUuid(db,A,'verifactu','existing-B-provider-uuid'),null);

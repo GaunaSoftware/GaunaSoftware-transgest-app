@@ -1,0 +1,27 @@
+import React, {act} from 'react';
+import {createRoot} from 'react-dom/client';
+import {Simulate} from 'react-dom/test-utils';
+import QuickDetentionForm from './QuickDetentionForm';
+import {calculateDetention,prepareDetentionPrefactura} from '../../services/api';
+global.IS_REACT_ACT_ENVIRONMENT=true;
+jest.mock('../../services/api',()=>({calculateDetention:jest.fn(),prepareDetentionPrefactura:jest.fn()}));
+jest.mock('../../ui',()=>({Button:({children,...props})=><button {...props}>{children}</button>}));
+test('usa el cálculo del servidor, invalida el resultado al editar y conserva la operación al reintentar',async()=>{
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);const created=jest.fn();
+  const oldCrypto=global.crypto;Object.defineProperty(global,'crypto',{configurable:true,value:{...oldCrypto,randomUUID:()=> 'same-operation'}});
+  calculateDetention.mockResolvedValue({importe:80,filas:[{dia:1,horas:2,tarifa_hora:40,importe:80}],criterio:'Fuente servidor'});
+  prepareDetentionPrefactura.mockRejectedValueOnce(new Error('Respuesta perdida')).mockResolvedValueOnce({id:'claim'});
+  await act(async()=>root.render(<QuickDetentionForm pedidoId="pedido" onCreated={created} onCancel={()=>{}}/>));
+  const inputs=host.querySelectorAll('input[type="datetime-local"]');
+  await act(async()=>{Simulate.change(inputs[0],{target:{value:'2026-01-01T10:00'}});Simulate.change(inputs[1],{target:{value:'2026-01-01T13:00'}});});
+  await act(async()=>Simulate.submit(host.querySelector('form')));
+  expect(host.textContent).toContain('80,00');
+  await act(async()=>Simulate.change(inputs[1],{target:{value:'2026-01-01T13:10'}}));expect(host.textContent).not.toContain('Crear prefactura');
+  await act(async()=>Simulate.submit(host.querySelector('form')));
+  const save=()=>[...host.querySelectorAll('button')].find(b=>b.textContent.includes('Crear prefactura'));
+  await act(async()=>Simulate.click(save()));expect(host.textContent).toContain('Respuesta perdida');
+  await act(async()=>Simulate.click(save()));
+  expect(prepareDetentionPrefactura.mock.calls[0][1].operacion).toBe(prepareDetentionPrefactura.mock.calls[1][1].operacion);
+  expect(created).toHaveBeenCalledWith({id:'claim'});
+  await act(async()=>root.unmount());host.remove();Object.defineProperty(global,'crypto',{configurable:true,value:oldCrypto});
+});

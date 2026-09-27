@@ -37,13 +37,14 @@ async function main(){
  // Exercise the actual production module boundaries, not authentication alone.
  const authMiddleware=req('./middleware/auth');
  const boundarySource=code.slice(code.indexOf('function pedidosAuthUnlessPublic'),code.indexOf('safeUse(`${api}/auth`'));
- const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission,colaboradoresAuthUnlessPublic})',authMiddleware);
+ const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission,colaboradoresAuthUnlessPublic,routeOptimizerAuthUnlessPublic,routeOptimizerPlanUnlessPublic})',authMiddleware);
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.get('/api/v1/producto',(request,res)=>res.json({producto:'tms'}));
  app.use('/api/v1/auth',auth);
  app.use('/api/v1/empresa',authMiddleware.authenticate,authMiddleware.requireModulePermission('empresa'),req('./routes/datos_empresa'));
  app.use('/api/v1/superadmin',req('./routes/superadminCore'));
  app.use('/api/v1/usuarios',authMiddleware.authenticate,req('./routes/usuarios'));
+ app.use('/api/v1/route-optimizer',boundaries.routeOptimizerAuthUnlessPublic,boundaries.routeOptimizerPlanUnlessPublic,req('./routes/route_optimizer'));
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
  app.use('/api/v1/planner-loading',authMiddleware.authenticate,req('./routes/planner_loading'));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
@@ -57,6 +58,7 @@ async function main(){
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
+ app.use('/api/v1/control-horario',authMiddleware.authenticate,authMiddleware.requireModulePermission('control_horario'),req('./routes/control_horario'));
  app.use('/api/v1/importacion',req('./middleware/auth').authenticate,req('./middleware/auth').requireModulePermission('importacion'),req('./routes/importacion'));
  if(process.env.AUDIT_BROWSER==='1'){
   const browserBuild=path.resolve(root,'../transgest-frontend/build');
@@ -71,6 +73,7 @@ async function main(){
  try{
  const login=await call('Login gerente demo','POST','/auth/login',{email:'audit@example.invalid',password});token=login.token;
  if(!token)throw Error('No token on demo login');
+ evidence.officeAttendance=await require('./audit_office_attendance.cjs')({db,base,company,token,password});
  const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
  const driver=await call('Crear conductor','POST','/choferes',{nombre:'Conductor',apellidos:'de Pruebas',dni:'00000000T',telefono:'960000001',email:'driver@example.invalid',activo:true});
  const vehicle=await call('Crear tractora','POST','/vehiculos',{matricula:'1234AUD',tipo:'tractora',marca:'Prueba',modelo:'Auditoría',fecha_itv:'2027-09-16',km_actuales:10000,activo:true});
@@ -252,6 +255,7 @@ async function main(){
   evidence.plannerExchange=await require('./audit_network.cjs')({db,company,user,base,token,password,transportCompany,transportClient,sharedOrder,legacyToken:invitation,pdf,stock});
   evidence.supplierInvoice=await require('./audit_supplier_invoice.cjs')({db,base,company,user,token,password,order:sharedOrder});
   evidence.invoiceWorkflow=await require('./audit_invoice_workflow.cjs')({db,base,company,user,token,password});
+  evidence.operationalCompletion=await require('./audit_operational_completion.cjs')({db,base,company,user,token,password,pdf});
   evidence.fiscalDelivery=await require('./audit_fiscal_delivery.cjs')({db,company,user});
   evidence.physicalBi=await require('./audit_physical_bi.cjs')({db,base,company,token});
   evidence.integrationRegistry=await require('./audit_integration_registry.cjs')({db,base,company,token});
@@ -326,6 +330,7 @@ async function main(){
    evidence.controlTowerFlow=await require('./audit_control_tower_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,password});
    evidence.operationalModel=await require('./audit_operational_model.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    evidence.groupagePlan=await require('./audit_groupage_plan.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
+   evidence.journeyReplanning=await require('./audit_journey_replanning.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    evidence.orderInbox=await require('./audit_inbox_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client});
    evidence.driverJourney=await require('./audit_driver_journey.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,driver,vehicle});
    await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});
@@ -361,11 +366,28 @@ async function main(){
   token=login.token;
   const monthlyExpense=await call('Estructura: crear mensual','POST','/empresa/gastos-estructura',{nombre:'Alquiler sintético',importe:100,periodo:'mensual',fecha:'2026-09'});
   const oneOffExpense=await call('Estructura: crear puntual','POST','/empresa/gastos-estructura',{nombre:'Puntual sintético',importe:200,periodo:'unico',fecha:'2026-09'});
+  const expenseCompany=crypto.randomUUID();
+  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'GASTOS B SINTÉTICOS','B00000999','expense-b@example.invalid','enterprise','activa')",[expenseCompany]);
+  const foreignExpense=(await db.query("INSERT INTO gastos_estructura(empresa_id,nombre,tipo,importe,periodo,fecha) VALUES($1,'Gasto de otra empresa','Otros',9000,'mensual','2025-01') RETURNING id",[expenseCompany])).rows[0];
   const expenseSummary=await call('Estructura: resumen mensual','GET','/empresa/gastos-estructura/resumen?periodo=2026-09&empresa_id=ajena');
   assert.equal(expenseSummary.total,300);assert.ok(expenseSummary.gastos.every(g=>g.empresa_id===company));
   assert.equal(Math.round(expenseSummary.reparto.reduce((s,r)=>s+r.coste_igual,0)*100),30000);
   const nextExpenseSummary=await call('Estructura: recurrencia siguiente mes','GET','/empresa/gastos-estructura/resumen?periodo=2026-10');
   assert.equal(nextExpenseSummary.total,100);
+  assert.deepEqual(nextExpenseSummary.comparativa.periodos.map(p=>p.total),[100,300,null]);
+  assert.equal(nextExpenseSummary.comparativa.variacion_anterior.diferencia,-200);
+  assert.equal(expenseSummary.comparativa.periodos[0].total,expenseSummary.total);
+  token=(await call('Estructura: login conductor restringido','POST','/auth/login',{email:'driver-login@example.invalid',password})).token;
+  await call('Estructura: chófer sin acceso a comparativa','GET','/empresa/gastos-estructura/resumen?periodo=2026-09');
+  token=login.token;
+  await call('Estructura: no editar gasto de otra empresa','PUT','/empresa/gastos-estructura/'+foreignExpense.id,{importe:10});
+  const foreignUser=crypto.randomUUID();
+  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Contable B sintético','expense-b@example.invalid',$3,'contable',true)",[foreignUser,expenseCompany,await req('bcryptjs').hash(password,10)]);
+  const foreignLogin=await call('Estructura: login contable B','POST','/auth/login',{email:'expense-b@example.invalid',password});
+  token=foreignLogin.token;
+  const foreignSummary=await call('Estructura: comparación B no filtra A','GET','/empresa/gastos-estructura/resumen?periodo=2026-09&empresa_id='+company);
+  assert.equal(foreignSummary.total,9000);assert.deepEqual(foreignSummary.comparativa.periodos.map(p=>p.total),[9000,9000,9000]);
+  token=login.token;
   await call('Estructura: cerrar mes compatible','POST','/empresa/meses-cerrados/2026-09-01',{});
   assert.ok((await call('Estructura: mes cerrado','GET','/empresa/meses-cerrados')).includes('2026-09'));
   await call('Estructura: bloqueo servidor de mes cerrado','PUT','/empresa/gastos-estructura/'+monthlyExpense.id,{importe:101});
@@ -375,6 +397,8 @@ async function main(){
   await call('Estructura: quitar puntual de ensayo','DELETE','/empresa/gastos-estructura/'+oneOffExpense.id);
   await call('Estructura: quitar mensual de ensayo','DELETE','/empresa/gastos-estructura/'+monthlyExpense.id);
   const expectedErrors=new Map([
+  ['Estructura: chófer sin acceso a comparativa',403],
+  ['Estructura: no editar gasto de otra empresa',404],
   ['Estructura: bloqueo servidor de mes cerrado',409],
   ['Rechazar ruta de otro cliente al editar',400],
   ['Exigir confirmación de carga real en otro día',409],
@@ -398,6 +422,7 @@ async function main(){
  evidence.passed=true;
  evidence.created={company:!!company,user:!!user,client:!!client.id,driver:!!driver.id,vehicle:!!vehicle.id};
  if(process.env.AUDIT_BROWSER==='1'){
+  await db.query("INSERT INTO gastos_estructura(empresa_id,nombre,tipo,importe,periodo,fecha) VALUES ($1,'Alquiler oficina · SINTÉTICO','Alquiler/Arrendamiento',950,'mensual','2025-01'),($1,'Licencia anual · SINTÉTICO','Software/Licencias',1200,'anual','2026-01'),($1,'Formación septiembre · SINTÉTICO','Formación',450,'unico','2026-09'),($1,'Formación agosto · SINTÉTICO','Formación',250,'unico','2026-08')",[company]);
   // Keep this order free of Planner reservations and customer debt so the
   // browser can exercise an ordinary save/reopen cycle without bypassing guards.
   const qaClient=await call('Cliente limpio para QA visual','POST','/clientes',{nombre:'Cliente QA visual',cif:'B87654321',direccion:'Calle de Ensayo 2',cp:'46002',ciudad:'Valencia',codigo_postal:'46002',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'visual@example.invalid',telefono:'960000002',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias'});

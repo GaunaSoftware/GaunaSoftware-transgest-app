@@ -64,6 +64,28 @@ module.exports=async function({db,company,user,base,token,password,transportComp
  const portalPdf=await request('GET',`/supplier-app/pedidos/${sharedOrder.id}/albaran-salida`,null,200,portal);assert.equal(portalPdf.version,2);assert.equal(portalPdf.file_base64,privatePdf.file_base64);
  await request('GET',path+'/viajes/'+trip.id+'/albaran',null,404,other);
  await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'cancelar',version:detail.version,motivo:'Fin ensayo sintético'});
+ // Economic exchange is opt-in even for an otherwise fully connected pair.
+ const bp=path+'/facturacion/'+linked.conexion_id,invoice=crypto.randomUUID();
+ await db.query("INSERT INTO facturas(id,empresa_id,numero,cliente_id,estado,base_imponible,cuota_iva,total) VALUES($1,$2,'QA-NET-INVOICE',$3,'emitida',360,75.60,435.60)",[invoice,transportCompany,transportClient]);
+ await db.query('INSERT INTO factura_pedidos(factura_id,pedido_id) VALUES($1,$2)',[invoice,trip.id]);
+ const original={factura_id:invoice,nombre:'QA-NET-INVOICE.pdf',base64:pdf.file_base64,confirmado:true};
+ await request('POST',bp+'/compartir',original,403,carrier);
+ await request('GET',bp,null,404,other);await request('GET',bp,null,403,portal);
+ await request('POST',bp+'/consentimiento',{autorizar:true});
+ assert.equal((await request('GET',bp,null,200,carrier)).autorizado,false);
+ await request('POST',bp+'/consentimiento',{autorizar:true},200,carrier);
+ assert.equal((await request('GET',bp,null,200,carrier)).autorizado,true);
+ const sharedInvoice=await request('POST',bp+'/compartir',original,201,carrier);
+ assert.equal((await request('POST',bp+'/compartir',original,201,carrier)).id,sharedInvoice.id);
+ const recv=(await request('GET',bp)).facturas.find(f=>f.id===sharedInvoice.id);assert.equal(recv.revision,'revision');assert.equal(Number(recv.total),435.6);
+ const stored=await request('GET','/supplier-invoice-review/'+recv.recibida_id+'/original');assert.equal(stored.base64,pdf.file_base64);
+ await request('GET','/supplier-invoice-review/'+recv.recibida_id+'/original',null,404,carrier);
+ assert.equal((await request('GET','/supplier-invoice-review/'+recv.recibida_id)).datos.lineas[0].pedido_id,sharedOrder.id);
+ const coverage=(await db.query('SELECT conciliacion FROM factura_proveedor_lineas WHERE empresa_id=$1 AND factura_id=$2',[company,recv.recibida_id])).rows[0].conciliacion.documentacion;
+ assert.equal(coverage.estado,'disponible_para_revision');assert.ok(coverage.documentos.length>0);
+ await request('POST',bp+'/consentimiento',{autorizar:false},200,carrier);
+ assert.equal((await request('GET',bp)).facturas.length,0);await request('POST',bp+'/compartir',original,403,carrier);
+ assert.equal((await request('GET','/supplier-invoice-review/'+recv.recibida_id+'/original')).base64,pdf.file_base64,'recipient retains its received original after revocation');
  await request('DELETE',path+'/'+linked.conexion_id,null,404,other);
  await request('DELETE',path+'/'+linked.conexion_id,null,200,carrier);await request('DELETE',path+'/'+linked.conexion_id,null,200,carrier);
  await request('GET',path+'/seguimiento/'+sharedOrder.id,null,404);await request('GET',path+'/viajes/'+trip.id+'/albaran',null,404,carrier);
@@ -71,5 +93,5 @@ module.exports=async function({db,company,user,base,token,password,transportComp
  await db.query("UPDATE pedidos SET estado='entregado' WHERE id=$1 AND empresa_id=$2",[trip.id,transportCompany]);await request('POST',path+'/sincronizar',{});
  assert.equal((await db.query('SELECT estado FROM pedidos WHERE id=$1',[sharedOrder.id])).rows[0].estado,'en_curso');
  const audit=await request('GET',path+'/auditoria/'+linked.conexion_id);assert.ok(audit.datos.some(e=>e.tipo==='conexion.revocada'));await request('GET',path+'/auditoria/'+linked.conexion_id,null,404,other);
- return {checks,bilateral:true,scopes:true,agreedPrice:true,retry:true,currentImmutableNote:true,gpsAndEtaPrivacy:true,revoke:true};
+ return {checks,bilateral:true,scopes:true,agreedPrice:true,retry:true,currentImmutableNote:true,gpsAndEtaPrivacy:true,revoke:true,billingBilateral:true,billingOriginalAndReview:true,billingIdempotency:true};
 };

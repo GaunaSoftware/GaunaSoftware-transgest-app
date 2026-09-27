@@ -29,11 +29,11 @@ function activeDriverStop(order,all={}) {
 
 const number=v=>Number(String(v??'').replace(',','.'));
 const reject=message=>{throw Object.assign(new Error(message),{status:409,code:'DRIVER_STOP_SEQUENCE'});};
-function mergeStop(order,all,patch) {
+function mergeStop(order,all,patch,orderedStopIds) {
  const stops=driverStops(order),stop=stops.find(s=>s.id===patch.parada_id);
  if(!stop)reject('La parada ha cambiado. Actualiza el viaje antes de continuar.');
  const previous=stopData(stop,all,stops),next={...previous,...patch};delete next.paradas;delete next.parada_id;
- const active=activeDriverStop(order,all);
+ const active=orderedStopIds ? orderedStopIds.map(id=>stops.find(s=>s.id===id)).filter(Boolean).find(s=>!stopDone(s,stopData(s,all,stops))) : activeDriverStop(order,all);
  if(stopDone(stop,previous)) {
   const changed=Object.entries(patch).some(([key,value])=>!['parada_id','updated_at'].includes(key)&&!key.endsWith('_at')&&JSON.stringify(value)!==JSON.stringify(previous[key]));
   if(changed)reject('Esta parada ya está confirmada. Solicita a tráfico la corrección.');
@@ -87,11 +87,12 @@ async function saveStop(db,{pedidoId,empresaId,choferId,patch,actorId,authorize}
   if(['cancelado','facturado'].includes(order.estado))reject('Este viaje ya no admite cambios operativos.');
   const current=(await client.query('SELECT data FROM pedido_chofer_pasos WHERE pedido_id=$1 AND empresa_id=$2',[pedidoId,empresaId])).rows[0]?.data||{};
   const journey=await journeyService.loadJourney(client,empresaId,pedidoId,{lock:true});
-  if(journey&&authorize&&journey.orders.some(item=>!authorize(item)))throw Object.assign(new Error('La asignación del grupaje ha cambiado.'),{status:403,code:'DRIVER_ASSIGNMENT_CHANGED'});
+  if(journey&&authorize&&journey.orders.some(item=>!authorize(item)&&!(journey.trip.relevos?.length&&['entregado','facturado'].includes(item.estado)&&authorize({...item,...journey.trip.asignacion_snapshot}))))throw Object.assign(new Error('La asignación del grupaje ha cambiado.'),{status:403,code:'DRIVER_ASSIGNMENT_CHANGED'});
   const target=journeyService.assertNextStop(journey,pedidoId,patch.parada_id);
   const now=new Date().toISOString();
   const effective=journeyService.serverPatch(patch,current.paradas?.[patch.parada_id]||{},now);
-  const merged=mergeStop(order,current,effective);
+  const orderedStopIds=journey?.stops.map(s=>journeyService.ownerOf(s,journey)).filter(s=>s.pedido_id===pedidoId).map(s=>s.parada_legacy_id);
+  const merged=mergeStop(order,current,effective,orderedStopIds);
   if(merged.idempotent){
     // A new operation UUID retrying a completed stop still receives a receipt.
     if(operation)await journeyService.recordStop(client,{empresaId,pedidoId,actorId,operation,patch,merged,order,now});

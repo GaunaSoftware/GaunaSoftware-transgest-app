@@ -993,8 +993,11 @@ export const getControlHorarioResumen = (params={}) => apiFetch(`/control-horari
 export const getControlHorarioConfig = () => apiFetch("/control-horario/config", { silentSuccess:true, silentError:true });
 export const saveControlHorarioConfig = (data) => apiFetch("/control-horario/config", { method:"PUT", body:data });
 export const getTeletrabajoSolicitudes = (params={}) => apiFetch(`/control-horario/teletrabajo?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
-export const crearTeletrabajoSolicitud = (data) => apiFetch("/control-horario/teletrabajo", { method:"POST", body:data });
+export const crearTeletrabajoSolicitud = (data) => apiFetch("/control-horario/teletrabajo", { method:"POST", body:data, silentSuccess:true });
 export const resolverTeletrabajoSolicitud = (id, data) => apiFetch(`/control-horario/teletrabajo/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
+export const getOfficeVacationRequests = (params={}) => apiFetch(`/control-horario/vacaciones?${new URLSearchParams(params)}`, { silentSuccess:true });
+export const createOfficeVacationRequest = (data) => apiFetch("/control-horario/vacaciones", { method:"POST", body:data, silentSuccess:true });
+export const resolveOfficeVacationRequest = (id, data) => apiFetch(`/control-horario/vacaciones/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const getJornadaConfig = (params={}) => apiFetch(`/control-horario/jornada-config?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const saveJornadaConfig = (data) => apiFetch("/control-horario/jornada-config", { method:"PUT", body:data });
 export const editarControlHorario = (id, data) => apiFetch(`/control-horario/${id}`, { method:"PUT", body:data });
@@ -1036,6 +1039,7 @@ export const getResumenGastosEstructura = periodo => apiFetch(`/empresa/gastos-e
 export const getGastosEstructura   = ()        => apiFetch("/empresa/gastos-estructura");
 export const crearGastoEstructura  = (data)    => apiFetch("/empresa/gastos-estructura", {method:"POST",body:data});
 export const editarGastoEstructura = (id,data) => apiFetch(`/empresa/gastos-estructura/${id}`, {method:"PUT",body:data});
+export const cambiarVigenciaGasto = (id,data) => apiFetch(`/empresa/gastos-estructura/${id}/vigencia`, {method:"POST",body:data});
 export const borrarGastoEstructura = (id)      => apiFetch(`/empresa/gastos-estructura/${id}`, {method:"DELETE"});
 export const getMesesCerrados      = ()        => apiFetch("/empresa/meses-cerrados");
 export const cerrarMes             = (mes)     => apiFetch(`/empresa/meses-cerrados/${mes}`, {method:"POST"});
@@ -1376,6 +1380,8 @@ export async function uploadDocumentPackage(files){
 }
 
 export const getGroupagePlan = groupId => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/plan`);
+export const journeyOperation = (pedidoId,path='',options={}) => apiFetch(`/pedidos/${encodeURIComponent(pedidoId)}/operativa${path}`,options);
+export const pedidoParalizaciones = (id,body) => apiFetch(`/pedidos/${encodeURIComponent(id)}/paralizaciones`,body?{method:'POST',body}:{});
 export const saveGroupagePlan = (groupId,data) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/plan`,{method:'POST',body:{...data,client_operation_uuid:crypto.randomUUID()}});
 
 export const assignGroupage = (groupId,asignacion) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/asignacion`,{method:"POST",body:{asignacion,client_operation_uuid:crypto.randomUUID()}});
@@ -1398,3 +1404,22 @@ export async function switchActiveCompany(empresa_id) {
 }
 export const getBiGroups = () => apiFetch('/informes/bi/grupos');
 export const getGroupBi = params => apiFetch('/informes/bi/consolidado?'+new URLSearchParams(params),{timeoutMs:120000});
+
+export const calculateDetention = (id,body) => apiFetch(`/pedidos/${encodeURIComponent(id)}/paralizaciones/calcular`,{method:'POST',body,silentSuccess:true});
+export const prepareDetentionPrefactura = (id,body) => apiFetch(`/pedidos/${encodeURIComponent(id)}/paralizaciones/prefactura`,{method:'POST',body});
+export async function downloadDetentionPrefactura(id,claim) {
+  const token=getToken();
+  const response=await fetch(`${BASE}/api/v1/pedidos/${encodeURIComponent(id)}/paralizaciones/${encodeURIComponent(claim)}/prefactura.pdf`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar la prefactura');
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Abre de nuevo el pedido.');
+  return response.blob();
+}
+
+export const fiscalFlowRequest=(path,options={})=>apiFetch(`/facturas${path}`,options);
+export async function downloadClaveicon(id) {
+ const token=getToken();
+ const response=await fetch(apiUrl(`/facturas/contabilidad/claveicon/${encodeURIComponent(id)}/exportar`),{method:'POST',headers:{Authorization:`Bearer ${token}`}});
+ if(token!==getToken())throw new Error('La sesión ha cambiado. Abre la información con la cuenta actual.');
+ if(!response.ok){const data=await parseApiResponse(response);throw new Error(data.error || 'No se pudo exportar');}
+ const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filenameFromDisposition(response.headers.get('content-disposition')) || 'claveicon.xml';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}

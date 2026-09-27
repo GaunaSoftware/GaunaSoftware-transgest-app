@@ -27,6 +27,7 @@ function evaluate(p) {
  if(rules.bloquear_incidencia&&p.estado==='incidencia')errors.push('Incidencia operativa sin resolver');
  if(p.importe===null||p.importe===''||!Number.isFinite(Number(p.importe))||Number(p.importe)<=0)errors.push('Revisar tarifa: importe ausente, cero o negativo');
  const data={estado:p.estado,importe:p.importe,combustible:p.importe_revision_combustible,cliente_id:p.cliente_id,referencia:p.referencia_cliente,origen:p.origen,destino:p.destino,fecha_carga:p.fecha_carga,fecha_descarga:p.fecha_descarga,soportes:p.soportes,decas:p.decas,envios:p.envios,salida:departure(p),reglas:rules};
+ data.paralizacion=p.importe_paralizacion;
  const huella=crypto.createHash('sha256').update(canonical(data)).digest('hex');
  return {id:p.id,numero:p.numero,cliente_id:p.cliente_id,cliente_nombre:p.cliente_nombre,importe:p.importe,reglas:rules,huella,eligible,errores:errors,estado:errors.length?'excepcion':p.review_hash===huella?'listo':'revisar',documentos:{pod:p.soportes?.length||0,deca:p.decas?.length||0}};
 }

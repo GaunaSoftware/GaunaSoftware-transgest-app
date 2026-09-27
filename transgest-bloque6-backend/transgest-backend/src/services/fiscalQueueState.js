@@ -1,3 +1,11 @@
+async function persistProviderMetadata(client, item, response) {
+  if(response?.provider !== 'verifacti') return;
+  const qrUrl=require('./fiscalProviderVerifacti').officialQrUrl(response.qr_url);
+  const qr=await require('./fiscalQr').officialQrImage(qrUrl,response.qr_value);
+  await client.query('UPDATE factura_envios_fiscales SET provider_uuid=COALESCE(provider_uuid,$1) WHERE id=$2 AND empresa_id=$3',[response.provider_uuid || null,item.id,item.empresa_id]);
+  await client.query(`UPDATE factura_registros_fiscales SET official_qr_url=COALESCE($1,official_qr_url),official_qr_base64=COALESCE($2,official_qr_base64),provider_hash=COALESCE($3,provider_hash) WHERE id=$4 AND empresa_id=$5`,[qrUrl,qr?.toString('base64') || null,response.provider_hash || null,item.registro_id,item.empresa_id]);
+}
+
 async function logFiscalEvent(client, recordId, facturaId, empresaId, eventoTipo, detalle = {}) {
   await client.query(
     `INSERT INTO factura_eventos_fiscales
@@ -20,7 +28,14 @@ async function markQueueAccepted(client, item, responsePayload, actorUserId) {
       WHERE id=$2 AND estado NOT IN ('aceptado','omitido') RETURNING id`,
     [JSON.stringify(responsePayload), item.id]
   );
-  if (!transition.rowCount) return;
+  if (!transition.rowCount) {
+    // A later status may supply the official QR after acceptance; never reopen the queue.
+    const saved=(await client.query("SELECT * FROM factura_envios_fiscales WHERE id=$1 AND empresa_id=$2 AND estado='aceptado'",[item.id,item.empresa_id])).rows[0];
+    const uuid=saved?.provider_uuid || saved?.response?.provider_uuid;
+    if(saved && uuid && responsePayload?.provider_uuid===uuid) await persistProviderMetadata(client,item,responsePayload);
+    return;
+  }
+  await persistProviderMetadata(client,item,responsePayload);
   await client.query(
     `UPDATE factura_envios_fiscales
         SET estado='omitido',
@@ -35,7 +50,7 @@ async function markQueueAccepted(client, item, responsePayload, actorUserId) {
   );
   await client.query(
     `UPDATE factura_registros_fiscales
-        SET estado_envio='aceptado',
+        SET estado_envio='aceptado', accepted_at=COALESCE(accepted_at,NOW()),
             ultimo_error=NULL,
             ultimo_envio_at=NOW(),
             updated_by=$1,
@@ -61,6 +76,7 @@ async function markQueuePending(client, item, responsePayload, actorUserId, retr
     [JSON.stringify(responsePayload), new Date(Date.now() + retryInMs).toISOString(), item.id]
   );
   if (!transition.rowCount) return;
+  await persistProviderMetadata(client,item,responsePayload);
   await client.query(
     `UPDATE factura_registros_fiscales
         SET estado_envio='pendiente',
@@ -91,6 +107,7 @@ async function markQueueError(client, item, message, actorUserId, retryable = tr
     [responsePayload ? JSON.stringify(responsePayload) : null, message, retryable ? new Date(Date.now() + 60 * 60 * 1000).toISOString() : null, item.id, retryable]
   );
   if (!transition.rowCount) return;
+  await persistProviderMetadata(client,item,responsePayload);
   await client.query(
     `UPDATE factura_registros_fiscales
         SET estado_envio='error',
@@ -115,6 +132,7 @@ async function findLatestQueueItemByProviderUuid(client, empresaId, sistema, pro
       WHERE q.empresa_id=$1
         AND q.sistema=$2
         AND COALESCE(
+          q.provider_uuid,
           q.response->>'provider_uuid',
           q.response->>'uuid',
           q.response->'response'->>'uuid',

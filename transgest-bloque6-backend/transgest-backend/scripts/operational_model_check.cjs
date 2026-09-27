@@ -62,6 +62,20 @@ async function main(){
   await assert.rejects(pg.query('INSERT INTO parada_envios(empresa_id,viaje_id,parada_id,envio_id) VALUES($1,$2,$3,$4)',[company,actual.viaje_id,model.viajes[0].paradas[0].id,otherShipment]),{code:'23503'});
   const outage={query:async()=>{throw Object.assign(Error('unavailable'),{code:'08006'});}};
   await assert.rejects(readOperationalModel(outage,company,id),/unavailable/);
+  const declaredOrder=crypto.randomUUID(),declaredShipment=crypto.randomUUID();
+  await insert({...simple,id:declaredOrder,estado:'en_curso'});
+  const stops=legacyOperationalModel({...simple,id:declaredOrder}).viajes[0].paradas;
+  await pg.query('INSERT INTO pedidos_envios(id,empresa_id,pedido_id,snapshot) VALUES($1,$2,$3,$4)',[declaredShipment,company,declaredOrder,JSON.stringify({origen_stop_id:stops[0].legacy_key,destino_stop_id:stops[1].legacy_key,peso_kg:2000,bultos:8,mercancia:'Declarada'})]);
+  await pg.query('INSERT INTO pedido_chofer_pasos VALUES($1,$2,$3)',[declaredOrder,company,JSON.stringify({carga_ok:true,carga_ok_at:'2026-09-27T08:00:00Z'})]);
+  await materializeSimpleOrder(db,{empresaId:company,pedidoId:declaredOrder,operationId:crypto.randomUUID(),adoptProgress:true,motivo:'Relevo documentado'});
+  const adopted=(await readOperationalModel(db,company,declaredOrder)).viajes[0];
+  assert.equal(adopted.envios.length,1);assert.equal(adopted.envios[0].id,declaredShipment);
+  assert.equal(adopted.paradas[0].estado,'finalizada');assert.equal(new Date(adopted.paradas[0].fin_real_at).toISOString(),'2026-09-27T08:00:00.000Z');
+  assert.equal(adopted.paradas[1].envios[0].peso_kg,'2000');
+  const unmapped=crypto.randomUUID();await insert({...simple,id:unmapped});
+  await pg.exec('CREATE TABLE transport_document_versions(id uuid,empresa_id uuid,pedido_id uuid)');
+  await pg.query('INSERT INTO transport_document_versions VALUES($1,$2,$3)',[crypto.randomUUID(),company,unmapped]);
+  await assert.rejects(save(unmapped),{code:'DOCUMENT_MAPPING_REQUIRED'});
   console.log('PASS operational model: repeatable migration, legacy/no fictitious shipments, explicit real times/DST, tenant graph constraints, resource history, retries, rollback and no commercial mutation.');
  } finally {await pg.close();}
 }

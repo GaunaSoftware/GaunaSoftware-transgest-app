@@ -630,7 +630,10 @@ function requireModulePermission(modulo) {
       return next();
     }
 
-    const tipo = req.method === "GET" || req.method === "HEAD" ? "ver" : "editar";
+    // Viewing attendance grants only one's own clock/requests. Management is
+    // separately restricted to gerencia by the route, never by UI visibility.
+    const attendanceSelfService = modulo === "control_horario" && req.method === "POST" && /^\/(fichar|teletrabajo|vacaciones)\/?$/.test(req.path || "");
+    const tipo = req.method === "GET" || req.method === "HEAD" || attendanceSelfService ? "ver" : "editar";
     const regla = reglas[modulo];
     if (
       modulo === "empresa" &&

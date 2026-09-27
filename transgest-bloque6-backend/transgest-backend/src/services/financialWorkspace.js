@@ -2,7 +2,7 @@
 // formulas come from financialEconomics; this module only builds visual series,
 // filter choices, paginated explanations and navigation targets.
 const db = require('./db');
-const { reportRange, day, money, ratio, isValidInvoice } = require('./financialKpis');
+const { reportRange, day, money, ratio, isValidInvoice, serviceIncome } = require('./financialKpis');
 const { loadAnalyticsSources } = require('./financialAnalytics');
 const { buildEconomics, costBreakdown } = require('./financialEconomics');
 const { buildOperationalMetrics, loadOperationalEvidence, loadPlannerMetrics } = require('./operationalMetrics');
@@ -63,8 +63,8 @@ function evolution(services, granularity) {
     buckets.get(key).push(p);
   }
   return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([fecha, rows]) => {
-    const known = rows.filter(p => p.importe != null && Number.isFinite(Number(p.importe)));
-    const income = known.length ? euro(known.reduce((n, p) => n + Number(p.importe), 0)) : null;
+    const known = rows.filter(p => serviceIncome(p) != null);
+    const income = known.length ? euro(known.reduce((n, p) => n + Number(serviceIncome(p)), 0)) : null;
     const costs = costBreakdown(rows);
     return { fecha, ingreso: income, margen: income == null || costs.directo_registrado == null ? null : euro(income - costs.directo_registrado),
       cobertura_costes: costs.cobertura };
@@ -79,7 +79,7 @@ function detail(services, clients, vehicles, invoices, sort, direction, page, li
     return { id:p.id, numero:p.numero || String(p.id), fecha:dateOf(p), cliente_id:p.cliente_id,
       cliente:clientNames.get(String(p.cliente_id)) || 'Sin cliente', ruta:`${p.origen || '?'} → ${p.destino || '?'}`,
       vehiculo_id:p.vehiculo_id || null, vehiculo:p.bi_assignment_warning?'Varios recursos históricos':plates.get(String(p.vehiculo_id)) || p.matricula || 'Sin vehículo',
-      ejecucion:execution(p), ingreso:euro(p.importe), coste:cost, margen:cost == null || euro(p.importe) == null ? null : euro(Number(p.importe) - cost),
+      ejecucion:execution(p), ingreso:serviceIncome(p), coste:cost, margen:cost == null || serviceIncome(p) == null ? null : euro(Number(serviceIncome(p)) - cost),
       km_pedido:p.km_ruta == null ? null : Number(p.km_ruta), km_vacio_pedido:p.km_vacio == null ? null : Number(p.km_vacio),
       viajes_operativos:(p.bi_legs||[]).map(l=>l.id), coste_viaje_atribuido:p.bi_journey_cost||0, advertencia:p.bi_cost_warning||p.bi_assignment_warning||null,
       pendiente_factura:p.pendiente_factura === true,
@@ -114,7 +114,7 @@ function reviewItems(services, invoices, range, invoiceScope) {
     const cost = costBreakdown([p]).directo_registrado;
     if (p.bi_cost_warning || p.bi_assignment_warning) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:p.bi_cost_warning||p.bi_assignment_warning,prioridad:0});
     if (cost == null) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Coste directo sin valorar',prioridad:1});
-    else if (Number(p.importe || 0) < cost) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Margen directo negativo',prioridad:0});
+    else if (Number(serviceIncome(p) || 0) < cost) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Margen directo negativo',prioridad:0});
     if (!(Number(p.km_ruta) > 0)) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Kilómetros sin informar',prioridad:2});
   }
   if (invoiceScope) for (const f of invoices) {
@@ -155,6 +155,11 @@ async function readWorkspace(empresaId, query = {}, access = {}) {
     emptyKm:source.emptyKm.filter(r=>!filters.vehiculo_id||String(r.vehiculo_id)===filters.vehiculo_id),
     config:evidence.config,missingSources:[...source.missingSources,...evidence.missingSources],page,limit,
     attributionScope:!filters.cliente_id&&!filters.ruta&&!filters.ejecucion}) : null;
+  if (operations && query.vista==='operaciones') {
+    const recovery=await require('./detentionWorkflow').recovery({query:queryDb},empresaId,operationalOrders,range.hasta);
+    operations.paralizaciones={...recovery,detalle:{rows:recovery.rows.slice((page-1)*limit,page*limit),total:recovery.rows.length,page,limit}};
+    delete operations.paralizaciones.rows;
+  }
   if (operations && ['operaciones','planner'].includes(query.vista) && access.plannerAuthorized && !Object.values(filters).some(Boolean))
     operations.planner=await loadPlannerMetrics(empresaId,range,queryDb);
   const prior = source.orders.filter(p => done(p) && dateOf(p) >= previousRange.desde && dateOf(p) <= previousRange.hasta && matches(p,filters));

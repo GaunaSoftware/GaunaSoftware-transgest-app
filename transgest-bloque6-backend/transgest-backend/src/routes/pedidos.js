@@ -877,6 +877,7 @@ function normalizeChoferPasosPayload(value = {}) {
     "mercancia_cargada",
     "mercancia_palets",
     "mercancia_referencia",
+    "peso_variacion_confirmacion",
   ].forEach((key) => {
     if (source[key] !== undefined) next[key] = String(source[key] || "").trim().slice(0, 500);
   });
@@ -8148,7 +8149,8 @@ router.get('/ai-inbox/entries',async(req,res)=>{
   const page=Math.max(1,Math.min(100000,parseInt(req.query.page,10)||1));
   const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
   const counts=(await db.query('SELECT state,COUNT(*)::int AS count FROM ai_inbox_items WHERE empresa_id=$1 GROUP BY state',[company])).rows;
-  res.json({items:rows,counts,page,page_size:25,inbound:orderInbox.inboundConfiguration(company)});
+  const inbound=orderInbox.inboundConfiguration(company);
+  res.json({items:rows,counts,page,page_size:25,inbound:inbound.configured?inbound:await require('../services/orderMailbox').inboxStatus(db,company)});
  }catch(e){res.status(e.status||500).json({error:e.message});}
 });
 router.get('/ai-inbox/entries/:entry',async(req,res)=>{
@@ -9163,24 +9165,14 @@ router.patch("/:id/estado",
       }
       return res.json({ ok: true, estado, sin_cambios: true, facturacion_auto: false });
     }
-    const cargaRealDesdeEstado = estado === "en_curso" &&
-      ["confirmado", "espera_carga", "cargando"].includes(String(rows[0].estado || "").toLowerCase()) &&
-      !rows[0].carga_real_at;
+    let cargaFecha;
+    try {
+      cargaFecha = require('../services/loadDateChoice').loadDateChoice(rows[0], estado, req.user?.rol, req.body);
+    } catch (error) {return res.status(error.status || 400).json({error:error.message,code:error.code,fecha_planificada:error.fecha_planificada,fecha_real:error.fecha_real});}
+    const cargaRealDesdeEstado = cargaFecha.recordActual;
     const descargaRealDesdeEstado = estado === "entregado" &&
       String(rows[0].estado || "").toLowerCase() !== "entregado" &&
       !rows[0].descarga_real_at;
-    if (cargaRealDesdeEstado && req.user?.rol !== "chofer") {
-      const fechaPlan = normalizePedidoDate(rows[0].fecha_carga_planificada || rows[0].fecha_carga);
-      const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-      if (fechaPlan && fechaPlan !== hoyMadrid && req.body.confirmar_carga_real !== true) {
-        return res.status(409).json({
-          code: "FECHA_REAL_CARGA_CONFIRMAR",
-          error: `El pedido estaba planificado para ${fechaPlan}. Confirma que la carga se ha completado hoy (${hoyMadrid}).`,
-          fecha_planificada: fechaPlan,
-          fecha_real: hoyMadrid,
-        });
-      }
-    }
     if(req.user?.rol==='chofer'&&estado==='entregado') {
       const progress=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
       if(progress.paradas&&!progress.firma_entrega)return res.status(409).json({error:'Confirma y firma todas las descargas antes de finalizar el viaje.',code:'DRIVER_DELIVERIES_PENDING'});
@@ -9299,6 +9291,7 @@ router.patch("/:id/estado",
     // Emails automaticos
     await logPedidoEvento(req.params.id, empresaId, "estado.actualizado", {
       estado,
+      fecha_carga_accion:cargaFecha.choice,
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
     }, req.user?.rol || "usuario", actorUsuarioId)

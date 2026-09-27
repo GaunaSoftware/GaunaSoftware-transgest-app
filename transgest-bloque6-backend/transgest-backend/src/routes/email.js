@@ -7,7 +7,20 @@ const { CUSTOMER_INVOICE_DOCUMENT_SCOPE } = require("../services/invoiceCustomer
 const { buildFacturaPdfBuffer } = require("../services/invoicePdf");
 const router  = express.Router();
 router.use(authenticate);
+router.use((req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
 const EID = req => req.empresaId || req.user?.empresa_id;
+const mailbox=require('../services/orderMailbox');
+const {requirePlanFeature,requireModulePermission}=require('../middleware/auth');
+router.use('/order-mailbox',SOLO_GERENTE,requirePlanFeature('ai'),requireModulePermission('empresa'),requireModulePermission('pedidos'),(req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
+router.get('/order-mailbox',async(req,res)=>{
+ try{res.json(await mailbox.status(db,EID(req)));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.put('/order-mailbox',async(req,res)=>{
+ try{res.json(await mailbox.save(db,EID(req),req.user.id,req.body));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+for(const action of ['test','sync'])router.post(`/order-mailbox/${action}`,require('express-rate-limit')({windowMs:60000,max:4,keyGenerator:req=>EID(req),standardHeaders:true,legacyHeaders:false}),async(req,res)=>{
+ try{res.json(await mailbox.run(db,EID(req),{test:action==='test',actor:req.user.id}));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
 
 const ESTADOS_ENVIO_FACTURA = ['emitida', 'enviada', 'cobrada', 'vencida', 'reclamada', 'sin_cobrar'];
 
@@ -125,7 +138,7 @@ function buildFacturaEmailPreflight(ctx, destinatario = "") {
 
 // Log de emails
 router.get("/log", SOLO_GERENTE, async (req,res) => {
-  const { rows } = await db.query("SELECT * FROM email_log WHERE empresa_id=$1 OR empresa_id IS NULL ORDER BY sent_at DESC LIMIT 200", [EID(req)]);
+  const { rows } = await db.query("SELECT * FROM email_log WHERE empresa_id=$1 ORDER BY sent_at DESC LIMIT 200", [EID(req)]);
   res.json(rows);
 });
 
@@ -155,15 +168,19 @@ router.post("/test", SOLO_GERENTE, async (req,res) => {
   const { destinatario } = req.body;
   if (!destinatario) return res.status(400).json({ error: "destinatario requerido" });
   try {
-    await enviarEmail({
+    const config=await getEmpresaEmailConfig(EID(req),true);
+    if(!config?.activo||!config.smtp_host||!config.smtp_user||!config.smtp_pass||!config.smtp_from)return res.status(422).json({error:'Guarda primero la configuración SMTP completa de la empresa. Esta prueba no utilizará el correo de la plataforma.'});
+    const result=await enviarEmail({
       trigger:"test",
+      require_company:true,
       destinatario,
       plantilla:"pedido_confirmado",
       empresa_id: EID(req),
       datos:{ numero:"TEST-0001", ruta:"Madrid → Barcelona", fecha_carga:"hoy", mercancia:"Prueba de email" }
     });
+    if(result?.simulado||!result?.messageId)throw new Error('El proveedor no ha confirmado el envío SMTP. Revisa la configuración.');
     await markEmailConfigTest(EID(req), true).catch(() => {});
-    res.json({ ok:true });
+    res.json({ ok:true,messageId:result.messageId });
   } catch(e) {
     await markEmailConfigTest(EID(req), false, e.message).catch(() => {});
     res.status(500).json({ error: e.message });

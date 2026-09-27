@@ -9416,12 +9416,13 @@ export default function Pedidos() {
       if (fechaPlan && fechaPlan !== hoyMadrid) {
         const confirmed = await confirmDialog({
           title:"Registrar carga real",
-          message:`El pedido estaba planificado para ${fechaPlan}. ¿Registrar la carga real como realizada hoy (${hoyMadrid})? La fecha planificada se conservará.`,
+          message:`El pedido estaba planificado para ${fechaPlan}. Puedes mantener esa fecha al cambiar el estado, o registrar que la carga se ha completado hoy (${hoyMadrid}). Conservar la fecha no inventa una hora real de carga.`,
           confirmText:"Registrar carga de hoy",
+          alternateText:"Conservar fecha original",
           tone:"warning",
         });
         if (!confirmed) return false;
-        extra = { ...extra, confirmar_carga_real:true };
+        extra = { ...extra, fecha_carga_accion:confirmed==='alternate'?'conservar':'hoy', confirmar_carga_real:confirmed===true };
       }
     }
     const incidenciaTexto = String(extra.incidencia || "").trim();

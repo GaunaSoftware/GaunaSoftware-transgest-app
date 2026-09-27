@@ -4,14 +4,15 @@ import DriverTripCard from './DriverTripCard';
 import { transportStateKey } from '../../utils/transportStateCatalog';
 import DriverDcdActions from './DriverDcdActions';
 import DriverTripMap from './DriverTripMap';
+import {nextStopDirections, plannedLoadWeight, canPhotographCargo} from './driverNavigation';
 import { openMobileDocument, shareMobileDocument } from '../../services/mobileRuntime';
 import { hasNativeDocuments } from '../../services/nativeDocuments';
 import { restoreDriverSteps } from './driverSupport';
 import { useState, useEffect, useCallback } from "react";
-import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, actualizarGpsPedido, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
+import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
 
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion, adrRequisitos } from "../../utils/adr";
-import { confirmDialog, notify } from "../../services/notify";
+import { confirmDialog, promptDialog, notify } from "../../services/notify";
 
 
 
@@ -317,12 +318,20 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
       notify("El peso debe ser un número válido.", "warning");
       return;
     }
+    const plannedWeight = plannedLoadWeight(pedido, activeStop, currentData);
+    const variation = plannedWeight != null && Math.abs(plannedWeight-pesoNum) > 0.01;
+    if (variation) {
+      const answer = await promptDialog({title:'Variación de peso', message:`Tráfico indicó ${plannedWeight.toLocaleString('es-ES')} kg y has registrado ${pesoNum.toLocaleString('es-ES')} kg. Revisa el peso y, si es necesario, contacta con tráfico. Escribe confirmo para guardar la diferencia como información; no se marcará el viaje como incidencia.`, placeholder:'confirmo', confirmText:'Confirmar peso'});
+      if (answer == null) return;
+      if (answer.trim().toLowerCase() !== 'confirmo') {notify('Escribe confirmo para aceptar la variación de peso.', 'warning');return;}
+    }
     await persistirPasos({
       mercancia_confirmada: true,
       mercancia_confirmada_at: new Date().toISOString(),
       mercancia_cargada: mercancia,
       mercancia_palets: palets,
       mercancia_peso_kg: String(pesoNum),
+      ...(variation ? {peso_variacion_confirmacion:'confirmo'} : {}),
     }, { silent: true });
     const fresh = await cargarDocumentoControl().catch(() => null);
     if (fresh) setDocControl(fresh);
@@ -635,79 +644,11 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     setFirmando(true);
   }
 
-  async function actualizarPosicion(){
-    const pos = await capturarUbicacionActual(15000);
-    if(!pos){notify("GPS no disponible o permiso denegado", "warning");return;}
-    const gpsPayload = {
-      lat: pos.lat,
-      lng: pos.lng,
-      accuracy_m: Math.round(Number(pos.accuracy_m || 0)),
-      captured_at: pos.captured_at || new Date().toISOString(),
-    };
-    try{
-        await actualizarGpsPedido(pedido.id, gpsPayload);
-        notify("Posicion actualizada", "success");
-    }catch(err){
-      if (esErrorOffline(err)) {
-        queueOfflineCriticalAction({
-          tipo: "pedido_gps",
-          pedido_id: pedido.id,
-          body: gpsPayload,
-          dedupe_key: `pedido_gps:${pedido.id}:${Date.now()}`,
-          fecha: new Date().toISOString(),
-        }, "Posicion guardada para sincronizar");
-        return;
-      }
-      notify(err.message, "error");
-    }
-  }
-
   async function abrirUbicacionEnApps(){
-    const location = await capturarUbicacionActual();
-    if (!location) {
-      notify("No se pudo obtener la ubicación", "error");
-      return;
-    }
-    const label = encodeURIComponent(`TransGest ${pedido.numero || "viaje"}`);
-    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`;
-    const geoUrl = `geo:${location.lat},${location.lng}?q=${location.lat},${location.lng}(${label})`;
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: `Ubicacion viaje ${pedido.numero || ""}`.trim(),
-          text: `Ubicacion registrada por app chofer (${location.lat.toFixed(6)}, ${location.lng.toFixed(6)})`,
-          url: mapsUrl,
-        });
-        return;
-      }
-    } catch {}
-    window.location.href = geoUrl;
-    window.setTimeout(() => window.open(mapsUrl, "_blank", "noopener,noreferrer"), 700);
-  }
-
-  async function registrarVariacionCarga(){
-    const peso = window.prompt("Peso real o variación detectada (opcional)", pedido.peso_kg || "");
-    if (peso === null) return;
-    const mercancia = window.prompt("Mercancía real o variación detectada (opcional)", pedido.mercancia || pedido.descripcion_carga || "");
-    if (mercancia === null) return;
-    const detalle = window.prompt("Describe la variación/incidencia para tráfico", "");
-    if (detalle === null) return;
-    const partes = [
-      peso ? `Peso indicado por chofer: ${peso}` : null,
-      mercancia ? `Mercancia indicada por chofer: ${mercancia}` : null,
-      detalle ? `Detalle: ${detalle}` : null,
-    ].filter(Boolean);
-    if (!partes.length) {
-      notify("No se ha indicado ninguna variación.", "warning");
-      return;
-    }
-    try {
-      await cambiarEstadoPedido(pedido.id, "incidencia", { incidencia: `[Variacion carga] ${partes.join(" | ")}` });
-      notify("Variación registrada para revisión de tráfico.", "success");
-      onActualizar();
-    } catch (err) {
-      notify(err.message || "No se pudo registrar la variación", "error");
-    }
+    if(stepsLoading||stepsError||(journeyContext&&!activeStop)){notify('Espera a que se compruebe la próxima parada del viaje.', 'warning');return;}
+    const url = nextStopDirections(pedido, allSteps, activeStop);
+    if (!url) {notify("No hay una dirección válida para la próxima parada. Revisa el mapa del viaje o consulta a tráfico.", "warning");return;}
+    try {await openMobileDocument(url);} catch (error) {notify(error.message || 'No se pudo abrir la ruta.', 'error');}
   }
 
   const ACCIONES = {
@@ -1041,18 +982,12 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
           {/* Acciones secundarias */}
           <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
-            <button onClick={actualizarPosicion} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Mi ubicación
+            <button disabled={stepsLoading||!!stepsError||(!!journeyContext&&!activeStop)} onClick={abrirUbicacionEnApps} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.1)",color:"#10b981",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Abrir mapas · próxima parada
             </button>
-            <button onClick={abrirUbicacionEnApps} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(16,185,129,.3)",background:"rgba(16,185,129,.1)",color:"#10b981",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Abrir mapas
-            </button>
-            <button onClick={()=>onFoto?.(pedido)} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.1)",color:"#60a5fa",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Foto
-            </button>
-            <button onClick={registrarVariacionCarga} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(245,158,11,.3)",background:"rgba(245,158,11,.1)",color:"#fbbf24",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
-              Variación
-            </button>
+            {!stepsLoading && !stepsError && canPhotographCargo(pedido, allSteps) && <button onClick={()=>onFoto?.(pedido)} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(59,130,246,.3)",background:"rgba(59,130,246,.1)",color:"#60a5fa",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
+              Foto de la mercancía
+            </button>}
             {pedido.estado!=="entregado"&&pedido.estado!=="cancelado"&&(
               <button onClick={()=>abrirIncidencia(pedido.estado==="descarga"?"descarga":"ruta")} style={{flex:"1 1 112px",padding:"10px",borderRadius:8,border:"1px solid rgba(251,191,36,.3)",background:"rgba(251,191,36,.1)",color:"#fbbf24",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                 Aviso viaje

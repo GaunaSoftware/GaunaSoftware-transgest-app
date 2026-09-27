@@ -67,3 +67,12 @@ Navegador local con empresa sintética: anchos 390/768/1440/1920, sin desbordami
 - Concurrencia en PostgreSQL nativo, Android físico, conectividad/cámara/firma real y revisión profesional del procedimiento documental pendientes. PGlite y emulación no sustituyen esas pruebas.
 
 No se declara terminada toda la fase ni listo para producción el conjunto de la evolución.
+
+
+## Actualización de cierre local · 27/09/2026
+
+Queda resuelto el pendiente de salida por colaborador: portal y enlace de correo antiguo consultan originales vigentes y exigen revisión explícita de sus IDs. Se rechazan versiones sustituidas, peso cambiado y salida global legacy sin parada. La salida por correo es transaccional y reintentable; conserva notas y un solo evento. No se inventa un original cuando falta.
+
+La prueba visual encontró y corrigió JavaScript inválido en el portal, estados que confundían cargado con en ruta, encabezado obsoleto, contador impreciso y hover ilegible. El banco compila el script renderizado; HTTP comprueba formularios URL-encoded y llamadas simultáneas. Navegador 390/768/1440/1920, revisión del documento y salida comprobados.
+
+`evolution-native-final.log`: PostgreSQL 17.11 local, migrador real aplicado/repetido, tres solicitudes simultáneas y un único evento/consumo de token, copia/restauración contrastada. Esta evidencia sustituye el pendiente genérico de PostgreSQL para esos casos concretos; no prueba fallos físicos ni todos los escritores concurrentes. Se conservan los límites de replanificación documentada, QR anteriores, dispositivo y revisión profesional. Ver `TMS_EVOLUTION_RELEASE_CHECKLIST.md`.

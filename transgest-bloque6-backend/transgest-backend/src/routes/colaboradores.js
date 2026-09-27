@@ -825,12 +825,9 @@ function renderLiquidacionColaboradorHtml({ colaborador, viajes, facturas, pagos
           if (box) box.innerHTML = '<span class="red">' + String(data.error || 'No se pudo preparar el documento digital').replace(/[<>&]/g, '') + '</span>';
           return;
         }
-        const url = data.remision && data.remision.download_url ? data.remision.download_url : (data.soporte_url || (data.documento && data.documento.soporte_url) || '');
-        if (box) {
-          box.innerHTML = (data.status && data.status.ready ? '<span class="green">DCD listo</span>' : '<span class="amber">DCD pendiente de datos</span>')
-            + (url ? '<br><a href="' + url + '" target="_blank" rel="noreferrer">Abrir documento digital</a>' : '');
-        }
-        if (url) window.open(url, '_blank', 'noopener');
+        const versions = Array.isArray(data.versiones) ? data.versiones : [];
+        if (box) { box.replaceChildren(); if (!versions.length) box.textContent = 'Tráfico debe emitir o adjuntar el DeCA.';
+          versions.forEach(v => { const p=document.createElement('p'),a=document.createElement('a');a.href=v.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='DeCA v'+v.version+' · '+v.filename;p.append(a);box.append(p); }); }
       }
       async function subirAlbaran(ev,id,ref){
         const file = ev.target.files && ev.target.files[0];
@@ -946,7 +943,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         </div>
         <div class="trip-badges">
           <span class="badge badge-${htmlEscape(workflow.status)}" data-trip-status>${htmlEscape(workflow.status.replace("_", " "))}</span>
-          <span class="badge badge-neutral">${htmlEscape(String(viaje.estado || "pendiente").replace("_", " "))}</span>
+          <span class="badge badge-neutral" data-order-status>${htmlEscape(String(viaje.estado || "pendiente").replace("_", " "))}</span>
         </div>
       </div>
       <div class="trip-meta">
@@ -1001,6 +998,9 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
       .btn{border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:10px;padding:10px 12px;font-size:13px;font-weight:800;cursor:pointer}
       .btn:hover{background:#f8fafc}
       .btn-primary{background:#0f766e;border-color:#0f766e;color:#fff}
+      .btn-primary:hover{background:#115e59;color:#fff}
+      .btn{min-height:44px}.btn:focus-visible,input:focus-visible{outline:3px solid #0d9488;outline-offset:3px}
+      .badge-cargado{background:#ecfdf5;color:#047857}
       .trip-panel{margin-top:14px;border:1px dashed #cbd5e1;border-radius:14px;padding:14px;background:#f8fafc}
       .trip-placeholder{color:#64748b;font-size:13px}
       .driver-card{margin-bottom:12px;padding:12px;border:1px solid #cbd5e1;border-radius:12px;background:#fff}
@@ -1022,6 +1022,8 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
       .empty{margin-top:18px;padding:24px;border-radius:16px;border:1px dashed #cbd5e1;background:#fff;color:#64748b;text-align:center}
       .docs-list,.op-status{margin-top:10px;font-size:12px;line-height:1.55;color:#475569}
       .docs-list a{color:#0f766e;font-weight:800;text-decoration:none}
+      .docs-list{overflow-wrap:anywhere}.docs-list label{display:flex;gap:8px;align-items:flex-start;margin-top:12px;cursor:pointer}
+      .docs-list input[type=checkbox]{width:20px;height:20px;flex:0 0 20px}
       .ok{color:#047857;font-weight:800}
       .error{color:#dc2626;font-weight:800}
       .warn{color:#b45309;font-weight:800}
@@ -1043,7 +1045,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         <div class="mini-grid">
           <div class="mini-card"><strong>${htmlEscape(colaborador.nombre || "Colaborador")}</strong><span>Proveedor</span></div>
           <div class="mini-card"><strong>${htmlEscape(String(activos.length))}</strong><span>Viajes visibles</span></div>
-          <div class="mini-card"><strong>${htmlEscape(viajes.filter((v) => Number(v.albaranes_count || 0) > 0).length)}</strong><span>Viajes con soporte</span></div>
+          <div class="mini-card"><strong>${htmlEscape(viajes.filter((v) => Number(v.albaranes_count || 0) > 0).length)}</strong><span>Viajes con albaranes</span></div>
         </div>
         <div class="hint">
           Recomendado para subcontratados: se comparte un enlace seguro y temporal, se registra todo en el pedido real
@@ -1054,7 +1056,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
     </main>
     <script>
       const TOKEN = ${JSON.stringify(token)};
-      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"]/g, (char) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;" }[char] || char));
+      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[char] || char));
       const fmtDateTime = (value) => {
         if (!value) return "";
         const d = new Date(value);
@@ -1074,10 +1076,14 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           box.innerHTML = '<div class="error">No se pudo cargar la operativa.</div>';
           return;
         }
+        const card=box.closest('.trip');
+        const tripStatus=card?.querySelector('[data-trip-status]'),orderStatus=card?.querySelector('[data-order-status]');
+        if(tripStatus){tripStatus.textContent=String(workflow.status||'pendiente').replace('_',' ');tripStatus.className=statusClass(workflow.status);}
+        if(orderStatus)orderStatus.textContent=String(pedido.estado||'pendiente').replace('_',' ');
         const steps = Array.isArray(workflow.steps) ? workflow.steps : [];
         const driverForm = '<div class="driver-card">'
           + '<h3>Conductor efectivo del viaje</h3>'
-          + '<p>Estos datos se incorporan al DCD/carta de porte y quedan vinculados solo a este viaje.</p>'
+          + '<p>Datos de este viaje. Si cambian, tráfico debe revisar también los documentos emitidos.</p>'
           + '<div class="driver-grid">'
           + '<label>Nombre<input data-driver-field="nombre" value="' + escapeHtml(pedido.conductor_efectivo_nombre || '') + '" autocomplete="given-name"></label>'
           + '<label>Apellidos<input data-driver-field="apellidos" value="' + escapeHtml(pedido.conductor_efectivo_apellidos || '') + '" autocomplete="family-name"></label>'
@@ -1134,11 +1140,17 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         const status = document.getElementById('op-status-' + tripId);
         // Rechazar deja el viaje sin transportista: se confirma antes.
         if (action === 'rechazar_viaje' && !window.confirm('Vas a rechazar este viaje. La empresa tendra que reasignarlo. Continuar?')) return;
+        let review = {};
+        if (action === 'iniciar_viaje') {
+          const checked = panel(tripId)?.querySelector('input[data-deca-reviewed]');
+          if (!checked?.checked) { await openDcd(tripId); return; }
+          review = {deca_revisado:true,document_versions:JSON.parse(checked.getAttribute('data-deca-ids'))};
+        }
         if (status) status.innerHTML = '<span class="warn">Guardando cambio...</span>';
         const res = await fetch('/api/v1/colaboradores/public/portal/' + encodeURIComponent(TOKEN) + '/pedidos/' + encodeURIComponent(tripId) + '/operativa', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action })
+          body: JSON.stringify({ action, ...review })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1225,6 +1237,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         if (box) box.innerHTML = data.map((doc) => '<a href="' + escapeHtml(doc.download_url || '#') + '">' + escapeHtml(doc.nombre || 'albaran') + '</a>').join('<br>');
       }
       async function openDcd(tripId){
+        if (!document.getElementById('docs-' + tripId)) await loadOperativa(tripId);
         const status = document.getElementById('op-status-' + tripId) || panel(tripId);
         if (status) status.innerHTML = '<span class="warn">Preparando DCD...</span>';
         const res = await fetch('/api/v1/colaboradores/public/portal/' + encodeURIComponent(TOKEN) + '/pedidos/' + encodeURIComponent(tripId) + '/documento-control');
@@ -1233,25 +1246,30 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
           if (status) status.innerHTML = '<span class="error">' + escapeHtml(data.error || 'No se pudo preparar el DCD') + '</span>';
           return;
         }
-        const url = data.remision && data.remision.download_url ? data.remision.download_url : (data.soporte_url || (data.documento && data.documento.soporte_url) || '');
-        if (url) {
-          window.open(url, '_blank', 'noopener,noreferrer');
-          if (status) status.innerHTML = '<span class="ok">DCD listo en una nueva pestana.</span>';
-        } else if (status) {
-          status.innerHTML = '<span class="warn">El DCD se ha generado, pero falta una URL de descarga.</span>';
-        }
+        const versions = Array.isArray(data.versiones) ? data.versiones : [];
+        const box = document.getElementById('docs-' + tripId);
+        if (box) box.innerHTML = versions.length
+          ? '<h3>DeCA originales vigentes</h3>' + versions.map(v => '<p><a target="_blank" rel="noopener noreferrer" href="' + escapeHtml(v.url) + '">Abrir DeCA v' + escapeHtml(v.version) + ' · ' + escapeHtml(v.filename) + '</a></p>').join('')
+            + '<label><input type="checkbox" data-deca-reviewed data-deca-ids="' + escapeHtml(JSON.stringify(versions.map(v=>v.id))) + '"> He revisado estos documentos y los llevo disponibles para el transporte</label>'
+          : '<p class="warn">Tráfico debe emitir o adjuntar el DeCA antes de la salida.</p>';
+        if (status) status.textContent = versions.length ? 'Revisa los originales antes de confirmar la salida.' : 'DeCA pendiente de emisión.';
       }
       document.addEventListener('click', async (event) => {
         const trigger = event.target.closest('[data-action],[data-run-action]');
         if (!trigger) return;
         const tripId = trigger.getAttribute('data-pedido-id');
         if (!tripId) return;
-        if (trigger.getAttribute('data-action') === 'load-operativa') return loadOperativa(tripId);
-        if (trigger.getAttribute('data-action') === 'list-docs') return listDocs(tripId);
-        if (trigger.getAttribute('data-action') === 'open-dcd') return openDcd(tripId);
-        if (trigger.getAttribute('data-action') === 'save-driver') return saveDriver(tripId);
+        try {
+        if (trigger.getAttribute('data-action') === 'load-operativa') return await loadOperativa(tripId);
+        if (trigger.getAttribute('data-action') === 'list-docs') return await listDocs(tripId);
+        if (trigger.getAttribute('data-action') === 'open-dcd') return await openDcd(tripId);
+        if (trigger.getAttribute('data-action') === 'save-driver') return await saveDriver(tripId);
         const action = trigger.getAttribute('data-run-action');
-        if (action) return runAction(tripId, action);
+        if (action) return await runAction(tripId, action);
+        } catch (error) {
+          const status=document.getElementById('op-status-'+tripId)||panel(tripId);
+          if(status)status.textContent='No se pudo completar la consulta. Comprueba la conexión y vuelve a intentarlo.';
+        }
       });
       document.addEventListener('change', async (event) => {
         const input = event.target;
@@ -1532,6 +1550,7 @@ function normalizePortalChoferPasosPayload(value = {}) {
     "carga_proceso",
     "carga_ok",
     "viaje_iniciado",
+    "dcd_revisado", "dcd_disponible",
     "posicionado_descarga",
     "descarga_iniciada",
     "descarga_ok",
@@ -1557,6 +1576,7 @@ function normalizePortalChoferPasosPayload(value = {}) {
     const d = new Date(source[key]);
     if (Number.isFinite(d.getTime())) next[key] = d.toISOString();
   });
+  if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(id=>/^[0-9a-f-]{36}$/i.test(String(id)));
   return next;
 }
 
@@ -1593,8 +1613,10 @@ function buildPortalProveedorOperativa(pedido = {}, pasos = {}) {
   let status = "pendiente";
   if (steps.every((step) => step.done)) status = "completa";
   else if (pasos.descarga_iniciada || String(pedido.estado || "") === "descarga") status = "descarga";
-  else if (pasos.viaje_iniciado || pasos.carga_ok || String(pedido.estado || "") === "en_curso") status = "en_ruta";
+  else if (pasos.viaje_iniciado) status = "en_ruta";
+  else if (pasos.carga_ok) status = "cargado";
   else if (pasos.carga_iniciada || pasos.carga_proceso) status = "carga";
+  else if (String(pedido.estado || "") === "en_curso") status = "en_curso";
   return {
     status,
     completed: steps.filter((step) => step.done).length,
@@ -1706,7 +1728,7 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
       break;
     case "iniciar_viaje":
       if (!pasos.albaran_carga) throw Object.assign(new Error("Sube el albaran de carga antes de iniciar el viaje."), { status: 409 });
-      patch = { viaje_iniciado: true, viaje_iniciado_at: now };
+      patch = { viaje_iniciado: true, viaje_iniciado_at: now, ...require('../services/supplierTransportDocuments').review(body) };
       break;
     case "posicionar_descarga":
       if (!pasos.carga_ok) throw Object.assign(new Error("Primero finaliza la carga."), { status: 409 });
@@ -2085,14 +2107,7 @@ router.get("/public/portal/:token/pedidos/:pedidoId/documento-control", async (r
     const ctx = await getPortalProveedorDocumentoControlContext(req.params.token, req.params.pedidoId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no disponible para este proveedor" });
     await db.query("UPDATE colaborador_liquidacion_tokens SET opened_at=COALESCE(opened_at,NOW()) WHERE id=$1", [ctx.token.id]).catch(()=>{});
-    const payload = buildDocumentoControlPayload({
-      empresaId: ctx.token.empresa_id,
-      pedido: ctx.pedido,
-      empresa: ctx.empresa,
-      cliente: ctx.cliente,
-      colaborador: ctx.colaborador,
-      appBaseUrl: publicBaseUrl(req),
-    });
+    const payload = await require('../services/supplierTransportDocuments').summary(db,ctx.pedido.empresa_id,ctx.pedido.id);
     await logPedidoEventoPortal(ctx.pedido.id, ctx.pedido.empresa_id, "documento_control.consultado", {
       source: "portal_proveedor",
       codigo_control: payload.documento?.codigo_control || "",

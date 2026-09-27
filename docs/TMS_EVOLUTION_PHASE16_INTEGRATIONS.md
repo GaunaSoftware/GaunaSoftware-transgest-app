@@ -17,3 +17,8 @@ Migración aditiva `20260927_integration_registry.sql`, antes del backend. Dos t
 `audit_integration_registry.cjs` integrado en el banco HTTP: token ordinario rechazado, catálogo, promociones incompletas, salud falsificada, ámbito empresa/plataforma, entorno, versión, salud caducada/fallida, conflicto de revisión e invalidación. Todas las llamadas externas bloqueadas. Frontend: error visible al rechazar una promoción y evidencia accesible. Pilotos y contratos reales de proveedores continúan pendientes de validación externa. La evidencia humana no sustituye la revisión del acta citada. No se declara ninguna integración productiva en datos de clientes.
 
 Resultados: banco HTTP completo código 0, schemaErrors vacío; `npm run check` código 0; frontend 57 suites/131 pruebas, build código 0 con avisos previos. La primera ejecución del nuevo test falló por faltar email_admin en una empresa sintética: se corrigió el fixture y se repitió. No se ha efectuado prueba visual del panel SuperAdmin en esta fase; interacción DOM comprobada con React y compilación.
+
+
+## Ampliación del 27/09/2026
+
+Fase 17 verificó visualmente Registro verificable en SuperAdmin a 390 px, con controles de 42 px, foco visible y los temas existentes. El banco HTTP del registro pasó también en PostgreSQL nativo. No se promovió ninguna integración real ni se introdujeron claves de cliente.

@@ -20,7 +20,8 @@ async function main(){
  if(process.env.AUDIT_PG_PORT)evidence.mode='native PostgreSQL on loopback, dedicated new database; no external delivery';
  db.query=adapt(pg).query;db.transaction=fn=>pg.transaction(tx=>fn(adapt(tx)));
  await pg.exec(fs.readFileSync(path.join(root,'scripts/install_completo.sql'),'utf8'));
- for(const file of fs.readdirSync(path.join(root,'scripts/migrations')).filter(n=>n.endsWith('.sql')).sort()){
+ if(pg.applyMigrations)evidence.migrationRunner=await pg.applyMigrations();
+ else for(const file of fs.readdirSync(path.join(root,'scripts/migrations')).filter(n=>n.endsWith('.sql')).sort()){
   try{await pg.exec(fs.readFileSync(path.join(root,'scripts/migrations',file),'utf8').replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;','-- PGlite provides gen_random_uuid; pgcrypto extension unavailable.'));}catch(e){evidence.schemaErrors.push(file+': '+e.message);}
  }
  const code=fs.readFileSync(path.join(root,'src/server.js'),'utf8');
@@ -32,11 +33,11 @@ async function main(){
  const company=crypto.randomUUID(),user=crypto.randomUUID();const password='Audit-Isolated-'+crypto.randomBytes(10).toString('hex');
  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'AUDITORÍA LOCAL','B00000000','audit@example.invalid','enterprise','activa')",[company]);
  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente de pruebas','audit@example.invalid',$3,'gerente',true)",[user,company,await req('bcryptjs').hash(password,10)]);
- const express=req('express'),app=express();app.use('/api/v1/inbound/orders',req('./routes/orderInboxInbound'));app.use(express.json({limit:'12mb'}));req('./middleware/asyncErrors')(logger);
+ const express=req('express'),app=express();app.use('/api/v1/inbound/orders',req('./routes/orderInboxInbound'));app.use(express.json({limit:'12mb'}));app.use(express.urlencoded({extended:true,limit:'12mb'}));req('./middleware/asyncErrors')(logger);
  // Exercise the actual production module boundaries, not authentication alone.
  const authMiddleware=req('./middleware/auth');
  const boundarySource=code.slice(code.indexOf('function pedidosAuthUnlessPublic'),code.indexOf('safeUse(`${api}/auth`'));
- const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission})',authMiddleware);
+ const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission,colaboradoresAuthUnlessPublic})',authMiddleware);
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.get('/api/v1/producto',(request,res)=>res.json({producto:'tms'}));
  app.use('/api/v1/auth',auth);
@@ -49,7 +50,7 @@ async function main(){
  app.use('/api/v1/informes',authMiddleware.authenticate,authMiddleware.requireModulePermission('informes'),authMiddleware.requirePlanFeature('kpis_avanzados'),req('./routes/informes'));
  // Exercise the compatibility router separately; production registers it after pedidos.
  app.use('/api/v1/legacy-pedidos',boundaries.pedidosAuthUnlessPublic,req('./routes/carta_porte'));
- app.use('/api/v1/colaboradores',authMiddleware.authenticate,authMiddleware.requireModulePermission('colaboradores'),req('./routes/colaboradores'));
+ app.use('/api/v1/colaboradores',boundaries.colaboradoresAuthUnlessPublic,req('./routes/colaboradores'));
  app.use('/api/v1/supplier-app',req('./middleware/auth').authenticate,req('./routes/supplier_app'));
  app.use('/api/v1/supplier-invoice-review',authMiddleware.authenticate,req('./routes/supplier_invoice_review'));
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
@@ -254,6 +255,7 @@ async function main(){
   evidence.physicalBi=await require('./audit_physical_bi.cjs')({db,base,company,token});
   evidence.integrationRegistry=await require('./audit_integration_registry.cjs')({db,base,company,token});
   evidence.multiempresa=await require('./audit_multiempresa.cjs')({db,base,company,token,password});
+  evidence.supplierDeparture=await require('./audit_supplier_departure.cjs')({db,base,company,token});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});

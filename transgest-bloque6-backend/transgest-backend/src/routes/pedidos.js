@@ -3066,44 +3066,14 @@ function colaboradorPage(title, body) {
 }
 
 async function getColaboradorDocumentoControlPayload(req, pedidoId, empresaId) {
-  try {
-    const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
-    if (!ctx?.pedido) return null;
-    return buildDocumentoControlPayload({
-      empresaId,
-      pedido: ctx.pedido,
-      empresa: ctx.empresa,
-      cliente: ctx.cliente,
-      colaborador: ctx.colaborador,
-      appBaseUrl: publicBaseUrl(req),
-    });
-  } catch (error) {
-    logger.warn("No se pudo preparar el documento de control para colaborador:", error.message);
-    return null;
-  }
+  return require('../services/supplierTransportDocuments').summary(db,empresaId,pedidoId);
 }
 
 function renderColaboradorDocumentoControlBox(docControl) {
-  if (!docControl?.documento) return "";
-  const supportFromDownload = String(docControl.remision?.download_url || "").replace(/([?&])download=1\b/, "").replace(/[?&]$/, "");
-  const soporteUrl = docControl.soporte_url || docControl.documento?.url_publica || supportFromDownload || "";
-  const downloadUrl = docControl.remision?.download_url || soporteUrl;
-  const faltantes = Array.isArray(docControl.status?.faltantes) ? docControl.status.faltantes.slice(0, 4) : [];
-  return `
-    <div class="card">
-      <h2>Documento de control digital</h2>
-      <p class="meta"><strong>${htmlEscape(docControl.remision?.etiqueta || docControl.documento?.sistema_label || "Soporte documental")}</strong></p>
-      <p class="meta">Codigo: <strong>${htmlEscape(docControl.documento.codigo_control || "-")}</strong></p>
-      ${docControl.status?.ready
-        ? `<div class="ok">El soporte documental del viaje ya esta disponible para consulta e impresion.</div>`
-        : `<div class="warn">Aun faltan datos por completar en el documento.${faltantes.length ? ` Revisar: ${htmlEscape(faltantes.join(", "))}.` : ""}</div>`}
-      <div class="actions">
-        ${soporteUrl ? `<a class="btn" href="${htmlEscape(soporteUrl)}" target="_blank" rel="noreferrer">Abrir soporte</a>` : ""}
-        ${downloadUrl ? `<a class="btn" href="${htmlEscape(downloadUrl)}" target="_blank" rel="noreferrer">Descargar soporte</a>` : ""}
-      </div>
-      ${docControl.remision?.instrucciones ? `<p class="muted">${htmlEscape(docControl.remision.instrucciones)}</p>` : ""}
-    </div>
-  `;
+  const versions=docControl?.versiones||[];
+  return '<div class="card"><h2>DeCA originales vigentes</h2>' + (versions.length
+    ? versions.map(v=>`<p><a class="btn" target="_blank" rel="noopener noreferrer" href="${htmlEscape(v.url)}">Abrir DeCA v${htmlEscape(v.version)} · ${htmlEscape(v.filename)}</a></p>`).join('')
+    : '<p class="warn">Tráfico debe emitir o adjuntar el DeCA antes de salir.</p>')+'</div>';
 }
 
 function getColaboradorPrecioTonelada(data) {
@@ -3141,6 +3111,7 @@ function renderColaboradorConfirmacionPreview(data, docControl) {
 
 function renderColaboradorPedidoBox(data, { mostrarPrecio = false } = {}) {
   if (!data) return "";
+  const measure=(value,unit)=>value==null||value===''||!Number.isFinite(Number(value))?'':Number(value).toLocaleString('es-ES',{maximumFractionDigits:3})+' '+unit;
   const precioTonelada = mostrarPrecio ? getColaboradorPrecioTonelada(data) : null;
   const precioCerrado = mostrarPrecio && !precioTonelada ? getColaboradorPrecioCerradoTonelada(data) : null;
   const precioRow = precioTonelada
@@ -3161,8 +3132,8 @@ function renderColaboradorPedidoBox(data, { mostrarPrecio = false } = {}) {
         <div class="f"><div class="fl">Carga</div><div class="fv">${htmlEscape([data.fecha_carga, data.hora_carga || data.ventana_carga].filter(Boolean).join(" ") || "-")}</div></div>
         <div class="f"><div class="fl">Descarga</div><div class="fv">${htmlEscape([data.fecha_descarga || data.fecha_entrega, data.hora_descarga || data.ventana_descarga].filter(Boolean).join(" ") || "-")}</div></div>
         <div class="f"><div class="fl">Mercancia</div><div class="fv">${htmlEscape(data.mercancia || "-")}</div></div>
-        <div class="f"><div class="fl">Peso / bultos</div><div class="fv">${htmlEscape([data.peso_kg ? `${data.peso_kg} kg` : "", data.bultos ? `${data.bultos} bultos` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
-        <div class="f"><div class="fl">M3 / ML</div><div class="fv">${htmlEscape([data.volumen ? `${data.volumen} m3` : "", data.metros_lineales ? `${data.metros_lineales} ML` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
+        <div class="f"><div class="fl">Peso / bultos</div><div class="fv">${htmlEscape([measure(data.peso_kg,'kg'),measure(data.bultos,'bultos')].filter(Boolean).join(" - ") || "-")}</div></div>
+        <div class="f"><div class="fl">M3 / ML</div><div class="fv">${htmlEscape([measure(data.volumen,'m³'),measure(data.metros_lineales,'ML')].filter(Boolean).join(" - ") || "-")}</div></div>
         <div class="f"><div class="fl">Tractora</div><div class="fv">${htmlEscape(data.matricula_colaborador || "Pendiente")}</div></div>
         <div class="f"><div class="fl">Remolque</div><div class="fv">${htmlEscape(data.remolque_matricula_colaborador || "-")}</div></div>
         ${precioRow}
@@ -3408,11 +3379,13 @@ router.get("/colaborador/camino/:token", async (req, res) => {
       ${renderColaboradorPedidoBox(data)}
       ${renderColaboradorDocumentoControlBox(docControl)}
       <form method="post">
+        <input type="hidden" name="document_versions" value="${htmlEscape(JSON.stringify((docControl?.versiones||[]).map(v=>v.id)))}">
+        <label><input style="width:auto" type="checkbox" name="deca_revisado" value="true" required> He revisado los DeCA vigentes y los llevo disponibles</label>
         <label>Observacion durante el viaje</label><textarea name="notas" rows="3"></textarea>
         <button type="submit">Marcar como en camino</button>
       </form>
     `));
-  } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
+  } catch(e) { res.status(e.status||500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
 router.post("/colaborador/camino/:token", async (req, res) => {
@@ -3420,27 +3393,20 @@ router.post("/colaborador/camino/:token", async (req, res) => {
     const data = await getColaboradorTokenData(req.params.token, "camino");
     if (!data) return res.status(404).send(colaboradorPage("Enlace no disponible", `<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>`));
     const notas = String(req.body.notas || "").trim();
-    await db.query(`
-      UPDATE pedidos
-      SET estado='en_curso',
-          colaborador_en_camino_confirmada_at=NOW(),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
-      WHERE id=$2 AND empresa_id=$3
-    `, [notas ? `EN CAMINO COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
-    await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.en_camino_confirmado", { notas: notas || null }, "colaborador");
-    await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
+    let versions;try{versions=JSON.parse(req.body.document_versions||'[]');}catch{versions=[];}
+    const departure=await require('../services/supplierTransportDocuments').emailDeparture(db,{tokenHash:hashToken(req.params.token),notes:notas,body:{deca_revisado:req.body.deca_revisado==='true',document_versions:versions}});
 
     const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
-    if (pedido?.colaborador_email) {
+    if (!departure.replayed && pedido?.colaborador_email) {
       const tokenDescarga = await createColaboradorToken(pedido, "descarga", 720);
       await sendColaboradorEmail(req, pedido, "descarga", tokenDescarga).catch(e => logger.error("Email colaborador descarga:", e.message));
     }
     res.send(colaboradorPage("Viaje en camino", `
       <h1>Viaje en camino</h1>
-      <div class="ok">Hemos registrado que el transporte va en camino. Se ha enviado el enlace para confirmar descarga y subir albaranes.</div>
+      <div class="ok">Hemos registrado que el transporte va en camino. Conserva los DeCA revisados durante el viaje.</div>
       ${renderColaboradorAcuseBox("Acuse de salida hacia destino", data, { notas })}
     `));
-  } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
+  } catch(e) { res.status(e.status||500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
 router.get("/colaborador/descarga/:token", async (req, res) => {
@@ -7805,6 +7771,8 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
     }
     if(req.body?.paradas) return res.status(400).json({error:'Envía únicamente los cambios de la parada actual.'});
     const patch = normalizeChoferPasosPayload(req.body || {});
+    if(patch.viaje_iniciado===true&&!patch.parada_id)return res.status(409).json({error:'Actualiza la app y confirma la salida desde la parada correspondiente, tras revisar los DeCA vigentes.',code:'DRIVER_STOP_REQUIRED'});
+
     if(req.user?.rol==='chofer'&&!patch.parada_id&&Object.keys(patch).some(key=>!key.startsWith('dcd_')&&key!=='updated_at')) {
       const existing=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
       if(existing.paradas || require('../services/driverStops').driverStops(pedido).length>2 || await require('../services/driverJourney').loadJourney(db,empresaId,req.params.id))return res.status(409).json({error:'Actualiza la app para confirmar cada carga y descarga por separado.',code:'DRIVER_STOP_REQUIRED'});

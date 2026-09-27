@@ -52,3 +52,8 @@ Lecturas comerciales y endpoints existentes conservados. La proyección permite 
 - No se ha medido concurrencia en PostgreSQL nativo ni carga real. Los bloqueos solo garantizan exclusión entre escritores que usan el protocolo nuevo; los flujos antiguos se revisan en las fases dependientes.
 
 Las puertas de regresión están en verde. Se puede continuar con fase 4; esta evidencia no declara publicable la evolución completa ni cerrados los límites anteriores.
+
+
+## Referencias de cierre posteriores
+
+Los costes físicos se concilian en fase 15 (`TMS_EVOLUTION_PHASE15_BI.md`), sin sumar importes potencialmente duplicados; los solapes sin enlace quedan visibles como pendientes. La ejecución multiparada se implementó en fase 4 y documentos/versiones en fase 5. El banco HTTP completo se ejecutó también en PostgreSQL nativo en el cierre de 27/09/2026. Estas ampliaciones no habilitan replanificación de viajes iniciados ni un optimizador externo de restricciones. Ver `TMS_EVOLUTION_RELEASE_CHECKLIST.md`.

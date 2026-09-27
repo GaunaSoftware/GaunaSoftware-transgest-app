@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const db = require("../src/services/db");
-const { isPublishedHistoricalVariant } = require("./migrationHistory");
+const { isPublishedHistoricalVariant, sortMigrationFiles } = require("./migrationHistory");
 
 const migrationsDir = path.join(__dirname, "migrations");
 
@@ -29,9 +29,8 @@ async function run() {
   }
 
   await ensureTable();
-  const files = fs.readdirSync(migrationsDir)
-    .filter(file => file.toLowerCase().endsWith(".sql"))
-    .sort((a, b) => a.localeCompare(b));
+  const files = sortMigrationFiles(fs.readdirSync(migrationsDir)
+    .filter(file => file.toLowerCase().endsWith(".sql")));
 
   if (!files.length) {
     console.log("No hay migraciones SQL pendientes.");

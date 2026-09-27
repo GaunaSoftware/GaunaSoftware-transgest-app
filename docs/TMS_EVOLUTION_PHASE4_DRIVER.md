@@ -31,3 +31,8 @@ Esta fase migra los viajes ya materializados. Los pedidos históricos/multiparad
 La app conserva acciones pendientes de sincronización pero no permite adelantar la secuencia normalizada sin confirmación del servidor. El funcionamiento Android/offline más amplio corresponde a fase 7. No se han verificado un dispositivo físico, GPS real ni concurrencia PostgreSQL nativa. El expediente y las firmas reforzadas de fase 5 todavía no están implementados por estos cambios; las referencias actuales apuntan al mecanismo previo.
 
 Puertas de esta tanda en verde; permite continuar con fase 5. No declara finalizada ni publicable toda la evolución.
+
+
+## Referencias de cierre posteriores
+
+La fase 5 añadió identificación explícita de envíos nuevos, originales, expediente y firma de conformidad versionada; la fase 7 añadió el soporte Android/offline documentado. El cierre del 27/09/2026 ejecutó el banco HTTP completo en PostgreSQL nativo sintético. No se han probado teléfono físico ni materialización de viajes históricos ya iniciados. El checklist de cierre conserva esos límites.

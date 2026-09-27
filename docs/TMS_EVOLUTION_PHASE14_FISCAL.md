@@ -32,3 +32,8 @@ Se conserva Verifacti como primer proveedor. `fiscalProviders` ofrece sendRecord
 Piloto con NIF/entorno real, aceptación y consulta AEAT a través de Verifacti, rectificación y anulación acordadas con la clienta. Concurrencia entre procesos PostgreSQL nativos y reinicio a mitad de envío. Estos puntos no se certifican con PGlite. Las retenciones y documentos legacy rectificativos sin identidad/tipo completos se bloquean para revisión fiscal; no se inventa su tratamiento. Operaciones exentas, intracomunitarias o con regímenes especiales necesitan su clasificación fiscal real. El método de cancelación queda en el contrato, sin automatizar anulaciones jurídicas ni exponer un botón no validado.
 
 Fuente primaria contrastada el 27/09/2026: [documentación Verifacti](https://www.verifacti.com/docs). El XML interno de TransGest y su huella propia no son una implementación del formato o encadenado oficial AEAT.
+
+
+## Ampliación del 27/09/2026
+
+`audit_fiscal_delivery.cjs` pasó también dentro del banco PostgreSQL 17.11 nativo, con dos consumidores concurrentes y una sola llamada al proveedor simulado. El piloto real y una caída de proceso a mitad de llamada permanecen pendientes; no se sustituye la aceptación real por esta evidencia. El cierre conserva la restricción de reversión del scheduler.

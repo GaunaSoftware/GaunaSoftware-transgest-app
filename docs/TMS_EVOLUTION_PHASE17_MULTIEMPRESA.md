@@ -53,3 +53,10 @@ Navegador local: login, confirmación de cambio de A/gerente a B/contable, ausen
 Despliegue, no ejecutado: copia completa restaurable y ensayada, migraciones antes de API, después web/app compatibles, smoke de usuario de una empresa y usuario multiempresa. No mezclar servidores antiguos/nuevos durante la activación. Para revertir a un backend anterior a membresías, **invalidar todos los JWT de usuario y exigir login**, pues el código anterior usa la empresa principal del usuario. Conservar las tablas/evidencias; no aplicar down migrations destructivas. El selector y los accesos secundarios dejan de existir con el código anterior.
 
 La fase está implementada y validada localmente. No certifica por sí sola la publicación de toda la evolución.
+
+
+## Ampliación de evidencia · PostgreSQL nativo
+
+El 27/09/2026 se ejecutó el banco HTTP completo en PostgreSQL 17.11 local sobre bases nuevas sintéticas. El runner real aplica 61 migraciones y su repetición conserva IDs/checksums/fechas; membresías, roles, revocación, caché e aislamiento pasan. `pg_dump`/`pg_restore` contrastan 184 tablas y 670 filas. Registro local: `evolution-native-final.log` y `output/native-pg-backups/restore-verification.json` desde la raíz del worktree.
+
+La prueba descubrió y corrigió el orden de migraciones dependiente del idioma y la conversión de SQL DATE a día anterior. No se modificó ningún SQL histórico ni ninguna fecha guardada. Esta evidencia sustituye la falta de prueba PostgreSQL del banco sintético; sigue pendiente el ensayo con copia autorizada de instalación real, grupos grandes y móvil físico. Véase el checklist de cierre para publicación y reversión.

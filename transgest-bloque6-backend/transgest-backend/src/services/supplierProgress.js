@@ -4,7 +4,7 @@ const { stateFromProgress, assertTransportTransition } = require('./transportTra
 // token read before traffic reassigns the trip cannot alter its new assignment.
 async function saveSupplierProgress(db, { pedidoId, empresaId, colaboradorId, patch }) {
   return db.transaction(async client => {
-    const pedido = (await client.query('SELECT id,estado,colaborador_id FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [pedidoId,empresaId])).rows[0];
+    const pedido = (await client.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [pedidoId,empresaId])).rows[0];
     if (!pedido || !colaboradorId || pedido.colaborador_id !== colaboradorId) throw Object.assign(new Error('Viaje no disponible para este colaborador'), {status:403});
     const current = (await client.query('SELECT data FROM pedido_chofer_pasos WHERE pedido_id=$1 AND empresa_id=$2', [pedidoId,empresaId])).rows[0]?.data || {};
     const data = { ...current };
@@ -16,12 +16,13 @@ async function saveSupplierProgress(db, { pedidoId, empresaId, colaboradorId, pa
         throw Object.assign(new Error('Completa primero el paso operativo anterior.'), {status:409,code:'SUPPLIER_STEP_SEQUENCE'});
       }
     }
+    if(patch.viaje_iniciado===true&&current.viaje_iniciado!==true) await require('./transportDocumentVersions').assertDeparture(client,empresaId,pedido,{...current,...patch});
     const now = new Date().toISOString();
     let changed = false;
     for (const [key,value] of Object.entries(patch)) {
       if (key.endsWith('_at')) continue;
       if (current[key] === true && value === false) throw Object.assign(new Error('No se puede deshacer una confirmación registrada'), {status:409});
-      if (value === current[key]) continue;
+      if (JSON.stringify(value) === JSON.stringify(current[key])) continue;
       data[key] = value;
       if (value === true) data[`${key}_at`] = now;
       changed = true;

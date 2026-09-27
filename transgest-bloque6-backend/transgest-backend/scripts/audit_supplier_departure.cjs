@@ -1,0 +1,57 @@
+const assert=require('node:assert/strict'),crypto=require('crypto');
+module.exports=async({db,base,company,token})=>{
+ const docs=require('../src/services/transportDocumentVersions'),supplier=crypto.randomUUID(),order=crypto.randomUUID(),legacyOrder=crypto.randomUUID();
+ await db.query("INSERT INTO colaboradores(id,empresa_id,nombre,cif) VALUES($1,$2,'Proveedor salida sintético','SINTETICO')",[supplier,company]);
+ for(const [id,number] of [[order,'DEPARTURE-PORTAL'],[legacyOrder,'DEPARTURE-EMAIL']])await db.query("INSERT INTO pedidos(id,empresa_id,colaborador_id,numero,estado,peso_kg,colaborador_carga_confirmada_at,cliente_id) VALUES($1,$2,$3,$4,'confirmado',100,NOW(),(SELECT id FROM clientes WHERE empresa_id=$2 LIMIT 1))",[id,company,supplier,number]);
+ const portal=crypto.randomBytes(32).toString('hex'),legacy=crypto.randomBytes(32).toString('hex'),hash=s=>crypto.createHash('sha256').update(s).digest('hex');
+ await db.query("INSERT INTO colaborador_liquidacion_tokens(empresa_id,colaborador_id,pedido_id,token_hash,expires_at) VALUES($1,$2,$3,$4,NOW()+INTERVAL '1 hour')",[company,supplier,order,hash(portal)]);
+ await db.query("INSERT INTO colaborador_pedido_tokens(empresa_id,pedido_id,accion,token_hash,expires_at) VALUES($1,$2,'camino',$3,NOW()+INTERVAL '1 hour')",[company,legacyOrder,hash(legacy)]);
+ const call=async(path,body)=>{const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const text=await r.text();let data;try{data=JSON.parse(text);}catch{data={text};}return {status:r.status,data};};
+ const path='/colaboradores/public/portal/'+portal+'/pedidos/'+order;
+ const portalHtml=await call('/colaboradores/public/portal/'+portal);
+ assert.equal(portalHtml.status,200);
+ const browserScripts=[...portalHtml.data.text.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
+ assert.ok(browserScripts.length,'Portal must contain its operative script');
+ for(const [,script] of browserScripts)new(require('node:vm').Script)(script,{filename:'supplier-portal-rendered.js'});
+ const doc={codigo_control:'SYNTHETIC',fecha_transporte:'2026-09-27',cargador_contractual:{nombre:'Cargador sintético',nif:'SINTETICO',domicilio:'Dirección de ensayo'},transportista_efectivo:{nombre:'Proveedor sintético',nif:'SINTETICO'},origen:{direccion:'Origen de ensayo'},destino:{direccion:'Destino de ensayo',destinatario:'Destinatario de ensayo'},mercancia:{descripcion:'Mercancía de ensayo',peso_kg:100},vehiculo:{tractora:'QA-0000'},observaciones_publicas:'DATOS SINTÉTICOS, SIN VALOR PARA TRANSPORTE REAL'};
+ const issue=(id,reason='Emisión sintética')=>docs.issue(db,{empresaId:company,pedidoId:id,baseUrl:'https://example.invalid',payload:{documento:doc},reason});
+ assert.equal((await call(path+'/documento-control')).data.versiones.length,0);
+ for(const action of ['posicionar_carga','iniciar_carga','finalizar_carga'])assert.equal((await call(path+'/operativa',{action})).status,200,action);
+ assert.equal((await call(path+'/operativa')).data.workflow.status,'cargado');
+ await db.query("UPDATE pedido_chofer_pasos SET data=data||'{\"albaran_carga\":true}'::jsonb WHERE pedido_id=$1",[order]);
+ const first=await issue(order);
+ assert.equal((await call(path+'/operativa',{action:'iniciar_viaje'})).status,409);
+ const listed=await call(path+'/documento-control');assert.equal(listed.data.versiones[0].id,first.id);assert.equal(listed.data.source,'portal_proveedor');assert.ok(listed.data.versiones[0].url.includes('/public/documento-version/'));
+ assert.equal((await call('/colaboradores/public/portal/'+portal+'/pedidos/'+legacyOrder+'/documento-control')).status,404);
+ doc.mercancia.descripcion='Mercancía revisada de ensayo';const second=await issue(order,'Corrección sintética de mercancía');
+ assert.equal((await call(path+'/operativa',{action:'iniciar_viaje',deca_revisado:true,document_versions:[first.id]})).status,409);
+ const departures=await Promise.all(Array.from({length:3},()=>call(path+'/operativa',{action:'iniciar_viaje',deca_revisado:true,document_versions:[second.id]})));
+ for(const departure of departures)assert.equal(departure.status,200,JSON.stringify(departure.data));
+ assert.equal((await call(path+'/operativa')).data.workflow.status,'en_ruta');
+ assert.equal((await call(path+'/operativa',{action:'iniciar_viaje',deca_revisado:true,document_versions:[second.id]})).status,200);
+ assert.equal((await db.query("SELECT count(*)::int n FROM pedido_eventos WHERE pedido_id=$1 AND tipo='colaborador_portal.operativa_actualizada' AND detalle->'pasos'->>'viaje_iniciado'='true'",[order])).rows[0].n,1);
+ const emailPath='/pedidos/colaborador/camino/'+legacy;
+ assert.equal((await call(emailPath,{document_versions:'[]',deca_revisado:'true'})).status,409);
+ const original=await issue(legacyOrder);
+ const page=await call(emailPath);assert.equal(page.status,200);assert.match(page.data.text,/name="deca_revisado"/);assert.ok(page.data.text.includes(original.id));
+ assert.match(page.data.text,/>100 kg</);assert.ok(!page.data.text.includes('100.000 kg'),'SQL decimals must not look like Spanish thousands');
+ await db.query('UPDATE pedidos SET peso_kg=110 WHERE id=$1',[legacyOrder]);
+ const body={deca_revisado:'true',document_versions:JSON.stringify([original.id])};assert.equal((await call(emailPath,body)).status,409);
+ assert.equal((await db.query('SELECT usado_at FROM colaborador_pedido_tokens WHERE token_hash=$1',[hash(legacy)])).rows[0].usado_at,null);
+ await db.query('UPDATE pedidos SET peso_kg=100 WHERE id=$1',[legacyOrder]);
+ const emailDepartures=await Promise.all(Array.from({length:3},()=>fetch(base+emailPath,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...body,notas:'Nota de ensayo'})})));
+ assert.ok(emailDepartures.some(r=>r.status===200));
+ assert.ok(emailDepartures.every(r=>[200,404].includes(r.status)));
+ assert.equal((await db.query('SELECT notas FROM pedidos WHERE id=$1',[legacyOrder])).rows[0].notas,'EN CAMINO COLABORADOR: Nota de ensayo');
+ const retry=await require('../src/services/supplierTransportDocuments').emailDeparture(db,{tokenHash:hash(legacy),body:{}});assert.equal(retry.replayed,true);
+ assert.equal((await db.query("SELECT count(*)::int n FROM pedido_eventos WHERE pedido_id=$1 AND tipo='colaborador.en_camino_confirmado'",[legacyOrder])).rows[0].n,1);
+ const oldApp=await fetch(base+'/pedidos/'+order+'/chofer-pasos',{method:'PATCH',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({viaje_iniciado:true})});assert.equal(oldApp.status,409);assert.equal((await oldApp.json()).code,'DRIVER_STOP_REQUIRED');
+ if(process.env.AUDIT_BROWSER==='1'){
+   // Reset only these explicitly synthetic fixtures for manual UI review.
+   await db.query("UPDATE pedidos SET estado='confirmado' WHERE id=ANY($1::uuid[])",[[order,legacyOrder]]);
+   await db.query("UPDATE pedido_chofer_pasos SET data=data-'viaje_iniciado'-'viaje_iniciado_at'-'dcd_revisado'-'dcd_disponible'-'dcd_versiones_revisadas' WHERE pedido_id=ANY($1::uuid[])",[[order,legacyOrder]]);
+   await db.query('UPDATE colaborador_pedido_tokens SET usado_at=NULL WHERE token_hash=$1',[hash(legacy)]);
+   console.log(JSON.stringify({supplierBrowser:{portal:base+'/colaboradores/public/portal/'+portal,email:base+emailPath}}));
+ }
+ return {portal:true,email:true,immutableOriginals:true,explicitReview:true,outdatedVersionDenied:true,changedWeightDenied:true,tokenIsolation:true,atomicToken:true,idempotent:true,concurrentDeparture:true,legacyBypassDenied:true};
+};

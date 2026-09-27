@@ -20,11 +20,12 @@ async function main() {
   const order='11111111-1111-4111-8111-111111111111',company='22222222-2222-4222-8222-222222222222',supplier='33333333-3333-4333-8333-333333333333';
   const save=patch=>saveSupplierProgress(db,{pedidoId:order,empresaId:company,colaboradorId:supplier,patch});
   try {
-    await pg.exec(`CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,colaborador_id uuid,estado text,updated_at timestamptz,carga_real_at timestamptz,descarga_real_at timestamptz);
+    await pg.exec(`CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,colaborador_id uuid,peso_kg numeric,estado text,updated_at timestamptz,carga_real_at timestamptz,descarga_real_at timestamptz);
       CREATE TABLE pedido_chofer_pasos(pedido_id uuid PRIMARY KEY,empresa_id uuid,chofer_id uuid,data jsonb,updated_at timestamptz);
       CREATE TABLE pedido_eventos(pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,detalle jsonb);
       CREATE TABLE colaborador_liquidacion_tokens(pedido_id uuid,empresa_id uuid,expires_at timestamptz);`);
-    await pg.query("INSERT INTO pedidos VALUES($1,$2,$3,'confirmado',NULL,NULL,NULL)",[order,company,supplier]);
+    for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(require('fs').readFileSync(require('path').join(__dirname,'migrations',file),'utf8'));
+    await pg.query("INSERT INTO pedidos VALUES($1,$2,$3,100,'confirmado',NULL,NULL,NULL)",[order,company,supplier]);
     await assert.rejects(save({viaje_iniciado:true}),{code:'SUPPLIER_STEP_SEQUENCE'});
     const arrival=await save({carga_iniciada:true});assert.equal(arrival.estado,'espera_carga');
     assert.equal((await save({carga_iniciada:true,carga_iniciada_at:'2020-01-01'})).data.carga_iniciada_at,arrival.data.carga_iniciada_at);
@@ -35,7 +36,12 @@ async function main() {
     assert.equal((await save({carga_proceso:true})).estado,'cargando');
     assert.equal((await save({carga_ok:true})).estado,'en_curso');
     assert.ok((await pg.query('SELECT carga_real_at FROM pedidos')).rows[0].carga_real_at);
-    await save({albaran_carga:true});await save({viaje_iniciado:true});
+    await save({albaran_carga:true});
+    await assert.rejects(save({viaje_iniciado:true}),{code:'DECA_REQUIRED'});
+    const document=await require('../src/services/transportDocumentVersions').issue({...db,query:(...a)=>pg.query(...a)},{empresaId:company,pedidoId:order,baseUrl:'https://example.invalid',payload:{documento:{fecha_transporte:'2026-09-27',cargador_contractual:{nombre:'Synthetic',nif:'SYNTHETIC',domicilio:'Test'},transportista_efectivo:{nombre:'Synthetic',nif:'SYNTHETIC'},origen:{direccion:'Test A'},destino:{direccion:'Test B',destinatario:'Test'},mercancia:{descripcion:'Synthetic goods',peso_kg:100},vehiculo:{tractora:'TEST'}}}});
+    await assert.rejects(save({viaje_iniciado:true}),{code:'DECA_REVIEW_REQUIRED'});
+    await save({viaje_iniciado:true,dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[document.id]});
+
     assert.equal((await save({posicionado_descarga:true})).estado,'espera_descarga');
     assert.equal((await save({descarga_iniciada:true})).estado,'descarga');
     assert.equal((await save({descarga_ok:true})).estado,'descarga','Unloading is not signed/documented completion');

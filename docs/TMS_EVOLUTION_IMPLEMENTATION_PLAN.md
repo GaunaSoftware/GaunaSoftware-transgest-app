@@ -36,3 +36,12 @@ Actualización: 27/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 17 Multiempresa | Implementada y validada localmente | `TMS_EVOLUTION_PHASE17_MULTIEMPRESA.md`: membresías vivas, roles por sociedad, selector, BI autorizado, revocación y regresiones; prueba PostgreSQL/dispositivo pendiente |
 
 Antes de dar una fase por terminada, revisar todos sus requisitos del encargo original y resolver o identificar expresamente cada límite heredado. Los documentos 0–5 constituyen evidencia de lo realizado, no una certificación global. El usuario ha autorizado terminar las fases pendientes; no hay que pedir permiso otra vez para implementar. Continuar por los pendientes de fase 5 antes de declarar su cierre; no presentar como terminadas las fases 6–17 por existir módulos anteriores.
+
+
+## Cierre local y punto de continuidad · 27/09/2026
+
+Se completó el recorrido de implementación hasta la fase 17 y el contraste transversal. Consultar `TMS_EVOLUTION_RELEASE_CHECKLIST.md` antes de cualquier publicación: contiene evidencias, funciones no implementadas, límites externos y procedimiento de reversión. El número de fase alcanzado no equivale a cierre de todos los requisitos.
+
+Se resolvieron las vías legacy de salida por portal/correo y el bypass global de la app, el doble evento en reintentos, el JavaScript inválido del portal, la fecha civil desplazada y el orden del migrador. PostgreSQL nativo: 61 migraciones aplicadas y repetidas, aislamiento/membresías, salidas y cola fiscal concurrentes, copia/restauración con huellas. No se requiere repetir autorizaciones para continuar implementación local pendiente.
+
+No se han ejecutado push/merge/despliegue ni pruebas con datos de producción. No declarar terminado el WMS avanzado automático, replanificación documentada, eCMR contractual, AEAT directa o pilotos/dispositivo pendientes. Los datos sintéticos y logs locales no se publican.

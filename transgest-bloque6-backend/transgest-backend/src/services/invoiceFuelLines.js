@@ -21,7 +21,8 @@ function validateFuelInvoiceLines(orders, lines) {
   const actual = fuelLines.reduce((sum, l) => sum + cents(Number(l.cantidad) * Number(l.precio_unit)), 0);
   if (expected !== actual) fail('El recargo de combustible debe figurar en una línea separada por su importe exacto. Regenera las líneas del borrador para separar el porte sin duplicar el recargo.');
   for(const order of orders){
-    const detention=cents(order.importe_paralizacion),matched=lines.filter(l=>l.paralizacion_pedido_id===order.id);
+    const detention=cents(order.importe_paralizacion),matched=lines.filter(l=>l.paralizacion_pedido_id && l.paralizacion_pedido_id===order.id);
+    if(detention>0 && !order.id)fail('Falta la identidad del pedido para enlazar la paralización.');
     if(matched.length>1||matched.reduce((n,l)=>n+cents(Number(l.cantidad)*Number(l.precio_unit)),0)!==detention)fail('La paralización debe figurar por su importe exacto en una línea separada enlazada a su pedido. Regenera las líneas.');
     if(matched.some(l=>l.concepto!==`Paralización · ${order.numero||''}`))fail('Conserva la identificación de la paralización en su línea.');
   }

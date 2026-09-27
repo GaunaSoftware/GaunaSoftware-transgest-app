@@ -22,7 +22,7 @@ El usuario autoriza terminar Android, preparar prefacturas de paralización sin 
 - Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:bundleRelease --offline --no-daemon --max-workers=2`: aprobado; lint 0 errores y 17 advertencias (recursos/iconos). AAB sin firma de publicación y APK debug; no son una publicación en Play.
 - Auditoría HTTP en PostgreSQL local: 141 comprobaciones principales y subbaterías, incluidas 44 operativas y 26 fiscales. 70 migraciones aplicadas, segunda ejecución intacta; cero errores de esquema. Copia/restauración sintética de 199 tablas / 860 filas verificada por huellas. Un fixture horario justo en un límite de minuto produjo 9 frente a 10; se desplazó 30 segundos dentro del minuto sin cambiar el cálculo real.
 - PDF sintético generado con PDFKit, renderizado con Poppler e inspeccionado: una página A4, tildes/ñ/€, filas y avisos legibles. Ejemplo local `output/pdf/prefactura-paralizacion-sintetica.pdf` (no se versionan datos de ensayo).
-- Navegador local: acceso sintético, pedido y prefactura en componentes comunes; formulario a 390 px sin desbordamiento horizontal (390,4 por redondeo). El control automatizado no logró completar el selector nativo datetime-local; cálculo/guardado/PDF sí comprobados por API y pruebas de React. No se afirma validación manual completa del selector en iPhone/Android.
+- Navegador local: acceso sintético, pedido y prefactura en componentes comunes; formulario a 390/768/1440/1920 px sin desbordamiento horizontal (390,4 por redondeo; anchos de modal 720/840/840 en los restantes). El control automatizado no logró completar el selector nativo datetime-local; cálculo/guardado/PDF sí comprobados por API y pruebas de React. No se afirma validación manual completa del selector en iPhone/Android.
 - `adb devices`: ningún dispositivo conectado. Cámara física, GPS foreground/batería, permisos y push requieren teléfono real.
 
 ## Infraestructura
@@ -42,3 +42,10 @@ Cuenta y verificación Play, política de privacidad aprobada, clave custodiada/
 ## Estado del despliegue
 
 Pendiente de registrar el resultado real de la fusión y de los despliegues, no inferirlo de un push.
+
+
+### Cierre de regresiones tras integración
+
+`npm run security:regression` y `npm run audit:regression`: aprobados con salida 0. CI inicial detectó un esquema mínimo de seguridad sin `provider_uuid`; se actualizó al campo aditivo real. La auditoría de combustible detectó que dos identificadores ausentes se comparaban como una coincidencia de paralización: se exige enlace explícito y se rechaza un importe de paralización sin identidad de pedido. Los tests existentes de combustible individual/agrupado/PDF y los nuevos fiscales pasan. No se deshabilitó ninguna comprobación.
+
+Artefactos locales (no versionados): APK debug SHA256 `10395fb4e7c6f08033754b0bf9e4e97d4955715d31ea22925f3bcb6f5ec0d727`; AAB sin firma SHA256 `938d6f9552f2762e8f24d95a228de0b1e46b286bb52411843bde9ec05c81cb40`. `jarsigner -verify` confirma expresamente que el AAB no está firmado. Último Gradle: BUILD SUCCESSFUL, 844 tareas (77 ejecutadas, 767 actualizadas). Las pruebas nativas sin cambios reutilizan los resultados de Gradle; no equivalen a ejecutar en un teléfono.

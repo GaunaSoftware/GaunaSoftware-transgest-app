@@ -17,6 +17,7 @@ test('due invoice opens its invoice focus, never the generic notices page',async
   expect(node.textContent).toContain((1210).toLocaleString('es-ES',{style:'currency',currency:'EUR'}));
   await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent==='Ver factura').click());
   expect(events).toEqual(['facturacion']);expect(readRuntimeFocus('tms_facturacion_focus').factura_id).toBe('qa-invoice');
+  expect(readRuntimeFocus('tms_finance_tab')).toBe('facturas');
   window.removeEventListener('tms:navegar',receive);
 });
 test('mounted destinations receive subsequent focus changes',async()=>{

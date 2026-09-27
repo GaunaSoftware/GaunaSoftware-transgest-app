@@ -30,6 +30,8 @@ Ejecutadas con scripts reales; los fixtures son sintéticos y locales:
 
 El primer intento local de `npm run check` encontró un `EPERM` del sandbox al crear procesos; el reintento autorizado terminó con código 0. Un intento de compilación con `CI=true` trata las advertencias existentes como errores; se emplea la configuración de build habitual `CI=false`. Un intento de preload Node con ruta Windows mal escapada falló antes de compilar y se corrigió usando barras `/`. Ninguno de esos intentos se presenta como prueba superada.
 
+La primera ejecución de CI detectó que el fixture de auditoría invocaba reservas Planner sin declarar ese producto en el contexto del usuario. Se mantiene la denegación en servidor y se corrige el fixture: verifica rechazo para TransGest solo, y acceso con Planner explícitamente autorizado. La auditoría añade además ejecución de las dos nuevas herramientas sobre el esquema completo sintético.
+
 ## Verificación visual
 
 `frontend/scripts/notice_center_preview.cjs` sirve el build real con una API exclusivamente sintética en `127.0.0.1`; no llama a producción ni se importa en el bundle.
@@ -38,7 +40,8 @@ El primer intento local de `npm run check` encontró un `EPERM` del sandbox al c
 - «Leído» elimina el contador de 92 avisos del fixture. El caso completo de 301 se valida por HTTP real contra PGlite.
 - Configuración: cambio de antelación, desactivar plataformas, guardar y comprobar que el listado pasa de tres avisos a dos.
 - Intelligence: consulta guiada con proveedor simulado, respuesta estructurada, tabla, fuentes y enlace a la factura. No se han enviado datos operativos reales a un proveedor de IA en esta validación.
-- Navegación móvil a 390 px: cabecera, pestañas desplazables, formulario y tarjetas sin desbordamiento horizontal de la página. Las tablas de respuestas permiten desplazamiento dentro de su contenedor.
+- Abrir ITV de remolque desde Dashboard: ficha del remolque y pestaña Documentación. Apertura de factura desde una referencia de Intelligence; selección explícita de la pestaña Facturas. Consulta guiada accesible con Enter.
+- Revisión visual a 390, 768 y 1440 px: cabecera, pestañas desplazables, formulario y tarjetas sin desbordamiento horizontal de la página. Las tablas de respuestas permiten desplazamiento dentro de su contenedor.
 
 ## Migración y reversión
 

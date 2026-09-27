@@ -15,10 +15,12 @@ async function main() {
       CREATE TABLE colaboradores(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,tipo text,nombre text,cif text UNIQUE,telefono text,email text,notas text);
       CREATE TABLE rutas(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),origen text,destino text,km integer);
       CREATE TABLE ruta_precios_cliente(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),ruta_id uuid,cliente_id uuid,precio numeric);
-      CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);
-      CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text);`);
+      CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,tipo_doc varchar(60) NOT NULL,fecha_emision date,fecha_vencimiento date);
+      CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,tipo_doc varchar(60) NOT NULL,fecha_emision date,fecha_vencimiento date);`);
     const dir=path.join(__dirname,'migrations');
     for (const name of ['20260924_import_batches.sql','20260924_import_doc_metadata.sql','20260924_import_master_fields.sql','20260924_import_tenant_keys.sql','20260924_import_rollback.sql']) await pg.exec(fs.readFileSync(path.join(dir,name),'utf8'));
+    const compatibilitySql=fs.readFileSync(path.join(dir,'20260930_document_legacy_compatibility.sql'),'utf8');
+    await pg.exec(compatibilitySql);
     await pg.query('INSERT INTO empresas(id) VALUES($1),($2)',[a,b]);
     const batch=(await pg.query("INSERT INTO import_batches(empresa_id,tipo,filename,source_system) VALUES($1,'Pack_TransGest','test.xlsx','old') RETURNING id",[a])).rows[0].id;
     let decision=await evaluateMaster(pg,a,'old','Clientes',{nombre:'Cliente A',cif:'B12345678'},'c1','a'.repeat(64));
@@ -36,8 +38,15 @@ async function main() {
     assert.equal(decision.parentId,driver.id);
     const doc=await createMaster(pg,a,batch,'Docs_Conductores',{chofer_dni:'12345678Z',tipo_doc:'contrato_laboral',estado_vencimiento:'PERMANENTE'},decision);
     assert.equal((await pg.query('SELECT fecha_vencimiento,estado_vencimiento FROM docs_choferes WHERE id=$1',[doc.id])).rows[0].estado_vencimiento,'PERMANENTE');
+    await pg.query("UPDATE docs_choferes SET descripcion='Documento existente',referencia='REF-1',alerta_dias=15 WHERE id=$1",[doc.id]);
+    await pg.exec(compatibilitySql);
+    assert.deepEqual((await pg.query('SELECT descripcion,referencia,alerta_dias FROM docs_choferes WHERE id=$1',[doc.id])).rows[0],
+      {descripcion:'Documento existente',referencia:'REF-1',alerta_dias:15},'Idempotent migration preserves existing metadata');
     assert.equal((await evaluateMaster(pg,a,'old','Docs_Conductores',{chofer_nombre:'Ana María López',tipo_doc:'cap'},'doc2','h'.repeat(64))).action,'review');
     assert.equal((await evaluateMaster(pg,a,'old','Docs_Vehiculos',{matricula:'0009LCZ',tipo_doc:'itv'},'doc3','i'.repeat(64))).parentId,vehicle.id);
+    const vehicleDocData={matricula:'0009LCZ',tipo_doc:'itv',fecha_vencimiento:'2027-01-12',numero_doc:'ITV-1'};
+    const vehicleDoc=await createMaster(pg,a,batch,'Docs_Vehiculos',vehicleDocData,await evaluateMaster(pg,a,'old','Docs_Vehiculos',vehicleDocData,'doc3','i'.repeat(64)));
+    assert.equal((await pg.query('SELECT referencia FROM docs_vehiculos WHERE id=$1',[vehicleDoc.id])).rows[0].referencia,'ITV-1');
     decision=await evaluateMaster(pg,a,'old','Tarifas',{cliente_cif:'B12345678',origen:'Madrid',destino:'Valencia',precio:300,km:350,unidad:'viaje'},'t1','j'.repeat(64));
     assert.equal(decision.action,'create');
     const tariff=await createMaster(pg,a,batch,'Tarifas',{cliente_cif:'B12345678',origen:'Madrid',destino:'Valencia',precio:300,km:350,unidad:'viaje'},decision);

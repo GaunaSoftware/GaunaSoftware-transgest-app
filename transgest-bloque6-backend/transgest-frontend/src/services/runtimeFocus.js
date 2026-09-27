@@ -26,6 +26,7 @@ export function readRuntimeFocus(key, options = {}) {
 
 export function setRuntimeFocus(key, value) {
   runtimeFocusState[key] = value ?? null;
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('tms:runtime-focus', { detail:{ key, value } }));
   try {
     sessionStorage.removeItem(key);
   } catch {}

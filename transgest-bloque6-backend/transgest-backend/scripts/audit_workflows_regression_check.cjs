@@ -296,8 +296,9 @@ async function main(){
  intelContext.period=period;await vm.runInNewContext('releaseTurn(company,period)',intelContext);
  evidence.intelligenceRefunded=(await db.query('SELECT ia_usos_mes FROM empresas WHERE id=$1',[company])).rows[0].ia_usos_mes;
  const intelligence=req('./services/intelligence');evidence.intelligenceTools=[];
- for(const [name,args] of [['buscar_pedidos',{texto:'',desde:'2026-09-01',hasta:'2026-09-30'}],['resumen_mes',{mes:'2026-09'}],['disponibilidad_flota',{fecha:'2026-09-16',texto:''}],['stock_almacen',{texto:''}],['reservas_muelles',{fecha:'2026-09-16'}]]){
-  try{const value=await intelligence.executeTool(db,{id:user,empresa_id:company,rol:'gerente'},name,args);evidence.intelligenceTools.push({name,ok:true,source:value.fuente});}catch(e){evidence.intelligenceTools.push({name,ok:false,error:e.message});}
+ await require('node:assert/strict').rejects(intelligence.executeTool(db,{id:user,empresa_id:company,rol:'gerente',productos:['transgest']},'reservas_muelles',{fecha:'2026-09-16'}),e=>e.status===403);
+ for(const [name,args] of [['buscar_pedidos',{texto:'',desde:'2026-09-01',hasta:'2026-09-30'}],['resumen_mes',{mes:'2026-09'}],['disponibilidad_flota',{fecha:'2026-09-16',texto:''}],['stock_almacen',{texto:''}],['reservas_muelles',{fecha:'2026-09-16'}],['vencimientos_empresa',{categoria:'',texto:'',pagina:'1'}],['analisis_rentabilidad',{desde:'2026-09-01',hasta:'2026-09-30',cliente_id:'',vehiculo_id:'',ejecucion:''}]]){
+  try{const value=await intelligence.executeTool(db,{id:user,empresa_id:company,rol:'gerente',productos:['transgest','planner']},name,args);evidence.intelligenceTools.push({name,ok:true,source:value.fuente || name});}catch(e){evidence.intelligenceTools.push({name,ok:false,error:e.message});}
   require('node:assert/strict').equal(evidence.intelligenceTools.at(-1).ok,true,`Intelligence ${name}: ${evidence.intelligenceTools.at(-1).error||''}`);
  }
  if(driver.id){

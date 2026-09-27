@@ -1,5 +1,7 @@
 const express = require("express");
 const db = require("../services/db");
+const noticeCenter = require('../services/noticeCenter');
+const operativeRead = require('../services/operativeReadState');
 const {
   crearNotificacion,
   listarNotificaciones,
@@ -312,7 +314,7 @@ function filterAlertsByRole(items, rol) {
   return items.filter(item => allowed.has(item.kind));
 }
 
-async function listarAvisosColaboradores(req) {
+async function listarAvisosColaboradores(req, { all = false, includeRead = false } = {}) {
   await ensureAvisosOperativosSchema();
   const empresaId = req.user?.empresa_id;
   const usuarioId = req.user?.id;
@@ -353,7 +355,7 @@ async function listarAvisosColaboradores(req) {
         AND COALESCE(p.fecha_descarga,p.fecha_entrega,p.fecha_carga,p.fecha_pedido,p.created_at::date) >= CURRENT_DATE - INTERVAL '60 days'
         AND COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) <= CURRENT_DATE + INTERVAL '30 days'
       ORDER BY COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
-      LIMIT 250`,
+      `,
     [empresaId]
     );
     rows = result.rows || [];
@@ -370,7 +372,7 @@ async function listarAvisosColaboradores(req) {
           AND p.estado::text IN ('en_curso','descarga')
           AND COALESCE(p.fecha_descarga,p.fecha_entrega,p.fecha_carga,p.fecha_pedido,p.created_at::date) >= CURRENT_DATE - INTERVAL '10 days'
         ORDER BY COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
-        LIMIT 150`,
+        `,
       [empresaId]
     );
     choferRows = choferResult.rows || [];
@@ -387,21 +389,50 @@ async function listarAvisosColaboradores(req) {
     [empresaId, usuarioId]
   ).catch(() => ({ rows: [] }));
   const ignoredKeys = new Set(ignored.rows.map(r => String(r.alert_key || "")));
-  const items = filterAlertsByRole(
+  const pending = filterAlertsByRole(
     rows.flatMap(buildColaboradorAlerts)
       .concat(choferRows.flatMap(buildChoferStaleAlerts))
       .filter(a => !ignoredKeys.has(a.key)),
     rol
-  ).slice(0, 80);
+  );
+  let unread = includeRead ? pending : await operativeRead.unreadItems(db, req.user, pending);
+  if (!includeRead && noticeCenter.can(req.user, 'agenda')) {
+    const { rows: tasks } = await db.query(`SELECT metadata->>'alert_key' AS alert_key,source_id,cause_code FROM agenda_eventos
+      WHERE empresa_id=$1 AND (asignado_a=$2 OR creado_por=$2 OR visibilidad='equipo') AND estado IN ('pendiente','en_progreso')
+      AND (metadata->>'source'='avisos_operativos_colaborador' OR source_type='pedido')`, [empresaId, usuarioId]);
+    const delegated = new Set(tasks.map(t => t.alert_key));
+    const automated = new Set(tasks.map(t => `${t.source_id}:${t.cause_code}`));
+    const cause = {carga_sin_confirmar:'carga_sin_finalizar',descarga_sin_confirmar:'entrega_vencida'};
+    unread = unread.filter(i => !delegated.has(i.key) && !(cause[i.kind] && automated.has(`${i.pedido_id}:${cause[i.kind]}`)));
+  }
+  const items = all ? unread : unread.slice(0, 80);
   const resumen = {
-    total: items.length,
-    alta: items.filter(i => i.severity === "alta").length,
-    media: items.filter(i => i.severity === "media").length,
-    colaboradores: new Set(items.map(i => i.colaborador_id).filter(Boolean)).size,
-    albaranes_pendientes: items.filter(i => i.kind === "albaran_pendiente").length,
+    total: unread.length,
+    alta: unread.filter(i => i.severity === "alta").length,
+    media: unread.filter(i => i.severity === "media").length,
+    colaboradores: new Set(unread.map(i => i.colaborador_id).filter(Boolean)).size,
+    albaranes_pendientes: unread.filter(i => i.kind === "albaran_pendiente").length,
   };
-  return { items, resumen };
+  return { items, resumen, pending_total: pending.length, limited: items.length < unread.length };
 }
+
+router.get('/centro', async (req, res, next) => {
+  try { res.json(await noticeCenter.readNotices(db, req.user)); } catch (e) { next(e); }
+});
+router.get('/configuracion', async (req, res, next) => {
+  try { res.json(await noticeCenter.settings(db, req.user)); } catch (e) { next(e); }
+});
+router.put('/configuracion', async (req, res, next) => {
+  try { res.json(await noticeCenter.saveSettings(db, req.user, req.body)); } catch (e) { next(e); }
+});
+router.post('/operativas/leer-todas', async (req, res, next) => {
+  try {
+    if (!ROLES_OPERATIVOS.has(req.user?.rol)) return res.status(403).json({ error: 'No autorizado' });
+    const result = await listarAvisosColaboradores(req, { all: true });
+    if (result.resumen.warning) return res.status(503).json({ error: 'No se pudieron consultar todos los avisos.' });
+    res.json({ ok: true, actualizadas: await operativeRead.markRead(db, req.user, result.items) });
+  } catch (e) { next(e); }
+});
 
 router.get("/", async (req, res) => {
   const empresaId = req.user?.empresa_id;
@@ -463,13 +494,25 @@ router.post("/operativas/colaboradores/agenda", async (req, res, next) => {
     await ensureAvisosOperativosSchema();
     const empresaId = req.user?.empresa_id;
     if (!empresaId) return res.status(401).json({ error: "Sesion no valida" });
-    const alert = req.body?.alert || {};
+    if (!noticeCenter.can(req.user, 'agenda', 'editar')) return res.status(403).json({ error: 'Sin permiso de edición de agenda' });
+    const pending = await listarAvisosColaboradores(req, { all: true, includeRead: true });
+    const alert = pending.items.find(a => a.key === req.body?.alert?.key);
+    if (!alert) return res.status(404).json({ error: 'Aviso no encontrado o ya resuelto' });
+    const assignee = req.body?.asignado_a || req.user.id;
+    const owner = await db.query('SELECT id FROM usuarios WHERE id=$1 AND empresa_id=$2 AND activo=true', [assignee, empresaId]);
+    if (!owner.rows.length) return res.status(400).json({ error: 'Usuario de agenda no válido' });
     const pedidoId = cleanText(alert.pedido_id);
     const alertKey = cleanText(alert.key);
     if (!pedidoId || !alertKey) return res.status(400).json({ error: "Aviso no valido" });
     const fechaBase = dateOnly(alert.fecha_descarga || alert.fecha_carga || new Date());
     const fechaInicio = `${fechaBase || new Date().toISOString().slice(0, 10)}T09:00:00`;
-    const { rows } = await db.query(
+    let created = false;
+    const { rows } = await db.transaction(async tx => {
+      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`avimp:${empresaId}:${alertKey}`]);
+      const existing = await tx.query(`SELECT * FROM agenda_eventos WHERE empresa_id=$1 AND metadata->>'alert_key'=$2 AND estado IN ('pendiente','en_progreso') ORDER BY created_at LIMIT 1`, [empresaId, alertKey]);
+      if (existing.rows.length) return existing;
+      created = true;
+      return tx.query(
       `INSERT INTO agenda_eventos
         (empresa_id, creado_por, asignado_a, titulo, descripcion, fecha_inicio, todo_dia,
          tipo, prioridad, estado, visibilidad, pedido_id, metadata)
@@ -478,7 +521,7 @@ router.post("/operativas/colaboradores/agenda", async (req, res, next) => {
       [
         empresaId,
         req.user.id,
-        req.body?.asignado_a || req.user.id,
+        assignee,
         cleanText(alert.title) || "Revisar aviso colaborador",
         `${cleanText(alert.detail) || "Revisar viaje de colaborador."}\n\nAccion: ${cleanText(alert.action) || "Revisar y cerrar aviso."}`,
         fechaInicio,
@@ -488,9 +531,11 @@ router.post("/operativas/colaboradores/agenda", async (req, res, next) => {
         JSON.stringify({ source: "avisos_operativos_colaborador", alert_key: alertKey, kind: alert.kind || "" }),
       ]
     );
-    await crearNotificacion({
+    });
+    await operativeRead.markRead(db, req.user, [alert]);
+    if (created) await crearNotificacion({
       empresa_id: empresaId,
-      usuario_id: req.body?.asignado_a || req.user.id,
+      usuario_id: assignee,
       tipo: "agenda_aviso_colaborador",
       titulo: "Recordatorio de colaborador en agenda",
       mensaje: cleanText(alert.title) || "Revisar aviso de colaborador",
@@ -515,7 +560,9 @@ router.post("/operativas/colaboradores/ignorar", async (req, res, next) => {
     const empresaId = req.user?.empresa_id;
     const usuarioId = req.user?.id;
     if (!empresaId || !usuarioId) return res.status(401).json({ error: "Sesion no valida" });
-    const alert = req.body?.alert || {};
+    const pending = await listarAvisosColaboradores(req, { all:true, includeRead:true });
+    const alert = pending.items.find(a=>a.key === req.body?.alert?.key);
+    if (!alert) return res.status(404).json({error:'Aviso no encontrado o ya resuelto'});
     const alertKey = cleanText(alert.key);
     if (!alertKey) return res.status(400).json({ error: "Aviso no valido" });
     const motivo = cleanText(req.body?.motivo) || "Ignorado desde panel operativo";

@@ -1,3 +1,4 @@
+import useRuntimeFocus from "../hooks/useRuntimeFocus";
 import InvoiceWorkflow from "./finance/InvoiceWorkflow";
 import SupplierInvoiceCenter from "./colaboradores/SupplierInvoiceCenter";
 import ClaveiconPanel from '../components/ClaveiconPanel';
@@ -18,7 +19,7 @@ import { getPedido, getFacturas, getFactura, guardarFacturaAnotaciones, getFactu
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
-import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { clearRuntimeFocus } from "../services/runtimeFocus";
 import { FINANCE_TABS, useFinanceTab } from "../services/financeNavigation";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
 
@@ -2052,9 +2053,6 @@ function ModalFacturarMultiple({ onClose }) {
   );
 }
 
-function readFacturacionFocus() {
-  return readRuntimeFocus("tms_facturacion_focus");
-}
 
 function monthBounds(value = new Date()) {
   const monthMatch = typeof value === "string" ? value.match(/^(\d{4})-(\d{2})$/) : null;
@@ -2075,7 +2073,7 @@ export default function Facturacion() {
   const esGerenteFacturacion = String(user?.rol || "").toLowerCase() === "gerente";
   const aiDisponible      = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [activeFacturacionTab, setActiveFacturacionTab] = useFinanceTab();
-  const [focusFactura]    = useState(() => readFacturacionFocus());
+  const focusFactura = useRuntimeFocus("tms_facturacion_focus");
   const [summaryClient, setSummaryClient] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
   const isSummary = activeFacturacionTab === "resumen";
@@ -2196,7 +2194,16 @@ export default function Facturacion() {
     };
   }, [cargar]);
   useEffect(() => {
+    if (!focusFactura?.factura_id || !focusFactura.open) return;
+    let active = true;
+    getFactura(focusFactura.factura_id).then(f => {
+      if (active) { setVistaFact(f); clearRuntimeFocus('tms_facturacion_focus'); }
+    }).catch(e => { if (active) notify(e.message || 'No se pudo abrir la factura.', 'error'); });
+    return () => { active = false; };
+  }, [focusFactura]);
+  useEffect(() => {
     if (!focusFactura?.factura_id || loading) return;
+    if (focusFactura.open) return;
     const found = facturas.find(f => String(f.id) === String(focusFactura.factura_id));
     if (!found) return;
     const t = window.setTimeout(() => {

@@ -1,12 +1,13 @@
+import useRuntimeFocus from "../hooks/useRuntimeFocus";
 import "./workspace/workspace.css";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getChoferHistorialVehiculos, getTractoraPeriodos } from "../services/api";
 import { asignarRemolque } from "../services/api";
 import { formatDni, upperFromEvent } from "../utils/formatos";
 import { getChoferes, crearChofer, editarChofer, borrarChofer, getVehiculos, getNominasEmitidas, getTallerEstado, guardarTallerEstado, getChoferJornadas } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
-import { clearRuntimeFocus, readRuntimeFocus } from "../services/runtimeFocus";
+import { clearRuntimeFocus } from "../services/runtimeFocus";
 import { GeoFields } from "../components/GeoFields";
 import PlatformDocumentsEditor, { normalizePlatformDocuments } from "../components/PlatformDocumentsEditor";
 
@@ -568,10 +569,10 @@ function TabJornadas({ chofer }) {
   );
 }
 
-function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persistTallerState }) {
+function ModalChofer({ editando, initialTab = 'datos', onClose, onSaved, vehiculos, tallerState, persistTallerState }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("choferes");
-  const [tab,    setTab]    = useState("datos");
+  const [tab,    setTab]    = useState(initialTab);
   const [form,   setForm]   = useState(editando ? { ...editando, remolque_id: editando.remolque_id || editando.vehiculo_remolque_id || "" } : {
     activo:true, nombre:"", apellidos:"", alias:"", dni:"", telefono:"", email:"",
     direccion:"", poblacion:"", cp:"", provincia:"", pais:"España",
@@ -941,15 +942,13 @@ function ModalChofer({ editando, onClose, onSaved, vehiculos, tallerState, persi
 }
 
 // ---------------------------------------------------------------------------
-function readChoferesFocus() {
-  return readRuntimeFocus("tms_choferes_focus");
-}
 
 export default function Choferes() {
   const { puedeEditar, user } = useAuth();
   const canEdit          = puedeEditar("choferes");
   const esGerente        = user?.rol === "gerente";
-  const [focusChofer]    = useState(() => readChoferesFocus());
+  const focusChofer = useRuntimeFocus("tms_choferes_focus");
+  const consumedNotice = useRef(null);
   const [choferes,  setChoferes]  = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [tallerState, setTallerState] = useState(() => ({ ...EMPTY_TALLER_CHOFER }));
@@ -994,11 +993,13 @@ export default function Choferes() {
   useEffect(() => { cargar(); }, [cargar]);
 
   useEffect(() => {
-    if (!focusChofer?.chofer_id || loading) return;
+    if (!focusChofer?.chofer_id || loading || consumedNotice.current === focusChofer) return;
     const found = choferes.find(c => String(c.id) === String(focusChofer.chofer_id));
     if (!found) return;
     setPage(Math.floor(choferes.indexOf(found)/pageSize)+1);
     const t = window.setTimeout(() => {
+      consumedNotice.current = focusChofer;
+      if (focusChofer.open) { setEditando(found); setModal(true); }
       document.getElementById(`chofer-row-${focusChofer.chofer_id}`)?.scrollIntoView({ behavior:"smooth", block:"center" });
       clearRuntimeFocus("tms_choferes_focus");
     }, 180);
@@ -1136,6 +1137,7 @@ export default function Choferes() {
       {modal && (
         <ModalChofer
           editando={editando}
+          initialTab={editando?.id === focusChofer?.chofer_id ? (focusChofer.section === 'documentacion' ? 'contrato' : focusChofer.section === 'plataformas' ? 'plataformas' : 'datos') : 'datos'}
           vehiculos={vehiculos}
           tallerState={tallerState}
           persistTallerState={persistTallerState}

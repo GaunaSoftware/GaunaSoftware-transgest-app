@@ -133,3 +133,7 @@ Para cualquier plantilla, valores `null` se exportan como «No calculable» en P
 ## Alcance del informe semanal de flota
 
 El acceso de gerencia **Ver informe semanal de flota** ejecuta la plantilla «Explotación por vehículo» con `semana_anterior`: lunes 00:00 a domingo 23:59:59 de la semana civil completa anterior en `Europe/Madrid`. Puede solicitarse cualquier día; el lunes ya corresponde a la semana que acaba de cerrar. Incluye ingreso neto realizado, coste directo registrado, margen directo en euros, ingreso por km total, porcentaje de km vacíos y gastos pendientes de valorar. La matriz usa el vehículo asignado históricamente al servicio. El margen no equivale a beneficio neto: combustible no conciliado, nóminas, taller y estructura no se descuentan de forma automática. El PDF se genera a demanda desde el mismo snapshot que la pantalla; el detalle completo permanece en servidor y la vista previa se pagina de 25 en 25 filas.
+
+## Evolución TMS fase 15 (27/09/2026)
+
+El adaptador `financialJourneys` añade `viajes_operativos.km_cargados/km_vacios/asignacion_snapshot`, `viaje_pedidos`, `viaje_costes.importe_neto/fecha/anulado_at` al contrato existente, con reparto sobre población completa por peso o bultos. Se conserva el importe no conciliado cuando puede duplicar un coste de pedido. `bi_legs` permite trazabilidad de cada pedido a los viajes físicos. Consultar `TMS_EVOLUTION_PHASE15_BI.md` para reglas y límites. No se transforman repostajes en consumo ni margen parcial en beneficio neto.

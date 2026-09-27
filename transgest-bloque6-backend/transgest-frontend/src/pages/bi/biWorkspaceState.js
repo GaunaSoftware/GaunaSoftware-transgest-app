@@ -9,7 +9,7 @@ export const filterKeys = ['cliente_id','ruta','vehiculo_id','ejecucion'];
 export function queryForBi(state) {
   const q = state.periodo === 'personalizado' ? {desde:state.desde,hasta:state.hasta} : {periodo:state.periodo};
   if (state.granularity) q.granularity = state.granularity;
-  if (['operaciones','flota','calidad'].includes(state.vista)) q.vista=state.vista;
+  if (['operaciones','flota','calidad','planner'].includes(state.vista)) q.vista=state.vista;
   for (const key of filterKeys) if (state[key]) q[key] = state[key];
   return {...q,page:state.page,limit:state.limit,sort:state.sort,direction:state.direction,invoice_page:state.invoicePage,invoice_sort:state.invoiceSort,invoice_direction:state.invoiceDirection};
 }
@@ -26,7 +26,7 @@ export function restoreBiState(raw) {
     if (!value || typeof value !== 'object') return initialBiState;
     const safe = {...initialBiState};
     for (const key of Object.keys(safe)) if (Object.prototype.hasOwnProperty.call(value,key)) safe[key] = value[key];
-    if (!['direccion','rentabilidad','operaciones','flota','calidad','centro','anteriores'].includes(safe.vista)) safe.vista='direccion';
+    if (!['direccion','rentabilidad','operaciones','flota','calidad','planner','centro','anteriores'].includes(safe.vista)) safe.vista='direccion';
     if (!Array.isArray(safe.columnas)) safe.columnas=initialBiState.columnas;
     if (!Array.isArray(safe.columnasServicios)) safe.columnasServicios=initialBiState.columnasServicios;
     return safe;

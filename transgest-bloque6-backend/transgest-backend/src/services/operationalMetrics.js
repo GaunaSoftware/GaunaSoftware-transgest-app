@@ -199,7 +199,7 @@ async function loadPlannerMetrics(empresaId,range,queryDb=db.query) {
       LEFT JOIN LATERAL (SELECT x.carga_inicio_at,x.carga_fin_at FROM planner_preparaciones x
         WHERE x.empresa_id=r.empresa_id AND x.pedido_id=r.pedido_id AND x.estado<>'cancelada'
         ORDER BY x.carga_inicio_at DESC NULLS LAST LIMIT 1) pp ON true
-      WHERE r.empresa_id=$1 AND r.inicio < ($3::date + INTERVAL '1 day') AND r.fin >= $2::date
+      WHERE r.empresa_id=$1 AND r.inicio < (($3::date + INTERVAL '1 day') AT TIME ZONE 'Europe/Madrid') AND r.fin >= ($2::date AT TIME ZONE 'Europe/Madrid')
       ORDER BY r.inicio`,[empresaId,range.desde,range.hasta]));
   } catch(error) {if(error.code==='42P01')return {estado:'sin_datos',fuente_no_disponible:true,reservas:0,por_muelle:[],duracion_carga:distribution([],0)};throw error;}
   const dock=new Map(),durations=[];

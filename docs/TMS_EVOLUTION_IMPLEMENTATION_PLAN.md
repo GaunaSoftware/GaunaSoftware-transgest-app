@@ -31,7 +31,7 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 12 Facturas proveedor e IA | Implementada y verificada localmente | `TMS_EVOLUTION_PHASE12_SUPPLIER_INVOICES.md`: originales privados, extracción opcional, conciliación, revisión humana y proyección compatible sin pagos automáticos |
 | 13 Facturación operativa | Implementada y verificada localmente | `TMS_EVOLUTION_PHASE13_BILLING.md`: reglas cliente, excepciones, revisión vigente, lote idempotente, combustible y asociación transaccional; sin emisión automática |
 | 14 Fiscalidad | Estabilización local verificada; piloto real pendiente | `TMS_EVOLUTION_PHASE14_FISCAL.md`: contrato común, cola atómica, idempotencia, inmutabilidad y conexión verificable. HTTP, npm check y build: código 0 |
-| 15 KPI/BI | Pendiente de conciliación del nuevo modelo | Sin duplicar kilómetros físicos ni costes; incorporar/anular costes de viaje con conciliación explícita |
+| 15 KPI/BI | Conciliación física implementada y verificada localmente | `TMS_EVOLUTION_PHASE15_BI.md`: reparto estable, datos históricos, dashboard, informes, Planner separado, pruebas y build 0 |
 | 16 Integration Registry | Pendiente de contrastar e implementar | Contratos y capacidades reales de proveedores |
 | 17 Multiempresa | Pendiente de contrastar e implementar | Membresías, permisos y autorización efectiva; no confiar solo en parámetros o JWT |
 

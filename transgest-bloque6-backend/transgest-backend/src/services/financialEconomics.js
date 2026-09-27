@@ -10,7 +10,7 @@ const execution = p => p.colaborador_id || p.colaborador_nombre ? 'subcontratado
 const aged = days => days <= 30 ? '0_30' : days <= 60 ? '31_60' : days <= 90 ? '61_90' : 'mas_90';
 const daysSince = (from, to) => Math.max(0, Math.floor((Date.parse(day(to)) - Date.parse(day(from))) / 86400000));
 const unique = rows => [...new Map(rows.map((r, i) => [r.id || `row:${i}`, r])).values()];
-const hasRecordedCost = p => [p.precio_colaborador, p.coste_gasoil, p.coste_peajes, p.coste_dietas, p.coste_otros, p.extracostes_importe].some(v => value(v) != null && Number(v) !== 0) || value(p.coste_operativo) > 0;
+const hasRecordedCost = p => p.bi_cost_recorded === true || [p.precio_colaborador, p.coste_gasoil, p.coste_peajes, p.coste_dietas, p.coste_otros, p.extracostes_importe].some(v => value(v) != null && Number(v) !== 0) || value(p.coste_operativo) > 0;
 const group = (rows, key) => {
   const map = new Map();
   for (const row of rows) { const id = key(row); if (!map.has(id)) map.set(id, []); map.get(id).push(row); }
@@ -19,6 +19,14 @@ const group = (rows, key) => {
 function physicalKm(orders, manualEmpty = []) {
   const legs = new Map(); let missing = 0, ambiguous = 0;
   for (const p of orders) {
+    if (p.bi_legs) {
+      if (p.bi_legs.some(l => l.cargados == null || l.vacios == null)) missing++;
+      for (const leg of p.bi_legs) {
+        const key=`physical:${leg.id}`, prior=legs.get(key)||{loaded:0,empty:0};
+        prior.loaded+=value(leg.cargados)||0; prior.empty+=value(leg.vacios)||0; legs.set(key,prior);
+      }
+      continue;
+    }
     if (!(value(p.km_ruta) > 0)) { missing++; continue; }
     const shared = !!p.grupaje_id;
     const key = shared ? `g:${p.grupaje_id}:${p.vehiculo_id || 'sin_vehiculo'}` : `p:${p.id}`;
@@ -111,9 +119,9 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
   const salaryIncomplete = salaryRows.some(r => value(r.salario_base) == null || value(r.ss_empresa) == null);
   const structureValue = structureInPeriod(own(structure), range);
   // Unknown linkage with order-level 'otros' prevents silently adding workshop twice.
-  const workshopOverlap = services.some(p => value(p.coste_otros) > 0) && repairsPeriod.length > 0;
+  const workshopOverlap = services.some(p => value(p.coste_otros) > 0 || value(p.bi_journey_cost)>0) && repairsPeriod.length > 0;
   const includedWorkshop = workshopOverlap ? 0 : workshop;
-  const result = directMargin == null ? null : money(directMargin - includedWorkshop - salary - (structureValue.importe || 0));
+  const result = directMargin == null || (services.some(p=>value(p.bi_journey_cost)>0) && (salaryRows.length || structureValue.importe != null)) ? null : money(directMargin - includedWorkshop - salary - (structureValue.importe || 0));
   const fuelRows = unique(own(fuel).filter(r => between(r.fecha, range)));
   const driverRows = unique(own(driverExpenses).filter(r => between(r.fecha, range)));
   const nightRows = unique(own(nights).filter(r => between(r.fecha, range)));
@@ -179,7 +187,7 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
     resultado_categorias: { importe: result, incluidas: ['costes_directos_pedido', ...(!workshopOverlap && repairsPeriod.length ? ['taller_registrado'] : []),
       ...(salaryRows.length && !salaryIncomplete ? ['salario_base_y_ss_empresa_registrados'] : []), ...(structureValue.importe != null ? ['estructura_estimada'] : [])],
       importes: { taller: includedWorkshop, nomina_base_ss: salaryRows.length && !salaryIncomplete ? salary : null, estructura: structureValue.importe },
-      pendientes_conciliar: ['repostajes', 'gastos_chofer', 'noches', ...(workshopOverlap ? ['taller_posible_solape_con_otros'] : []), ...(salaryIncomplete ? ['nominas_incompletas'] : [])],
+      pendientes_conciliar: ['repostajes', 'gastos_chofer', 'noches', ...(services.some(p=>value(p.bi_journey_cost)>0)?['categorias_genericas_de_coste_fisico']:[]), ...(workshopOverlap ? ['taller_posible_solape_con_otros'] : []), ...(salaryIncomplete ? ['nominas_incompletas'] : [])],
       estructura_no_atribuida: unallocatedStructure, reparto_estructura: structureShares,
       criterio_estructura: `${structureValue.criterio}; por ingreso neto positivo de servicios con tractora histórica asignada` },
     kilometros: km, ingreso_km_total: metrics.ingreso_km_total.valor, coste_km_total: metrics.coste_km_total.valor,

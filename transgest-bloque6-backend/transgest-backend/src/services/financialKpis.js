@@ -75,7 +75,7 @@ const financialPedidosCte = `pedidos_bi AS (
     NOT EXISTS (SELECT 1 FROM facturas f WHERE f.empresa_id=p.empresa_id
       AND (f.id=p.factura_id OR EXISTS (SELECT 1 FROM factura_pedidos fp WHERE fp.factura_id=f.id AND fp.pedido_id=p.id))
       AND f.fecha <= $3 AND ${validInvoiceSql('f')}) AS pendiente_factura
-  FROM pedidos p WHERE p.empresa_id=$1
+  FROM pedidos p WHERE p.empresa_id=$1 AND COALESCE(to_jsonb(p)->>'origen_producto','transgest')<>'planner'
 )`;
 
 

@@ -128,7 +128,7 @@ async function loadAnalyticsSources(empresaId, range, ordersFrom = range.desde, 
   };
   const [orders,invoices,vehicles,drivers,workshop,emptyKm,structure,clients,fuel,driverExpenses,payroll,nights] = await Promise.all([
     queryDb(`WITH ${financialPedidosCte} SELECT * FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3`,[empresaId,ordersFrom,range.hasta]),
-    queryDb(`SELECT f.*, c.nombre AS cliente_nombre FROM facturas f LEFT JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id WHERE f.empresa_id=$1 AND f.fecha <= $2`,[empresaId,range.hasta]),
+    queryDb(`SELECT f.*, c.nombre AS cliente_nombre FROM facturas f LEFT JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id WHERE f.empresa_id=$1 AND COALESCE(to_jsonb(f)->>'origen_producto','transgest')<>'planner' AND NULLIF(to_jsonb(f)->>'planner_preparacion_id','') IS NULL AND f.fecha <= $2`,[empresaId,range.hasta]),
     queryDb('SELECT * FROM vehiculos WHERE empresa_id=$1',[empresaId]),
     queryDb("SELECT id,empresa_id,nombre,to_jsonb(choferes)->>'apellidos' AS apellidos FROM choferes WHERE empresa_id=$1",[empresaId]),
     queryDb('SELECT data FROM taller_estado WHERE empresa_id=$1',[empresaId]),
@@ -140,8 +140,9 @@ async function loadAnalyticsSources(empresaId, range, ordersFrom = range.desde, 
     optional('nominas_emitidas','SELECT * FROM nominas_emitidas WHERE empresa_id=$1 AND LEFT(periodo::text,7) BETWEEN $2 AND $3',[empresaId,range.desde.slice(0,7),range.hasta.slice(0,7)]),
     optional('vehiculo_noches','SELECT * FROM vehiculo_noches WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3',[empresaId,range.desde,range.hasta])
   ]);
+  const physical=await require('./financialJourneys').loadJourneyReconciliation(empresaId,orders.rows,range.hasta,queryDb);
   const missingSources=[structure,fuel,driverExpenses,payroll,nights].map(r=>r.missingSource).filter(Boolean);
-  return {empresaId,range,orders:orders.rows,invoices:invoices.rows,vehicles:vehicles.rows,drivers:drivers.rows,
+  return {empresaId,range,orders:physical.orders,reconciliation:physical.reconciliation,invoices:invoices.rows,vehicles:vehicles.rows,drivers:drivers.rows,
     repairs:workshop.rows[0]?.data?.reparaciones || [],emptyKm:emptyKm.rows,structure:structure.rows,clients:clients.rows,
     fuel:fuel.rows,driverExpenses:driverExpenses.rows,payroll:payroll.rows,nights:nights.rows,missingSources};
 }

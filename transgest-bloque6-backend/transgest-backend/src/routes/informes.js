@@ -109,7 +109,7 @@ router.get("/bi/resumen", async (req, res) => {
         COALESCE(SUM(total) FILTER (WHERE estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente_cobro,
         COALESCE(SUM(total) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas
-      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('borrador','cancelada','anulada')
+      WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('borrador','cancelada','anulada')
     `, params),
     db.query(`
       WITH ${financialPedidosCte}, pedidos_cliente AS (
@@ -131,7 +131,7 @@ router.get("/bi/resumen", async (req, res) => {
                COALESCE(SUM(base_imponible) FILTER (WHERE estado::text <> 'borrador'),0)::numeric AS facturado,
                COALESCE(SUM(total) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
           FROM facturas
-         WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('cancelada','anulada')
+         WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('cancelada','anulada')
          GROUP BY cliente_id
       )
       SELECT c.id, c.nombre,
@@ -246,13 +246,23 @@ router.get("/bi/resumen", async (req, res) => {
              COALESCE(SUM(f.total) FILTER (WHERE f.estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas f
       JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
-      WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3 AND f.estado::text NOT IN ('borrador','cancelada','anulada')
+      WHERE f.empresa_id=$1 AND NULLIF(to_jsonb(f)->>'planner_preparacion_id','') IS NULL AND f.fecha BETWEEN $2 AND $3 AND f.estado::text NOT IN ('borrador','cancelada','anulada')
       GROUP BY c.id, c.nombre
       ORDER BY facturado DESC NULLS LAST, cobrado DESC NULLS LAST
       LIMIT 12
     `, params),
   ]);
   const p = pedidos.rows[0] || {};
+  const rawPhysical=await db.query(`WITH ${financialPedidosCte} SELECT * FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3`,params);
+  const physical=await require('../services/financialJourneys').loadJourneyReconciliation(empresaId,rawPhysical.rows,hasta,db.query);
+  const {buildEconomics,physicalKm}=require('../services/financialEconomics');
+  const economy=buildEconomics({empresaId,range:{desde,hasta},orders:physical.orders,limit:Number.MAX_SAFE_INTEGER});
+  const allKm=physicalKm(physical.orders.filter(row=>row.estado!=='cancelado'));
+  Object.assign(p,{coste_operativo_realizado:economy.costes_directos.directo_registrado,con_coste:economy.costes_directos.cobertura.evaluables,
+    con_km:economy.kilometros.cobertura.evaluables,km:allKm.total,km_vacio:allKm.vacios,km_realizados:economy.kilometros.total,km_vacio_realizado:economy.kilometros.vacios});
+  for(const row of clientes.rows){const actual=economy.por_cliente.find(c=>c.id===String(row.id));if(actual)Object.assign(row,{coste:actual.coste_directo_registrado,margen:actual.margen_directo_registrado});}
+  for(const row of rutas.rows){const actual=economy.por_ruta.find(r=>r.id===`${row.origen} → ${row.destino}`);if(actual)Object.assign(row,{margen:actual.margen_directo_registrado,km_medio:ratio(actual.km_total,actual.servicios)});}
+
   const venta = Number(p.venta || 0);
   const ventaRealizada = Number(p.venta_realizada || 0);
   const pendienteFacturarRealizado = Number(p.pendiente_facturar_realizado || 0);
@@ -269,12 +279,12 @@ router.get("/bi/resumen", async (req, res) => {
   const totalPedidos = Number(p.total || 0);
   const realizados = Number(p.completados || 0);
   const saldo = await db.query(`SELECT COALESCE(SUM(total) FILTER (WHERE estado::text <> 'cobrada'),0)::numeric AS saldo
-    FROM facturas WHERE empresa_id=$1 AND fecha <= $3 AND $2::date <= $3::date AND ${validInvoiceSql('')}`, params);
+    FROM facturas WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha <= $3 AND $2::date <= $3::date AND ${validInvoiceSql('')}`, params);
   const serie = await db.query(`WITH ${financialPedidosCte}, valores AS (
     SELECT to_char(fecha_bi,'YYYY-MM') AS mes, 0::numeric AS facturado, importe AS pendiente
       FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3 AND estado::text IN ('entregado','facturado') AND pendiente_factura
     UNION ALL SELECT to_char(fecha,'YYYY-MM'),base_imponible,0 FROM facturas
-      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND ${validInvoiceSql('')}
+      WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND ${validInvoiceSql('')}
   ) SELECT mes AS name, SUM(facturado)::numeric AS facturado, SUM(pendiente)::numeric AS pendiente
     FROM valores GROUP BY mes ORDER BY mes`,params);
   const clientIncome = clientes.rows.reduce((sum,c)=>sum+Number(c.ingreso_gestionado || 0),0);

@@ -42,4 +42,16 @@ Si falla predeploy, conservar la versión activa, sin forzar checksums ni hacer 
 
 Android físico/Play/Firebase, pilotos fiscales/inbound, eCMR contractual y automatismos WMS avanzados conservan sus límites. La publicación web/API no certifica esos puntos ni riesgo cero.
 
-Estado: pendiente CI, ensayo final sobre copia y verificación de despliegue.
+## Publicación verificada
+
+- Ensayo previo sobre una segunda copia restaurada: migrador de `029d5e1`, primera pasada 24 pendientes aplicadas, segunda pasada 0; ambas código 0. El primer intento de clonar la base agotó el timeout de 20 segundos; se repitió con 180 segundos únicamente para esa sesión de ensayo. No se cambió el timeout productivo.
+- PR #25 fusionada: `365028b1fa3bb4707edf4ff80f8e281069d1c1c0`.
+- CI previo, ejecución `36314177215`: todos los trabajos correctos. CI posterior de main, `36314414901`: correcto. Ambas publicaciones Vercel comunicaron `success`.
+- Render `dep-dasff749v7es73ev3aj0`: predeploy completo, 24 migraciones aplicadas, API disponible el 27/09/2026 a las 13:02 Europe/Madrid. `/health` público devuelve HTTP 200 y el SHA fusionado.
+- Web pública: manifiesto actualizado a `main.0d669620.js` (113 archivos). Inicio real con gerente demo, Dashboard con proveedores identificados, acceso a gastos y diez tractoras cargadas, sin tutorial. No se crearon gastos ni se modificaron pedidos de producción en estas comprobaciones.
+- La pestaña abierta antes de publicar conservaba `main.029aca96.js` y falló al solicitar un chunk retirado. Recargar desde el mensaje de recuperación cargó la versión nueva y permitió operar. Las pestañas abiertas durante el cambio deben recargarse; no se ha añadido recarga automática que pueda descartar formularios sin guardar.
+- Revisión visual local a 390 y 1440 px: en escritorio ancho/scroll del documento 1440/1440, sin desbordamiento horizontal global; tabla móvil desplaza dentro de su contenedor.
+
+Precaución de copias: el contenedor nuevo notificó ausencia de dumps locales previos. No debe confiarse en su directorio efímero como retención entre despliegues. Se conservan la base restaurada previa y la segunda copia de ensayo en PostgreSQL; no se han eliminado ni conectado tareas a ellas. La configuración de retención externa permanente sigue pendiente de una decisión de almacenamiento.
+
+Estado: código web/API publicado y verificado. Las limitaciones externas indicadas arriba siguen abiertas. Este cierre documental no cambia el código ejecutable.

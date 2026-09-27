@@ -3232,6 +3232,7 @@ router.put("/:id/facturas/:facturaId", GERENTE_O_TRAFICO, async (req,res)=>{
       [req.params.facturaId, req.params.id, empresaId]
     );
     if (!actual.rows[0]) return res.status(404).json({ error: "Factura recibida no encontrada" });
+    if (actual.rows[0].factura_proveedor_id) return res.status(409).json({error:"La factura revisada conserva sus importes y documento. Registra los pagos en Pagos y consulta Conciliación para el original."});
 
     const defaultIva = normalizeIva(colaborador.rows[0].tipo_iva, colaborador.rows[0].iva_regimen);
     const invoiceIva = normalizeIva(
@@ -3302,6 +3303,7 @@ router.put("/:id/facturas/:facturaId", GERENTE_O_TRAFICO, async (req,res)=>{
 router.delete("/:id/facturas/:facturaId", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
+    if ((await db.query("SELECT id FROM colaborador_facturas WHERE id=$1 AND empresa_id=$2 AND colaborador_id=$3 AND factura_proveedor_id IS NOT NULL",[req.params.facturaId,empresaId,req.params.id])).rows.length) return res.status(409).json({error:"La factura recibida revisada se conserva con su auditoría; no puede borrarse desde el registro antiguo."});
     await db.query(
       "DELETE FROM colaborador_facturas WHERE id=$1 AND colaborador_id=$2 AND empresa_id=$3",
       [req.params.facturaId, req.params.id, empresaId]

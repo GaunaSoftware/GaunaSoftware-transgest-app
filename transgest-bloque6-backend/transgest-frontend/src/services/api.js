@@ -160,6 +160,7 @@ function applyAuthSession(data = {}) {
 }
 
 // ── Fetch base ────────────────────────────────────────
+export const supplierInvoiceReview = (path = '', options = {}) => apiFetch('/supplier-invoice-review' + path, options);
 async function apiFetch(path, options = {}) {
   const { silentSuccess = false, silentError = false, timeoutMs, ...fetchOptions } = options;
   const token = getToken();

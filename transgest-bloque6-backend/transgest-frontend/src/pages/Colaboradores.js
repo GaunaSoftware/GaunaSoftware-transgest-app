@@ -1,3 +1,4 @@
+import SupplierInvoiceReview from "./colaboradores/SupplierInvoiceReview";
 import React, { useState, useEffect, useCallback } from "react";
 import { getColaboradores, crearColaborador, editarColaborador,
          borrarColaborador,
@@ -193,7 +194,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
   const [form, setForm] = useState({
     pedido_id: viaje?.id || "",
     referencia_orden: factura?.referencia_orden || orderRef(viaje),
-    número_factura: factura?.número_factura || "",
+    numero_factura: factura?.numero_factura || "",
     fecha: factura?.fecha ? String(factura.fecha).slice(0,10) : new Date().toISOString().slice(0,10),
     vencimiento: factura?.vencimiento ? String(factura.vencimiento).slice(0,10) : "",
     base: importe ? importe.toFixed(2) : "",
@@ -222,7 +223,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
 
   async function guardar() {
     if (!form.referencia_orden) { notify("Referencia de orden obligatoria", "warning"); return; }
-    if (!form.número_factura) { notify("Número de factura obligatorio", "warning"); return; }
+    if (!form.numero_factura) { notify("Número de factura obligatorio", "warning"); return; }
     setSaving(true);
     try {
       const payload = {
@@ -254,7 +255,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div><label style={S.lbl}>Referencia orden</label><input style={S.inp} value={form.referencia_orden} onChange={f("referencia_orden")}/></div>
-          <div><label style={S.lbl}>Número factura proveedor *</label><input style={S.inp} value={form.número_factura} onChange={f("número_factura")} placeholder="FAC-2026-001"/></div>
+          <div><label style={S.lbl}>Número factura proveedor *</label><input style={S.inp} value={form.numero_factura} onChange={f("numero_factura")} placeholder="FAC-2026-001"/></div>
           <div><label style={S.lbl}>Fecha factura</label><input type="date" style={S.inp} value={form.fecha} onChange={f("fecha")}/></div>
           <div><label style={S.lbl}>Vencimiento</label><input type="date" style={S.inp} value={form.vencimiento||""} onChange={f("vencimiento")}/></div>
           <div><label style={S.lbl}>Base imponible</label><input type="number" step="0.01" style={S.inp} value={form.base} onChange={onBase}/></div>
@@ -767,7 +768,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
   const totalFacturado = facturas.reduce((s,f)=>s+Number(f.total || 0),0);
   const totalPagado = pagos.filter(p=>p.estado==="pagado").reduce((s,p)=>s+Number(p.importe || 0),0);
   const totalPendienteFactura = facturas
-    .filter(f=>!f.número_factura || f.estado==="pendiente")
+    .filter(f=>!f.numero_factura || f.estado==="pendiente")
     .reduce((s,f)=>s+Number(f.total || 0),0);
   const estadoProveedor = estadoPagosProveedor({ facturas, pagos });
   const docsCaducados = documentos.filter(d => estadoDocumentoColaborador(d).dias !== null && estadoDocumentoColaborador(d).dias < 0);
@@ -909,6 +910,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
 
   return (
     <div>
+      <SupplierInvoiceReview proveedor={colaborador} onRegistered={cargar}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
         {[["Viajes",viajes.length,"var(--accent)"],["A pagar estimado",fmt2(totalViajes)+" EUR","#f59e0b"],["Facturas recibidas",fmt2(totalFacturado)+" EUR","#10b981"],["Pagado",fmt2(totalPagado)+" EUR","#22d3ee"]].map(([l,v,c])=>(
           <div key={l} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
@@ -1089,7 +1091,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
                     <td style={S.td}>
                       {factura ? (
                         <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700,background:"rgba(16,185,129,.12)",color:"#10b981"}}>
-                          {factura.número_factura || "Registrada"}
+                          {factura.numero_factura || "Registrada"}
                         </span>
                       ) : (
                         <span style={{padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700,background:"rgba(245,158,11,.12)",color:"#f59e0b"}}>
@@ -1099,7 +1101,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
                     </td>
                     <td style={S.td}>
                       {canEdit && (
-                        <button onClick={()=>{setModalViaje(v);setModalFactura(factura || null);}} style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"4px 10px",fontSize:11,border:"1px solid var(--border2)"}}>
+                        <button disabled={Boolean(factura?.factura_proveedor_id)} title={factura?.factura_proveedor_id?"Original y revisión disponibles en Conciliación de facturas recibidas":undefined} onClick={()=>{setModalViaje(v);setModalFactura(factura || null);}} style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",padding:"4px 10px",fontSize:11,border:"1px solid var(--border2)"}}>
                           {factura ? "Completar factura" : "Registrar factura recibida"}
                         </button>
                       )}
@@ -1120,11 +1122,11 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {facturas.map(f=>(
               <div key={f.id} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto auto auto",gap:10,alignItems:"center",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:8,padding:"9px 12px"}}>
-                <div style={{fontWeight:700,color:"var(--text)"}}>{f.número_factura || "Sin número"}</div>
+                <div style={{fontWeight:700,color:"var(--text)"}}>{f.numero_factura || "Sin número"}</div>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:11,color:"var(--text4)"}}>{f.referencia_orden || f.referencia_cliente || "-"}</div>
                 <div style={{fontSize:12,color:"var(--text4)"}}>{fmtDate(f.fecha)}</div>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:900,color:"#10b981"}}>{fmt2(f.total)} EUR</div>
-                {canEdit && (
+                {canEdit && !f.factura_proveedor_id && (
                   <button onClick={()=>{
                     const viaje = viajes.find(v=>String(v.id)===String(f.pedido_id)) || { id:f.pedido_id, referencia_busqueda:f.referencia_orden };
                     setModalViaje(viaje);

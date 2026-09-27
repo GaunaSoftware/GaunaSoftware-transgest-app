@@ -7956,12 +7956,15 @@ router.get("/colaborador-pagos/pendientes", GERENTE_O_TRAFICO, async (req, res) 
       `SELECT p.id AS pedido_id, p.numero, p.estado, p.fecha_carga, p.fecha_descarga,
               p.origen, p.destino, p.precio_colaborador,
               co.id AS colaborador_id, co.nombre AS colaborador_nombre, co.forma_pago AS colaborador_forma_pago,
-              pay.id AS pago_id, pay.factura_nombre, pay.factura_data, pay.fecha_recepcion, pay.fecha_pago_calculada,
+              pay.id AS pago_id, COALESCE(NULLIF(pay.factura_nombre,''),recibida.nombre) AS factura_nombre, recibida.id AS factura_proveedor_id, pay.factura_data, COALESCE(pay.fecha_recepcion,recibida.created_at::date) AS fecha_recepcion, pay.fecha_pago_calculada,
               pay.fecha_pago_real, pay.importe, pay.pagado, pay.documentacion_recibida,
               pay.fecha_documentacion_recepcion, pay.notas_pago
          FROM pedidos p
          JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
          LEFT JOIN pedido_colaborador_pagos pay ON pay.pedido_id=p.id AND pay.empresa_id=p.empresa_id
+         LEFT JOIN LATERAL (SELECT f.id,f.nombre,f.created_at FROM colaborador_facturas cf JOIN facturas_proveedor f ON f.id=cf.factura_proveedor_id AND f.empresa_id=cf.empresa_id
+           WHERE cf.empresa_id=p.empresa_id AND cf.pedido_id=p.id AND cf.colaborador_id=p.colaborador_id AND f.estado='revisada'
+           ORDER BY (cf.total>=0) DESC,f.created_at DESC LIMIT 1) recibida ON true
         WHERE p.empresa_id=$1
           AND p.colaborador_id IS NOT NULL
           AND COALESCE(p.precio_colaborador,0) > 0
@@ -8013,9 +8016,12 @@ router.get("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
         LIMIT 1`,
       [req.params.id, empresaId]
     );
+    const recibida=(await db.query("SELECT f.id,f.nombre,f.created_at FROM colaborador_facturas cf JOIN facturas_proveedor f ON f.id=cf.factura_proveedor_id AND f.empresa_id=cf.empresa_id WHERE cf.empresa_id=$1 AND cf.pedido_id=$2 AND cf.colaborador_id=$3 AND f.estado='revisada' ORDER BY (cf.total>=0) DESC,f.created_at DESC LIMIT 1",[empresaId,pedido.id,pedido.colaborador_id])).rows[0];
     const row = rows[0];
+    const receipt=recibida?{factura_proveedor_id:recibida.id,factura_nombre:row?.factura_nombre||recibida.nombre,fecha_recepcion:normalizePedidoDate(row?.fecha_recepcion||recibida.created_at)}:{};
     if (!row) {
       return res.json({
+        ...receipt,
         pedido_id: pedido.id,
         colaborador_id: pedido.colaborador_id || null,
         importe: Number(pedido.precio_colaborador || 0),
@@ -8025,7 +8031,8 @@ router.get("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
     }
     res.json({
       ...row,
-      fecha_recepcion: normalizePedidoDate(row.fecha_recepcion),
+      ...receipt,
+      fecha_recepcion: receipt.fecha_recepcion||normalizePedidoDate(row.fecha_recepcion),
       fecha_pago_calculada: normalizePedidoDate(row.fecha_pago_calculada),
       fecha_pago_real: normalizePedidoDate(row.fecha_pago_real),
       fecha_documentacion_recepcion: normalizePedidoDate(row.fecha_documentacion_recepcion),

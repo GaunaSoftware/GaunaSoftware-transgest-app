@@ -1,3 +1,4 @@
+import SupplierInvoiceCenter from "./colaboradores/SupplierInvoiceCenter";
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import { guardarControlCobrosConfig, getReclamacionesEnvios, getFacturaPlantilla } from '../services/api';
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
@@ -9,7 +10,7 @@ import "./finance/summary.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
-import { registrarRevisionFactura } from '../services/api';
+import { supplierInvoiceReview, registrarRevisionFactura } from '../services/api';
 import { getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
@@ -2558,6 +2559,10 @@ export default function Facturacion() {
     }
   }
 
+  async function descargarFacturaRevisada(id) {
+    try { const file=await supplierInvoiceReview('/'+id+'/original');const url=URL.createObjectURL(new Blob([Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0))],{type:file.mime}));const a=document.createElement('a');a.href=url;a.download=file.nombre;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
+    catch(e){notify(e.message,'error');}
+  }
   function verFacturaProveedor(data) {
     if (!data) return;
     const win = window.open();
@@ -3004,6 +3009,7 @@ export default function Facturacion() {
       </div>
       )}
 
+      {activeFacturacionTab === "pagos" && <SupplierInvoiceCenter onRegistered={cargar}/>}
       {activeFacturacionTab === "pagos" && pagosProveedor.length > 0 && (
         <div style={{...S.card,padding:14,marginBottom:16,borderColor:"var(--border)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}>
@@ -3054,6 +3060,7 @@ export default function Facturacion() {
                           <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
                             {canEdit && !p.documentacion_recibida && <button onClick={()=>accionRapidaPagoProveedor(p,"documentacion")} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Docs recibida</button>}
                             {canEdit && !p.factura_nombre && <button onClick={()=>accionRapidaPagoProveedor(p,"factura")} style={{...S.btn,padding:"5px 8px",background:"rgba(251,191,36,.12)",color:"#f59e0b",border:"1px solid rgba(251,191,36,.24)"}}>Factura recibida</button>}
+                            {p.factura_proveedor_id && <Button onClick={()=>descargarFacturaRevisada(p.factura_proveedor_id)}>Descargar factura revisada</Button>}
                             {p.factura_data && <button onClick={()=>verFacturaProveedor(p.factura_data)} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Ver factura</button>}
                             <button onClick={()=>abrirGestionPagoProveedor(p)} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border)"}}>Gestionar</button>
                             {canEdit && <button onClick={()=>accionRapidaPagoProveedor(p,"pagado")} style={{...S.btn,padding:"5px 8px",background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.24)"}}>Pagado</button>}

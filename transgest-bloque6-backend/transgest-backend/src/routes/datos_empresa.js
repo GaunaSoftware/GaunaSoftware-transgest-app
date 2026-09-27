@@ -825,9 +825,10 @@ async function buildJornadaDiaria(req) {
     safeOne(`
       SELECT
         COUNT(*) FILTER (
-          WHERE pay.id IS NULL
+          WHERE (pay.id IS NULL
              OR (NULLIF(TRIM(COALESCE(pay.factura_nombre,'')),'') IS NULL
-                 AND NULLIF(TRIM(COALESCE(pay.factura_data,'')),'') IS NULL)
+                 AND NULLIF(TRIM(COALESCE(pay.factura_data,'')),'') IS NULL))
+            AND NOT EXISTS(SELECT 1 FROM colaborador_facturas cf JOIN facturas_proveedor fp ON fp.id=cf.factura_proveedor_id AND fp.empresa_id=cf.empresa_id WHERE cf.pedido_id=p.id AND cf.empresa_id=p.empresa_id AND cf.colaborador_id=p.colaborador_id AND fp.estado='revisada')
         )::int AS facturas_pendientes,
         COUNT(*) FILTER (WHERE pay.id IS NULL OR COALESCE(pay.documentacion_recibida,false)=false)::int AS documentacion_pendiente,
         COUNT(*) FILTER (

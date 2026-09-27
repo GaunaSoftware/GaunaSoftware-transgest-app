@@ -47,7 +47,9 @@ async function main(){
  app.use('/api/v1/informes',authMiddleware.authenticate,authMiddleware.requireModulePermission('informes'),authMiddleware.requirePlanFeature('kpis_avanzados'),req('./routes/informes'));
  // Exercise the compatibility router separately; production registers it after pedidos.
  app.use('/api/v1/legacy-pedidos',boundaries.pedidosAuthUnlessPublic,req('./routes/carta_porte'));
+ app.use('/api/v1/colaboradores',authMiddleware.authenticate,authMiddleware.requireModulePermission('colaboradores'),req('./routes/colaboradores'));
  app.use('/api/v1/supplier-app',req('./middleware/auth').authenticate,req('./routes/supplier_app'));
+ app.use('/api/v1/supplier-invoice-review',authMiddleware.authenticate,req('./routes/supplier_invoice_review'));
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
@@ -244,6 +246,7 @@ async function main(){
   if(!sharedOrder.id)throw Error('No se pudo crear el encargo compartido');
   const invitation=crypto.randomBytes(32).toString('hex');await db.query("INSERT INTO colaborador_pedido_tokens(pedido_id,empresa_id,accion,token_hash,expires_at) VALUES($1,$2,'confirmar',$3,NOW()+INTERVAL '1 hour')",[sharedOrder.id,company,crypto.createHash('sha256').update(invitation).digest('hex')]);
   evidence.plannerExchange=await require('./audit_network.cjs')({db,company,user,base,token,password,transportCompany,transportClient,sharedOrder,legacyToken:invitation,pdf,stock});
+  evidence.supplierInvoice=await require('./audit_supplier_invoice.cjs')({db,base,company,user,token,password,order:sharedOrder});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});

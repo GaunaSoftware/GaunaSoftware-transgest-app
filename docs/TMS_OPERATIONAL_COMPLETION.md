@@ -90,3 +90,8 @@ Reversión: restaurar versión anterior de código solo tras revisar uso de las 
 ## Estado de publicación
 
 Comprobación de Render del 27/09/2026: PostgreSQL figura **suspended**, con aviso de almacenamiento casi lleno. Soporte muestra la escalada a equipo humano sin respuesta técnica nueva. No se pulsó reanudación, no se amplió disco ni se desplegó. Publicar una rama de revisión no activa estas funciones en producción.
+
+
+## Continuación 27/09/2026
+
+La integración y validación vigentes, la autorización posterior de ampliación y los límites de publicación se documentan en `ANDROID_DETENTION_RELEASE_20260927.md`. Se conserva este historial.

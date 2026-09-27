@@ -44,7 +44,7 @@ module.exports = async ({ db, base, company, token, password }) => {
     for (const [path, body] of [['/' + entry.id, { motivo: 'Empleado no puede editar', entrada_at: '2000-01-01T00:00:00Z' }], ['/jornada-config', { pausa_min: 0 }], ['/config', { lat: 40, lng: -3 }]]) await expect(user.token, 'PUT', path, body, 403);
     await expect(user.token, 'GET', '/export.csv', null, 403);
     await expect(user.token, 'POST', '/fichar', { accion: 'pausa' });
-    await db.query("UPDATE oficina_fichajes SET entrada_at=NOW()-INTERVAL '70 minutes',pausa_inicio_at=NOW()-INTERVAL '10 minutes' WHERE id=$1", [entry.id]);
+    await db.query("UPDATE oficina_fichajes SET entrada_at=NOW()-INTERVAL '70 minutes 30 seconds',pausa_inicio_at=NOW()-INTERVAL '10 minutes 30 seconds' WHERE id=$1", [entry.id]);
     const paused = await expect(user.token, 'GET', '/resumen');
     assert.equal(paused.resumen.pausa_min, 10); assert.equal(paused.resumen.trabajado_min, 60);
     await expect(user.token, 'POST', '/fichar', { accion: 'reanudar' });

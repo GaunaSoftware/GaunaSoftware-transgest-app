@@ -26,10 +26,29 @@ async function processSingleQueueItem(client, item, config, actorUserId) {
 
   if (item.sistema === "verifactu" && config?.verifactu?.proveedor === "verifacti") {
     try {
-      const providerUuid = item?.response?.provider_uuid || item?.response?.uuid || null;
+      const verifacti=require('./fiscalProviderVerifacti');
+      require('./fiscalEmission').assertRepresentation(config);
+      const request=item.request_payload || verifacti.mapInternalPayloadToVerifacti(item.payload || {});
+      const hash=require('./fiscalIdentity').digest(request);
+      if(item.request_hash && item.request_hash!==hash) throw Object.assign(new Error('La solicitud fiscal persistida no coincide con su huella.'),{retryable:false,status:409});
+      // Keep legacy keys on existing records; persist identity before any external create.
+      const frozen=await client.query(`UPDATE factura_envios_fiscales SET idempotency_key=COALESCE(idempotency_key,$1),request_payload=COALESCE(request_payload,$2::jsonb),request_hash=COALESCE(request_hash,$3) WHERE id=$4 AND empresa_id=$5 RETURNING *`,[verifacti.idempotencyKey(item),JSON.stringify(request),hash,item.id,item.empresa_id]);
+      Object.assign(item,frozen.rows[0]);
+      let providerUuid = item.provider_uuid || item?.response?.provider_uuid || item?.response?.uuid || null;
       if (!providerUuid && (!item.first_attempt_at || Date.now() - new Date(item.first_attempt_at).getTime() > 23 * 60 * 60 * 1000)) {
-        await markQueueError(client, item, "Envío sin UUID fuera de la ventana segura de idempotencia. Conciliar con el proveedor antes de reenviar.", actorUserId, false);
-        return { status: "error", reason: "reconciliation_required" };
+        await markQueueError(client, item, 'Envío sin UUID fuera de la ventana segura de idempotencia. Conciliar con el proveedor antes de reenviar.', actorUserId, false);
+        return { status: 'error', reason: 'reconciliation_required' };
+      }
+      if(!providerUuid) {
+        const health=await verifacti.probeVerifactiConnection(config);
+        if(!health.ok) throw Object.assign(new Error(health.message),{retryable:!health.reachable,status:health.http_status});
+      }
+      if(!providerUuid && Number(item.intento)>1) {
+        const lookup=await verifacti.findVerifactiInvoice(config,request);
+        providerUuid=lookup.provider_uuid;
+        if(!providerUuid && !['factura inexistente','facturainexistente'].includes(String(lookup.response?.estado || '').toLowerCase())) {
+          throw Object.assign(new Error('No se ha podido conciliar la solicitud anterior; no se reenviará automáticamente.'),{retryable:false,status:409});
+        }
       }
       const provider = fiscalProvider(config);
       const providerResult = providerUuid ? await provider.getStatus(providerUuid) : await provider.sendRecord(item);
@@ -61,7 +80,7 @@ async function processSingleQueueItem(client, item, config, actorUserId) {
       );
       return { status: "error", reason: "verifacti_provider_error" };
     } catch (error) {
-      await markQueueError(client, item, `Verifacti: ${error.message}`, actorUserId, !error.status || [408, 409, 429].includes(error.status) || error.status >= 500, error?.data ? { last_error_response: error.data } : null);
+      await markQueueError(client, item, `Verifacti: ${error.message}`, actorUserId, error.retryable !== false && (!error.status || [408, 429].includes(error.status) || error.status >= 500), error?.data ? { last_error_response: error.data } : null);
       return { status: "error", reason: "verifacti_transport_error" };
     }
   }

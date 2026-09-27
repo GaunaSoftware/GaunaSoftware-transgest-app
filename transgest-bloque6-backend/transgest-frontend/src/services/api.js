@@ -1414,3 +1414,12 @@ export async function downloadDetentionPrefactura(id,claim) {
   if(getToken()!==token)throw new Error('La sesión ha cambiado. Abre de nuevo el pedido.');
   return response.blob();
 }
+
+export const fiscalFlowRequest=(path,options={})=>apiFetch(`/facturas${path}`,options);
+export async function downloadClaveicon(id) {
+ const token=getToken();
+ const response=await fetch(apiUrl(`/facturas/contabilidad/claveicon/${encodeURIComponent(id)}/exportar`),{method:'POST',headers:{Authorization:`Bearer ${token}`}});
+ if(token!==getToken())throw new Error('La sesión ha cambiado. Abre la información con la cuenta actual.');
+ if(!response.ok){const data=await parseApiResponse(response);throw new Error(data.error || 'No se pudo exportar');}
+ const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filenameFromDisposition(response.headers.get('content-disposition')) || 'claveicon.xml';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
+}

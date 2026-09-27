@@ -38,6 +38,6 @@ test('routing conflict cannot be applied, partial proposal remains explicit',asy
 });
 test('unrecorded detention payment is shown as unknown, never zero or paid',async()=>{
  api.pedidoParalizaciones.mockResolvedValue({reclamaciones:[],documentos:[],facturas:[],resumen:{documentado:200,aceptado:150,facturado:0,cobrado:null}});
- await act(async()=>root.render(<DetentionPanel pedido={{id:'p',numero:'SINTÉTICO'}} canEdit/>));await click('Paralizaciones documentadas');
+ await act(async()=>root.render(<DetentionPanel pedido={{id:'p',numero:'SINTÉTICO'}} canEdit/>));await click('Paralización / prefactura');
  expect(document.body.textContent).toContain('Cobro acreditadoNo calculable');
 });

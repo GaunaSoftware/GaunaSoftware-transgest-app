@@ -53,7 +53,7 @@ async function recovery(db,c,orders,cutoff){
 }
 function recoveryTotals(c,orders,claims,lines){
  const map=new Map(orders.filter(p=>String(p.empresa_id)===String(c)).map(p=>[String(p.id),{id:p.id,numero:p.numero,documentado:0,aceptado:0,facturado:0,reclamaciones:0}]));
- const seen=new Set();for(const r of claims){const p=map.get(String(r.pedido_id));if(!p||String(r.empresa_id)!==String(c)||seen.has(r.id))continue;seen.add(r.id);p.reclamaciones++;if(r.estado!=='rechazada')p.documentado+=Number(r.documentado);if(r.estado==='aceptada')p.aceptado+=Number(r.aceptado);}
+ const seen=new Set();for(const r of claims){if(r.estado==='preparada')continue;const p=map.get(String(r.pedido_id));if(!p||String(r.empresa_id)!==String(c)||seen.has(r.id))continue;seen.add(r.id);p.reclamaciones++;if(r.estado!=='rechazada')p.documentado+=Number(r.documentado);if(r.estado==='aceptada')p.aceptado+=Number(r.aceptado);}
  const seenLines=new Set();let unmatched=0;for(const l of lines){const p=map.get(String(l.pedido_id));if(!p||seenLines.has(l.id))continue;seenLines.add(l.id);if(p.reclamaciones)p.facturado+=Number(l.importe);else unmatched+=Number(l.importe);}
  const round=n=>Math.round((n+Number.EPSILON)*100)/100;
  const rows=[...map.values()].filter(p=>p.reclamaciones).map(p=>({...p,documentado:round(p.documentado),aceptado:round(p.aceptado),facturado:round(p.facturado)}));

@@ -3551,6 +3551,23 @@ router.post('/:id/operativa', GESTION_PEDIDOS_ESCRITURA, async (req,res,next)=>{
 router.get('/:id/paralizaciones', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
  try{res.set('Cache-Control','private, no-store');res.json(await require('../services/detentionWorkflow').list(db,req.empresaId,req.params.id));}catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
 });
+router.post('/:id/paralizaciones/calcular', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+ try {
+  if(!(await db.query('SELECT id FROM pedidos WHERE empresa_id=$1 AND id::text=$2',[req.empresaId,req.params.id])).rows.length)return res.status(404).json({error:'Pedido no encontrado.'});
+  res.set('Cache-Control','private, no-store').json(require('../services/detentionQuote').calculate(req.body));
+ } catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
+router.post('/:id/paralizaciones/prefactura', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+ try{res.set('Cache-Control','private, no-store').status(201).json(await require('../services/detentionQuote').prepare(db,req.empresaId,req.user.id,req.params.id,req.body));}
+ catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
+router.get('/:id/paralizaciones/:reclamacion/prefactura.pdf', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+ try{
+  const snapshot=await require('../services/detentionQuote').read(db,req.empresaId,req.params.id,req.params.reclamacion);
+  const pdf=await require('../services/detentionQuotePdf')(snapshot);
+  res.set({'Cache-Control':'private, no-store','Content-Type':'application/pdf','Content-Disposition':`attachment; filename="${snapshot.numero}.pdf"`}).send(pdf);
+ }catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
 router.post('/:id/paralizaciones', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
  try{res.set('Cache-Control','private, no-store');res.json(await require('../services/detentionWorkflow').save(db,req.empresaId,req.user.id,req.params.id,req.body));}catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
 });

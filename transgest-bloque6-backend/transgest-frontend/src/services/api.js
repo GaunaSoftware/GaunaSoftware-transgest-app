@@ -1404,3 +1404,13 @@ export async function switchActiveCompany(empresa_id) {
 }
 export const getBiGroups = () => apiFetch('/informes/bi/grupos');
 export const getGroupBi = params => apiFetch('/informes/bi/consolidado?'+new URLSearchParams(params),{timeoutMs:120000});
+
+export const calculateDetention = (id,body) => apiFetch(`/pedidos/${encodeURIComponent(id)}/paralizaciones/calcular`,{method:'POST',body,silentSuccess:true});
+export const prepareDetentionPrefactura = (id,body) => apiFetch(`/pedidos/${encodeURIComponent(id)}/paralizaciones/prefactura`,{method:'POST',body});
+export async function downloadDetentionPrefactura(id,claim) {
+  const token=getToken();
+  const response=await fetch(`${BASE}/api/v1/pedidos/${encodeURIComponent(id)}/paralizaciones/${encodeURIComponent(claim)}/prefactura.pdf`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});
+  if(!response.ok)throw new Error((await response.json().catch(()=>({}))).error||'No se pudo descargar la prefactura');
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Abre de nuevo el pedido.');
+  return response.blob();
+}

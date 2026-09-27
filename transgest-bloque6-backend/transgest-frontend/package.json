@@ -48,8 +48,8 @@
     "preplanner:build": "node scripts/prepare_map_workers.cjs",
     "predesktop:build": "node scripts/prepare_map_workers.cjs",
     "mobile:build": "cross-env REACT_APP_LOCAL_SERVER=false REACT_APP_PRODUCT=transgest react-scripts build",
-    "premobile:build": "node scripts/prepare_map_workers.cjs",
-    "mobile:android:prepare": "npm run mobile:build && npx cap sync android"
+    "premobile:build": "node scripts/mobile_android_preflight.cjs && node scripts/prepare_map_workers.cjs",
+    "mobile:android:prepare": "npm run mobile:build && npx cap sync android && node scripts/mobile_android_preflight.cjs --assets"
   },
   "eslintConfig": {
     "extends": [

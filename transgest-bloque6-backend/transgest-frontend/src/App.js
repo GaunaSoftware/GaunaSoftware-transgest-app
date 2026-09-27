@@ -1,3 +1,5 @@
+import ProductNews from "./components/ProductNews";
+import AppUpdateStatus from "./components/AppUpdateStatus";
 import { uniquePendingTasks } from "./services/operativeTasks";
 import { TUTORIALS_ENABLED } from "./services/tutorialPolicy";
 import { createPortal } from "react-dom";
@@ -1654,7 +1656,7 @@ function AppInner() {
       } catch {}
       const desde = addDaysKey(-14);
       const hasta = addDaysKey(2);
-      return getAgendaEventos({ desde, hasta })
+      return getAgendaEventos({ origen:"manual", desde, hasta })
         .then(payload => {
           const arr = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.eventos) ? payload.eventos : [];
           const today = addDaysKey(0);
@@ -1879,7 +1881,7 @@ function AppInner() {
       const delay = Math.max(0, until.getTime() - Date.now());
       const timer = window.setTimeout(() => {
         startupSnoozeTimersRef.current.delete(timer);
-        getAgendaEventos({ desde:addDaysKey(-14), hasta:addDaysKey(2) })
+        getAgendaEventos({ origen:"manual", desde:addDaysKey(-14), hasta:addDaysKey(2) })
           .then(rows => {
             const current = (Array.isArray(rows) ? rows : []).find(item => String(item.id) === String(evento.id));
             if (current && ["pendiente","en_progreso"].includes(String(current.estado || "").toLowerCase()) && !reminderIsPostponed(current)) {
@@ -2132,6 +2134,8 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <ProductWorkspace path={path} />
+          <AppUpdateStatus />
+          <ProductNews />
         </AuthProvider>
       </ToastProvider>
     </ThemeProvider>

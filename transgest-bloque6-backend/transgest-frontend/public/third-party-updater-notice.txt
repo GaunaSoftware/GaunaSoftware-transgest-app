@@ -1,0 +1,4 @@
+TransGest Android uses Capacitor Updater 8.51.25 by Capgo, under the Mozilla Public License 2.0.
+Unmodified source: https://github.com/Cap-go/capacitor-updater
+License: https://www.mozilla.org/en-US/MPL/2.0/
+This updater is self-hosted by TransGest. No Capgo Cloud account or telemetry is enabled.

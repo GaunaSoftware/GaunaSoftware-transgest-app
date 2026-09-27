@@ -3,6 +3,7 @@ const db = require("../services/db");
 const { authenticate, requireRole } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
 
+const {validateAgendaReferences,validateAgendaDates}=require("../services/agendaValidation");
 const router = express.Router();
 
 router.use(authenticate);
@@ -43,7 +44,7 @@ function normalizeType(value) {
 
 async function ensureOwnerOrManager(req, eventoId) {
   const { rows } = await db.query(
-    `SELECT id, empresa_id, creado_por, asignado_a, visibilidad, source_type
+    `SELECT id, empresa_id, creado_por, asignado_a, visibilidad, source_type, fecha_inicio, fecha_fin
        FROM agenda_eventos
       WHERE id=$1 AND empresa_id=$2`,
     [eventoId, empresaId(req)]
@@ -94,6 +95,7 @@ router.get("/", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const params = [empresaId(req)];
   const where = ["e.empresa_id=$1"];
+  if (req.query.origen === 'manual') where.push("e.source_type IS NULL AND COALESCE(e.metadata->>'source','') <> 'avisos_operativos_colaborador'");
   if (req.query.mostrar_resueltas !== '1') where.push('(e.source_type IS NULL OR e.resolved_at IS NULL)');
   const qIdx = () => `$${params.length}`;
 
@@ -155,6 +157,8 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   const asignadoA = (req.user?.rol === "gerente")
     ? (cleanText(body.asignado_a) || req.user.id)
     : req.user.id;
+  await validateAgendaReferences(db,req.user,{...body,asignado_a:asignadoA});
+  validateAgendaDates(body);
   const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
   const { rows } = await db.query(
     `INSERT INTO agenda_eventos
@@ -200,8 +204,10 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
 
 router.patch("/:id", PUEDE_EDITAR, async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
-  await ensureOwnerOrManager(req, req.params.id);
+  const prior = await ensureOwnerOrManager(req, req.params.id);
   const body = req.body || {};
+  await validateAgendaReferences(db,req.user,body);
+  validateAgendaDates(body,prior);
   const sets = [];
   const params = [];
   let i = 1;

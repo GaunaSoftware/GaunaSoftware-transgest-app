@@ -1,9 +1,11 @@
+import AgendaNotices from "../components/AgendaNotices";
+import "../components/ProductNews.css";
 import {AGENDA_TYPES,agendaType,agendaStyle} from "./workspace/agendaTypes";
 import "./orders/refinements.css";
 import AgendaTimeline from "./workspace/AgendaTimeline";
 import { incidentDetailParts, isAutomaticIncident } from "./workspace/agendaIncident";
 import "./workspace/workspace.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { borrarAgendaEvento, completarAgendaEvento, crearAgendaEvento, editarAgendaEvento, getAgendaEventos, getAgendaUsuarios, getAvisosOperativosIgnorados, posponerAgendaEvento } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -251,7 +253,6 @@ function AvisosIgnoradosTab({ mes, setMes }) {
 }
 
 function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSaved }) {
-  const now = new Date();
   const esGerente = user?.rol === "gerente";
   const start = evento?.fecha_inicio || `${fechaBase}T09:00:00`;
   const end = evento?.fecha_fin || `${fechaBase}T10:00:00`;
@@ -323,7 +324,8 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
             <input style={S.input} value={form.titulo} onChange={f("titulo")} placeholder="Ej: Confirmar entregas de mañana" />
           </div>
           <div style={{gridColumn:'1/-1'}}><label style={S.label}>Tipo de evento</label><div className="agenda-type-picker">{Object.entries(AGENDA_TYPES).map(([value,type])=><button type="button" style={agendaStyle(value)} key={value} aria-pressed={form.tipo===value} onClick={()=>setForm(p=>({...p,tipo:value}))}>{type.label}</button>)}</div></div>
-          {esGerente && (
+          <AgendaNotices />
+      {esGerente && (
             <div>
               <label style={S.label}>Agenda de / responsable</label>
               <select style={S.input} value={form.asignado_a} onChange={f("asignado_a")}>
@@ -388,7 +390,7 @@ export default function Agenda() {
   const canEdit = puedeEditar("agenda");
   const esGerente = user?.rol === "gerente";
   const [tab, setTab] = useState("agenda");
-  const [vista, setVista] = useState("semana");
+  const [vista, setVista] = useState(() => window.innerWidth < 768 ? "dia" : "semana");
   const [error, setError] = useState("");
   const [mes, setMes] = useState(() => monthKey(new Date()));
   const [usuarios, setUsuarios] = useState([]);
@@ -415,12 +417,15 @@ export default function Agenda() {
     return last;
   }, [monthStart]);
 
+  const requestId = useRef(0);
   async function cargar() {
+    const id=++requestId.current;
     setLoading(true);
     setError("");
     try {
       const [rows, users] = await Promise.all([
         getAgendaEventos({
+          origen: "manual",
           desde: monthStart.toISOString(),
           hasta: monthEnd.toISOString(),
           modo: soloMias ? "mias" : "todas",
@@ -430,14 +435,15 @@ export default function Agenda() {
         }),
         getAgendaUsuarios().catch(() => []),
       ]);
+      if(id!==requestId.current)return;
       setEventos(Array.isArray(rows) ? rows : []);
       setUsuarios(Array.isArray(users) ? users : []);
-    } catch (e) { setError(e.message || "No se pudo cargar la agenda."); } finally {
-      setLoading(false);
+    } catch (e) { if(id===requestId.current)setError(e.message || "No se pudo cargar la agenda."); } finally {
+      if(id===requestId.current)setLoading(false);
     }
   }
 
-  useEffect(() => { cargar(); }, [mes, soloMias, estado, tipo, mostrarResueltas]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar(); return()=>{requestId.current++;}; }, [mes, soloMias, estado, tipo, mostrarResueltas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const eventosPorDia = useMemo(() => {
     const map = new Map();
@@ -508,9 +514,10 @@ export default function Agenda() {
   }
   return (
     <div className="tg-agenda-page tg-responsive-page modern-workspace" style={S.page}>
-      <div className="tg-agenda-title" style={S.title}>Agenda operativa</div>
-      <div style={S.sub}>Calendario operativo para usuarios, recordatorios y seguimiento interno del día a día.</div>
+      <div className="tg-agenda-title" style={S.title}>Mi agenda</div>
+      <div style={S.sub}>Reuniones, llamadas, tareas y recordatorios para organizar tu día y el de tu equipo.</div>
 
+      <AgendaNotices />
       {esGerente && (
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
           {[

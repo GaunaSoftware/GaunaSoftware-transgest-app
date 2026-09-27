@@ -103,6 +103,8 @@ jobs:
         working-directory: transgest-bloque6-backend/transgest-frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -110,6 +112,10 @@ jobs:
           cache-dependency-path: transgest-bloque6-backend/transgest-frontend/package-lock.json
       - name: Instalar dependencias sin scripts nativos
         run: npm ci --ignore-scripts
+      - name: Novedades para cada cambio de producto
+        env:
+          RELEASE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/check_release_notes.cjs
       - name: Tests unitarios
         env:
           CI: true
@@ -122,4 +128,8 @@ jobs:
         env:
           CI: false
           GENERATE_SOURCEMAP: false
+          TRANSGEST_PACKAGE_UPDATE: 1
         run: npm run build
+
+      - name: Comprobar paquete de actualización Android
+        run: node scripts/app_package_check.cjs

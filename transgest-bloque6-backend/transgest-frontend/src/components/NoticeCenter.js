@@ -14,18 +14,18 @@ export function useNoticeCenter(enabled = true) {
   }, [enabled, revision]);
   return { data, error, reload:() => setRevision(n => n + 1) };
 }
-export function NoticeList({ data, category, error, reload }) {
+export function NoticeList({ data, category, categories, limit, error, reload }) {
   const [search, setSearch] = useState('');
-  const rows = (data?.items || []).filter(i => (!category || i.category === category) && `${i.title} ${i.entity || ''}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
+  const rows = (data?.items || []).filter(i => (!category || i.category === category) && (!categories || categories.includes(i.category)) && `${i.title} ${i.entity || ''}`.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es')));
   return <section className="notices-center" aria-label="Vencimientos por tipo">
-    <div className="notices-tools"><label>Buscar aviso<input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Factura, matrícula, conductor o plataforma"/></label><Button onClick={reload}>Actualizar</Button></div>
+    <div className="notices-tools"><label>Buscar aviso<input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Pedido, factura, matrícula o conductor"/></label><Button onClick={reload}>Actualizar</Button></div>
     {error && <p role="alert" className="notices-error">{error}</p>}
     {data?.errors?.length > 0 && <p role="alert" className="notices-error">Consulta parcial: no se pudieron leer {data.errors.map(e=>e.source).join(', ')}. Actualiza para reintentar.</p>}
     {!data && !error && <p role="status">Consultando vencimientos…</p>}
-    {data && <p className="notices-caption">{rows.length} avisos · Fecha de consulta: {new Date(`${data.date}T12:00:00`).toLocaleDateString('es-ES')}. Caducados y próximos según la configuración de cada tipo.</p>}
-    {rows.map(item => <article key={item.id} className="notices-entry">
-      <div><span className={`notice-status ${item.severity}`}>{item.days < 0 ? `Vencido hace ${Math.abs(item.days)} días` : item.days === 0 ? 'Vence hoy' : `Vence en ${item.days} días`}</span><h3>{item.title}</h3><p>{item.entity}</p>{item.amount != null && <strong>{Number(item.amount).toLocaleString('es-ES',{style:'currency',currency:'EUR'})} · Total factura</strong>}{item.description && <p className="notices-caption">{item.description}</p>}</div>
-      <div className="notices-entry-action"><time>{new Date(`${item.date}T12:00:00`).toLocaleDateString('es-ES')}</time><Button onClick={()=>openNotice(item)}>{item.category === 'facturas' ? 'Ver factura' : 'Abrir ficha'}</Button></div>
+    {data && <p className="notices-caption">{rows.length} avisos · Fecha de consulta: {new Date(`${data.date}T12:00:00`).toLocaleDateString('es-ES')}. Incidencias y vencimientos según tus permisos y la configuración de cada tipo.</p>}
+    {rows.slice(0,limit || rows.length).map(item => <article key={item.id} className="notices-entry">
+      <div><span className={`notice-status ${item.severity}`}>{item.category === 'operativa' ? 'Requiere atención' : item.days < 0 ? `Vencido hace ${Math.abs(item.days)} días` : item.days === 0 ? 'Vence hoy' : `Vence en ${item.days} días`}</span><h3>{item.title}</h3><p>{item.entity}</p>{item.amount != null && <strong>{Number(item.amount).toLocaleString('es-ES',{style:'currency',currency:'EUR'})} · Total factura</strong>}{item.description && <p className="notices-caption">{item.description}</p>}</div>
+      <div className="notices-entry-action"><time>{new Date(`${item.date}T12:00:00`).toLocaleDateString('es-ES')}</time><Button onClick={()=>openNotice(item)}>{item.category === 'facturas' ? 'Ver factura' : item.category === 'operativa' ? 'Abrir pedido' : 'Abrir ficha'}</Button></div>
     </article>)}
     {data && !rows.length && !error && <EmptyState title="Sin avisos para este filtro" description={data.errors?.length ? 'Hay fuentes pendientes de consultar.' : 'Puedes cambiar los plazos en Configuración.'}/>}
   </section>;

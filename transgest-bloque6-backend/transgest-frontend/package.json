@@ -15,6 +15,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/push-notifications": "8.0.0",
     "@capacitor/share": "^8.0.0",
+    "@capgo/capacitor-updater": "8.51.25",
     "@zxing/browser": "0.2.0",
     "@zxing/library": "0.22.0",
     "lodash": "4.18.1",
@@ -43,13 +44,16 @@
     "audit:contrast": "node scripts/audit_filter_contrast.js",
     "audit:prompts": "node scripts/audit_prompts.js",
     "check": "node --check src/App.js && node --check src/components/ToastProvider.js && node --check src/components/ErrorBoundary.js && node --check src/components/ui.js && node --check src/components/PortalPointPicker.js && node --check src/pages/Clientes.js && node --check src/pages/PortalClientes.js && node --check src/pages/Solicitudes.js && node --check src/pages/Usuarios.js && node --check src/pages/SuperAdmin.js && node --check src/services/api.js && node --check src/services/incidents.js && node --check src/services/notify.js && node --check scripts/audit_alerts.js && node --check scripts/audit_confirms.js && node --check scripts/audit_filter_contrast.js && node --check scripts/audit_prompts.js && npm run audit:contrast",
-    "prebuild": "node scripts/prepare_map_workers.cjs",
-    "prestart": "node scripts/prepare_map_workers.cjs",
-    "preplanner:build": "node scripts/prepare_map_workers.cjs",
-    "predesktop:build": "node scripts/prepare_map_workers.cjs",
+    "prebuild": "node scripts/app_release.cjs && node scripts/prepare_map_workers.cjs",
+    "prestart": "node scripts/app_release.cjs && node scripts/prepare_map_workers.cjs",
+    "preplanner:build": "node scripts/app_release.cjs && node scripts/prepare_map_workers.cjs",
+    "predesktop:build": "node scripts/app_release.cjs && node scripts/prepare_map_workers.cjs",
     "mobile:build": "cross-env REACT_APP_LOCAL_SERVER=false REACT_APP_PRODUCT=transgest react-scripts build",
-    "premobile:build": "node scripts/mobile_android_preflight.cjs && node scripts/prepare_map_workers.cjs",
-    "mobile:android:prepare": "npm run mobile:build && npx cap sync android && node scripts/mobile_android_preflight.cjs --assets"
+    "premobile:build": "node scripts/app_release.cjs && node scripts/mobile_android_preflight.cjs && node scripts/prepare_map_workers.cjs",
+    "mobile:android:prepare": "npm run mobile:build && npx cap sync android && node scripts/mobile_android_preflight.cjs --assets",
+    "pretest": "node scripts/app_release.cjs",
+    "postbuild": "node scripts/app_release.cjs --pack",
+    "postmobile:build": "node scripts/app_release.cjs --pack"
   },
   "eslintConfig": {
     "extends": [
@@ -77,6 +81,7 @@
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "jszip": "3.10.1",
     "rcedit": "^5.0.2",
     "react-scripts": "5.0.1"
   },

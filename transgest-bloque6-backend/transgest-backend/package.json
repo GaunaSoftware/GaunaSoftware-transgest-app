@@ -25,7 +25,7 @@
     "security:roundtrip": "node scripts/security_roundtrip.js",
     "portal:regression": "node scripts/portal_cliente_regression_check.js",
     "geo:regression": "node scripts/geocoding_regression_check.js && node scripts/geo_location_integrity_check.js && node scripts/point_location_migration_check.cjs && node scripts/point_document_snapshot_check.cjs && node scripts/optimizer_geometry_check.cjs && node scripts/here_route_check.cjs",
-    "agenda:regression": "node --check src/services/agendaIncidents.js && node scripts/agenda_incidents_check.cjs",
+    "agenda:regression": "node --check src/services/agendaIncidents.js && node scripts/agenda_incidents_check.cjs && node scripts/user_experience_check.cjs",
     "cargo:regression": "node scripts/cargo_length_mode_check.cjs",
     "ai:regression": "node scripts/ai_config_regression_check.js && node scripts/order_inbox_check.cjs && node scripts/order_mailbox_check.cjs && node scripts/order_mailbox_http_check.cjs",
     "daily-plan:regression": "node scripts/daily_plan_regression_check.js && node scripts/operational_permissions_check.js && node scripts/driver_documents_access_check.js && node scripts/driver_stops_check.cjs && node scripts/driver_journey_check.cjs && node scripts/transport_progress_check.cjs && node scripts/control_tower_flow_check.cjs",

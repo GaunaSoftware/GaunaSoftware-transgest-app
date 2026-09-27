@@ -22,6 +22,7 @@ export default class ErrorBoundary extends React.Component {
     if (!this.state.error) return this.props.children;
 
     const message = this.state.error?.message || "Error inesperado";
+    const staleChunk = /ChunkLoadError|Loading chunk|Failed to fetch dynamically imported module/i.test(message);
     const isDev = process.env.NODE_ENV !== "production";
     const incident = this.state.incident;
 
@@ -45,10 +46,10 @@ export default class ErrorBoundary extends React.Component {
           boxShadow:"0 22px 70px rgba(15,23,42,.12)",
         }}>
           <div style={{fontFamily:"'Syne',Arial,sans-serif",fontSize:22,fontWeight:900,marginBottom:8}}>
-            No se ha podido cargar esta pantalla
+            {staleChunk ? "Necesitamos actualizar esta pantalla" : "No se ha podido cargar esta pantalla"}
           </div>
           <p style={{margin:"0 0 16px",color:"var(--text3,#587068)",lineHeight:1.5}}>
-            Hemos protegido la aplicacion para que no se quede en blanco. Recarga la pantalla y, si vuelve a pasar, revisa el ultimo cambio realizado.
+            {staleChunk ? "Puede haber una nueva versión o una interrupción de la conexión. Comprueba tu conexión y pulsa Recargar para abrir la versión actual." : "Hemos protegido la aplicación para que no se quede en blanco. Recarga la pantalla y, si vuelve a pasar, contacta con soporte indicando el código de incidencia."}
           </p>
           {incident?.id && (
             <div style={{

@@ -20,7 +20,7 @@ const { driverStops } = require('../src/services/driverStops');
         puntos_carga jsonb, puntos_descarga jsonb, origen text, destino text, carga_real_at timestamptz);
       CREATE TABLE pedido_chofer_pasos (pedido_id uuid PRIMARY KEY, empresa_id uuid NOT NULL, data jsonb);
       CREATE TABLE agenda_eventos (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), empresa_id uuid NOT NULL,
-        titulo text NOT NULL, descripcion text, fecha_inicio timestamptz, todo_dia boolean,
+        titulo text NOT NULL, descripcion text, fecha_inicio timestamptz, fecha_fin timestamptz, todo_dia boolean,
         tipo text, prioridad text, estado text, visibilidad text, pedido_id uuid,
         creado_por uuid, asignado_a uuid,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());

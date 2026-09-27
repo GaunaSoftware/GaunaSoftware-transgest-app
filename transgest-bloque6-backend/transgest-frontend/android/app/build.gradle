@@ -14,8 +14,8 @@ android {
         applicationId "com.gaunasoftware.transgest"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode = (System.getenv("TRANSGEST_ANDROID_VERSION_CODE") ?: "4").toInteger()
-        versionName = (System.getenv("TRANSGEST_ANDROID_VERSION_NAME") ?: "1.2.1")
+        versionCode = (System.getenv("TRANSGEST_ANDROID_VERSION_CODE") ?: "5").toInteger()
+        versionName = (System.getenv("TRANSGEST_ANDROID_VERSION_NAME") ?: "1.3.0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

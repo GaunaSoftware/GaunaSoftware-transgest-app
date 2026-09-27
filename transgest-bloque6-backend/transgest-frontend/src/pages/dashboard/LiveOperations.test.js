@@ -49,3 +49,12 @@ test('live operations reconciles the loaded badge with its counter without inven
   expect(html).not.toContain('En ruta');
   expect(order.estado).toBe('en_curso');
 });
+
+
+test('today agenda shows the assigned supplier without an internal vehicle', () => {
+  const now=new Date(), today=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const order={id:'agenda-supplier',numero:'QA-AGENDA',estado:'confirmado',fecha_carga:today,colaborador_id:'supplier',colaborador_nombre:'Proveedor Agenda'};
+  const html=renderToStaticMarkup(<DashboardWorkspace pedidos={[order]} facturas={[]} vehiculos={[]} choferes={[]} alertas={[]} tareas={[]} loadErrors={[]} onSnapshot={()=>{}} openOrder={()=>{}} navigate={()=>{}} stateMeta={()=>({label:'Confirmado'})}/>);
+  const agenda=html.split('Agenda de hoy')[1].split('Acciones rápidas')[0];
+  expect(agenda).toContain('Asignado a Proveedor Agenda');expect(agenda).not.toContain('Sin asignar');
+});

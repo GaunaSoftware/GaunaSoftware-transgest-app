@@ -1,3 +1,4 @@
+import { TUTORIALS_ENABLED } from "../services/tutorialPolicy";
 import OrderAiInbox, {notifyInboxChanged} from './orders/OrderAiInbox';
 import {getOrderInbox} from '../services/api';
 import TransportDocumentVersions from './TransportDocumentVersions';
@@ -8747,6 +8748,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
 }
 
 function readGuidedPedidoTutorial() {
+  if (!TUTORIALS_ENABLED) return null;
   const focus = readRuntimeFocus("tms_guided_tutorial");
   return focus?.type === "pedido_create" ? focus : null;
 }
@@ -8953,9 +8955,10 @@ export default function Pedidos() {
     savePedidosCollapsedGroups(collapsedClientes);
   }, [collapsedClientes]);
 
-  const guidedPedidoActive = !!guidedPedido?.active;
+  const guidedPedidoActive = TUTORIALS_ENABLED && !!guidedPedido?.active;
 
   const startGuidedPedido = useCallback(() => {
+    if (!TUTORIALS_ENABLED) return;
     setGuidedPedido({ active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) });
   }, []);
 
@@ -8991,7 +8994,7 @@ export default function Pedidos() {
   }, []);
 
   useEffect(() => {
-    if (guidedPedidoActive) return undefined;
+    if (!TUTORIALS_ENABLED || guidedPedidoActive) return undefined;
     const pending = readGuidedPedidoTutorial();
     if (pending) startGuidedPedido();
     const onStart = e => {

@@ -41,6 +41,7 @@ async function main(){
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.get('/api/v1/producto',(request,res)=>res.json({producto:'tms'}));
  app.use('/api/v1/auth',auth);
+ app.use('/api/v1/empresa',authMiddleware.authenticate,authMiddleware.requireModulePermission('empresa'),req('./routes/datos_empresa'));
  app.use('/api/v1/superadmin',req('./routes/superadminCore'));
  app.use('/api/v1/usuarios',authMiddleware.authenticate,req('./routes/usuarios'));
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
@@ -60,8 +61,8 @@ async function main(){
  if(process.env.AUDIT_BROWSER==='1'){
   const browserBuild=path.resolve(root,'../transgest-frontend/build');
   if(!fs.existsSync(path.join(browserBuild,'index.html')))throw Error('Build local ausente para AUDIT_BROWSER');
-  app.use(req('express').static(browserBuild));
-  app.get('*',(request,res)=>res.sendFile(path.join(browserBuild,'index.html')));
+  app.use(req('express').static(browserBuild,{index:false}));
+  app.get('*',(request,res)=>res.type('html').send(fs.readFileSync(path.join(browserBuild,'index.html'),'utf8').replace('<head>','<head><script>localStorage.setItem("transgest_api_url",location.origin)</script>')));
  }
  app.use((err,request,res,next)=>res.status(err.status||500).json({error:err.message}));
  const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
@@ -357,7 +358,24 @@ async function main(){
  assert.ok(evidence.failedDelivery.emails_fallidos>0);
  assert.ok(evidence.retryDelivery.emails>0);
  assert.equal(evidence.duplicateDelivery.emails,0);
+  token=login.token;
+  const monthlyExpense=await call('Estructura: crear mensual','POST','/empresa/gastos-estructura',{nombre:'Alquiler sintético',importe:100,periodo:'mensual',fecha:'2026-09'});
+  const oneOffExpense=await call('Estructura: crear puntual','POST','/empresa/gastos-estructura',{nombre:'Puntual sintético',importe:200,periodo:'unico',fecha:'2026-09'});
+  const expenseSummary=await call('Estructura: resumen mensual','GET','/empresa/gastos-estructura/resumen?periodo=2026-09&empresa_id=ajena');
+  assert.equal(expenseSummary.total,300);assert.ok(expenseSummary.gastos.every(g=>g.empresa_id===company));
+  assert.equal(Math.round(expenseSummary.reparto.reduce((s,r)=>s+r.coste_igual,0)*100),30000);
+  const nextExpenseSummary=await call('Estructura: recurrencia siguiente mes','GET','/empresa/gastos-estructura/resumen?periodo=2026-10');
+  assert.equal(nextExpenseSummary.total,100);
+  await call('Estructura: cerrar mes compatible','POST','/empresa/meses-cerrados/2026-09-01',{});
+  assert.ok((await call('Estructura: mes cerrado','GET','/empresa/meses-cerrados')).includes('2026-09'));
+  await call('Estructura: bloqueo servidor de mes cerrado','PUT','/empresa/gastos-estructura/'+monthlyExpense.id,{importe:101});
+  await call('Estructura: reabrir mes','DELETE','/empresa/meses-cerrados/2026-09');
+  const attachedExpense=await call('Estructura: conservar justificante','PUT','/empresa/gastos-estructura/'+oneOffExpense.id,{factura_nombre:'Justificante.pdf',factura_data:'data:application/pdf;base64,'+Buffer.from('%PDF-1.4 synthetic').toString('base64')});
+  assert.ok(attachedExpense.factura_data);
+  await call('Estructura: quitar puntual de ensayo','DELETE','/empresa/gastos-estructura/'+oneOffExpense.id);
+  await call('Estructura: quitar mensual de ensayo','DELETE','/empresa/gastos-estructura/'+monthlyExpense.id);
   const expectedErrors=new Map([
+  ['Estructura: bloqueo servidor de mes cerrado',409],
   ['Rechazar ruta de otro cliente al editar',400],
   ['Exigir confirmación de carga real en otro día',409],
   ['Rechazar recargo incluido en porte',409],

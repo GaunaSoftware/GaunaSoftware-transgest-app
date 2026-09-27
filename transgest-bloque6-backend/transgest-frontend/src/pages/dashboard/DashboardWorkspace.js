@@ -5,6 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import { Button, Card, Icon, KpiCard, DataTable, MobileDataCard, EmptyState, Badge, TransportStateBadge } from "../../ui";
 import "./dashboard.css";
 import LiveOperations from "./LiveOperations";
+import { dashboardAssignment } from "../orders/quickInfo";
 import {overdueOrder,incidentDescription} from "./operationalStatus";
 import { normalizePlatformDocuments } from '../../components/PlatformDocumentsEditor';
 
@@ -78,7 +79,7 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     {key:"numero",label:"Nº pedido",render:p => <button className="dashboard-link" onClick={() => openOrder({pedido_id:p.id,numero:p.numero})}>{p.numero || "Ver pedido"}</button>},
     {key:"fecha",label:"Carga",render:p => dateLabel(p.fecha_carga)},
     {key:"cliente_nombre",label:"Cliente"}, {key:"origen",label:"Origen",render:p=>displayOrderLocation(p,"carga")}, {key:"destino",label:"Destino",render:p=>displayOrderLocation(p,"descarga")},
-    {key:"estado",label:"Estado",render:status}, {key:"vehiculo_matricula",label:"Vehículo",render:p => p.vehiculo_matricula || "Sin asignar"},
+    {key:"estado",label:"Estado",render:status}, {key:"vehiculo_matricula",label:"Vehículo",render:p => dashboardAssignment(p)},
     {key:"importe",label:"Importe",render:p => money(p.importe ?? p.precio ?? p.precio_cliente_col)},
   ];
   return <main className="dashboard-workspace">
@@ -92,7 +93,7 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     </div>
     {puedeVer("pedidos")&&<LiveOperations initialItems={pedidos} onSnapshot={onSnapshot} openOrder={openOrder}/>}
     <div className="dashboard-grid">
-      {puedeVer("pedidos") && <Section title="Agenda de hoy" icon="clock" className="dashboard-agenda" action={link("Ver agenda completa","agenda")}><p className="dashboard-caption">Cargas y descargas previstas · {data.agenda.length} eventos</p><div className="dashboard-scroll">{data.agenda.length ? data.agenda.map(e => <button key={e.id} className="dashboard-agenda-row" onClick={() => openOrder({pedido_id:e.p.id,numero:e.p.numero})}><time>{e.time || "Sin hora"}</time><Badge tone={e.kind === "carga" ? "success" : "info"}>{e.kind === "carga" ? "Carga" : "Descarga"}</Badge><span>{e.p.cliente_nombre || "Sin cliente"}</span><span>{e.place || "Sin ubicación"}</span><small>{e.p.vehiculo_matricula || "Sin asignar"}</small></button>) : <EmptyState title="Sin cargas ni descargas previstas hoy"/>}</div></Section>}
+      {puedeVer("pedidos") && <Section title="Agenda de hoy" icon="clock" className="dashboard-agenda" action={link("Ver agenda completa","agenda")}><p className="dashboard-caption">Cargas y descargas previstas · {data.agenda.length} eventos</p><div className="dashboard-scroll">{data.agenda.length ? data.agenda.map(e => <button key={e.id} className="dashboard-agenda-row" onClick={() => openOrder({pedido_id:e.p.id,numero:e.p.numero})}><time>{e.time || "Sin hora"}</time><Badge tone={e.kind === "carga" ? "success" : "info"}>{e.kind === "carga" ? "Carga" : "Descarga"}</Badge><span>{e.p.cliente_nombre || "Sin cliente"}</span><span>{e.place || "Sin ubicación"}</span><small>{dashboardAssignment(e.p)}</small></button>) : <EmptyState title="Sin cargas ni descargas previstas hoy"/>}</div></Section>}
       <Section title="Acciones rápidas" icon="route" className="dashboard-quick"><div className="dashboard-quick-grid">{quick.map(([label,icon,view,,action]) => <Button key={label} onClick={action || (() => navigate(view))}><Icon name={icon} size={19}/>{label}</Button>)}</div>{!quick.length && <EmptyState title="Sin accesos disponibles"/>}</Section>
       <Section title="Alertas y tareas" icon="alert" className="dashboard-alerts" action={link("Ver avisos","avisos")}><div className="dashboard-scroll">{availableAlerts.map((a,i) => <button key={i} className="dashboard-alert-row" onClick={() => openAlert(a)}><Icon name="alert" size={20}/><span>{a.texto}<small>{a.actionLabel || "Revisar"}</small></span><Icon name="chevron" size={14}/></button>)}{tareas.filter(t=>puedeVer(t.view)).map(t=><button key={t.id} className="dashboard-alert-row" onClick={()=>navigate(t.view)}><Icon name="invoice"/><span>{t.titulo || t.title || t.descripcion || "Tarea asignada"}<small>Asignada a ti</small></span></button>)}{!availableAlerts.length && !tareas.length && <EmptyState title="Sin alertas ni tareas en los datos cargados"/>}</div></Section>
       {puedeVer("pedidos") && <Section title="Pedidos recientes" icon="invoice" className="dashboard-recent" action={link("Ver todos los pedidos","pedidos")}><DataTable rows={data.recent} columns={columns} emptyTitle="Todavía no hay pedidos" renderMobile={p => <MobileDataCard title={p.numero} subtitle={`${p.cliente_nombre||"Sin cliente"} · ${displayOrderLocation(p,"carga")} → ${displayOrderLocation(p,"descarga")}`} amount={money(p.importe ?? p.precio ?? p.precio_cliente_col)} actions={<Button onClick={() => openOrder({pedido_id:p.id,numero:p.numero})}>Ver pedido</Button>}>{status(p)}<span>{dateLabel(p.fecha_carga)}</span></MobileDataCard>}/></Section>}

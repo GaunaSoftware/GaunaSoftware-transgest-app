@@ -95,3 +95,8 @@ Estos límites impiden declarar **todas las funciones del encargo cerradas** o *
 - Completar el recorrido físico Android y piloto de APIs con credenciales introducidas por el responsable, sin enviarlas en informes.
 - Revisar procedimientos legales/retención y QR activos antes de autorizar publicación.
 - Medir consultas y carga con el volumen del cliente en copia autorizada; no extrapolar las medidas PGlite a producción.
+
+
+## Publicación autorizada · 27/09/2026
+
+El usuario solicita pruebas y despliegue de la rama acumulada. Ver `TMS_RELEASE_20260927.md` para correcciones adicionales, 62 migraciones, pruebas y copia/restauración previas. Los límites externos se conservan; el estado de publicación se registra en ese documento.

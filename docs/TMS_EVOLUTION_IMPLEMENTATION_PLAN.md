@@ -45,3 +45,8 @@ Se completó el recorrido de implementación hasta la fase 17 y el contraste tra
 Se resolvieron las vías legacy de salida por portal/correo y el bypass global de la app, el doble evento en reintentos, el JavaScript inválido del portal, la fecha civil desplazada y el orden del migrador. PostgreSQL nativo: 61 migraciones aplicadas y repetidas, aislamiento/membresías, salidas y cola fiscal concurrentes, copia/restauración con huellas. No se requiere repetir autorizaciones para continuar implementación local pendiente.
 
 No se han ejecutado push/merge/despliegue ni pruebas con datos de producción. No declarar terminado el WMS avanzado automático, replanificación documentada, eCMR contractual, AEAT directa o pilotos/dispositivo pendientes. Los datos sintéticos y logs locales no se publican.
+
+
+## Publicación autorizada · 27/09/2026
+
+El usuario solicita pruebas y despliegue de la rama acumulada. Ver `TMS_RELEASE_20260927.md` para correcciones adicionales, 62 migraciones, pruebas y copia/restauración previas. Los límites externos se conservan; el estado de publicación se registra en ese documento.

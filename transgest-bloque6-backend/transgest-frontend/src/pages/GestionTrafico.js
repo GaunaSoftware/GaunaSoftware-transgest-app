@@ -1,3 +1,4 @@
+import useOptimizedRoute from "../services/useOptimizedRoute";
 import GroupageDraftBuilder from './traffic/GroupageDraftBuilder';
 import {trafficUnits} from '../utils/trafficUnits';
 import {assignGroupage} from '../services/api';
@@ -11,7 +12,7 @@ import TrafficMobileBoard from "./traffic/TrafficMobileBoard";
 import { PageHeader } from "../ui";
 import "./operations/operations.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, optimizarRuta, getRutaOptimizadaPedido, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -694,7 +695,7 @@ function uniqueStops(stops) {
   const seen = new Set();
   return stops.filter(stop => {
     const address = cleanAddress(stop.address || stop);
-    const key = address.toLowerCase();
+    const key = `${address}|${stop.lat ?? ""}|${stop.lng ?? ""}|${stop.google_maps_url || ""}`.toLowerCase();
     if (!address || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -703,6 +704,7 @@ function uniqueStops(stops) {
 
 function pedidoRouteStops(pedido) {
   const cargas = safeStops(pedido.puntos_carga).map((stop, idx) => ({
+    lat: stop.lat ?? stop.latitud ?? null, lng: stop.lng ?? stop.lon ?? stop.longitud ?? null, google_maps_url: stop.google_maps_url || "",
     type: "Carga",
     name: stopName(stop, idx === 0 ? pedido.origen : ""),
     address: stopAddressFull(stop) || cleanAddress(pedido.origen),
@@ -711,6 +713,7 @@ function pedidoRouteStops(pedido) {
     window: stop.ventana || pedido.ventana_carga,
   }));
   const descargas = safeStops(pedido.puntos_descarga).map((stop, idx) => ({
+    lat: stop.lat ?? stop.latitud ?? null, lng: stop.lng ?? stop.lon ?? stop.longitud ?? null, google_maps_url: stop.google_maps_url || "",
     type: "Descarga",
     name: stopName(stop, idx === 0 ? pedido.destino : ""),
     address: stopAddressFull(stop) || cleanAddress(pedido.destino),
@@ -2005,8 +2008,6 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
   const [preferencia, setPreferencia] = useState("camion");
   const [search, setSearch] = useState("");
   const [providerInfo, setProviderInfo] = useState(null);
-  const [apiPlan, setApiPlan] = useState(null);
-  const [apiLoading, setApiLoading] = useState(false);
   const [dispatches, setDispatches] = useState([]);
   const [sendLoading, setSendLoading] = useState("");
   const candidatos = useMemo(() => pedidos
@@ -2023,7 +2024,13 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
   const vehiculo = selected ? vehiculos.find(v => v.id === selected.vehiculo_id) : null;
   const chofer = selected ? choferes.find(c => c.id === selected.chofer_id) : null;
   const plan = selected ? buildRoutePlan(selected, preferencia, vehiculo) : null;
-  const remotePlan = apiPlan?.pedido_id === selected?.id && apiPlan?.preference === preferencia ? apiPlan : null;
+  const routeQuery = useOptimizedRoute(selected && plan?.stops.length >= 2 ? {
+    pedido_id: selected.id, preference: preferencia, stops: plan.stops,
+    truck: {height_m: Number(vehiculo?.altura_m || 4), width_m: Number(vehiculo?.anchura_m || 2.55),
+      length_m: Number(vehiculo?.longitud_m || 16.5), weight_t: Number(vehiculo?.mma || 40000) / 1000},
+  } : null);
+  const remotePlan = routeQuery.data;
+  const apiLoading = routeQuery.loading;
   const planKm = remotePlan?.distance_km || plan?.km || 0;
   const planDuration = remotePlan?.duration_min ? `${Math.floor(remotePlan.duration_min / 60)}h${remotePlan.duration_min % 60 ? ` ${remotePlan.duration_min % 60}min` : ""}` : plan?.tiempo?.label;
   const planUrl = remotePlan?.maps_url || plan?.url || "";
@@ -2040,39 +2047,6 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
   useEffect(() => {
     getRouteProviders().then(setProviderInfo).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    setApiPlan(null);
-  }, [selected?.id, preferencia]);
-
-  useEffect(() => {
-    let alive = true;
-    if (!selected?.id) return undefined;
-    getRutaOptimizadaPedido(selected.id)
-      .then(data => {
-        if (!alive) return;
-        if (!data || data.preference !== preferencia || routeGeometry(data.geometry).length < 2 || JSON.stringify((data.stops || []).map(s=>s.address)) !== JSON.stringify((plan?.stops || []).map(s=>s.address))) {
-          // La ruta debe corresponder a las paradas y disponer de trazado real.
-          // No hay ruta guardada: se calcula sola al seleccionar el pedido para que
-          // el mapa real cargue sin tener que pulsar "Calcular" a mano.
-          if (Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi();
-          return;
-        }
-        setApiPlan({
-          ...data,
-          pedido_id: selected.id,
-          preference: data.preference || "camion",
-          provider_label: data.provider_label || data.provider,
-          maps_url: data.maps_url,
-          distance_km: data.distance_km ? Number(data.distance_km) : null,
-          duration_min: data.duration_min ? Number(data.duration_min) : null,
-          stops: data.stops || [],
-          truck: data.truck || {},
-        });
-      })
-      .catch(() => { if (alive && Array.isArray(plan?.stops) && plan.stops.length >= 2) calcularConApi(); });
-    return () => { alive = false; };
-  }, [selected?.id]);
 
   const cargarEnvios = useCallback(() => {
     if (!selected?.id) { setDispatches([]); return; }
@@ -2131,30 +2105,6 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
     }
   }
 
-  async function calcularConApi(prefOverride) {
-    if (!plan) return;
-    const pref = typeof prefOverride === "string" ? prefOverride : preferencia;
-    setApiLoading(true);
-    try {
-      const data = await optimizarRuta({
-        pedido_id: selected.id,
-        preference: pref,
-        stops: plan.stops,
-        truck: {
-          height_m: Number(vehiculo?.altura_m || 4),
-          width_m: Number(vehiculo?.anchura_m || 2.55),
-          length_m: Number(vehiculo?.longitud_m || 16.5),
-          weight_t: Number(selected?.peso_kg || 40000) / 1000 > 1 ? Number(selected?.peso_kg || 40000) / 1000 : 40,
-        },
-      });
-      setApiPlan({ ...data, pedido_id: selected.id });
-      notify(data.warning || `Ruta calculada y guardada con ${data.provider_label}.`, data.warning ? "warning" : "success");
-    } catch (e) {
-      notify("No se pudo calcular la ruta: " + e.message, "error");
-    } finally {
-      setApiLoading(false);
-    }
-  }
 
   return (
     <div className="traffic-responsive-grid" style={{flex:1,overflowY:"auto",padding:"16px 20px",display:"grid",gridTemplateColumns:"minmax(280px,390px) 1fr",gap:16}}>
@@ -2225,12 +2175,13 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
                 <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>{plan.modoLabel} - {plan.pedido.cliente_nombre || plan.pedido.colaborador_nombre || "sin cliente"}</div>
               </div>
               <div className="traffic-responsive-flex" style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                <button style={btn} onClick={calcularConApi} disabled={apiLoading}>{apiLoading ? "Calculando..." : "Calcular"}</button>
+                <button style={btn} onClick={routeQuery.recalculate} disabled={apiLoading}>{apiLoading ? "Calculando..." : "Calcular"}</button>
                 <button style={btn} onClick={()=>planUrl && window.open(planUrl,"_blank","noopener,noreferrer")}>Abrir enlace</button>
                 <button style={btn} onClick={copiar}>Copiar enlace</button>
                 <button style={btn} onClick={()=>printRoutePlan({ ...plan, km: planKm, tiempo: planDuration ? { label: planDuration } : plan.tiempo, url: planUrl })}>PDF ruta</button>
               </div>
             </div>
+            {routeQuery.error && <p role="alert">{routeQuery.error}</p>}
             {remotePlan?.warning && (
               <div style={{background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.35)",borderRadius:8,padding:"9px 12px",color:"#f59e0b",fontSize:12,fontWeight:700,marginBottom:12}}>
                 {remotePlan.warning}
@@ -2246,10 +2197,7 @@ function OptimizacionRutas({ pedidos, vehiculos, choferes, soloLecturaChofer = f
               plan={plan}
               remotePlan={remotePlan}
               planUrl={planUrl}
-              onPreferencia={next => {
-                setPreferencia(next);
-                calcularConApi(next);
-              }}
+              onPreferencia={setPreferencia}
             />
 
             <div className="traffic-responsive-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(120px,1fr))",gap:10,marginBottom:14}}>

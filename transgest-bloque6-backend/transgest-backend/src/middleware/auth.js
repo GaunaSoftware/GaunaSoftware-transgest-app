@@ -593,7 +593,7 @@ function requireRole(...roles) {
 function requireModulePermission(modulo) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "No autenticado" });
-    if (modulo === "empresa" && /^\/gastos-estructura(?:\/|$)/.test(String(req.path || ""))) {
+    if (modulo === "empresa" && /^\/(?:gastos-estructura|meses-cerrados)(?:\/|$)/.test(String(req.path || ""))) {
       return requireModulePermission("gastos_estructura")(req, res, next);
     }
     if (!companyProducts.moduleAvailable(req.user.productos, modulo)) {

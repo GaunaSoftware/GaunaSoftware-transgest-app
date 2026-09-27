@@ -1032,6 +1032,7 @@ export const getPagosColaboradorPendientes = () => apiFetch("/pedidos/colaborado
 
 // ── Datos empresa (localStorage → BD) ────────────────────────────────────
 // Gastos estructura
+export const getResumenGastosEstructura = periodo => apiFetch(`/empresa/gastos-estructura/resumen?periodo=${encodeURIComponent(periodo)}`);
 export const getGastosEstructura   = ()        => apiFetch("/empresa/gastos-estructura");
 export const crearGastoEstructura  = (data)    => apiFetch("/empresa/gastos-estructura", {method:"POST",body:data});
 export const editarGastoEstructura = (id,data) => apiFetch(`/empresa/gastos-estructura/${id}`, {method:"PUT",body:data});

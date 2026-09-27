@@ -1,3 +1,4 @@
+import { TUTORIALS_ENABLED } from "./services/tutorialPolicy";
 import { createPortal } from "react-dom";
 import {transportExchange} from './services/api';
 import { isPlannerRoute, hasProduct } from './planner/access';
@@ -1565,6 +1566,7 @@ function AppInner() {
 
   useEffect(() => {
     const handleGuidedStart = (e) => {
+      if (!TUTORIALS_ENABLED) return;
       const detail = e?.detail || {};
       if (detail.type !== "module_walkthrough" || !detail.route) return;
       setGuidedModule({ active:true, route:detail.route, source:detail.source || "onboarding", startedAt:detail.startedAt || new Date().toISOString() });
@@ -1785,7 +1787,7 @@ function AppInner() {
       return;
     }
     const key = onboardingStorageKey(user);
-    setShowOnboarding(!localStorage.getItem(key));
+    setShowOnboarding(TUTORIALS_ENABLED && !localStorage.getItem(key));
   }, [user]);
 
   if (loading) return (
@@ -1830,6 +1832,7 @@ function AppInner() {
   }
 
   function handleStartTutorial(payload = {}) {
+    if (!TUTORIALS_ENABLED) return;
     const route = payload.route;
     if (!route || !modulosVisibles.has(route)) return;
     setRuntimeFocus("tms_guided_tutorial", payload);
@@ -1978,7 +1981,7 @@ function AppInner() {
       }}
     />
     <GlobalGuidedModulePanel
-      mission={guidedModule}
+      mission={TUTORIALS_ENABLED ? guidedModule : null}
       onOpenModule={(route) => {
         if (modulosVisibles.has(route)) setVista(route);
       }}
@@ -1989,7 +1992,7 @@ function AppInner() {
     />
 
     {/* Onboarding wizard */}
-    {showOnboarding && user && (
+    {TUTORIALS_ENABLED && showOnboarding && user && (
       <OnboardingWizard
         user={user}
         visibleModules={Array.from(modulosVisibles)}

@@ -25,13 +25,13 @@ async function main(){
     await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY); CREATE TABLE usuarios(id uuid PRIMARY KEY);
       CREATE TABLE choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,dni text,nombre text);
       CREATE TABLE vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,matricula text);
-      CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text,file_url text);
-      CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,descripcion text,fecha_emision date,fecha_vencimiento date,referencia text,file_url text);
+      CREATE TABLE docs_choferes(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),chofer_id uuid,tipo text,tipo_doc varchar(60) NOT NULL,fecha_emision date,fecha_vencimiento date,file_url text);
+      CREATE TABLE docs_vehiculos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),vehiculo_id uuid,tipo text,tipo_doc varchar(60) NOT NULL,fecha_emision date,fecha_vencimiento date,file_url text);
       CREATE TABLE ruta_precios_cliente(id uuid PRIMARY KEY DEFAULT gen_random_uuid());
       INSERT INTO empresas VALUES('${a}'),('${b}');
       INSERT INTO choferes(empresa_id,dni,nombre) VALUES('${a}','12826758A','Ana'),('${b}','12826758A','Otra');
       INSERT INTO vehiculos(empresa_id,matricula) VALUES('${a}','0009-LCZ'),('${b}','0009-LCZ');`);
-    for(const name of ['20260924_import_batches.sql','20260924_import_simulations.sql','20260924_import_doc_metadata.sql','20260924_import_document_blobs.sql','20260924_import_rollback.sql'])
+    for(const name of ['20260924_import_batches.sql','20260924_import_simulations.sql','20260924_import_doc_metadata.sql','20260924_import_document_blobs.sql','20260924_import_rollback.sql','20260930_document_legacy_compatibility.sql'])
       await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',name),'utf8'));
     const db={query:(...args)=>pg.query(...args),transaction:async fn=>{await pg.exec('BEGIN');try{const value=await fn(pg);await pg.exec('COMMIT');return value;}catch(cause){await pg.exec('ROLLBACK');throw cause;}}};
     const batches=createImportBatches(db),storage=new DatabaseDocumentStorageProvider(db),documents=createImportDocuments(db,batches,storage),rollback=createImportRollback(db);

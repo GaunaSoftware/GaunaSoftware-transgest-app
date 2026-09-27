@@ -77,10 +77,7 @@ const RELEASE = String(
   process.env.APP_RELEASE ||
   "local"
 ).replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 40) || "local";
-const corsOrigins = (process.env.CORS_ORIGINS || "")
-  .split(",")
-  .map(o => o.trim())
-  .filter(Boolean);
+const { appCorsOptions } = require('./services/appCors');
 
 // ── Middlewares globales ──────────────────────────────
 app.disable("x-powered-by");
@@ -97,15 +94,7 @@ app.use((req, res, next) => {
 });
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(compression());
-app.use(cors({
-  origin(origin, cb) {
-    if (origin === 'transgest://app') return cb(null,true);
-    if (!origin) return cb(null, true);
-    if (!corsOrigins.length) return cb(null, true);
-    return cb(null, corsOrigins.includes(origin));
-  },
-  credentials: true,
-}));
+app.use(cors(appCorsOptions(process.env.CORS_ORIGINS)));
 app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookRoutes);
 app.use("/api/v1/inbound/orders", require("./routes/orderInboxInbound"));
 app.use(express.json({

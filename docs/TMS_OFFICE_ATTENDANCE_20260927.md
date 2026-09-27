@@ -46,3 +46,9 @@ Se conservan rutas y respuestas existentes de control horario. El cambio intenci
 Antes de publicar: CI, copia verificable y migración. Después: comprobar SHA en `/health`, abrir el menú y Control horario con cuenta autorizada en modo lectura. Los fichajes y aprobaciones de validación se realizan solo en el banco sintético. El rollback normal debe conservar estas restricciones de permisos: volver al backend anterior reintroduciría las vulnerabilidades identificadas. No borrar tablas, solicitudes ni eventos como forma de revertir la interfaz.
 
 Se mantiene el límite de una jornada por día del modelo previo. Una salida errónea requiere ajuste de Gerencia; no se habilita edición de empleados. La política de devengo/saldo de vacaciones y convenios queda fuera de este cambio.
+
+## Reglas de publicación
+
+No crear más entornos de prueba hospedados ni incrementar costes sin autorización. Conservar las pruebas locales y publicar en live tras superar los controles. No confundir las vistas previas de compilación con un despliegue verificado en producción.
+
+No restaurar copias de verificación dentro del servidor que comparte el disco con producción. Antes de cualquier operación de copia, comprobar capacidad libre y tamaño previsto. Conservar las copias existentes y no eliminar información de clientes para liberar espacio. Cualquier retirada de una copia fallida debe identificar exclusivamente esa base y tener autorización explícita. Mantener las incidencias y los identificadores de infraestructura en el registro privado de operaciones.

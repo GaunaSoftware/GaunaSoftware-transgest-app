@@ -1,3 +1,4 @@
+import InvoiceWorkflow from "./finance/InvoiceWorkflow";
 import SupplierInvoiceCenter from "./colaboradores/SupplierInvoiceCenter";
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import { guardarControlCobrosConfig, getReclamacionesEnvios, getFacturaPlantilla } from '../services/api';
@@ -11,7 +12,7 @@ import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
 import { supplierInvoiceReview, registrarRevisionFactura } from '../services/api';
-import { getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
+import { getPedido, getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -2861,6 +2862,7 @@ export default function Facturacion() {
         <AlertCard icon="shield" tone={!fiscalResumen ? "neutral" : fiscalAttention || fiscalNeedsSetup ? "warning" : "success"} title={!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"} description="Consultar estado y configuración AEAT" onClick={() => setActiveFacturacionTab("fiscal")} />
       </div>}
       <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
+      {activeFacturacionTab === "facturas" && <InvoiceWorkflow clients={clientes} canEdit={canEdit} manager={esGerenteFacturacion} onInvoice={abrirFacturaPorId} onOrder={async row=>{try{setPedidoCorreccion(await getPedido(row.id));}catch(e){notify(e.message,"error");}}} />}
       {isSummary && <FinanceSummary forecast={previsionTesoreria} money={fmt2} backlogCount={sinFacturar.length} backlogAmount={sinFacturarTotal} invoices={summaryInvoices} totalCount={totalCount} filters={invoiceFilters} renderInvoices={renderInvoiceList} canEdit={canEdit}
         onBacklog={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }} onInvoice={() => setModalMulti(true)} onAllInvoices={() => setActiveFacturacionTab("facturas")} onExport={() => setExportOpen(true)}
         documents={Number(bloqueoDocResumen.pedidos_sin_soporte || 0)} reviews={Number(controlResumen.revisar_hoy || 0)} pending={Number(controlResumen.importe_pendiente || 0)}

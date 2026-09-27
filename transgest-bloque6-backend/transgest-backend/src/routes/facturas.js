@@ -18,6 +18,7 @@ const invoiceAnnotations = require("../services/invoiceAnnotations");
 
 const router = express.Router();
 router.use(authenticate);
+router.use("/operativa",require("./invoice_workflow"));
 const collections = require('../services/collectionScheduler');
 
 // Redondeo a 2 decimales para importes de factura. Elimina restos de coma
@@ -1114,6 +1115,15 @@ router.post("/:id/fiscal/sincronizar", GERENTE_O_CONTABLE, async (req, res) => {
 });
 
 router.post("/", GERENTE_O_CONTABLE,
+  async(req,res,next)=>{try{
+    if(req.body.workflow_pedidos_ids!==undefined){
+      const ids=req.body.workflow_pedidos_ids;
+      if(!Array.isArray(ids)||!ids.length||ids.length>200||ids.some(id=>typeof id!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)))return res.status(400).json({error:'Selecciona entre 1 y 200 pedidos válidos'});
+      const rows=(await db.query('SELECT id,cliente_id FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[req.empresaId||req.user.empresa_id,ids])).rows;
+      if(rows.length!==new Set(ids).size||new Set(rows.map(r=>r.cliente_id)).size!==1)return res.status(400).json({error:'El lote debe contener pedidos autorizados de un solo cliente'});
+      req.body={workflow_pedidos_ids:ids,cliente_id:rows[0].cliente_id,pedidos_ids:ids,serie:'A',estado:'borrador',lineas:[{concepto:'Preparando lote',cantidad:1,precio_unit:0}]};
+    }next();
+  }catch(e){next(e);}},
   body("cliente_id").isUUID(),
   body("serie").isIn(["A","B","R","G"]),
   body("lineas").isArray({ min: 1 }),
@@ -1169,7 +1179,8 @@ router.post("/", GERENTE_O_CONTABLE,
           }
           borradoresPrevios.add(String(pedido.factura_id));
         }
-        if (pedido.estado !== "entregado") {
+        const eligibility=(await require('../services/invoiceOperationalWorkflow').facts(db,empresaId,[pedido.id]))[0];
+        if (!eligibility?.eligible) {
           return res.status(400).json({
             error: `El pedido ${pedido.numero || pid} debe estar terminado/entregado antes de crear la factura`,
           });
@@ -1178,11 +1189,29 @@ router.post("/", GERENTE_O_CONTABLE,
     }
 
     const created = await db.transaction(async (client) => {
+      let workflowHash=null;
       if (pedidosIdsUnicos.length) {
         const { rows: fuelOrders } = await client.query(
-          "SELECT id, numero, importe, importe_revision_combustible FROM pedidos WHERE id=ANY($1::uuid[]) AND empresa_id=$2 FOR UPDATE",
+          "SELECT * FROM pedidos WHERE id=ANY($1::uuid[]) AND empresa_id=$2 ORDER BY id FOR UPDATE",
           [pedidosIdsUnicos, empresaId]
         );
+        // Revalidate under the same locks that protect the association and numbering.
+        if(fuelOrders.length!==pedidosIdsUnicos.length)throw Object.assign(new Error('El lote ha cambiado'),{status:409});
+        borradoresPrevios.clear();
+        const readiness=await require('../services/invoiceOperationalWorkflow').facts(client,empresaId,pedidosIdsUnicos);
+        for(const p of fuelOrders){
+          if(String(p.cliente_id)!==String(cliente_id)||!readiness.find(r=>r.id===p.id)?.eligible)throw Object.assign(new Error('El pedido ha cambiado de cliente o de estado facturable'),{status:409});
+          const linked=(await client.query(`SELECT DISTINCT f.id,f.estado,f.cliente_id,f.empresa_id FROM facturas f WHERE f.id=$1 OR EXISTS(SELECT 1 FROM factura_pedidos fp WHERE fp.factura_id=f.id AND fp.pedido_id=$2) ORDER BY f.id`,[p.factura_id,p.id])).rows;
+          if(linked.some(f=>String(f.empresa_id)!==String(empresaId)||f.estado!=='borrador'||String(f.cliente_id)!==String(cliente_id)))throw Object.assign(new Error('El pedido ya tiene una factura no editable'),{status:409});
+          linked.forEach(f=>borradoresPrevios.add(f.id));
+        }
+        if(req.body.workflow_pedidos_ids){
+          if(readiness.some(r=>r.estado!=='listo'))throw Object.assign(new Error('Revisa los pedidos actuales antes de preparar el lote'),{status:409});
+          workflowHash=require('crypto').createHash('sha256').update(JSON.stringify(readiness.map(r=>[r.id,r.huella]))).digest('hex');
+          const previous=(await client.query('SELECT f.* FROM invoice_workflow_operations o JOIN facturas f ON f.id=o.factura_id AND f.empresa_id=o.empresa_id WHERE o.empresa_id=$1 AND o.request_hash=$2',[empresaId,workflowHash])).rows[0];
+          if(previous)return previous;
+          lineas=fuelOrders.flatMap(p=>require('../services/invoiceFuelLines').fuelInvoiceLines(p));
+        }
         require('../services/invoiceFuelLines').validateFuelInvoiceLines(fuelOrders, lineas);
       }
       if(plannerPreparation) lineas=await require('../services/plannerInvoice').saleLines(client,empresaId,plannerPreparation,cliente_id);
@@ -1276,19 +1305,8 @@ router.post("/", GERENTE_O_CONTABLE,
         );
       }
 
-      // Vincular pedidos — solo si están en estado válido para facturar
-      const ESTADOS_FACTURABLES = ["entregado"];
+      // Every order was validated and locked above; never silently skip a requested service.
       for (const pid of pedidosIdsUnicos) {
-        const { rows: pedCheck } = await client.query(
-          "SELECT id, estado FROM pedidos WHERE id=$1 AND empresa_id=$2",
-          [pid, empresaId]
-        );
-        if (!pedCheck[0]) continue; // skip if not found
-        if (!ESTADOS_FACTURABLES.includes(pedCheck[0].estado)) {
-          // Skip pedidos that are not in a billable state (pendiente, cancelado)
-          logger.warn(`Pedido ${pid} en estado ${pedCheck[0].estado} — no se vincula a la factura`);
-          continue;
-        }
         await client.query(
           `INSERT INTO factura_pedidos (factura_id, pedido_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
           [fac.id, pid]
@@ -1327,6 +1345,7 @@ router.post("/", GERENTE_O_CONTABLE,
         );
       }
 
+      if(workflowHash)await client.query('INSERT INTO invoice_workflow_operations(empresa_id,request_hash,factura_id) VALUES($1,$2,$3) ON CONFLICT(empresa_id,request_hash) DO UPDATE SET factura_id=$3',[empresaId,workflowHash,fac.id]);
       return fac;
     });
     res.status(201).json(created);

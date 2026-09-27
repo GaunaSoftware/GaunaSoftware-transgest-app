@@ -29,7 +29,7 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 10 Planner | 10A y base operativa 10B implementadas y verificadas; automatismos avanzados delimitados | `TMS_EVOLUTION_PHASE10_PLANNER.md`: carretillero, documentos, salida/facturación, ASN, calidad, inventario, picking/packing, SSCC y llegada. Límites de automatismos y dispositivo en el documento |
 | 11 Network | Implementada y verificada localmente | `TMS_EVOLUTION_PHASE11_NETWORK.md`: consentimiento bilateral por alcance, identidad vigente, revocación, precio acordado, referencias y documentos inmutables. Integraciones exteriores y facturas compartidas delimitadas |
 | 12 Facturas proveedor e IA | Implementada y verificada localmente | `TMS_EVOLUTION_PHASE12_SUPPLIER_INVOICES.md`: originales privados, extracción opcional, conciliación, revisión humana y proyección compatible sin pagos automáticos |
-| 13 Facturación operativa | Pendiente de contrastar e implementar | Reutilizar reglas de revisión, facturación parcial y línea de combustible |
+| 13 Facturación operativa | Implementada y verificada localmente | `TMS_EVOLUTION_PHASE13_BILLING.md`: reglas cliente, excepciones, revisión vigente, lote idempotente, combustible y asociación transaccional; sin emisión automática |
 | 14 Fiscalidad | Pendiente de contrastar y validar | Reutilizar integración fiscal; pruebas reales dependientes del proveedor |
 | 15 KPI/BI | Pendiente de conciliación del nuevo modelo | Sin duplicar kilómetros físicos ni costes; incorporar/anular costes de viaje con conciliación explícita |
 | 16 Integration Registry | Pendiente de contrastar e implementar | Contratos y capacidades reales de proveedores |

@@ -1381,3 +1381,5 @@ export const assignGroupage = (groupId,asignacion) => apiFetch(`/pedidos/grupaje
 
 export const getGroupageCosts = groupId => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/costes`);
 export const recordGroupageCost = (groupId,data) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/costes`,{method:"POST",body:{...data,client_operation_uuid:crypto.randomUUID()}});
+
+export const invoiceWorkflow=(path="",options={})=>apiFetch("/facturas/operativa"+path,options);

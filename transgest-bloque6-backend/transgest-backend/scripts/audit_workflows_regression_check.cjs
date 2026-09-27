@@ -247,6 +247,7 @@ async function main(){
   const invitation=crypto.randomBytes(32).toString('hex');await db.query("INSERT INTO colaborador_pedido_tokens(pedido_id,empresa_id,accion,token_hash,expires_at) VALUES($1,$2,'confirmar',$3,NOW()+INTERVAL '1 hour')",[sharedOrder.id,company,crypto.createHash('sha256').update(invitation).digest('hex')]);
   evidence.plannerExchange=await require('./audit_network.cjs')({db,company,user,base,token,password,transportCompany,transportClient,sharedOrder,legacyToken:invitation,pdf,stock});
   evidence.supplierInvoice=await require('./audit_supplier_invoice.cjs')({db,base,company,user,token,password,order:sharedOrder});
+  evidence.invoiceWorkflow=await require('./audit_invoice_workflow.cjs')({db,base,company,user,token,password});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});

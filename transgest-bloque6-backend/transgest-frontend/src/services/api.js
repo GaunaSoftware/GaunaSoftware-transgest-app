@@ -1011,21 +1011,27 @@ export const analizarPedidoFacturacionIA = (id, data = {}) =>
 export const getEmpresaIntegracionesStatus = () => apiFetch("/empresa/integraciones/status");
 
 // ── Config email (local) ──────────────────────────────
-export function getEmailConfig()  {
+export function getEmailConfig() {
   try {
-    if (typeof window !== "undefined" && window.__TMS_EMAIL_CFG && typeof window.__TMS_EMAIL_CFG === "object") {
-      return window.__TMS_EMAIL_CFG;
-    }
-    return JSON.parse(localStorage.getItem("tms_email_cfg")||"{}");
-  } catch { return {}; }
+    localStorage.removeItem('tms_email_cfg');
+    return window.__TMS_EMAIL_OWNER===getToken() ? {...window.__TMS_EMAIL_CFG,smtp_pass:''} : {};
+  } catch {return {};}
 }
 export function saveEmailConfig(d){
-  if (typeof window !== "undefined") window.__TMS_EMAIL_CFG = d || {};
-  try { localStorage.setItem("tms_email_cfg", JSON.stringify(d)); } catch {}
+  const safe={...d,smtp_pass:''};
+  if (typeof window !== "undefined") {window.__TMS_EMAIL_CFG = safe;window.__TMS_EMAIL_OWNER=getToken();}
+  // Mail settings belong to the authenticated tenant; never retain a shared
+  // browser copy (especially SMTP credentials) when users switch companies.
+  try { localStorage.removeItem("tms_email_cfg"); } catch {}
 }
 export const getEmailConfigBackend = () => apiFetch("/email/config");
 export const saveEmailConfigBackend = (data) => apiFetch("/email/config", { method:"PUT", body:data });
 export const getEmailLogBackend = () => apiFetch("/email/log");
+export const testCompanyEmail = destinatario => apiFetch('/email/test',{method:'POST',body:{destinatario}});
+export const getOrderMailbox = () => apiFetch('/email/order-mailbox');
+export const saveOrderMailbox = data => apiFetch('/email/order-mailbox',{method:'PUT',body:data});
+export const testOrderMailbox = () => apiFetch('/email/order-mailbox/test',{method:'POST',body:{}});
+export const syncOrderMailbox = () => apiFetch('/email/order-mailbox/sync',{method:'POST',body:{}});
 
 // ── Factura rectificativa ─────────────────────────────
 export const crearRectificativa = (data) => apiFetch("/facturas", { method:"POST", body:data });

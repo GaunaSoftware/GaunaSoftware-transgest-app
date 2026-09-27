@@ -87,6 +87,7 @@ export default function ToastProvider({ children }) {
         message: detail.message || "",
         confirmText: detail.confirmText || "Confirmar",
         cancelText: detail.cancelText || "Cancelar",
+        alternateText: detail.alternateText || "",
         tone: detail.tone || "default",
         resolve: typeof detail.resolve === "function" ? detail.resolve : () => {},
       });
@@ -243,6 +244,7 @@ export default function ToastProvider({ children }) {
               </div>
             )}
             <div style={{display:"flex",justifyContent:"flex-end",gap:10,flexWrap:"wrap"}}>
+              {confirmState.alternateText && <button type="button" onClick={()=>closeConfirm('alternate')} style={{border:'1px solid var(--border2)',borderRadius:8,padding:'8px 13px',background:'var(--bg3)',color:'var(--text)',fontWeight:800,cursor:'pointer'}}>{confirmState.alternateText}</button>}
               {confirmState.cancelText && (
                 <button
                   type="button"

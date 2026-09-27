@@ -14,6 +14,7 @@ export function confirmDialog(options = {}) {
         message: options.message || "",
         confirmText: options.confirmText || "Confirmar",
         cancelText: options.cancelText || "Cancelar",
+        alternateText: options.alternateText || "",
         tone: options.tone || "default",
         resolve,
       },

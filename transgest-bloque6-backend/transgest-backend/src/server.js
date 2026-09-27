@@ -1473,6 +1473,7 @@ async function startServer() {
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
     try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
     try { require('./services/mobilePush').startScheduler(); } catch { logger.warn('Notificaciones móviles sin iniciar'); }
+    try { require('./services/orderMailbox').startScheduler(); } catch { logger.warn('Recepción de pedidos por correo sin iniciar'); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
     require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
     require('./services/importDocuments').createImportDocuments().resume().catch(e => logger.warn('Documentos pendientes: ' + e.message));

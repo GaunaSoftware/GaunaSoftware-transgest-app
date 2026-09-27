@@ -1,3 +1,5 @@
+import OrderMailboxSettings from '../components/OrderMailboxSettings';
+import {testCompanyEmail} from '../services/api';
 import FiscalRepresentation from '../components/FiscalRepresentation';
 import DriverLocationsSettings from "../components/DriverLocationsSettings";
 import DataQuality from "../components/DataQuality";
@@ -100,8 +102,8 @@ export default function Empresa() {
   const [plantillaBusy, setPlantillaBusy] = useState(false);
   const esGerente = user?.rol === "gerente";
   // Sesion de superadmin (soporte) impersonando la empresa: solo entonces se
-  // muestran los ajustes tecnicos/sensibles (Tesoreria, Email, WhatsApp, VERIFACTU
-  // /SII). Para el gerente normal quedan ocultos: los gestiona el superadmin.
+  // muestran Tesorería, WhatsApp y ajustes fiscales de soporte. El correo de
+  // empresa lo prepara gerencia, con autorización adicional en el servidor.
   const esSuperadmin = (() => {
     try {
       const t = getToken();
@@ -501,14 +503,15 @@ export default function Empresa() {
   }
 
   async function guardarEmail() {
-    saveEmailConfig(emailCfg);
     try {
       const res = await saveEmailConfigBackend(emailCfg);
-      if (res?.config) setEmailCfg(p => ({ ...p, ...res.config, smtp_pass:"" }));
+      if (res?.config) {setEmailCfg(p => ({ ...p, ...res.config, smtp_pass:"" }));saveEmailConfig(res.config);}
       setSaved("email");
       setTimeout(() => setSaved(""), 3000);
+      return true;
     } catch(e) {
       notify("No se pudo guardar el SMTP en servidor: " + e.message, "error");
+      return false;
     }
   }
 
@@ -735,15 +738,8 @@ export default function Empresa() {
     setTesting(true);
     // Llamada al backend para envío de prueba
     try {
-        const res = await fetch("/api/v1/email/test", {
-          method:"POST",
-          headers:{ "Content-Type":"application/json", "Authorization":`Bearer ${getToken()}` },
-          body: JSON.stringify({ destinatario: testEmail }),
-        });
-      if (!res.ok) {
-        const data = await res.json().catch(()=>({}));
-        throw new Error(data.error || "No se pudo enviar el email de prueba");
-      }
+      if (!await guardarEmail()) return;
+      await testCompanyEmail(testEmail);
       notify("Email de prueba enviado a " + testEmail, "success");
       getEmailLogBackend().then(rows=>setEmailLog(Array.isArray(rows) ? rows : [])).catch(()=>{});
     } catch(e) {
@@ -759,7 +755,8 @@ export default function Empresa() {
     { id:"sostenibilidad", l:"Sostenibilidad / CO2" },
     { id:"factura", l:"Configuración facturas" },
     { id:"ubicaciones", l:"Puntos/Ubicaciones" },
-    ...(esSuperadmin ? [{ id:"email", l:"Email / Notificaciones" }, { id:"whatsapp", l:"WhatsApp" }] : []),
+    ...(esGerente ? [{ id:"email", l:"Correo / Bandeja IA" }] : []),
+    ...(esSuperadmin ? [{ id:"whatsapp", l:"WhatsApp" }] : []),
     { id:"trafico_cfg", l:"Config. Tráfico" },
     { id:"calidad_datos", l:"Calidad de datos" },
   ];
@@ -772,7 +769,7 @@ export default function Empresa() {
   useEffect(() => {
     if (!TABS.some(t => t.id === tab)) setTab("empresa");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, esSuperadmin]);
+  }, [tab, esSuperadmin, esGerente]);
 
   const activePalette = normalizePaletteConfig(empresa.paleta_colores);
 
@@ -2505,7 +2502,7 @@ export default function Empresa() {
           <div style={S.section}>
             <div style={S.secTitle}>Servidor SMTP</div>
             <div style={S.info}>
-              Configura el servidor de correo saliente. Si usas Gmail activa "Acceso de aplicaciones poco seguras" o usa una contraseña de aplicación.
+              Configura el correo saliente de la empresa. Usa las credenciales SMTP o la contraseña de aplicación autorizada por tu proveedor. La recepción se configura por separado más abajo.
             </div>
             <div style={S.grid2}>
               <div>
@@ -2518,7 +2515,6 @@ export default function Empresa() {
                   style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
                   <option value="587">587 - TLS (recomendado)</option>
                   <option value="465">465 - SSL</option>
-                  <option value="25">25 - Sin cifrado</option>
                 </select>
               </div>
               <div>
@@ -2534,8 +2530,12 @@ export default function Empresa() {
                 <input style={S.inp} value={emailCfg.smtp_from_nombre} onChange={fc("smtp_from_nombre")} placeholder="TransGest TMS" disabled={!esGerente}/>
               </div>
               <div>
-                <label style={S.lbl}>Email de respuesta (reply-to)</label>
+                <label style={S.lbl}>Email remitente</label>
                 <input type="email" style={S.inp} value={emailCfg.smtp_from} onChange={fc("smtp_from")} placeholder="info@empresa.com" disabled={!esGerente}/>
+              </div>
+              <div>
+                <label style={S.lbl}>Responder a (opcional)</label>
+                <input type="email" style={S.inp} value={emailCfg.reply_to||''} onChange={fc('reply_to')} placeholder="El mismo correo remitente" disabled={!esGerente}/>
               </div>
             </div>
             {esGerente && (
@@ -2549,26 +2549,7 @@ export default function Empresa() {
             )}
           </div>
 
-          <div style={S.section}>
-            <div style={S.secTitle}>Buzon IA para pedidos automaticos</div>
-            <div style={S.info}>
-              Indica el correo operativo al que los clientes enviaran pedidos para que la Bandeja IA los convierta en solicitudes. Usa una cuenta de la empresa o un alias reenviado a ella.
-            </div>
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
-              <input type="checkbox" id="ai_inbox_enabled" checked={!!emailCfg.ai_inbox_enabled} onChange={fc("ai_inbox_enabled")} disabled={!esGerente}
-                style={{ width:16, height:16, accentColor:"var(--accent-l)" }}/>
-              <label htmlFor="ai_inbox_enabled" style={{ fontSize:13, color:"var(--text2)", cursor:"pointer" }}>
-                Activar recepcion de pedidos por correo IA
-              </label>
-            </div>
-            <div>
-              <label style={S.lbl}>Correo IA de pedidos</label>
-              <input type="email" style={S.inp} value={emailCfg.ai_inbox_email || ""} onChange={fc("ai_inbox_email")} placeholder="pedidos@empresa.com" disabled={!esGerente}/>
-              <div style={{ fontSize:10, color:"var(--text5)", marginTop:3 }}>
-                La Bandeja IA usara este buzon como canal de entrada. Si no hay SMTP configurado, el sistema conserva la configuracion pero no podra enviar invitaciones ni avisos desde la empresa.
-              </div>
-            </div>
-          </div>
+          {esGerente && normalizePlan(user?.plan || getEmpresaPlanLocal())==='enterprise' && <OrderMailboxSettings/>}
 
           <div style={S.section}>
             <div style={S.secTitle}>Envío automático de facturas</div>

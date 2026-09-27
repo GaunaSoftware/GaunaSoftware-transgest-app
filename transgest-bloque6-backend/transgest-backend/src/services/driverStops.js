@@ -33,6 +33,13 @@ function mergeStop(order,all,patch,orderedStopIds) {
  const stops=driverStops(order),stop=stops.find(s=>s.id===patch.parada_id);
  if(!stop)reject('La parada ha cambiado. Actualiza el viaje antes de continuar.');
  const previous=stopData(stop,all,stops),next={...previous,...patch};delete next.paradas;delete next.parada_id;
+ // Snapshot traffic's weight before actual goods replace the order totals.
+ // Multi-load orders only have an evaluable baseline when the stop has a weight.
+ if(stop.tipo==='carga') {
+  const raw=Object.hasOwn(previous,'peso_planificado_kg')?previous.peso_planificado_kg:
+   stop.peso_kg??(!previous.mercancia_confirmada&&stops.filter(s=>s.tipo==='carga').length===1?order.peso_kg:null);
+  next.peso_planificado_kg=raw!=null&&raw!==''&&Number.isFinite(number(raw))&&number(raw)>0?number(raw):null;
+ }
  const active=orderedStopIds ? orderedStopIds.map(id=>stops.find(s=>s.id===id)).filter(Boolean).find(s=>!stopDone(s,stopData(s,all,stops))) : activeDriverStop(order,all);
  if(stopDone(stop,previous)) {
   const changed=Object.entries(patch).some(([key,value])=>!['parada_id','updated_at'].includes(key)&&!key.endsWith('_at')&&JSON.stringify(value)!==JSON.stringify(previous[key]));
@@ -48,6 +55,13 @@ function mergeStop(order,all,patch,orderedStopIds) {
   if(patch.mercancia_confirmada){
    if(!previous.carga_proceso)reject('Inicia primero la carga.');
    if(!String(next.mercancia_cargada||'').trim()||!(number(next.mercancia_palets)>0)||!(number(next.mercancia_peso_kg)>0))reject('Indica mercancía, bultos y peso válidos para esta carga.');
+   const delta=next.peso_planificado_kg==null?null:Math.round((number(next.mercancia_peso_kg)-next.peso_planificado_kg)*100)/100;
+   if(delta!=null&&Math.abs(delta)>0.01&&String(patch.peso_variacion_confirmacion||'').trim().toLowerCase()!=='confirmo') {
+    throw Object.assign(new Error('El peso difiere del indicado por tráfico. Escribe confirmo para registrar la variación.'),{status:409,code:'DRIVER_WEIGHT_CONFIRMATION_REQUIRED'});
+   }
+   next.peso_variacion_kg=delta;
+   next.peso_variacion_confirmacion=delta!=null&&Math.abs(delta)>0.01?'confirmo':null;
+   next.peso_variacion_confirmada_at=next.peso_variacion_confirmacion?new Date().toISOString():null;
   }
   if(patch.carga_ok&&!(next.carga_proceso&&next.mercancia_confirmada&&next.albaran_carga&&next.firma_cargador))reject('Confirma mercancía, albarán y firma de esta carga antes de finalizar.');
  } else {

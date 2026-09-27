@@ -98,7 +98,7 @@ function normalizeChoferPasos(value = {}) {
   ].forEach((key) => {
     if (source[key]) next[key] = String(source[key]);
   });
-  ["mercancia_cargada", "mercancia_palets", "mercancia_peso_kg", "mercancia_referencia"].forEach((key) => {
+  ["mercancia_cargada", "mercancia_palets", "mercancia_peso_kg", "mercancia_referencia", "peso_variacion_confirmacion"].forEach((key) => {
     if (source[key] !== undefined) next[key] = String(source[key] || "").trim();
   });
   Object.entries(source).forEach(([key, value]) => {

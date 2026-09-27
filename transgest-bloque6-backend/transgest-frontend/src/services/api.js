@@ -993,8 +993,11 @@ export const getControlHorarioResumen = (params={}) => apiFetch(`/control-horari
 export const getControlHorarioConfig = () => apiFetch("/control-horario/config", { silentSuccess:true, silentError:true });
 export const saveControlHorarioConfig = (data) => apiFetch("/control-horario/config", { method:"PUT", body:data });
 export const getTeletrabajoSolicitudes = (params={}) => apiFetch(`/control-horario/teletrabajo?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
-export const crearTeletrabajoSolicitud = (data) => apiFetch("/control-horario/teletrabajo", { method:"POST", body:data });
+export const crearTeletrabajoSolicitud = (data) => apiFetch("/control-horario/teletrabajo", { method:"POST", body:data, silentSuccess:true });
 export const resolverTeletrabajoSolicitud = (id, data) => apiFetch(`/control-horario/teletrabajo/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
+export const getOfficeVacationRequests = (params={}) => apiFetch(`/control-horario/vacaciones?${new URLSearchParams(params)}`, { silentSuccess:true });
+export const createOfficeVacationRequest = (data) => apiFetch("/control-horario/vacaciones", { method:"POST", body:data, silentSuccess:true });
+export const resolveOfficeVacationRequest = (id, data) => apiFetch(`/control-horario/vacaciones/${encodeURIComponent(id)}`, { method:"PATCH", body:data });
 export const getJornadaConfig = (params={}) => apiFetch(`/control-horario/jornada-config?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const saveJornadaConfig = (data) => apiFetch("/control-horario/jornada-config", { method:"PUT", body:data });
 export const editarControlHorario = (id, data) => apiFetch(`/control-horario/${id}`, { method:"PUT", body:data });

@@ -20,3 +20,13 @@ test('Go, Pro, Intelligence and migrated Control can import, without enabling AI
   expect(normalizePlan('control')).toBe('profesional');
   expect(planHasFeature('lite', 'ai')).toBe(false);
 });
+
+test('warehouse belongs to Operations once, and grouping never grants a hidden warehouse', () => {
+  const available = [{ items: [item('pedidos'), item('palets'), item('control_horario'), item('nominas'), item('hojas_ruta')] }];
+  const result = organizeSidebar(available, [], 'gerente')[0].items;
+  expect(result.find(x=>x.id==='nav_operaciones').children.map(x=>x.id)).toEqual(['pedidos','palets']);
+  expect(flattenNavigation(result).filter(x=>x.id==='palets')).toHaveLength(1);
+  expect(result.find(x=>x.id==='nav_gestion').children.map(x=>x.id)).toEqual(['control_horario']);
+  const restricted=organizeSidebar([{items:[item('pedidos')]}],[],'trafico');
+  expect(flattenNavigation(restricted[0].items).some(x=>x.id==='palets')).toBe(false);
+});

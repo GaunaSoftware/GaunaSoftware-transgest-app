@@ -57,6 +57,7 @@ async function main(){
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
+ app.use('/api/v1/control-horario',authMiddleware.authenticate,authMiddleware.requireModulePermission('control_horario'),req('./routes/control_horario'));
  app.use('/api/v1/importacion',req('./middleware/auth').authenticate,req('./middleware/auth').requireModulePermission('importacion'),req('./routes/importacion'));
  if(process.env.AUDIT_BROWSER==='1'){
   const browserBuild=path.resolve(root,'../transgest-frontend/build');
@@ -71,6 +72,7 @@ async function main(){
  try{
  const login=await call('Login gerente demo','POST','/auth/login',{email:'audit@example.invalid',password});token=login.token;
  if(!token)throw Error('No token on demo login');
+ evidence.officeAttendance=await require('./audit_office_attendance.cjs')({db,base,company,token,password});
  const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
  const driver=await call('Crear conductor','POST','/choferes',{nombre:'Conductor',apellidos:'de Pruebas',dni:'00000000T',telefono:'960000001',email:'driver@example.invalid',activo:true});
  const vehicle=await call('Crear tractora','POST','/vehiculos',{matricula:'1234AUD',tipo:'tractora',marca:'Prueba',modelo:'Auditoría',fecha_itv:'2027-09-16',km_actuales:10000,activo:true});

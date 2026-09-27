@@ -2,9 +2,15 @@ const express = require("express");
 const db = require("../services/db");
 const { authenticate } = require("../middleware/auth");
 const { crearNotificacion } = require("../services/notificaciones");
+const { userForCompany } = require("../services/companyMembership");
+const { OFFICE_ROLES, isOfficeEmployee, canManageAttendance, attendanceDay: dateOnly, attendancePeriod, schedule, fail } = require("../services/officeAttendancePolicy");
 
 const router = express.Router();
 router.use(authenticate);
+router.use((req, res, next) => {
+  if (!isOfficeEmployee(req.user)) return res.status(403).json({ error: "Control horario de oficina solo está disponible para personal interno autorizado." });
+  next();
+});
 
 let schemaReady = null;
 function ensureSchema() {
@@ -101,26 +107,24 @@ function empresaId(req) {
 }
 
 function canManage(req) {
-  return ["gerente", "contable", "administrativo"].includes(req.user?.rol);
+  return canManageAttendance(req.user);
 }
 
-function dateOnly(value = new Date()) {
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return dateOnly(new Date());
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+async function officeUser(req, id, client = db) {
+  const user = await userForCompany(id, empresaId(req), client);
+  if (!user || !isOfficeEmployee(user)) fail("Empleado no encontrado en esta empresa.", 404);
+  return user;
 }
 
 function minutesBetween(a, b) {
   const da = a ? new Date(a) : null;
   const dbb = b ? new Date(b) : null;
   if (!da || !dbb || Number.isNaN(da.getTime()) || Number.isNaN(dbb.getTime())) return 0;
-  return Math.max(0, Math.round((dbb - da) / 60000));
+  return Math.max(0, Math.floor((dbb - da) / 60000));
 }
 
 function numOrNull(value) {
+  if (value == null || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -177,10 +181,8 @@ async function notificarGerenciaUbicacion({ req, usuarioNombre, accion, gps, eva
   if (!evalGps?.fuera_radio) return;
   const empresaIdValue = empresaId(req);
   const { rows } = await db.query(
-    `SELECT id FROM usuarios
-      WHERE empresa_id=$1
-        AND rol='gerente'
-        AND activo IS DISTINCT FROM false`,
+    `SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id
+      WHERE m.empresa_id=$1 AND m.rol='gerente' AND m.activo=true AND u.activo=true`,
     [empresaIdValue]
   ).catch(() => ({ rows: [] }));
   const titulo = "Fichaje fuera de ubicacion";
@@ -209,8 +211,8 @@ async function notificarGerenciaUbicacion({ req, usuarioNombre, accion, gps, eva
 async function notificarGerentes(req, { tipo, titulo, mensaje, data = {} }) {
   const empresaIdValue = empresaId(req);
   const { rows } = await db.query(
-    `SELECT id FROM usuarios
-      WHERE empresa_id=$1 AND rol='gerente' AND activo IS DISTINCT FROM false`,
+    `SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id
+      WHERE m.empresa_id=$1 AND m.rol='gerente' AND m.activo=true AND u.activo=true`,
     [empresaIdValue]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(g => crearNotificacion({
@@ -232,7 +234,7 @@ async function getJornadaConfigForUsuario(req, usuarioId, client = db) {
       LIMIT 1`,
     [empresaId(req), usuarioId]
   ).catch(() => ({ rows: [] }));
-  return { pausa_min: Math.max(0, Number(rows[0]?.pausa_min || 60) || 60) };
+  return { pausa_min: Math.max(0, Number(rows[0]?.pausa_min ?? 60)) };
 }
 
 async function notificarGerenciaDescansoExcedido(req, jornada, accion) {
@@ -259,8 +261,7 @@ async function notificarGerenciaDescansoExcedido(req, jornada, accion) {
   });
 }
 
-function computeRow(row = {}) {
-  const now = new Date();
+function computeRow(row = {}, now = new Date()) {
   const pausaLive = row.pausa_inicio_at && !row.salida_at ? minutesBetween(row.pausa_inicio_at, now) : 0;
   const totalPausa = Number(row.pausa_total_min || 0) + pausaLive;
   const fin = row.salida_at || now;
@@ -281,7 +282,7 @@ async function logEvento(client, req, fichajeId, usuarioId, tipo, detalle = {}) 
     `INSERT INTO oficina_fichaje_eventos (empresa_id,fichaje_id,usuario_id,actor_id,tipo,detalle)
      VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
     [empresaId(req), fichajeId, usuarioId, req.user?.id || null, tipo, JSON.stringify(detalle || {})]
-  ).catch(() => {});
+  );
 }
 
 async function getToday(req, client = db) {
@@ -290,7 +291,9 @@ async function getToday(req, client = db) {
     `SELECT f.*, u.nombre AS usuario_nombre, u.email AS usuario_email, u.rol AS usuario_rol
        FROM oficina_fichajes f
        JOIN usuarios u ON u.id=f.usuario_id
-      WHERE f.empresa_id=$1 AND f.usuario_id=$2 AND f.fecha=$3::date`,
+      WHERE f.empresa_id=$1 AND f.usuario_id=$2
+        AND (f.fecha=$3::date OR (f.entrada_at IS NOT NULL AND f.salida_at IS NULL AND f.estado<>'cerrado'))
+      ORDER BY (f.salida_at IS NULL AND f.estado<>'cerrado') DESC, f.fecha DESC LIMIT 1 ${client === db ? "" : "FOR UPDATE OF f"}`,
     [empresaId(req), req.user.id, today]
   );
   return rows[0] ? computeRow(rows[0]) : null;
@@ -308,7 +311,7 @@ router.get("/config", async (req, res) => {
 
 router.put("/config", async (req, res) => {
   await ensureSchema();
-  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia/administracion puede configurar la ubicacion de control horario." });
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia puede configurar la ubicación de control horario." });
   const gps = normalizeGps(req.body || {});
   if (!gps) return res.status(400).json({ error: "Ubicacion GPS no valida." });
   const radio = Math.max(50, Math.round(Number(req.body?.radio_m || 250) || 250));
@@ -326,8 +329,7 @@ router.put("/config", async (req, res) => {
 router.get("/teletrabajo", async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
-  const desde = req.query.desde || dateOnly(new Date(Date.now() - 30 * 86400000));
-  const hasta = req.query.hasta || dateOnly(new Date(Date.now() + 45 * 86400000));
+  const { desde, hasta } = attendancePeriod({ ...req.query, hasta: req.query.hasta ?? new Date(Date.now() + 366 * 86400000) });
   const params = [eid, desde, hasta];
   const where = ["s.empresa_id=$1", "s.fecha BETWEEN $2 AND $3"];
   if (!canManage(req)) {
@@ -348,79 +350,136 @@ router.get("/teletrabajo", async (req, res) => {
 
 router.post("/teletrabajo", async (req, res) => {
   await ensureSchema();
-  const fecha = dateOnly(req.body?.fecha);
+  if (!req.body?.fecha) fail("Indica el día solicitado.");
+  const fecha = dateOnly(req.body.fecha);
   const motivo = String(req.body?.motivo || "").trim().slice(0, 500);
-  const { rows } = await db.query(
+  const out = await db.transaction(async client => {
+  await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`remote-work:${empresaId(req)}:${req.user.id}`]);
+  if ((await client.query("SELECT id FROM oficina_teletrabajo_solicitudes WHERE empresa_id=$1 AND usuario_id=$2 AND fecha=$3 AND estado IN ('pendiente','aprobada')", [empresaId(req), req.user.id, fecha])).rows.length) fail("Ya existe una solicitud pendiente o aprobada para ese día.", 409);
+  const { rows } = await client.query(
     `INSERT INTO oficina_teletrabajo_solicitudes (empresa_id,usuario_id,fecha,motivo)
      VALUES ($1,$2,$3,$4)
      RETURNING *`,
     [empresaId(req), req.user.id, fecha, motivo]
   );
+  await logEvento(client, req, null, req.user.id, "teletrabajo_solicitado", { solicitud: rows[0] });
+  return rows[0];
+  });
   await notificarGerentes(req, {
     tipo: "teletrabajo_solicitud",
     titulo: "Solicitud de teletrabajo",
     mensaje: `${req.user?.nombre || req.user?.email || "Empleado"} solicita teletrabajar el ${fecha}.`,
-    data: { solicitud_id: rows[0].id, fecha, usuario_id: req.user.id, dedupe_key: `teletrabajo:${rows[0].id}` },
+    data: { solicitud_id: out.id, fecha, usuario_id: req.user.id, dedupe_key: `teletrabajo:${out.id}` },
   });
-  res.status(201).json(rows[0]);
+  res.status(201).json(out);
 });
 
 router.patch("/teletrabajo/:id", async (req, res) => {
   await ensureSchema();
-  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia/administracion puede resolver teletrabajo." });
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia puede resolver teletrabajo." });
   const estado = String(req.body?.estado || "").toLowerCase();
   if (!["aprobada", "rechazada"].includes(estado)) return res.status(400).json({ error: "Estado no valido." });
   const comentario = String(req.body?.comentario || "").trim().slice(0, 500);
-  const { rows } = await db.query(
+  const out = await db.transaction(async client => {
+  const { rows } = await client.query(
     `UPDATE oficina_teletrabajo_solicitudes
         SET estado=$1, comentario_resolucion=$2, resuelto_por=$3, resuelto_at=NOW(), updated_at=NOW()
-      WHERE id=$4 AND empresa_id=$5
+      WHERE id=$4 AND empresa_id=$5 AND estado='pendiente'
       RETURNING *`,
     [estado, comentario, req.user.id, req.params.id, empresaId(req)]
   );
-  if (!rows[0]) return res.status(404).json({ error: "Solicitud no encontrada." });
+  if (!rows[0]) fail("Solicitud no encontrada o ya resuelta.", 404);
+  await logEvento(client, req, null, rows[0].usuario_id, "teletrabajo_resuelto", { solicitud: rows[0] });
+  return rows[0];
+  });
   await crearNotificacion({
     empresa_id: empresaId(req),
-    usuario_id: rows[0].usuario_id,
+    usuario_id: out.usuario_id,
     tipo: "teletrabajo_resuelta",
     titulo: estado === "aprobada" ? "Teletrabajo aprobado" : "Teletrabajo rechazado",
-    mensaje: `Tu solicitud de teletrabajo del ${dateOnly(rows[0].fecha)} ha sido ${estado}.`,
-    data: { solicitud_id: rows[0].id, estado, comentario },
+    mensaje: `Tu solicitud de teletrabajo del ${dateOnly(out.fecha)} ha sido ${estado}.`,
+    data: { solicitud_id: out.id, estado, comentario },
     created_by: req.user.id,
   }).catch(() => null);
-  res.json(rows[0]);
+  res.json(out);
+});
+
+router.get("/vacaciones", async (req, res) => {
+  await ensureSchema();
+  const { desde, hasta } = attendancePeriod({ ...req.query, hasta: req.query.hasta ?? new Date(Date.now() + 366 * 86400000) });
+  const { rows } = await db.query(
+    `SELECT s.*, u.nombre AS usuario_nombre, r.nombre AS resuelto_por_nombre
+       FROM oficina_vacaciones_solicitudes s JOIN usuarios u ON u.id=s.usuario_id
+       LEFT JOIN usuarios r ON r.id=s.resuelto_por
+      WHERE s.empresa_id=$1 AND s.hasta >= $2 AND s.desde <= $3
+        AND ($4::uuid IS NULL OR s.usuario_id=$4) ORDER BY s.desde DESC, s.created_at DESC`,
+    [empresaId(req), desde, hasta, canManage(req) ? (req.query.usuario_id || null) : req.user.id]
+  );
+  res.json(rows);
+});
+
+router.post("/vacaciones", async (req, res) => {
+  await ensureSchema();
+  if (!req.body?.desde || !req.body?.hasta) fail("Indica las fechas de vacaciones.");
+  const { desde, hasta } = attendancePeriod(req.body);
+  const motivo = String(req.body.motivo || "").trim().slice(0, 500);
+  const out = await db.transaction(async client => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`vacations:${empresaId(req)}:${req.user.id}`]);
+    const overlap = await client.query("SELECT id FROM oficina_vacaciones_solicitudes WHERE empresa_id=$1 AND usuario_id=$2 AND estado IN ('pendiente','aprobada') AND hasta >= $3 AND desde <= $4", [empresaId(req), req.user.id, desde, hasta]);
+    if (overlap.rows.length) fail("Ya existe una solicitud pendiente o aprobada para esas fechas.", 409);
+    const row = (await client.query("INSERT INTO oficina_vacaciones_solicitudes(empresa_id,usuario_id,desde,hasta,motivo) VALUES($1,$2,$3,$4,$5) RETURNING *", [empresaId(req), req.user.id, desde, hasta, motivo])).rows[0];
+    await logEvento(client, req, null, req.user.id, "vacaciones_solicitadas", { solicitud: row });
+    return row;
+  });
+  await notificarGerentes(req, { tipo: "vacaciones_oficina_solicitud", titulo: "Solicitud de vacaciones", mensaje: `${req.user.nombre || "Empleado"} solicita vacaciones del ${desde} al ${hasta}.`, data: { solicitud_id: out.id } });
+  res.status(201).json(out);
+});
+
+router.patch("/vacaciones/:id", async (req, res) => {
+  await ensureSchema();
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia puede resolver vacaciones." });
+  const estado = req.body?.estado;
+  if (!["aprobada", "rechazada"].includes(estado)) fail("Estado no válido.");
+  const comentario = String(req.body?.comentario || "").trim().slice(0, 500);
+  const out = await db.transaction(async client => {
+    const row = (await client.query(`UPDATE oficina_vacaciones_solicitudes SET estado=$1,comentario_resolucion=$2,resuelto_por=$3,resuelto_at=NOW(),updated_at=NOW()
+      WHERE id=$4 AND empresa_id=$5 AND estado='pendiente' RETURNING *`, [estado, comentario, req.user.id, req.params.id, empresaId(req)])).rows[0];
+    if (!row) fail("Solicitud no encontrada o ya resuelta.", 404);
+    await logEvento(client, req, null, row.usuario_id, "vacaciones_resueltas", { solicitud: row });
+    return row;
+  });
+  await crearNotificacion({ empresa_id: empresaId(req), usuario_id: out.usuario_id, tipo: "vacaciones_oficina_resuelta", titulo: "Solicitud de vacaciones resuelta", mensaje: `Tu solicitud del ${dateOnly(out.desde)} al ${dateOnly(out.hasta)} ha sido ${estado}.`, data: { solicitud_id: out.id, estado, comentario }, created_by: req.user.id }).catch(() => null);
+  res.json(out);
 });
 
 router.get("/jornada-config", async (req, res) => {
   await ensureSchema();
   const usuarioId = canManage(req) && req.query.usuario_id ? req.query.usuario_id : req.user.id;
+  const employee = await officeUser(req, usuarioId);
   const { rows } = await db.query(
-    `SELECT jc.*, u.nombre AS usuario_nombre
-       FROM usuarios u
-       LEFT JOIN oficina_jornada_config jc ON jc.usuario_id=u.id AND jc.empresa_id=u.empresa_id
-      WHERE u.empresa_id=$1 AND u.id=$2`,
+    `SELECT * FROM oficina_jornada_config WHERE empresa_id=$1 AND usuario_id=$2`,
     [empresaId(req), usuarioId]
   );
   const row = rows[0] || {};
   res.json({
     usuario_id: usuarioId,
-    usuario_nombre: row.usuario_nombre || "",
+    usuario_nombre: employee.nombre || "",
     hora_entrada: row.hora_entrada || "08:00",
     hora_salida: row.hora_salida || "17:00",
-    pausa_min: Number(row.pausa_min || 60),
+    pausa_min: Number(row.pausa_min ?? 60),
     extras_requieren_aprobacion: row.extras_requieren_aprobacion !== false,
   });
 });
 
 router.put("/jornada-config", async (req, res) => {
   await ensureSchema();
-  const usuarioId = canManage(req) && req.body?.usuario_id ? req.body.usuario_id : req.user.id;
-  const hhmm = (value, fallback) => (/^\d{2}:\d{2}$/.test(String(value || "")) ? String(value) : fallback);
-  const entrada = hhmm(req.body?.hora_entrada, "08:00");
-  const salida = hhmm(req.body?.hora_salida, "17:00");
-  const pausa = Math.max(0, Math.min(240, Math.round(Number(req.body?.pausa_min || 60) || 60)));
-  const extras = req.body?.extras_requieren_aprobacion !== false;
-  const { rows } = await db.query(
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia puede modificar la jornada prevista." });
+  const usuarioId = req.body?.usuario_id || req.user.id;
+  await officeUser(req, usuarioId);
+  const { entrada, salida, pausa, extras } = schedule(req.body);
+  const out = await db.transaction(async client => {
+  const before = (await client.query("SELECT * FROM oficina_jornada_config WHERE empresa_id=$1 AND usuario_id=$2 FOR UPDATE", [empresaId(req), usuarioId])).rows[0] || null;
+  const { rows } = await client.query(
     `INSERT INTO oficina_jornada_config
       (empresa_id,usuario_id,hora_entrada,hora_salida,pausa_min,extras_requieren_aprobacion,updated_by,updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
@@ -434,12 +493,16 @@ router.put("/jornada-config", async (req, res) => {
      RETURNING *`,
     [empresaId(req), usuarioId, entrada, salida, pausa, extras, req.user.id]
   );
-  res.json(rows[0]);
+  await logEvento(client, req, null, usuarioId, "jornada_config", { antes: before, despues: rows[0] });
+  return rows[0];
+  });
+  res.json(out);
 });
 
 router.post("/fichar", async (req, res) => {
   await ensureSchema();
   const accion = String(req.body?.accion || "").trim().toLowerCase();
+  if (!["entrada", "pausa", "reanudar", "salida"].includes(accion)) fail("Acción de fichaje no válida.");
   const modalidad = ["oficina", "teletrabajo", "visita", "otro"].includes(String(req.body?.modalidad || "").toLowerCase())
     ? String(req.body.modalidad).toLowerCase()
     : "oficina";
@@ -448,6 +511,8 @@ router.post("/fichar", async (req, res) => {
   const gps = normalizeGps(req.body?.ubicacion_gps || req.body?.gps || req.body || {});
 
   const out = await db.transaction(async (client) => {
+    // Serialize each employee, including the first entry when no row exists yet.
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`attendance:${empresaId(req)}:${req.user.id}`]);
     const cfg = await getControlConfig(empresaId(req), client);
     const evalGps = evalUbicacion(gps, cfg);
     let jornada = await getToday(req, client);
@@ -466,6 +531,10 @@ router.post("/fichar", async (req, res) => {
       if (jornada?.entrada_at && !jornada?.salida_at) {
         return jornada;
       }
+      if (modalidad === "teletrabajo") {
+        const approved = await client.query("SELECT id FROM oficina_teletrabajo_solicitudes WHERE empresa_id=$1 AND usuario_id=$2 AND fecha=$3 AND estado='aprobada' LIMIT 1", [empresaId(req), req.user.id, dateOnly()]);
+        if (!approved.rows.length) fail("Solicita teletrabajo y espera la aprobación de gerencia antes de fichar en esta modalidad.", 409);
+      }
       const { rows } = await client.query(
         `INSERT INTO oficina_fichajes (empresa_id,usuario_id,fecha,entrada_at,estado,modalidad,ubicacion,notas,entrada_lat,entrada_lng,entrada_accuracy_m,ubicacion_estado,ubicacion_distancia_m)
          VALUES ($1,$2,$11::date,NOW(),'abierto',$3,$4,$5,$6,$7,$8,$9,$10)
@@ -482,12 +551,16 @@ router.post("/fichar", async (req, res) => {
                ubicacion_distancia_m=EXCLUDED.ubicacion_distancia_m,
                updated_at=NOW()
          RETURNING *`,
-        [empresaId(req), req.user.id, modalidad, ubicacion, notas, gps?.lat || null, gps?.lng || null, gps?.accuracy_m || null, evalGps.estado, evalGps.distancia_m, dateOnly()]
+        [empresaId(req), req.user.id, modalidad, ubicacion, notas, gps?.lat ?? null, gps?.lng ?? null, gps?.accuracy_m ?? null, evalGps.estado, evalGps.distancia_m, dateOnly()]
       );
       await logEvento(client, req, rows[0].id, req.user.id, "entrada", { modalidad, ubicacion, gps, ubicacion_estado: evalGps.estado, distancia_m: evalGps.distancia_m });
       return computeRow(rows[0]);
     }
 
+    if (jornada.salida_at || jornada.estado === "cerrado") {
+      if (accion === "salida") return jornada; // Retries cannot rewrite the original clock-out.
+      fail("La jornada ya está cerrada.", 409);
+    }
     if (accion === "pausa") {
       if (jornada.salida_at) throw Object.assign(new Error("La jornada ya esta cerrada."), { status: 409 });
       if (jornada.pausa_inicio_at) throw Object.assign(new Error("Ya hay una pausa activa."), { status: 409 });
@@ -530,7 +603,7 @@ router.post("/fichar", async (req, res) => {
                 ubicacion_distancia_m=$9,
                 updated_at=NOW()
           WHERE id=$3 AND empresa_id=$4 RETURNING *`,
-        [extra, notas, jornada.id, empresaId(req), gps?.lat || null, gps?.lng || null, gps?.accuracy_m || null, evalGps.estado, evalGps.distancia_m]
+        [extra, notas, jornada.id, empresaId(req), gps?.lat ?? null, gps?.lng ?? null, gps?.accuracy_m ?? null, evalGps.estado, evalGps.distancia_m]
       );
       await logEvento(client, req, jornada.id, req.user.id, "salida", { pausa_extra_min: extra, gps, ubicacion_estado: evalGps.estado, distancia_m: evalGps.distancia_m });
       return computeRow(rows[0]);
@@ -559,8 +632,7 @@ router.get("/", async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
   const usuarioId = canManage(req) ? (req.query.usuario_id || null) : req.user.id;
-  const desde = req.query.desde || dateOnly(new Date(Date.now() - 30 * 86400000));
-  const hasta = req.query.hasta || dateOnly(new Date());
+  const { desde, hasta } = attendancePeriod(req.query);
   const params = [eid, desde, hasta];
   const where = ["f.empresa_id=$1", "f.fecha BETWEEN $2 AND $3"];
   if (usuarioId) {
@@ -575,111 +647,112 @@ router.get("/", async (req, res) => {
       ORDER BY f.fecha DESC, u.nombre ASC`,
     params
   );
-  res.json(rows.map(computeRow));
+  res.json(rows.map(row => computeRow(row)));
 });
 
 router.get("/resumen", async (req, res) => {
   await ensureSchema();
   const eid = empresaId(req);
-  const desde = req.query.desde || dateOnly(new Date(Date.now() - 30 * 86400000));
-  const hasta = req.query.hasta || dateOnly(new Date());
-  const params = [eid, desde, hasta];
-  const userFilter = canManage(req) ? req.query.usuario_id : req.user.id;
-  let extra = "";
-  if (userFilter) {
-    params.push(userFilter);
-    extra = ` AND f.usuario_id=$${params.length}`;
-  }
-  const [resumen, porUsuario, abiertos] = await Promise.all([
+  const { desde, hasta } = attendancePeriod(req.query);
+  const userFilter = canManage(req) ? (req.query.usuario_id || null) : req.user.id;
+  const [records, users, abiertos] = await Promise.all([
     db.query(
-      `SELECT COUNT(*)::int AS jornadas,
-              COUNT(*) FILTER (WHERE estado<>'cerrado')::int AS abiertas,
-              COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(salida_at,NOW())-entrada_at))/60 - pausa_total_min),0)::int AS trabajado_min,
-              COALESCE(SUM(pausa_total_min),0)::int AS pausa_min
-         FROM oficina_fichajes f
-        WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3${extra}`,
-      params
+      `SELECT * FROM oficina_fichajes f
+        WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3 AND ($4::uuid IS NULL OR f.usuario_id=$4)`,
+      [eid, desde, hasta, userFilter]
     ),
     db.query(
-      `SELECT u.id AS usuario_id, u.nombre, u.email, u.rol,
-              COUNT(f.id)::int AS jornadas,
-              COUNT(f.id) FILTER (WHERE f.estado<>'cerrado')::int AS abiertas,
-              COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(f.salida_at,NOW())-f.entrada_at))/60 - f.pausa_total_min),0)::int AS trabajado_min
-         FROM usuarios u
-         LEFT JOIN oficina_fichajes f ON f.usuario_id=u.id AND f.empresa_id=u.empresa_id AND f.fecha BETWEEN $2 AND $3
-        WHERE u.empresa_id=$1 AND u.rol NOT IN ('chofer','cliente','cliente_portal') AND u.activo IS DISTINCT FROM false
-        GROUP BY u.id,u.nombre,u.email,u.rol
-        ORDER BY u.nombre`,
-      [eid, desde, hasta]
+      `SELECT u.id AS usuario_id, u.nombre, u.email, m.rol
+         FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id
+        WHERE m.empresa_id=$1 AND m.activo=true AND u.activo=true AND m.rol=ANY($3::text[])
+          AND ($2::uuid IS NULL OR u.id=$2) ORDER BY u.nombre`,
+      [eid, userFilter, OFFICE_ROLES]
     ),
     db.query(
       `SELECT f.*, u.nombre AS usuario_nombre, u.email AS usuario_email, u.rol AS usuario_rol
          FROM oficina_fichajes f JOIN usuarios u ON u.id=f.usuario_id
-        WHERE f.empresa_id=$1 AND f.estado<>'cerrado'
+        WHERE f.empresa_id=$1 AND f.estado<>'cerrado' AND ($2::uuid IS NULL OR f.usuario_id=$2)
         ORDER BY f.entrada_at ASC`,
-      [eid]
+      [eid, userFilter]
     ),
   ]);
+  const rows = records.rows.map(row => computeRow(row));
+  const total = list => list.reduce((sum, row) => ({
+    jornadas: sum.jornadas + 1, abiertas: sum.abiertas + Number(row.abierto),
+    trabajado_min: sum.trabajado_min + row.trabajado_min, pausa_min: sum.pausa_min + row.pausa_total_live_min,
+  }), { jornadas: 0, abiertas: 0, trabajado_min: 0, pausa_min: 0 });
   res.json({
     desde,
     hasta,
-    resumen: resumen.rows[0] || {},
-    por_usuario: porUsuario.rows,
-    abiertas: abiertos.rows.map(computeRow),
+    resumen: total(rows),
+    por_usuario: users.rows.map(user => ({ ...user, ...total(rows.filter(row => row.usuario_id === user.usuario_id)) })),
+    abiertas: abiertos.rows.map(row => computeRow(row)),
   });
 });
 
 router.put("/:id", async (req, res) => {
   await ensureSchema();
-  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia/administracion puede ajustar fichajes." });
+  if (!canManage(req)) return res.status(403).json({ error: "Solo gerencia puede ajustar fichajes." });
   const motivo = String(req.body?.motivo || "").trim();
   if (!motivo) return res.status(400).json({ error: "Indica un motivo de ajuste." });
   const fields = [];
   const values = [];
   const add = (field, value) => {
     if (value === undefined) return;
-    values.push(value || null);
+    values.push(value === "" ? null : value);
     fields.push(`${field}=$${values.length}`);
   };
   add("entrada_at", req.body.entrada_at);
   add("salida_at", req.body.salida_at);
-  if (req.body.pausa_total_min !== undefined) add("pausa_total_min", Math.max(0, Math.round(Number(req.body.pausa_total_min) || 0)));
+  if (req.body.pausa_total_min !== undefined) {
+    const pause = numOrNull(req.body.pausa_total_min);
+    if (!Number.isInteger(pause) || pause < 0) fail("Indica una pausa válida en minutos.");
+    add("pausa_total_min", pause);
+  }
   add("modalidad", req.body.modalidad);
   add("ubicacion", req.body.ubicacion);
   add("notas", req.body.notas);
   if (!fields.length) return res.status(400).json({ error: "No hay campos para ajustar." });
   values.push(motivo, req.user.id, req.params.id, empresaId(req));
-  const { rows } = await db.query(
+  const out = await db.transaction(async client => {
+  const before = (await client.query("SELECT * FROM oficina_fichajes WHERE id=$1 AND empresa_id=$2 FOR UPDATE", [req.params.id, empresaId(req)])).rows[0];
+  if (!before) fail("Fichaje no encontrado.", 404);
+  const start = req.body.entrada_at === undefined ? before.entrada_at : req.body.entrada_at;
+  const end = req.body.salida_at === undefined ? before.salida_at : req.body.salida_at;
+  if (!start || !Number.isFinite(new Date(start).getTime()) || (end && (!Number.isFinite(new Date(end).getTime()) || new Date(end) < new Date(start)))) fail("Revisa las horas de entrada y salida.");
+  const { rows } = await client.query(
     `UPDATE oficina_fichajes
         SET ${fields.join(", ")}, ajuste_motivo=$${values.length - 3}, ajustado_por=$${values.length - 2}, updated_at=NOW()
       WHERE id=$${values.length - 1} AND empresa_id=$${values.length}
       RETURNING *`,
     values
   );
-  if (!rows[0]) return res.status(404).json({ error: "Fichaje no encontrado." });
-  await db.transaction((client) => logEvento(client, req, rows[0].id, rows[0].usuario_id, "ajuste_manual", { motivo }));
-  res.json(computeRow(rows[0]));
+  const adjusted = (await client.query("UPDATE oficina_fichajes SET estado=CASE WHEN salida_at IS NULL THEN 'abierto' ELSE 'cerrado' END, pausa_inicio_at=CASE WHEN salida_at IS NULL THEN pausa_inicio_at ELSE NULL END WHERE id=$1 AND empresa_id=$2 RETURNING *", [rows[0].id, empresaId(req)])).rows[0];
+  await logEvento(client, req, adjusted.id, adjusted.usuario_id, "ajuste_manual", { motivo, antes: before, despues: adjusted });
+  return adjusted;
+  });
+  res.json(computeRow(out));
 });
 
 router.get("/export.csv", async (req, res) => {
   await ensureSchema();
   if (!canManage(req)) return res.status(403).json({ error: "No tienes permisos para exportar control horario." });
-  const desde = req.query.desde || dateOnly(new Date(Date.now() - 30 * 86400000));
-  const hasta = req.query.hasta || dateOnly(new Date());
+  const { desde, hasta } = attendancePeriod(req.query);
   const { rows } = await db.query(
-    `SELECT f.fecha, u.nombre, u.email, u.rol, f.entrada_at, f.salida_at, f.pausa_total_min,
-            GREATEST(0, ROUND(EXTRACT(EPOCH FROM (COALESCE(f.salida_at,NOW())-f.entrada_at))/60 - f.pausa_total_min))::int AS trabajado_min,
-            f.estado, f.modalidad, f.ubicacion, f.ubicacion_estado, f.ubicacion_distancia_m,
-            f.entrada_lat, f.entrada_lng, f.salida_lat, f.salida_lng, f.notas
+    `SELECT f.*, u.nombre, u.email, u.rol
        FROM oficina_fichajes f JOIN usuarios u ON u.id=f.usuario_id
       WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3
       ORDER BY f.fecha DESC, u.nombre`,
     [empresaId(req), desde, hasta]
   );
-  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const esc = (v) => {
+    const raw = v instanceof Date ? v.toISOString() : String(v ?? "");
+    const safe = /^[=+@\-\t\r\n]/.test(raw) ? "'" + raw : raw;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
   const csv = [
     ["fecha","usuario","email","rol","entrada","salida","pausa_min","trabajado_min","estado","modalidad","ubicacion","ubicacion_estado","distancia_base_m","entrada_lat","entrada_lng","salida_lat","salida_lng","notas"].map(esc).join(";"),
-    ...rows.map(r => [r.fecha, r.nombre, r.email, r.rol, r.entrada_at, r.salida_at, r.pausa_total_min, r.trabajado_min, r.estado, r.modalidad, r.ubicacion, r.ubicacion_estado, r.ubicacion_distancia_m, r.entrada_lat, r.entrada_lng, r.salida_lat, r.salida_lng, r.notas].map(esc).join(";")),
+    ...rows.map(row => computeRow(row)).map(r => [r.fecha, r.nombre, r.email, r.rol, r.entrada_at, r.salida_at, r.pausa_total_live_min, r.trabajado_min, r.estado, r.modalidad, r.ubicacion, r.ubicacion_estado, r.ubicacion_distancia_m, r.entrada_lat, r.entrada_lng, r.salida_lat, r.salida_lng, r.notas].map(esc).join(";")),
   ].join("\n");
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="control-horario-${desde}-${hasta}.csv"`);

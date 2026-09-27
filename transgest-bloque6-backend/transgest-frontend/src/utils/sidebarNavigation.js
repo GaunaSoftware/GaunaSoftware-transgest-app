@@ -25,7 +25,7 @@ export function organizeSidebar(modules, financeTabs, role) {
     take("dashboard", "Dashboard"), take("agenda", "Agenda"), take("ia", "TransGest Intelligence"),
     group("nav_operaciones", "Operaciones", "pedidos", [
       take("pedidos", "Pedidos / tráfico"), take("gestion_trafico", "Mesa de tráfico"), take("control_tower", "Control Tower"),
-      take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"),
+      take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"), take("palets", "Gestión de almacén"),
     ]),
     group("nav_clientes", "Clientes", "clientes", [
       take("clientes", "Clientes"),
@@ -48,7 +48,6 @@ export function organizeSidebar(modules, financeTabs, role) {
       take("empresa", "Mi empresa"), take("usuarios", "Usuarios y roles"),
       take("importacion", "Importación"), take("mi_cuenta", "Mi cuenta"),
     ]),
-    take("palets", "Gestión de almacén"),
   ].filter(Boolean);
   // Keep any future/unknown accessible leaves reachable without duplicating routes.
   const remaining = all.filter(item => !item.children?.length && !used.has(item.id));

@@ -870,6 +870,10 @@ export const crearAgendaAvisoOperativoColaborador = (alert, data = {}) =>
 export const ignorarAvisoOperativoColaborador = (alert, motivo = "") =>
   apiFetch("/notificaciones/operativas/colaboradores/ignorar", { method:"POST", body:{ alert, motivo } });
 export const getActividad = (params={}) => apiFetch(`/actividad?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
+export const getUserRelease = id => apiFetch(`/user-experience/releases/${encodeURIComponent(id)}`, { silentError:true, silentSuccess:true });
+export const dismissUserRelease = id => apiFetch(`/user-experience/releases/${encodeURIComponent(id)}/dismiss`, { method:'POST', body:{}, silentSuccess:true, silentError:true });
+export const getAgendaPreferences = () => apiFetch('/user-experience/agenda', { silentError:true, silentSuccess:true });
+export const saveAgendaPreferences = notice_types => apiFetch('/user-experience/agenda', {method:'PUT',body:{notice_types},silentError:true,silentSuccess:true});
 export const getAgendaUsuarios = () => apiFetch("/agenda/usuarios", { silentSuccess:true, silentError:true });
 export const getAgendaEventos = (params={}) => apiFetch(`/agenda?${new URLSearchParams(params)}`, { silentSuccess:true, silentError:true });
 export const crearAgendaEvento = (data) => apiFetch("/agenda", { method:"POST", body:data });

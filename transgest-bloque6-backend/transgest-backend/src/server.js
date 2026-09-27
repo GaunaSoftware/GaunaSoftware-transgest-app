@@ -326,6 +326,7 @@ safeUse(`${api}/pedidos`,       authenticate, requireModulePermission("pedidos")
 safeUse(`${api}/adr`,           authenticate, requireModulePermission("pedidos"), adrRoutes);
 safeUse(`${api}/email`,         authenticate, requireModulePermission("empresa"), emailRoutes);
 safeUse(`${api}/registro`,      registroRoutes);
+safeUse(`${api}/user-experience`, authenticate, require("./routes/userExperience"));
 safeUse(`${api}/mi-cuenta`,     authenticate, requireModulePermission("mi_cuenta"), miCuentaRoutes);
   safeUse(`${api}/api-keys`,      authenticate, requireRole("gerente"), apiKeysPublicRoutes);
   safeUse(`${api}/integration`,   authenticate, integrationRoutes);

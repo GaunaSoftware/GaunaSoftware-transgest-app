@@ -413,7 +413,7 @@ export default function Avisos() {
       </div>
       {/* Main tabs */}
       <div className="notices-tabs" role="tablist" aria-label="Secciones de avisos">
-        {[["vencimientos","Todos los vencimientos"],...(notices.data?.categories || []).map(c=>[c.key,c.label]),["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configuración"]].map(([id,l])=>(
+        {[["vencimientos","Todos los avisos"],...(puedeVer("pedidos") ? [["operativa","Tráfico y pedidos"]] : []),...(notices.data?.categories || []).map(c=>[c.key,c.label]),["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configuración"]].map(([id,l])=>(
           <button key={id} role="tab" aria-selected={tab===id} onClick={()=>setTab(id)}
             style={{padding:"7px 16px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent-l)":"transparent"}`,
                     background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer",
@@ -422,7 +422,7 @@ export default function Avisos() {
           </button>
         ))}
       </div>
-      {['vencimientos','facturas','vehiculos','choferes','plataformas'].includes(tab) && <NoticeList data={notices.data} category={tab==='vencimientos'?'':tab} error={notices.error} reload={notices.reload}/>}
+      {['vencimientos','operativa','facturas','vehiculos','choferes','plataformas'].includes(tab) && <NoticeList data={notices.data} category={tab==='vencimientos'?'':tab} error={notices.error} reload={notices.reload}/>}
       {!!loadErrors.length && <div className="notices-error" role="alert">No se pudieron consultar: {loadErrors.join(', ')}. Los resultados pueden estar incompletos.</div>}
       {tab === 'internos' && notificationError && <div className="notices-error" role="alert">{notificationError} Pulsa Actualizar para reintentar.</div>}
 

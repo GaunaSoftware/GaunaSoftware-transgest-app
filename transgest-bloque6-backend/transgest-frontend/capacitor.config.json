@@ -30,6 +30,17 @@
         "camera",
         "photos"
       ]
+    },
+    "CapacitorUpdater": {
+      "autoUpdate": false,
+      "updateUrl": "",
+      "statsUrl": "",
+      "channelUrl": "",
+      "autoDeleteFailed": false,
+      "autoDeletePrevious": true,
+      "appReadyTimeout": 20000,
+      "resetWhenUpdate": true,
+      "allowModifyUrl": false
     }
   }
 }

@@ -13,6 +13,8 @@ async function run() {
   try {
     await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY,cfg_alertas jsonb DEFAULT '[]');
       CREATE TABLE usuarios(id uuid PRIMARY KEY,empresa_id uuid);
+      CREATE TABLE agenda_eventos(id uuid,empresa_id uuid,titulo text,descripcion text,fecha_inicio timestamptz,explanation text,recommended_action text,pedido_id uuid,source_type text,metadata jsonb,resolved_at timestamptz,estado text,visibilidad text,creado_por uuid,asignado_a uuid);
+      CREATE TABLE pedidos(id uuid,empresa_id uuid,numero text);
       CREATE TABLE clientes(id uuid,empresa_id uuid,nombre text);
       CREATE TABLE facturas(id uuid,empresa_id uuid,cliente_id uuid,numero text,fecha date,fecha_vencimiento date,total numeric,estado text,origen_producto text);
       CREATE TABLE vehiculos(id uuid PRIMARY KEY,empresa_id uuid,matricula text,fecha_itv date,fecha_seguro date,plataformas jsonb);

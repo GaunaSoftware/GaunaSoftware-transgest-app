@@ -82,6 +82,7 @@ async function readNotices(db, user, { now = new Date(), category = '', text = '
       }
     });
   }
+  await read('operativa', async () => { items.push(...await require('./agendaNotices').readOperationalNotices(db,user)); });
   const filtered = items.filter(i => (!category || i.category === category) && (!text || `${i.title} ${i.entity || ''}`.toLocaleLowerCase('es').includes(text.toLocaleLowerCase('es')))).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   return { items: filtered, total: filtered.length, categories: cfg, errors, coverage: errors.length ? 'parcial' : 'completo', date: today, updated_at: new Date().toISOString() };
 }

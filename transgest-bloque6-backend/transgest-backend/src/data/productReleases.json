@@ -1,0 +1,14 @@
+[
+  {
+    "id": "2026-09-agenda-updates",
+    "date": "2026-09-27",
+    "title": "Tu día, mejor organizado",
+    "intro": "Estas son las novedades que encontrarás al entrar en TransGest.",
+    "items": [
+      { "title": "Una agenda para organizarte", "text": "Reúne tus citas, llamadas y tareas. Gerencia puede asignar tareas al equipo. Las incidencias ya no llenan el calendario automáticamente.", "module": "agenda" },
+      { "title": "Tú eliges qué avisos ver", "text": "En Configurar agenda puedes añadir los avisos que te interesan, según tus permisos. Cada aviso permite abrir el pedido, factura o ficha para resolverlo.", "module": "agenda" },
+      { "title": "Novedades que recuerdan tu elección", "text": "Si eliges No mostrar más esta actualización, recordaremos tu elección en tu cuenta, también cuando uses otro dispositivo." },
+      { "title": "La app se mantiene al día", "text": "La nueva versión de Android prepara las mejoras en segundo plano y las aplica al volver a abrirla. Si tienes una versión anterior, instala primero el nuevo APK. Los cambios nativos seguirán requiriendo una nueva instalación.", "roles": ["chofer"] }
+    ]
+  }
+]

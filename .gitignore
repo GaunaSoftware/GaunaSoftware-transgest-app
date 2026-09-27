@@ -61,3 +61,6 @@ Extensions/
 
 visual-check/
 **/visual-check/
+
+# Generated deployment identity (prepared before build/start/test)
+**/src/data/appBuild.json

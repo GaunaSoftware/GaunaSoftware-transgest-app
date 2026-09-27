@@ -10013,6 +10013,8 @@ router.post('/:id/tracking/eta',async(req,res)=>{
     if(state.position&&state.next_stop?.coordinates){
       const route=await require('./geocoding').trackingRoute(empresaId,[state.position,state.next_stop.coordinates]);
       state.eta=tracking.roadEta(state,route);
+      if(state.eta.value)await db.query(`INSERT INTO tracking_eta_snapshot(empresa_id,pedido_id,position_recorded_at,eta) VALUES($1,$2,$3,$4)
+        ON CONFLICT(empresa_id,pedido_id) DO UPDATE SET position_recorded_at=EXCLUDED.position_recorded_at,eta=EXCLUDED.eta,created_at=now()`,[empresaId,order.id,state.last_recorded_at,JSON.stringify(state.eta)]);
     }
     res.setHeader('Cache-Control','private, no-store');res.json(state);
   }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}

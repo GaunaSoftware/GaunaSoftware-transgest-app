@@ -49,4 +49,11 @@ async function read(tx,company,id){
  if(current){if(docs.hash(Buffer.from(current.pdf))!==current.pdf_hash)throw fail('Fallo de integridad del albarán.',500);return current;}
  return (await tx.query('SELECT * FROM planner_albaranes WHERE id=$1 AND empresa_id=$2',[id,company])).rows[0];
 }
-module.exports={delivery,prepareDeca,closedLoad,read};
+async function latest(tx,company,orderId){
+ const row=(await tx.query(`SELECT a.id FROM planner_preparaciones prep JOIN LATERAL (
+  SELECT id,version FROM planner_albaran_versiones WHERE empresa_id=prep.empresa_id AND preparacion_id=prep.id
+  UNION ALL SELECT id,0 AS version FROM planner_albaranes WHERE empresa_id=prep.empresa_id AND preparacion_id=prep.id
+  ORDER BY version DESC LIMIT 1) a ON true WHERE prep.pedido_id=$1 AND prep.empresa_id=$2 AND prep.estado<>'cancelada'`,[orderId,company])).rows[0];
+ return row?read(tx,company,row.id):null;
+}
+module.exports={delivery,prepareDeca,closedLoad,read,latest};

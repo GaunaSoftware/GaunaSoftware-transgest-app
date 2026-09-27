@@ -1325,7 +1325,7 @@ function ModalColaborador({ editando, onClose, onSaved }) {
 
 // ── Principal ─────────────────────────────────────────────────────────────
 export default function Colaboradores() {
-  const { puedeEditar } = useAuth();
+  const { puedeEditar, puedeVer, user } = useAuth();
   const canEdit = puedeEditar("colaboradores");
   const [colaboradores, setColaboradores] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -1452,6 +1452,7 @@ export default function Colaboradores() {
               {revisandoLiquidaciones ? "Revisando..." : "Revisar liquidaciones"}
             </button>
           )}
+          {['gerente','trafico','administrativo'].includes(user?.rol)&&puedeVer('pedidos')&&<a href="/transportistas/conexiones" style={{...S.btn,color:'var(--text)',border:'1px solid var(--border)'}}>TransGest Network</a>}
           {canEdit && <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditando(null);setModal(true);}}>+ Nuevo colaborador</button>}
         </div>
       </div>

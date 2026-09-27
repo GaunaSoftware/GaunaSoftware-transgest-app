@@ -27,7 +27,7 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 8 Bandeja IA | Implementada y verificada localmente; correo externo condicionado | `TMS_EVOLUTION_PHASE8_AI_INBOX.md`: originales privados, deduplicación, estados, revisión humana y creación idempotente; falta configurar/verificar dominio y proveedor inbound real |
 | 9 Importador 2.0 | Existente contrastado y defectos corregidos | `TMS_EVOLUTION_PHASE9_IMPORTER.md`: 15 formatos, lotes, históricos aislados, originales privados, revisión de identidad modificada, respuestas obsoletas y ensayo completo de 10.001 filas |
 | 10 Planner | 10A y base operativa 10B implementadas y verificadas; automatismos avanzados delimitados | `TMS_EVOLUTION_PHASE10_PLANNER.md`: carretillero, documentos, salida/facturación, ASN, calidad, inventario, picking/packing, SSCC y llegada. Límites de automatismos y dispositivo en el documento |
-| 11 Network | Pendiente de contrastar e implementar | Intercambio expresamente autorizado y aislamiento de empresas |
+| 11 Network | Implementada y verificada localmente | `TMS_EVOLUTION_PHASE11_NETWORK.md`: consentimiento bilateral por alcance, identidad vigente, revocación, precio acordado, referencias y documentos inmutables. Integraciones exteriores y facturas compartidas delimitadas |
 | 12 Facturas proveedor e IA | Pendiente de contrastar e implementar | Revisión y conciliación; no pagos automáticos |
 | 13 Facturación operativa | Pendiente de contrastar e implementar | Reutilizar reglas de revisión, facturación parcial y línea de combustible |
 | 14 Fiscalidad | Pendiente de contrastar y validar | Reutilizar integración fiscal; pruebas reales dependientes del proveedor |

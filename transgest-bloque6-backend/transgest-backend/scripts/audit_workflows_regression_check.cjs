@@ -47,6 +47,7 @@ async function main(){
  app.use('/api/v1/informes',authMiddleware.authenticate,authMiddleware.requireModulePermission('informes'),authMiddleware.requirePlanFeature('kpis_avanzados'),req('./routes/informes'));
  // Exercise the compatibility router separately; production registers it after pedidos.
  app.use('/api/v1/legacy-pedidos',boundaries.pedidosAuthUnlessPublic,req('./routes/carta_porte'));
+ app.use('/api/v1/supplier-app',req('./middleware/auth').authenticate,req('./routes/supplier_app'));
  app.use('/api/v1/transport-exchange',req('./middleware/auth').authenticate,req('./routes/planner_exchange'));
  app.use('/api/v1/soporte',req('./middleware/auth').authenticate,req('./routes/soporte').createSupportRouter());
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
@@ -242,21 +243,7 @@ async function main(){
   const sharedOrder=await call('Planner: encargo a empresa externa','POST','/pedidos',{cliente_id:client.id,colaborador_id:supplier,precio_colaborador:350,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-18',importe:500});
   if(!sharedOrder.id)throw Error('No se pudo crear el encargo compartido');
   const invitation=crypto.randomBytes(32).toString('hex');await db.query("INSERT INTO colaborador_pedido_tokens(pedido_id,empresa_id,accion,token_hash,expires_at) VALUES($1,$2,'confirmar',$3,NOW()+INTERVAL '1 hour')",[sharedOrder.id,company,crypto.createHash('sha256').update(invitation).digest('hex')]);
-  const exchange=req('./services/plannerExchange'),assertPlanner=require('assert/strict');
-  await assertPlanner.rejects(exchange.connect(db,company,user,{token:invitation,cliente_id:client.id}),/no está disponible/);
-  const connected=await exchange.connect(db,transportCompany,user,{token:invitation,cliente_id:transportClient});
-  const repeated=await exchange.connect(db,transportCompany,user,{token:invitation,cliente_id:transportClient});assertPlanner.equal(repeated.viaje_id,connected.viaje_id);
-  const transported=(await db.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2',[connected.viaje_id,transportCompany])).rows[0];assertPlanner.equal(Number(transported.importe),350,'carrier sees its agreed sale price, not shipper sale price');assertPlanner.equal(transported.cliente_id,transportClient);
-  await db.query("UPDATE pedidos SET estado='en_curso',updated_at=NOW()+INTERVAL '1 second' WHERE id=$1",[transported.id]);
-  await db.query("INSERT INTO pedido_docs(empresa_id,pedido_id,tipo,nombre,file_base64,file_mime) VALUES($1,$2,'pod','Entrega.pdf',$3,'application/pdf')",[transportCompany,transported.id,pdf.file_base64]);
-  await exchange.synchronize(db,company);await exchange.synchronize(db,transportCompany);
-  assertPlanner.equal((await db.query('SELECT estado FROM pedidos WHERE id=$1',[sharedOrder.id])).rows[0].estado,'en_curso');
-  assertPlanner.equal((await db.query("SELECT COUNT(*)::int AS n FROM pedido_docs WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='pod'",[company,sharedOrder.id])).rows[0].n,1,'shared POD is idempotent');
-  await db.query('UPDATE planner_conexiones_transporte SET activo=false WHERE transportista_empresa_id=$1',[transportCompany]);
-  await db.query("UPDATE pedidos SET estado='entregado',updated_at=NOW()+INTERVAL '2 seconds' WHERE id=$1",[transported.id]);await exchange.synchronize(db,company);
-  assertPlanner.equal((await db.query('SELECT estado FROM pedidos WHERE id=$1',[sharedOrder.id])).rows[0].estado,'en_curso','disconnected supplier cannot update shipper');
-  await call('Planner: albaran de otro transportista bloqueado','GET','/transport-exchange/viajes/'+transported.id+'/albaran');
-  evidence.plannerExchange={singleTrip:true,ownTenant:true,agreedPrice:true,stateSync:true,podSync:true,revoke:true};
+  evidence.plannerExchange=await require('./audit_network.cjs')({db,company,user,base,token,password,transportCompany,transportClient,sharedOrder,legacyToken:invitation,pdf,stock});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});

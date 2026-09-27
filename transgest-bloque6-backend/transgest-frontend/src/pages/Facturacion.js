@@ -2403,7 +2403,7 @@ export default function Facturacion() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      notify("XML fiscal descargado.", "success");
+      notify("XML interno descargado. No es un fichero oficial para presentar a AEAT.", "success");
     } catch (e) {
       notify(e.message || "No se pudo descargar el XML fiscal.", "error");
     }
@@ -2429,7 +2429,7 @@ export default function Facturacion() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      notify("Lote XML fiscal descargado.", "success");
+      notify("Lote XML interno descargado. No es un fichero oficial para presentar a AEAT.", "success");
     } catch (e) {
       notify(e.message || "No se pudo descargar el lote XML fiscal.", "error");
     }
@@ -2895,7 +2895,7 @@ export default function Facturacion() {
             </button>
           )}
           <button onClick={descargarLoteXmlFiscal} style={{...S.btn,background:"rgba(59,130,246,.08)",color:"#2563eb",border:"1px solid rgba(59,130,246,.24)"}}>
-            Descargar lote XML
+            Descargar XML interno (no AEAT)
           </button>
           {[
             ["Aceptados", fiscalInfo.aceptados, "var(--green)"],
@@ -2934,7 +2934,7 @@ export default function Facturacion() {
                     Ver factura
                   </button>
                   <button onClick={()=>descargarXmlFiscal(item.factura_id)} style={{...S.btn,background:"rgba(148,163,184,.12)",color:"var(--text3)",border:"1px solid rgba(148,163,184,.25)",padding:"5px 8px"}}>
-                    XML
+                    XML interno
                   </button>
                   {canEdit && item.estado_envio !== "aceptado" && (
                     <button

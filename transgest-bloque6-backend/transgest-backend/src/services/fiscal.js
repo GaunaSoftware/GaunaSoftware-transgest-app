@@ -555,7 +555,7 @@ async function getEmpresaFiscalQueueSummary(empresaId, client = db) {
          SELECT DISTINCT ON (factura_id, sistema)
                 q.id, q.factura_id, q.sistema, q.entorno, q.estado, q.intento, q.error, q.next_retry_at, q.created_at,
                 CASE
-                  WHEN q.estado = 'error' AND (q.next_retry_at IS NULL OR q.next_retry_at <= NOW()) THEN true
+                  WHEN q.estado = 'error' AND q.retryable AND (q.next_retry_at IS NULL OR q.next_retry_at <= NOW()) THEN true
                   WHEN q.estado IN ('pendiente','procesando') AND q.created_at <= NOW() - INTERVAL '30 minutes' THEN true
                   ELSE false
                 END AS atascado,
@@ -662,7 +662,7 @@ async function testFiscalConnection(configInput = {}) {
         status,
         transport,
         message: transport.ok
-          ? "Canal VERIFACTU listo y Verifacti responde."
+          ? "API Verifacti verificada. La aceptación fiscal se consulta por factura."
           : transport.message || "No se pudo validar la conexion con Verifacti.",
       };
     }
@@ -725,6 +725,8 @@ function buildFacturaFiscalPayload({ factura, cliente, empresaPerfil, lineas, co
       numero: factura.numero,
       factura_id: factura.id,
       rectificativa_de: factura.factura_original_numero || null,
+      tipo_rectificativa: factura.tipo_rectificacion === 'diferencia' ? 'I' : factura.tipo_rectificacion === 'sustitucion' ? 'S' : null,
+      original: factura.fiscal_original || null,
     },
     emisor: {
       nombre: config.razon_social_declarante || empresaPerfil.razon_social || "",
@@ -894,7 +896,7 @@ async function appendFiscalEvent(client, recordId, facturaId, empresaId, eventTy
   );
 }
 
-async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = null, force = false, client = db }) {
+async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = null, client = db }) {
   const config = await getEmpresaFiscalConfig(empresaId, client);
   if (config.modo === "ninguno") {
     return { skipped: true, reason: "fiscal_mode_disabled" };
@@ -942,7 +944,7 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
   );
   const existing = existingRows[0] || null;
 
-  if (existing && !force) {
+  if (existing) {
     return { skipped: true, reason: "already_exists", record: existing };
   }
 
@@ -955,6 +957,9 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
     [empresaId, facturaId, config.modo]
   );
   const previousHash = previousRows[0]?.huella || null;
+  if (factura.factura_original_id) {
+    factura.fiscal_original = (await client.query('SELECT numero,serie,fecha,base_imponible,cuota_iva FROM facturas WHERE id=$1 AND empresa_id=$2', [factura.factura_original_id, empresaId])).rows[0] || null;
+  }
   const { payload, huella, qrText } = buildFacturaFiscalPayload({
     factura,
     cliente,
@@ -968,18 +973,7 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
     `INSERT INTO factura_registros_fiscales
       (empresa_id, factura_id, modo, entorno, estado_registro, estado_envio, hash_anterior, huella, qr_text, payload, created_by, updated_by)
      VALUES ($1,$2,$3,$4,'alta','pendiente',$5,$6,$7,$8::jsonb,$9,$9)
-     ON CONFLICT (factura_id) DO UPDATE
-       SET modo=EXCLUDED.modo,
-           entorno=EXCLUDED.entorno,
-           estado_registro='alta',
-           estado_envio=CASE WHEN factura_registros_fiscales.estado_envio='aceptado' THEN 'aceptado' ELSE 'pendiente' END,
-           hash_anterior=EXCLUDED.hash_anterior,
-           huella=EXCLUDED.huella,
-           qr_text=EXCLUDED.qr_text,
-           payload=EXCLUDED.payload,
-           ultimo_error=NULL,
-           updated_by=EXCLUDED.updated_by,
-           updated_at=NOW()
+     ON CONFLICT (factura_id) DO UPDATE SET factura_id=EXCLUDED.factura_id
      RETURNING *`,
     [empresaId, facturaId, config.modo, config.entorno, previousHash, huella, qrText, JSON.stringify(payload), actorUserId]
   );
@@ -1001,7 +995,7 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
         `INSERT INTO factura_envios_fiscales
           (registro_id, factura_id, empresa_id, sistema, entorno, estado, payload, next_retry_at)
          VALUES ($1,$2,$3,$4,$5,'pendiente',$6::jsonb,NOW())`,
-        [record.id, facturaId, empresaId, config.modo, config.entorno, JSON.stringify(payload)]
+        [record.id, facturaId, empresaId, config.modo, config.entorno, JSON.stringify(record.payload)]
       );
       await appendFiscalEvent(client, record.id, facturaId, empresaId, "queue.created", {
         modo: config.modo,

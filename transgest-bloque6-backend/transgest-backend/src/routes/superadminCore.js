@@ -1,3 +1,4 @@
+const { requeueFiscalRecord } = require("../services/fiscalRequeue");
 const express  = require("express");
 const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
@@ -2480,29 +2481,14 @@ router.post("/integraciones/fiscal/:empresaId/facturas/:facturaId/requeue", supe
       });
       if (fiscalResult.skipped && fiscalResult.reason !== "already_exists") return fiscalResult;
       const record = fiscalResult.record;
-      const { rows: pendingRows } = await client.query(
-        `SELECT id
-           FROM factura_envios_fiscales
-          WHERE factura_id=$1 AND empresa_id=$2 AND estado IN ('pendiente','procesando')
-          ORDER BY created_at DESC
-          LIMIT 1`,
-        [facturaId, empresaId]
-      );
-      if (!pendingRows[0]) {
-        await client.query(
-          `INSERT INTO factura_envios_fiscales
-            (registro_id, factura_id, empresa_id, sistema, entorno, estado, payload, next_retry_at)
-           VALUES ($1,$2,$3,$4,$5,'pendiente',$6::jsonb,NOW())`,
-          [record.id, facturaId, empresaId, record.modo, record.entorno, JSON.stringify(record.payload || {})]
-        );
-      }
+      const requeued = await requeueFiscalRecord(client, record);
       await client.query(
         `INSERT INTO factura_eventos_fiscales
           (registro_id, factura_id, empresa_id, evento_tipo, detalle)
          VALUES ($1,$2,$3,'queue.superadmin_requeue',$4::jsonb)`,
-        [record.id, facturaId, empresaId, JSON.stringify({ superadmin_id: req.superadmin?.id || null, superadmin_email: req.superadmin?.email || "", reused_pending: !!pendingRows[0] })]
+        [record.id, facturaId, empresaId, JSON.stringify({ superadmin_id: req.superadmin?.id || null, superadmin_email: req.superadmin?.email || "", reused_pending: requeued.reused_pending })]
       );
-      return { ok: true, record, reused_pending: !!pendingRows[0] };
+      return { ok: true, record, reused_pending: requeued.reused_pending };
     });
 
     await audit(req, "integracion.fiscal.requeue", { factura_id: facturaId, numero: factura.rows[0].numero }, empresaId);

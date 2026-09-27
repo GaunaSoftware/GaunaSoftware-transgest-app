@@ -1,3 +1,4 @@
+const { requeueFiscalRecord } = require("../services/fiscalRequeue");
 const express = require("express");
 const { body, param, query, validationResult } = require("express-validator");
 const db      = require("../services/db");
@@ -531,7 +532,7 @@ router.get("/fiscal/resumen", GERENTE_O_CONTABLE, async (req, res) => {
          SELECT DISTINCT ON (factura_id, sistema)
                 q.id, q.factura_id, q.sistema, q.entorno, q.estado, q.intento, q.error, q.next_retry_at, q.created_at,
                 CASE
-                  WHEN q.estado = 'error' AND (q.next_retry_at IS NULL OR q.next_retry_at <= NOW()) THEN true
+                  WHEN q.estado = 'error' AND q.retryable AND (q.next_retry_at IS NULL OR q.next_retry_at <= NOW()) THEN true
                   WHEN q.estado IN ('pendiente','procesando') AND q.created_at <= NOW() - INTERVAL '30 minutes' THEN true
                   ELSE false
                 END AS atascado,
@@ -587,15 +588,12 @@ router.post("/fiscal/procesar-cola", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const limit = Math.max(1, Math.min(Number(req.body?.limit) || 10, 50));
   const facturaId = req.body?.factura_id || null;
-  const result = await db.transaction((client) =>
-    processPendingFiscalQueue({
+  const result = await processPendingFiscalQueue({
       empresaId,
       actorUserId: req.user.id,
       limit,
       facturaId,
-      client,
-    })
-  );
+    });
   res.json(result);
 });
 
@@ -1019,27 +1017,12 @@ router.post("/:id/fiscal/requeue", SOLO_GERENTE, async (req, res) => {
       return fiscalResult;
     }
     const record = fiscalResult.record;
-    const { rows: pendingRows } = await client.query(
-      `SELECT id
-         FROM factura_envios_fiscales
-        WHERE factura_id=$1 AND empresa_id=$2 AND estado IN ('pendiente','procesando')
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [req.params.id, empresaId]
-    );
-    if (!pendingRows[0]) {
-      await client.query(
-        `INSERT INTO factura_envios_fiscales
-          (registro_id, factura_id, empresa_id, sistema, entorno, estado, payload, next_retry_at)
-         VALUES ($1,$2,$3,$4,$5,'pendiente',$6::jsonb,NOW())`,
-        [record.id, req.params.id, empresaId, record.modo, record.entorno, JSON.stringify(record.payload || {})]
-      );
-    }
+    const requeued = await requeueFiscalRecord(client, record);
     await client.query(
       `INSERT INTO factura_eventos_fiscales
         (registro_id, factura_id, empresa_id, evento_tipo, detalle)
        VALUES ($1,$2,$3,'queue.manual_requeue',$4::jsonb)`,
-      [record.id, req.params.id, empresaId, JSON.stringify({ usuario_id: req.user.id, reused_pending: !!pendingRows[0] })]
+      [record.id, req.params.id, empresaId, JSON.stringify({ usuario_id: req.user.id, reused_pending: requeued.reused_pending })]
     );
     return { ok: true, record };
   });

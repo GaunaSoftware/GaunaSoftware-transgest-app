@@ -27,14 +27,11 @@ async function runCycle() {
     for (const empresa of empresas) {
       try {
         cycleSummary.empresas += 1;
-        const result = await db.transaction((client) =>
-          processPendingFiscalQueue({
+        const result = await processPendingFiscalQueue({
             empresaId: empresa.id,
             actorUserId: null,
             limit: 25,
-            client,
-          })
-        );
+          });
         cycleSummary.accepted += Number(result.accepted || 0);
         cycleSummary.errors += Number(result.errors || 0);
         cycleSummary.processed += Number(result.total || 0);

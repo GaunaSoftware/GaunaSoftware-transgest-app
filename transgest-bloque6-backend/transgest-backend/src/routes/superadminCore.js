@@ -840,6 +840,10 @@ function superAuth(req, res, next) {
 }
 
 router.use("/soporte", superAuth, require("./soporte").createSupportRouter(true));
+const integrationRegistry = require('../services/integrationRegistry');
+router.get('/integraciones/registry', superAuth, async(req,res,next)=>{try{res.json(await integrationRegistry.list(req.query.empresa_id||null));}catch(e){next(e);}});
+router.put('/integraciones/registry/:provider', superAuth, async(req,res,next)=>{try{res.json(await integrationRegistry.change(req.body.empresa_id||null,req.params.provider,req.body,req.superadmin.id||req.superadmin.email));}catch(e){next(e);}});
+
 
 // ── POST /superadmin/login ────────────────────────────────────────────────
 async function ensurePasswordResetRequestsSchema() {
@@ -2111,6 +2115,7 @@ router.put("/integraciones/global/:provider", superAuth, async (req, res, next) 
     const apiKey = String(req.body?.api_key || "").trim();
     if (!apiKey) return res.status(400).json({ error: "Clave API obligatoria" });
     await setGlobalApiKey(provider, apiKey);
+    await integrationRegistry.invalidate(null,provider);
     await audit(req, "integracion.global.actualizada", { provider });
     res.json({ ok: true, status: await publicStatusForProvider(provider) });
   } catch (e) { next(e); }
@@ -2121,6 +2126,7 @@ router.delete("/integraciones/global/:provider", superAuth, async (req, res, nex
     const provider = String(req.params.provider || "").toLowerCase();
     if (!API_PROVIDERS.includes(provider)) return res.status(400).json({ error: "Proveedor no valido" });
     await deleteGlobalApiKey(provider);
+    await integrationRegistry.invalidate(null,provider);
     await audit(req, "integracion.global.eliminada", { provider });
     res.json({ ok: true, status: await publicStatusForProvider(provider) });
   } catch (e) { next(e); }
@@ -2144,6 +2150,7 @@ router.post("/integraciones/global/:provider/test", superAuth, async (req, res, 
       providerTest = await testGpsProviderConnection(provider, resolved.key, null);
     }
     const ok = Boolean(resolved.key) && Boolean(providerTest?.ok);
+    await integrationRegistry.recordProbe(null,provider,{ok,environment:"production",apiVersion:provider==="here"?"v8":provider==="ors"?"v2":"unspecified",reference:ok?"Prueba real de conexión completada":"Fallo de conexión; consultar diagnóstico del proveedor"});
     await audit(req, "integracion.global.test", {
       provider,
       ok,
@@ -2169,6 +2176,7 @@ router.put("/integraciones/empresas/:empresaId/:provider", superAuth, async (req
     const exists = await db.query("SELECT id FROM empresas WHERE id=$1", [req.params.empresaId]);
     if (!exists.rows[0]) return res.status(404).json({ error: "Empresa no encontrada" });
     await setCompanyApiConfig(req.params.empresaId, provider, req.body || {}, req.superadmin?.id || null);
+    await integrationRegistry.invalidate(req.params.empresaId,provider);
     await audit(req, "integracion.empresa.actualizada", {
       provider,
       use_global: req.body?.use_global,
@@ -2225,6 +2233,7 @@ router.post("/integraciones/empresas/:empresaId/:provider/test", superAuth, asyn
       message: e.message || "No se pudo comprobar el proveedor.",
     })) : null;
     const finalOk = ok && (providerTest ? providerTest.ok : true);
+    await integrationRegistry.recordProbe(req.params.empresaId,provider,{ok:finalOk,environment:"production",apiVersion:provider==="here"?"v8":provider==="ors"?"v2":"unspecified",reference:finalOk?"Prueba real de conexión completada":"Fallo de conexión; consultar diagnóstico del proveedor"});
     if (providerTest && !providerTest.ok) reasons.push(providerTest.message || "prueba del proveedor fallida");
 
     await audit(req, "integracion.empresa.test", { provider, ok: finalOk, source: resolved.source, reasons }, req.params.empresaId);
@@ -2265,6 +2274,7 @@ router.post("/integraciones/fiscal/:empresaId/test", superAuth, async (req, res,
     fiscalConfig.verifactu.software_id = appMeta.fiscal_software_id;
     const test = await testFiscalConnection(fiscalConfig);
     const savedConfig = await saveEmpresaFiscalTestResult(empresa.id, test);
+    await integrationRegistry.recordProbe(empresa.id,fiscalConfig.verifactu?.proveedor==='verifacti'?'verifacti':'aeat',{ok:test.ok===true && fiscalConfig.verifactu?.proveedor==='verifacti',environment:fiscalConfig.entorno==='produccion'?'production':'sandbox',apiVersion:'unversioned',reference:test.ok?"Prueba fiscal completada; revisar entorno y respuesta":"Prueba fiscal fallida"});
     await audit(req, "integracion.fiscal.test", {
       ok: test.ok,
       mode: test.mode,
@@ -2604,6 +2614,7 @@ router.put("/config/ia-key", superAuth, async (req, res) => {
   }
   try {
     await setGlobalApiKey(provider, api_key);
+    await integrationRegistry.invalidate(null,provider);
     await setGlobalSetting("ia_provider", provider);
     await setGlobalSetting("ia_base_url", String(req.body?.base_url || "").trim());
     await setGlobalSetting("ia_model", normalizeAiModel(provider, req.body?.model));
@@ -2617,6 +2628,7 @@ router.delete("/config/ia-key", superAuth, async (req, res) => {
   try {
     const provider = normalizeAiProvider(req.body?.provider || await getGlobalSetting("ia_provider", "anthropic"));
     await deleteGlobalApiKey(provider);
+    await integrationRegistry.invalidate(null,provider);
     return res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

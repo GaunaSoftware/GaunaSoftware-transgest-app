@@ -486,6 +486,12 @@ async function saveEmpresaFiscalConfig(empresaId, input, client = db) {
       RETURNING configuracion->'facturacion_fiscal' AS facturacion_fiscal`,
     [JSON.stringify(encryptFiscalSecrets(config)), empresaId]
   );
+  const signature = value => JSON.stringify([value.modo,value.entorno,value.verifactu,value.sii]);
+  if (signature(current)!==signature(config)) {
+    const registry=require('./integrationRegistry');
+    await registry.invalidate(empresaId,'verifacti',client);
+    await registry.invalidate(empresaId,'aeat',client);
+  }
   return normalizeFiscalConfig(rows[0]?.facturacion_fiscal || config);
 }
 

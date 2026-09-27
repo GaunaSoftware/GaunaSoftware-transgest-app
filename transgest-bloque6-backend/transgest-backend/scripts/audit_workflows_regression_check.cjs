@@ -40,6 +40,7 @@ async function main(){
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.get('/api/v1/producto',(request,res)=>res.json({producto:'tms'}));
  app.use('/api/v1/auth',auth);
+ app.use('/api/v1/superadmin',req('./routes/superadminCore'));
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
  app.use('/api/v1/planner-loading',authMiddleware.authenticate,req('./routes/planner_loading'));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
@@ -250,6 +251,7 @@ async function main(){
   evidence.invoiceWorkflow=await require('./audit_invoice_workflow.cjs')({db,base,company,user,token,password});
   evidence.fiscalDelivery=await require('./audit_fiscal_delivery.cjs')({db,company,user});
   evidence.physicalBi=await require('./audit_physical_bi.cjs')({db,base,company,token});
+  evidence.integrationRegistry=await require('./audit_integration_registry.cjs')({db,base,company,token});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});

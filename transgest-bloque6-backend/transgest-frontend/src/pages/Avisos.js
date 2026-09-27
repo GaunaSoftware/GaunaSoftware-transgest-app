@@ -1,3 +1,7 @@
+import { useAuth } from "../context/AuthContext";
+import { NoticeList, NoticeSettings, useNoticeCenter } from "../components/NoticeCenter";
+import { openNotice } from "../services/noticeNavigation";
+import { PageHeader, Button } from "../ui";
 import "./workspace/workspace.css";
 import "./Avisos.css";
 import { useState, useEffect, useMemo } from "react";
@@ -125,11 +129,14 @@ function dedupeNotificaciones(rows = []) {
 }
 
 export default function Avisos() {
+  const { user, puedeVer, puedeEditar } = useAuth();
+  const notices = useNoticeCenter();
+  const canConfigure = user?.rol === "gerente" && puedeEditar("avisos");
   const [docs,      setDocs]      = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [filtro,    setFiltro]    = useState("todos");
   const [q,         setQ]         = useState("");
-  const [tab,       setTab]       = useState("documentos");
+  const [tab,       setTab]       = useState("vencimientos");
   const [vehiculos, setVehiculos] = useState([]);
   const [choferes,  setChoferes]  = useState([]);
   const [avisosCfg, setAvisosCfg] = useState([]);
@@ -147,11 +154,11 @@ export default function Avisos() {
     const failed=[];
     const unavailable=(name,fallback)=>{failed.push(name);return fallback;};
     Promise.all([
-      getTodosLosDocs().catch(()=>unavailable('Documentos',[])),
-      getVehiculos().catch(()=>unavailable('Vehículos',[])),
-      getChoferes().catch(()=>unavailable('Conductores',[])),
-      getTallerEstado().catch(()=>unavailable('Taller',null)),
-      getEmpresaConfig().catch(()=>unavailable('Configuración',null)),
+      (puedeVer('documentos') ? getTodosLosDocs() : Promise.resolve([])).catch(()=>unavailable('Documentos',[])),
+      (puedeVer('vehiculos') ? getVehiculos() : Promise.resolve([])).catch(()=>unavailable('Vehículos',[])),
+      (puedeVer('choferes') ? getChoferes() : Promise.resolve([])).catch(()=>unavailable('Conductores',[])),
+      (puedeVer('taller') ? getTallerEstado() : Promise.resolve(null)).catch(()=>unavailable('Taller',null)),
+      (puedeVer('empresa') ? getEmpresaConfig() : Promise.resolve(null)).catch(()=>unavailable('Configuración',null)),
       cargarNotificaciones(),
     ])
       .then(([docsData, vehiculosData, choferesData, tallerData, empresaCfg]) => {
@@ -163,7 +170,7 @@ export default function Avisos() {
         setLoadErrors(failed);
       })
       .finally(()=>setLoading(false));
-  }, []);
+  }, [puedeVer]);
 
   function cargarNotificaciones() {
     return getNotificaciones(80)
@@ -195,6 +202,7 @@ export default function Avisos() {
   }
 
   function abrirDestino(n) {
+    if (n?.data?.factura_id || n?.data?.vehiculo_id || n?.data?.chofer_id) { openNotice(n); return; }
     if (n?.data?.colaborador_id && (n?.data?.view === "colaboradores" || String(n?.tipo || "").startsWith("colaborador_"))) {
       setRuntimeFocus("tms_colaborador_focus", {
         source: "avisos",
@@ -229,7 +237,7 @@ export default function Avisos() {
     const id = entidadId(d);
     if (tipo === "vehiculo" && id) {
       setRuntimeFocus("tms_vehiculos_focus", {
-        source: "avisos_documentos",
+        open: true, section: "documentacion", source: "avisos_documentos",
         vehiculo_id: id,
         title: d.tipo_doc,
         description: `Documento ${d.tipo_doc || ""} ${d.s?.texto || ""}`.trim(),
@@ -239,7 +247,7 @@ export default function Avisos() {
     }
     if (tipo === "chofer" && id) {
       setRuntimeFocus("tms_choferes_focus", {
-        source: "avisos_documentos",
+        open: true, section: "documentacion", source: "avisos_documentos",
         chofer_id: id,
         title: d.tipo_doc,
         description: `Documento ${d.tipo_doc || ""} ${d.s?.texto || ""}`.trim(),
@@ -395,7 +403,7 @@ export default function Avisos() {
   return (
     <div className="tg-responsive-page modern-workspace notices-workspace" style={S.page}>
       <div className="notices-heading">
-        <div><div style={S.title}>Avisos y vencimientos</div><p>Documentación de vehículos, conductores y plataformas; mantenimiento y avisos internos.</p></div>
+        <PageHeader title="Avisos y vencimientos" description="Actúa sobre cada factura, vehículo o conductor desde su aviso." actions={<Button onClick={()=>setTab('config')}>Configurar avisos</Button>}/>
         {tab === "documentos" && (
           <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
             <button onClick={verInformeCaducidades} style={{...S.btn,borderColor:"var(--border2)",background:"var(--bg4)",color:"var(--text2)"}}>Ver informe</button>
@@ -405,7 +413,7 @@ export default function Avisos() {
       </div>
       {/* Main tabs */}
       <div className="notices-tabs" role="tablist" aria-label="Secciones de avisos">
-        {[["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configurar avisos"]].map(([id,l])=>(
+        {[["vencimientos","Todos los vencimientos"],...(notices.data?.categories || []).map(c=>[c.key,c.label]),["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configuración"]].map(([id,l])=>(
           <button key={id} role="tab" aria-selected={tab===id} onClick={()=>setTab(id)}
             style={{padding:"7px 16px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent-l)":"transparent"}`,
                     background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer",
@@ -414,6 +422,7 @@ export default function Avisos() {
           </button>
         ))}
       </div>
+      {['vencimientos','facturas','vehiculos','choferes','plataformas'].includes(tab) && <NoticeList data={notices.data} category={tab==='vencimientos'?'':tab} error={notices.error} reload={notices.reload}/>}
       {!!loadErrors.length && <div className="notices-error" role="alert">No se pudieron consultar: {loadErrors.join(', ')}. Los resultados pueden estar incompletos.</div>}
       {tab === 'internos' && notificationError && <div className="notices-error" role="alert">{notificationError} Pulsa Actualizar para reintentar.</div>}
 
@@ -449,7 +458,7 @@ export default function Avisos() {
                       </span>
                     </div>
                     <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45}}>{n.mensaje}</div>
-                    {(n.data?.exception_key || n.data?.pedido_id || n.data?.colaborador_id) && (
+                    {(n.data?.exception_key || n.data?.pedido_id || n.data?.colaborador_id || n.data?.factura_id || n.data?.vehiculo_id || n.data?.chofer_id) && (
                       <div style={{fontSize:11,color:"var(--text5)",marginTop:6,fontFamily:"'JetBrains Mono',monospace"}}>
                         {n.data.exception_key || n.data.pedido_numero || n.data.pedido_id || n.data.colaborador_nombre || n.data.colaborador_id}
                       </div>
@@ -495,7 +504,7 @@ export default function Avisos() {
       {/* Leyenda semáforo */}
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
         <span style={{fontSize:11,color:"var(--text4)"}}>
-          Mostrando documento vigente por entidad y tipo. Historicos ocultos: {docs.length - docsVigentes.length}.
+          Mostrando documento vigente por entidad y tipo. Historicos ocultos: {Math.max(0, docsAll.length - docsVigentes.length)}.
         </span>
         {docsDuplicados.length > 0 && (
           <button onClick={()=>setFiltro("duplicados")} style={{...S.btn,borderColor:"rgba(245,158,11,.35)",background:"rgba(245,158,11,.10)",color:"#f59e0b"}}>
@@ -647,13 +656,13 @@ export default function Avisos() {
 
       {/* ── Config avisos ── */}
       {tab==="config" && (
-        <div>
+        <div><NoticeSettings data={notices.data} canEdit={canConfigure} onSaved={notices.reload}/><h2>Mantenimiento periódico</h2>
           <div style={{background:"rgba(59,130,246,.07)",border:"1px solid rgba(59,130,246,.15)",borderRadius:8,padding:"9px 14px",marginBottom:14,fontSize:12,color:"var(--text3)"}}>
             Define aquí los intervalos de mantenimiento periódico. Cuando un vehículo supere el 75% del intervalo desde la última intervención, aparecerá un aviso.
           </div>
           <div style={{marginBottom:14}}>
             <button style={{padding:"7px 14px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}
-              onClick={()=>{setEditAv(null);setModalAv(true);}}>+ Nuevo aviso de mantenimiento</button>
+              disabled={!canConfigure} onClick={()=>{setEditAv(null);setModalAv(true);}}>+ Nuevo aviso de mantenimiento</button>
           </div>
           {avisosCfg.length===0 ? (
             <div style={{textAlign:"center",padding:40,color:"var(--text5)",fontSize:12}}>
@@ -664,7 +673,7 @@ export default function Avisos() {
               <table style={{width:"100%",borderCollapse:"collapse"}}>
                 <thead><tr>{["Tipo","Descripción","Cada (días)","Cada (km)","Activo",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
                 <tbody>
-                  {avisosCfg.map((a,i)=>(
+                  {avisosCfg.filter(a=>a.tipo_mantenimiento).map((a,i)=>(
                     <tr key={a.id}>
                       <td style={{...S.td,fontWeight:700}}>{a.tipo_mantenimiento}</td>
                       <td style={{...S.td,fontSize:11,color:"var(--text4)"}}>{a.descripcion||"—"}</td>
@@ -679,9 +688,9 @@ export default function Avisos() {
                       </td>
                       <td style={S.td}>
                         <div style={{display:"flex",gap:5}}>
-                          <button onClick={()=>{setEditAv(a);setModalAv(true);}}
+                          <button disabled={!canConfigure} onClick={()=>{setEditAv(a);setModalAv(true);}}
                             style={{padding:"3px 8px",borderRadius:6,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text2)",fontSize:11,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600}}>Editar</button>
-                          <button onClick={async()=>{if(await confirmDialog({title:"Eliminar aviso",message:"Eliminar este aviso?",confirmText:"Eliminar",tone:"danger"})){const d=avisosCfg.filter(x=>x.id!==a.id);await guardarAvisosCfg(d);}}}
+                          <button disabled={!canConfigure} onClick={async()=>{if(await confirmDialog({title:"Eliminar aviso",message:"Eliminar este aviso?",confirmText:"Eliminar",tone:"danger"})){const d=avisosCfg.filter(x=>x.id!==a.id);await guardarAvisosCfg(d);}}}
                             style={{padding:"3px 8px",borderRadius:6,border:"none",background:"rgba(239,68,68,.1)",color:"var(--red)",fontSize:11,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>Eliminar</button>
                         </div>
                       </td>

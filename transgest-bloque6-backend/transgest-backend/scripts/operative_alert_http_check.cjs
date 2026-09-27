@@ -1,0 +1,60 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const express = require('express');
+const { PGlite } = require('@electric-sql/pglite');
+const db = require('../src/services/db');
+const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',U='33333333-3333-4333-8333-333333333333',V='44444444-4444-4444-8444-444444444444';
+async function run(){
+ const pg=new PGlite();let server;const original=db.query,originalTransaction=db.transaction;
+ try{
+  await pg.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY);
+   CREATE TABLE usuarios(id uuid PRIMARY KEY,empresa_id uuid,activo boolean DEFAULT true);
+   CREATE TABLE colaboradores(id uuid PRIMARY KEY,empresa_id uuid,nombre text,email text,activo boolean);
+   CREATE TABLE vehiculos(id uuid PRIMARY KEY,empresa_id uuid,matricula text);
+   CREATE TABLE choferes(id uuid PRIMARY KEY,empresa_id uuid,nombre text,apellidos text);
+   CREATE TABLE pedidos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,numero text,estado text,fecha_pedido date,fecha_carga date,fecha_descarga date,fecha_entrega date,created_at timestamptz DEFAULT NOW(),colaborador_id uuid,chofer_id uuid,vehiculo_id uuid);
+   CREATE TABLE colaborador_facturas(pedido_id uuid,empresa_id uuid,colaborador_id uuid,factura_proveedor_id uuid,created_at timestamptz);
+   CREATE TABLE facturas_proveedor(id uuid,empresa_id uuid,nombre text,estado text,created_at timestamptz);
+   CREATE TABLE agenda_eventos(id uuid DEFAULT gen_random_uuid(),empresa_id uuid,asignado_a uuid,creado_por uuid,estado text,metadata jsonb,source_type text,source_id text,cause_code text,visibilidad text,created_at timestamptz DEFAULT NOW(),titulo text,descripcion text,fecha_inicio timestamptz,todo_dia boolean,tipo text,prioridad text,pedido_id uuid);
+   INSERT INTO empresas VALUES('${A}'),('${B}');INSERT INTO usuarios(id,empresa_id) VALUES('${U}','${A}'),('${V}','${B}');
+   INSERT INTO colaboradores VALUES('${A}','${A}','Transportista QA A','qa-a@example.invalid',true),('${B}','${B}','Transportista QA B','qa-b@example.invalid',true);
+   INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id) SELECT '${A}','QA-'||n,'entregado',CURRENT_DATE,'${A}' FROM generate_series(1,301)n;
+   INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id) VALUES('${B}','SECRET-B','entregado',CURRENT_DATE,'${B}');`);
+  await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260928_operational_alert_reads.sql'),'utf8'));
+  db.query=pg.query.bind(pg);
+  db.transaction=fn=>pg.transaction(fn);
+  const app=express();app.use(express.json());app.use((req,res,next)=>{req.user=req.headers['x-test-user']==='b'?{empresa_id:B,id:V,rol:'gerente'}:{empresa_id:A,id:U,rol:'gerente'};next();});
+  app.use('/notifications',require('../src/routes/notificaciones'));
+  app.use((e,req,res,next)=>res.status(e.status||500).json({error:e.message}));
+  server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
+  const base=`http://127.0.0.1:${server.address().port}/notifications`;
+  const get=async(url,options={})=>{const r=await fetch(base+url,options);const body=await r.json();assert.equal(r.status,200,JSON.stringify(body));return body;};
+  const initial=await get('/operativas/colaboradores?empresa_id='+B);
+  assert.equal(initial.items.length,80);assert.equal(initial.resumen.total,301);assert.equal(initial.limited,true);assert.ok(!JSON.stringify(initial).includes('SECRET-B'));
+  const marked=await get('/operativas/leer-todas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({empresa_id:B,usuario_id:V})});
+  assert.equal(marked.actualizadas,301);
+  assert.equal((await get('/operativas/colaboradores')).resumen.total,0);
+  assert.equal((await get('/operativas/colaboradores',{headers:{'x-test-user':'b'}})).resumen.total,1);
+  assert.equal((await get('/operativas/leer-todas',{method:'POST'})).actualizadas,0);
+  // A promoted agenda reminder must not reappear as the same operational popup.
+  await pg.query('DELETE FROM avisos_operativos_leidos WHERE empresa_id=$1',[A]);
+  await pg.query(`INSERT INTO agenda_eventos(empresa_id,asignado_a,creado_por,estado,metadata) VALUES($1,$2,$2,'pendiente',$3)`,[A,U,JSON.stringify({source:'avisos_operativos_colaborador',alert_key:initial.items[0].key})]);
+  const delegated=await get('/operativas/colaboradores');assert.equal(delegated.resumen.total,300);assert.ok(!delegated.items.some(i=>i.key===initial.items[0].key));
+  const {rows:[active]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at) VALUES($1,'QA-ACTIVE','confirmado',CURRENT_DATE-1,CURRENT_DATE-1,$1,NOW()) RETURNING id`,[A]);
+  await pg.query(`INSERT INTO agenda_eventos(empresa_id,estado,source_type,source_id,cause_code,visibilidad) VALUES($1,'pendiente','pedido',$2,'carga_sin_finalizar','equipo'),($1,'en_progreso','pedido',$2,'entrega_vencida','equipo')`,[A,active.id]);
+  assert.equal((await get('/operativas/colaboradores')).resumen.total,300,'automated load/delivery tasks suppress the corresponding AvImp reminders');
+  await pg.query(`UPDATE agenda_eventos SET estado='completado' WHERE source_id=$1`,[active.id]);
+  assert.equal((await get('/operativas/colaboradores')).resumen.total,302,'closed tasks must not conceal unresolved conditions');
+  const payload={alert:initial.items[1],asignado_a:U};
+  const promote=async(body)=>{const r=await fetch(base+'/operativas/colaboradores/agenda',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:r.status,body:await r.json()};};
+  assert.equal((await promote({...payload,asignado_a:V})).status,400,'cross-tenant assignee rejected');
+  assert.equal((await promote({alert:{key:'colaborador:foreign:albaran_pendiente'}})).status,404,'forged alert rejected');
+  const first=await promote({...payload,alert:{...payload.alert,title:'FORGED TITLE'}});assert.equal(first.status,201,JSON.stringify(first));assert.notEqual(first.body.titulo,'FORGED TITLE');
+  const retry=await promote(payload);assert.equal(retry.status,201);assert.equal(retry.body.id,first.body.id);
+  const {rows:[count]}=await pg.query(`SELECT COUNT(*)::int AS total FROM agenda_eventos WHERE metadata->>'alert_key'=$1`,[payload.alert.key]);assert.equal(count.total,1);
+  assert.equal((await get('/operativas/colaboradores')).resumen.total,301);
+  console.log('PASS HTTP AvImp: 301 notices, page 80, read ALL, tenant isolation, active/closed automatic task deduplication, canonical agenda promotion, retry idempotency and foreign-assignee rejection.');
+ }finally{db.query=original;db.transaction=originalTransaction;if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}await pg.close();}
+}
+run().catch(e=>{console.error(e);process.exitCode=1;});

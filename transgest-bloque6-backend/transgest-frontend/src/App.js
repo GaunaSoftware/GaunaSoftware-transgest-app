@@ -1,3 +1,4 @@
+import { uniquePendingTasks } from "./services/operativeTasks";
 import { TUTORIALS_ENABLED } from "./services/tutorialPolicy";
 import { createPortal } from "react-dom";
 import {transportExchange} from './services/api';
@@ -12,7 +13,7 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, leerTodosAvisosOperativos, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan, planHasFeature } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
@@ -840,12 +841,12 @@ function GlobalGuidedModulePanel({ mission, onClose, onOpenModule }) {
 }
 
 function avimStorageKey(user) {
-  const scope = user?.empresa_id || user?.empresaId || user?.id || user?.email || "global";
+  const scope = `${user?.empresa_id || user?.empresaId || "empresa"}:${user?.id || user?.email || "user"}`;
   return `tms_avim_minimized:${scope}`;
 }
 
 function avimSeenStorageKey(user) {
-  const scope = user?.empresa_id || user?.empresaId || user?.id || user?.email || "global";
+  const scope = `${user?.empresa_id || "empresa"}:${user?.id || user?.email || "user"}`;
   return `tms_avim_seen:${scope}`;
 }
 
@@ -1640,6 +1641,7 @@ function AppInner() {
           const vistos = readAvimSeen(user);
           const nuevos = (next.items || []).filter(item => !vistos.has(avimAlertKey(item)));
           if (nuevos.length > 0 && !readAvimMinimized(user)) setAvisosOperativosOpen(true);
+          writeAvimSeen(user, new Set([...vistos, ...next.items.map(avimAlertKey)]));
           return next;
         })
         .catch(() => ({ items: [], resumen: {} }));
@@ -1657,7 +1659,7 @@ function AppInner() {
           const arr = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.eventos) ? payload.eventos : [];
           const today = addDaysKey(0);
           const tomorrow = addDaysKey(1);
-          const abiertas = arr.filter(ev => ["pendiente","en_progreso"].includes(String(ev.estado || "").toLowerCase()) && !reminderIsPostponed(ev));
+          const abiertas = uniquePendingTasks(arr).filter(ev => ["pendiente","en_progreso"].includes(String(ev.estado || "").toLowerCase()) && !reminderIsPostponed(ev));
           const next = {
             visible: false,
             pasadas: abiertas.filter(ev => dateKey(ev.fecha_inicio || ev.start || ev.fecha) && dateKey(ev.fecha_inicio || ev.start || ev.fecha) < today),
@@ -1813,6 +1815,8 @@ function AppInner() {
   const modulosVisibles = new Set(
     modulos.flatMap(grupo => (grupo.items || []).flatMap(item => item.children ? item.children.map(child => child.id) : [item.id]))
   );
+  // Existing deep links open the shared fleet view; the menu now exposes its two children.
+  if (modulosVisibles.has('vehiculos_tractoras') || modulosVisibles.has('vehiculos_remolques')) modulosVisibles.add('vehiculos');
   const vistaPreferida = vista || VISTA_DEFAULT(user.rol);
   const primeraVista = modulos.flatMap(grupo => (grupo.items || []).flatMap(item => item.children ? item.children.map(child => child.id) : [item.id]))[0];
   const vistaId = modulosVisibles.has(vistaPreferida) ? vistaPreferida : (primeraVista || VISTA_DEFAULT(user.rol));
@@ -1957,12 +1961,14 @@ function AppInner() {
         hidden={pedidoActionMenuOpen}
         onToggle={setAvisosOperativosOpen}
         onRefresh={() => getAvisosOperativosColaboradores().then(d => setAvisosOperativosColaboradores(d && Array.isArray(d.items) ? d : { items: [], resumen: {} })).catch(()=>{})}
-        onMarkRead={(items) => {
-          const next = readAvimSeen(user);
-          (Array.isArray(items) ? items : []).forEach(item => next.add(avimAlertKey(item)));
-          writeAvimSeen(user, next);
-          setAvisosOperativosOpen(false);
-          toast("Avisos marcados como leidos. El indicador pequeno se mantiene mientras haya avisos pendientes.", "success");
+        onMarkRead={async () => {
+          try {
+            const result = await leerTodosAvisosOperativos();
+            const next = await getAvisosOperativosColaboradores();
+            setAvisosOperativosColaboradores(next);
+            setAvisosOperativosOpen(false);
+            toast(result.actualizadas + " avisos marcados como leídos. Las tareas siguen pendientes hasta completarlas.", "success");
+          } catch (e) { toast(e.message || "No se pudieron marcar los avisos.", "error"); }
         }}
         onRemove={(key) => setAvisosOperativosColaboradores(prev => {
           const items = (prev.items || []).filter(item => item.key !== key);

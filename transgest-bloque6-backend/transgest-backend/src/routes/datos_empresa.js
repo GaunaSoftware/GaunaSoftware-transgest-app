@@ -1754,9 +1754,11 @@ router.get("/config/alertas", async (req,res) => {
     res.json(rows[0]?.cfg_alertas || []);
   } catch(e) { res.status(500).json({error:e.message}); }
 });
-router.put("/config/alertas", async (req,res) => {
+router.put("/config/alertas", SOLO_GERENTE, requireModulePermission('avisos', 'editar'), async (req,res) => {
   try {
-    await db.query("UPDATE empresas SET cfg_alertas=$1 WHERE id=$2",[JSON.stringify(req.body),EID(req)]);
+    if (!Array.isArray(req.body)) return res.status(400).json({error:'Configuración de mantenimiento no válida'});
+    const maintenance = req.body.filter(r => !r.tipo_aviso);
+    await db.query(`UPDATE empresas SET cfg_alertas=$1::jsonb || COALESCE((SELECT jsonb_agg(r) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(cfg_alertas)='array' THEN cfg_alertas ELSE '[]'::jsonb END) r WHERE r ? 'tipo_aviso'),'[]'::jsonb) WHERE id=$2`,[JSON.stringify(maintenance),EID(req)]);
     res.json({ok:true});
   } catch(e) { res.status(500).json({error:e.message}); }
 });

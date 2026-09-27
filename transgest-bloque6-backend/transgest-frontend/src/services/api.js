@@ -861,6 +861,9 @@ export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=$
 export const marcarNotificacionLeida = (id) => apiFetch(`/notificaciones/${encodeURIComponent(id)}/leida`, { method:"PATCH", body:{} });
 export const marcarTodasNotificacionesLeidas = () => apiFetch("/notificaciones/leer-todas", { method:"POST", body:{} });
 export const getAvisosOperativosColaboradores = () => apiFetch("/notificaciones/operativas/colaboradores", { silentSuccess:true, silentError:true });
+export const leerTodosAvisosOperativos = () => apiFetch('/notificaciones/operativas/leer-todas', { method:'POST', body:{}, silentSuccess:true });
+export const getCentroAvisos = () => apiFetch('/notificaciones/centro', { silentSuccess:true, silentError:true });
+export const guardarConfiguracionAvisos = data => apiFetch('/notificaciones/configuracion', { method:'PUT', body:data, silentSuccess:true });
 export const getAvisosOperativosIgnorados = (params={}) => apiFetch(`/notificaciones/operativas/ignorados?${new URLSearchParams(params)}`, { silentSuccess:true });
 export const crearAgendaAvisoOperativoColaborador = (alert, data = {}) =>
   apiFetch("/notificaciones/operativas/colaboradores/agenda", { method:"POST", body:{ alert, ...data } });

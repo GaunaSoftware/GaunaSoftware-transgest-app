@@ -1,5 +1,7 @@
 const { financialPedidosCte } = require('./financialKpis');
 const { normalizePermissionsForRole } = require('../middleware/auth');
+const { readNotices } = require('./noticeCenter');
+const { moduleAvailable } = require('./companyProducts');
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const text = (value, max = 120) => String(value || '').trim().slice(0, max);
@@ -25,17 +27,32 @@ const definition = (name, description, properties) => ({ type: 'function', name,
 const string = { type: 'string' };
 function toolsFor(user) {
   const tools = [];
+  if (canRead(user, 'avisos')) tools.push(definition('vencimientos_empresa', 'Vencimientos actuales de facturas no cobradas, vehículos/remolques, conductores y plataformas. Misma fuente y configuración que Dashboard y Avisos. categoria vacía=todas o facturas/vehiculos/choferes/plataformas. No confirma pagos ni saldo histórico. pagina desde 1.', { categoria:string, texto:string, pagina:string }));
+  if (canRead(user, 'informes') && canRead(user, 'facturacion')) tools.push(definition('analisis_rentabilidad', 'Análisis económico BI común y reconciliado: servicios realizados, costes registrados, margen, km vacíos, pendiente de facturar y revisión. Devuelve definiciones y cobertura. Preferir a resumen_mes para rentabilidad. Fechas YYYY-MM-DD y filtros vacíos o IDs verificados; ejecucion vacía/flota_propia/subcontratado. No consultar nóminas individuales.', { desde:string, hasta:string, cliente_id:string, vehiculo_id:string, ejecucion:string }));
   if (canRead(user, 'pedidos')) tools.push(definition('buscar_pedidos', 'Pedidos por número, referencia, cliente o ruta y fechas de carga inclusivas. Devuelve total exacto y páginas de 50. estado: vacío=todos, pendiente=solo pendientes, abiertos=todos salvo entregados/facturados/cancelados; otros estados exactos permitidos. pagina desde 1. Repite páginas si el usuario solicita el listado completo. Nunca presentes una página parcial como todos los pedidos.', { texto: string, desde: string, hasta: string, estado: string, pagina: string }));
   if (canRead(user, 'informes') && canRead(user, 'facturacion')) tools.push(definition('resumen_mes', 'KPIs de viajes realizados por mes economico YYYY-MM. Importes netos sin IVA; costes registrados, no margen contable definitivo.', { mes: string }));
   if (canRead(user, 'vehiculos') && canRead(user, 'pedidos')) tools.push(definition('disponibilidad_flota', 'Hasta 30 vehiculos con ocupacion registrada para una fecha; no garantiza disponibilidad fisica ni GPS en directo. Filtra matricula con texto.', { fecha: string, texto: string }));
   if(canRead(user,'palets')) tools.push(definition('stock_almacen','Consultar hasta 30 referencias de stock por nombre o SKU. Devuelve existencias y mínimos por almacén, sin precios.',{texto:string}));
-  if(canRead(user,'pedidos')) tools.push(definition('reservas_muelles','Consultar reservas de muelles para una fecha YYYY-MM-DD; no crear ni modificar reservas.',{fecha:string}));
+  if(canRead(user,'pedidos') && moduleAvailable(user.productos,'planner')) tools.push(definition('reservas_muelles','Consultar reservas de muelles para una fecha YYYY-MM-DD; no crear ni modificar reservas.',{fecha:string}));
   return tools;
 }
 
 async function executeTool(db, user, name, args) {
   if (!user.empresa_id || !toolsFor(user).some(t => t.name === name)) throw fail('Consulta no permitida para este perfil.', 403);
   const eid = user.empresa_id;
+  if (name === 'vencimientos_empresa') {
+    const category = text(args.categoria), page = Number(args.pagina || 1);
+    if (!['','facturas','vehiculos','choferes','plataformas'].includes(category) || !Number.isInteger(page) || page < 1 || page > 10000) throw fail('Filtro de avisos no válido.');
+    const result = await readNotices(db, user, { category, text:text(args.texto) });
+    return { ...result, items:result.items.slice((page-1)*50,page*50), pagina:page, limitado:result.total>page*50, siguiente_pagina:result.total>page*50?page+1:null };
+  }
+  if (name === 'analisis_rentabilidad') {
+    const desde = date(args.desde), hasta = date(args.hasta);
+    if (desde > hasta || Date.parse(hasta)-Date.parse(desde)>366*86400000) throw fail('Selecciona un periodo de hasta un año.');
+    const result = await require('./financialWorkspace').readWorkspace(eid, { desde, hasta, cliente_id:text(args.cliente_id,80), vehiculo_id:text(args.vehiculo_id,80), ejecucion:text(args.ejecucion,32), limit:20 }, { queryDb:db.query.bind(db) });
+    return { metadata:result.metadata, metricas:result.economia.metricas, cascada:result.cascada, comparacion:result.comparacion, revision:result.revision.slice(0,20), rankings:result.rankings,
+      cobertura:result.economia.cobertura, limitado:true, nota:'Rankings top 10; revisión hasta 20 servicios. Agregados de toda la población autorizada, sin limitar por páginas. No es beneficio neto contable.' };
+  }
   if(name==='stock_almacen'){
     const {rows}=await db.query(`SELECT m.nombre,m.sku,m.unidad,m.stock_actual,m.stock_minimo,a.nombre AS almacen
       FROM almacen_mercancias m LEFT JOIN almacenes a ON a.id=m.almacen_id AND a.empresa_id=m.empresa_id
@@ -118,6 +135,7 @@ async function runConversation({ db, user, messages, request, now = new Date() }
   const input = validateMessages(messages);
   const tools = toolsFor(user);
   const sources = [];
+  const references = new Map();
   const usage = { input_tokens: 0, output_tokens: 0 };
   const instructions = `Eres TransGest Intelligence, asistente de transporte. Responde en español profesional, completo y útil, ajustando la extensión a los datos encontrados.
     Maqueta con títulos Markdown, párrafos breves, listas y tablas para comparar pedidos. No escribas HTML.
@@ -136,7 +154,13 @@ async function runConversation({ db, user, messages, request, now = new Date() }
     Pregunta por fechas o referencias cuando el alcance sea ambiguo; indica siempre periodo, filtros, fuente y limites de las listas.
     Distingue viajes realizados, facturas emitidas, borradores y cobros. No confundas ingresos de viajes con dinero cobrado.
     El margen operativo solo resta costes registrados del viaje, no gastos generales. No atribuyas otras capacidades al sistema sin comprobarlas.
-    Puedes explicar resultados, detectar datos faltantes y redactar borradores de mensajes, nunca afirmar que se han enviado.`;
+    Puedes explicar resultados, detectar datos faltantes y redactar borradores de mensajes, nunca afirmar que se han enviado.
+    Para gestión empresarial organiza la respuesta en: resumen ejecutivo con cifras contrastadas, tabla de registros, prioridades con motivo y próximos pasos concretos.
+    Utiliza analisis_rentabilidad para economía: conserva unidad, definición y cobertura del BI. Nunca llames beneficio neto a un margen parcial ni rellenes costes ausentes con cero.
+    Utiliza vencimientos_empresa para documentación y cobros. Un importe estimado no es un cobro efectivo ni saldo conciliado. Si una fuente falla, indícalo; no digas que no hay avisos.
+    Para preparar la jornada revisa pedidos abiertos, asignaciones y ventanas: prioriza incidencias y datos faltantes comprobables. No supongas que una fecha planificada es una hora real.
+    Separa hechos de sugerencias. Si redactas una reclamación, usa solo los datos consultados y preséntala como borrador para revisar.
+    Los enlaces a registros los ofrece la aplicación; no inventes URLs. Si una capacidad no está entre las herramientas, explica el límite sin prometer ejecutarla.`;
   for (let round = 0; round < 4; round++) {
     const response = await request({ instructions, input, tools, store: false, parallel_tool_calls: false, max_output_tokens: 6000 });
     usage.input_tokens += Number(response.usage?.input_tokens || 0);
@@ -147,7 +171,7 @@ async function runConversation({ db, user, messages, request, now = new Date() }
     if (!calls.length) {
       const answer = output.filter(item => item.type === 'message').flatMap(item => item.content || []).filter(c => c.type === 'output_text').map(c => c.text).join('\n').trim();
       if (!answer) throw fail('La IA no ha devuelto una respuesta util. Vuelve a intentarlo.', 502);
-      return { answer, sources, usage, read_only: true, checked_at: now.toISOString() };
+      return { answer, sources, references:[...references.values()].slice(0,40), usage, read_only: true, checked_at: now.toISOString() };
     }
     if (calls.length > 3 || sources.length + calls.length > 6) throw fail('Demasiadas consultas. Divide la pregunta.', 422);
     input.push(...output);
@@ -158,7 +182,10 @@ async function runConversation({ db, user, messages, request, now = new Date() }
         const def = tools.find(t => t.name === call.name);
         if (!def || !args || Object.keys(args).some(k => !Object.hasOwn(def.parameters.properties,k)) || def.parameters.required.some(k => typeof args[k] !== 'string')) throw fail('Argumentos de consulta no validos.');
         result = await executeTool(db, user, call.name, args);
-        sources.push({ name: result.fuente, filters: args, limited: Boolean(result.limitado), total: result.total, page: result.pagina, next_page: result.siguiente_pagina });
+        sources.push({ name: result.fuente || call.name, filters: args, limited: Boolean(result.limitado), total: result.total, page: result.pagina, next_page: result.siguiente_pagina, coverage:result.coverage || result.cobertura, errors:result.errors, date:result.date || result.metadata?.periodo?.hasta });
+        for (const item of result.items || []) if (item.focusKey && item.focus) references.set(item.id, {label:item.title,view:item.view,focusKey:item.focusKey,focus:item.focus});
+        for (const p of result.pedidos || []) if (p.id) references.set(`pedido:${p.id}`, {label:p.numero || 'Ver pedido',view:'pedidos',focusKey:'tms_pedidos_focus',focus:{pedido_id:p.id}});
+        for (const r of result.revision || []) if (r.id) references.set(`${r.tipo}:${r.id}`, {label:r.numero || 'Ver registro',view:r.tipo==='factura'?'facturacion':'pedidos',focusKey:r.tipo==='factura'?'tms_facturacion_focus':'tms_pedidos_focus',focus:r.tipo==='factura'?{factura_id:r.id}:{pedido_id:r.id}});
       } catch (error) {
         if (!error.status) throw error;
         result = { error: error.message };

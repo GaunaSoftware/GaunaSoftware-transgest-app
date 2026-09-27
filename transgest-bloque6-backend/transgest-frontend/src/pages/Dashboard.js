@@ -1,3 +1,4 @@
+import { openNotice } from "../services/noticeNavigation";
 import { useState, useEffect, useMemo } from "react";
 import { getFacturasTodas, getPedidosTodos, getVehiculos, getChoferes, getExcepcionesOperativas, getEmpresaConfig, getTallerEstado, getPaletMovimientos, getBiResumen } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -82,8 +83,7 @@ function buildPaletsDashboardAlerts(movimientos = []) {
 }
 
 function abrirAlerta(alerta = {}) {
-  if (alerta.focusKey && alerta.focus) setRuntimeFocus(alerta.focusKey, alerta.focus);
-  navegar(alerta.view || "control_tower");
+  openNotice({ ...alerta, view:alerta.view || 'control_tower' });
 }
 
 function enfocarPedidos(focus) {

@@ -1,3 +1,4 @@
+import useRuntimeFocus from "../hooks/useRuntimeFocus";
 import "./workspace/unified-tools.css";
 import FleetWorkspace from "./fleet/FleetWorkspace";
 import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
@@ -267,9 +268,6 @@ function readGpsFocus() {
   return readRuntimeFocus("tms_vehiculos_gps_focus");
 }
 
-function readVehiculosFocus() {
-  return readRuntimeFocus("tms_vehiculos_focus");
-}
 
 function mergeVehiculoState(rows = [], updated) {
   if (!updated?.id) return Array.isArray(rows) ? rows : [];
@@ -1020,10 +1018,10 @@ function ModalChoferPicker({ vehiculoId, matricula, estado, choferes, onConfirm,
   );
 }
 
-function ModalVehiculo({ editando, initialClase = "Tractora", onClose, onSaved, choferes=[], vehiculos=[], onVehiculoActualizado = null, onGpsRefresh = null }) {
+function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'identificacion', onClose, onSaved, choferes=[], vehiculos=[], onVehiculoActualizado = null, onGpsRefresh = null }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("vehiculos");
-  const [tab,    setTab]    = useState("identificacion");
+  const [tab,    setTab]    = useState(initialTab);
   const [form,   setForm]   = useState(editando ? {
     ...editando,
     // Las fechas llegan del backend como ISO (2027-05-10T00:00:00Z) y un input
@@ -1793,7 +1791,8 @@ export default function Vehiculos({ initialTipo = "todos" }) {
   // Eliminar permanente: solo gerente
   const canEliminar = user?.rol === "gerente";
   const [vehiculos, setVehiculos] = useState([]);
-  const [focusVehiculo] = useState(() => readVehiculosFocus());
+  const focusVehiculo = useRuntimeFocus("tms_vehiculos_focus");
+  const consumedNotice = useRef(null);
   const [pedidos,   setPedidos]   = useState([]);
   const [choferes,  setChoferes]  = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -1865,10 +1864,11 @@ export default function Vehiculos({ initialTipo = "todos" }) {
     }
   }, [initialTipo]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!focusVehiculo?.vehiculo_id || loading) return;
+    if (!focusVehiculo?.vehiculo_id || loading || consumedNotice.current === focusVehiculo) return;
     const found = vehiculos.find(v => String(v.id) === String(focusVehiculo.vehiculo_id));
     if (!found) return;
     const t = window.setTimeout(() => {
+      consumedNotice.current = focusVehiculo;
       setEditando(found); setModal(true);
       clearRuntimeFocus("tms_vehiculos_focus");
     }, 180);
@@ -2032,6 +2032,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         <ModalVehiculo
           editando={editando}
           initialClase={initialClaseModal}
+          initialTab={editando?.id === focusVehiculo?.vehiculo_id ? (focusVehiculo.section === 'documentacion' ? 'docs' : focusVehiculo.section === 'plataformas' ? 'plataformas' : 'identificacion') : 'identificacion'}
           choferes={choferes}
           vehiculos={vehiculos}
           onClose={() => { setModal(false); setEditando(null); }}

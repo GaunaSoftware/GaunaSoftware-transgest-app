@@ -137,3 +137,17 @@ El acceso de gerencia **Ver informe semanal de flota** ejecuta la plantilla «Ex
 ## Evolución TMS fase 15 (27/09/2026)
 
 El adaptador `financialJourneys` añade `viajes_operativos.km_cargados/km_vacios/asignacion_snapshot`, `viaje_pedidos`, `viaje_costes.importe_neto/fecha/anulado_at` al contrato existente, con reparto sobre población completa por peso o bultos. Se conserva el importe no conciliado cuando puede duplicar un coste de pedido. `bi_legs` permite trazabilidad de cada pedido a los viajes físicos. Consultar `TMS_EVOLUTION_PHASE15_BI.md` para reglas y límites. No se transforman repostajes en consumo ni margen parcial en beneficio neto.
+
+## Gastos de estructura: comparación mensual (27/09/2026)
+
+Servicio común `structureExpenses.readStructure`, contrato aditivo `comparativa` versión `estructura.mensual.v1`. Fuente: `gastos_estructura`, siempre de la empresa autenticada y con `activo=true`. Mes civil seleccionado, mes anterior y mismo mes del año anterior. No se añade una fórmula financiera en React.
+
+| Indicador | Fórmula y unidad | Cobertura / límites |
+|---|---|---|
+| Gastos del mes | Suma de `importe_periodo`, EUR. Mensual íntegro, anual/12, trimestral/3 desde `fecha`; puntual solo en su mes | Parcial: importes registrados, sin desglose de IVA en la fuente; no se normalizan a neto ni a pagos. Sin registros => null |
+| Variación mensual / interanual | Actual − referencia, EUR; diferencia / valor absoluto de referencia × 100, % | Null si falta un mes; porcentaje null si la base es cero. No media de porcentajes ni infinito |
+| Gastos por categoría | Misma suma agrupada por `tipo` | Reconciliada con total. Categoría ausente en mes con registros = 0; mes sin registros = null |
+| Coste medio por camión | Total mensual / camiones activos elegibles | Usa flota actual, no histórica. Sin camiones o total => null |
+| Reparto por camión | Partes iguales o proporción de ingresos netos positivos de servicios realizados; ajuste acumulativo de céntimos | Orientativo, no escribe costes duplicados; importe no atribuido visible. Remolques excluidos |
+
+Permisos: módulo Gastos de estructura en el servidor, empresa del token; mutaciones gerente/contable y edición autorizada. Se conserva el contrato anterior. Cada comparación incluye límites temporales, definición, impuestos, cobertura, alcance y generación. El mes en curso puede estar incompleto. Los históricos se reconstruyen con fichas vigentes: no son snapshots contables por cierre. No se inventan costes anteriores.

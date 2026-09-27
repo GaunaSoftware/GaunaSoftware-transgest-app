@@ -47,6 +47,46 @@ function buildStructure({empresaId, month, structure = [], vehicles = []}) {
     base_reparto: 'Ingresos netos positivos de servicios realizados por tractora; reparto orientativo, no genera gastos duplicados',
   };
 }
+function shiftedMonth(month, offset) {
+  const [year, m] = expenseMonth(month).split('-').map(Number);
+  const date = new Date(Date.UTC(year, m - 1 + offset, 1));
+  return date.toISOString().slice(0, 7);
+}
+function variation(current, previous) {
+  const difference = current == null || previous == null ? null : money(current - previous);
+  return {diferencia: difference, porcentaje: difference == null || previous === 0 ? null : difference / Math.abs(previous) * 100,
+    estado: difference == null ? 'sin_datos' : previous === 0 ? 'sin_base' : 'calculable'};
+}
+// Compare the same monthly allocation on one authorized source, without attachments
+// or current fleet counts masquerading as historical fleet data.
+function compareStructure({empresaId, month, structure = []}) {
+  const own = structure.filter(row => String(row.empresa_id) === String(empresaId));
+  const periods = [month, shiftedMonth(month, -1), shiftedMonth(month, -12)].map(periodo => {
+    const rows = structureMonth(own, periodo);
+    const categorias = new Map();
+    for (const row of rows) {
+      const category = row.tipo || 'Sin categoría';
+      categorias.set(category, money((categorias.get(category) || 0) + row.importe_periodo));
+    }
+    const [year, m] = periodo.split('-').map(Number);
+    return {periodo, desde: periodo + '-01', hasta: new Date(Date.UTC(year, m, 0)).toISOString().slice(0, 10),
+      total: rows.length ? money(rows.reduce((sum, row) => sum + row.importe_periodo, 0)) : null,
+      registros: rows.length, prorrateados: rows.filter(row => ['anual','trimestral'].includes(row.periodo)).length,
+      estado: rows.length ? 'parcial' : 'sin_datos', categorias};
+  });
+  const categorias = [...new Set(periods.flatMap(p => [...p.categorias.keys()]))].sort((a,b) => a.localeCompare(b, 'es')).map(tipo => {
+    const values = periods.map(p => p.registros ? p.categorias.get(tipo) || 0 : null);
+    return {tipo, actual: values[0], anterior: values[1], ano_anterior: values[2],
+      variacion_anterior: variation(values[0], values[1]), variacion_anual: variation(values[0], values[2])};
+  });
+  return {version: 'estructura.mensual.v1', periodos: periods.map(({categorias, ...p}) => p), categorias,
+    variacion_anterior: variation(periods[0].total, periods[1].total), variacion_anual: variation(periods[0].total, periods[2].total),
+    definicion: 'Suma de gastos activos imputados al mes: mensual íntegro, puntual solo en su mes, trimestral / 3 y anual / 12 desde el mes de inicio.',
+    unidad: 'EUR', impuestos: 'Importes tal como se registraron; esta fuente no desglosa IVA ni permite normalizar una base neta.',
+    cobertura: 'Gastos de estructura registrados, no todos los costes de explotación. La ausencia de registros no confirma coste cero.',
+    alcance: 'Meses naturales completos. El mes en curso puede estar incompleto. El histórico se reconstruye con las fichas vigentes; no es una instantánea contable de cada cierre.',
+    generado_at: new Date().toISOString()};
+}
 async function readStructure(empresaId, value) {
   const month = expenseMonth(value);
   const [year, m] = month.split('-').map(Number);
@@ -59,7 +99,8 @@ async function readStructure(empresaId, value) {
     ) SELECT v.*, COALESCE(i.ingresos,0) AS ingresos FROM vehiculos v
       LEFT JOIN ingresos i ON i.vehiculo_id=v.id WHERE v.empresa_id=$1 ORDER BY v.matricula,v.id`, [empresaId, month+'-01',last]),
   ]);
-  return {...buildStructure({empresaId, month, structure: structure.rows, vehicles: vehicles.rows}),
-    periodo: month, fecha_corte: last, estado: structure.rows.length ? 'estimado' : 'sin_datos'};
+  const result = buildStructure({empresaId, month, structure: structure.rows, vehicles: vehicles.rows});
+  return {...result, comparativa: compareStructure({empresaId, month, structure: structure.rows}),
+    periodo: month, fecha_corte: last, estado: result.gastos.length ? 'estimado' : 'sin_datos'};
 }
-module.exports = {expenseMonth, structureMonth, buildStructure, readStructure};
+module.exports = {expenseMonth, structureMonth, buildStructure, readStructure, compareStructure};

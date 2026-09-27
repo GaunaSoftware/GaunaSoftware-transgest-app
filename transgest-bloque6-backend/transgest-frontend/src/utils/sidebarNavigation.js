@@ -35,7 +35,9 @@ export function organizeSidebar(modules, financeTabs, role) {
     group("nav_finanzas", "Finanzas", "facturacion_grupo", [
       ...(finance ? financeTabs.map(tab => ({ id: `finance-${tab.value}`, label: tab.label, target: finance.id, financeTab: tab.value, icon: finance.icon })) : []),
       group("nav_informes", "Informes", "informes_grupo", [take("informes", "Informes de gestión"), take("explotacion", "Explotación"), take("objetivos", "Objetivos")]),
-      take("contabilidad", "Contabilidad"), take("gastos_estructura", "Gastos de estructura"), take("nominas", "Nóminas"), take("hojas_ruta", "Hojas de ruta"),
+      take("contabilidad", "Contabilidad"),
+      group("nav_costes", "Costes", "gastos_estructura", [take("gastos_estructura", "Gastos de estructura")]),
+      take("nominas", "Nóminas"), take("hojas_ruta", "Hojas de ruta"),
     ]),
     group("nav_gestion", "Gestión", "control_horario", [take("control_horario", "Control horario")]),
     group("nav_avisos", "Avisos", "avisos", [

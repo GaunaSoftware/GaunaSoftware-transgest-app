@@ -1,18 +1,30 @@
-.structure-expenses-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-.structure-expenses-controls > div { min-width: 0; }
-.structure-expenses-allocation {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-@media (max-width: 768px) {
-  .structure-expenses-controls > div { flex: 1 1 180px; }
-  .structure-expenses-allocation { grid-template-columns: minmax(0, 1fr); }
+.structure-expenses-controls { display:flex; align-items:flex-end; flex-wrap:wrap; gap:16px; padding:16px; margin-bottom:16px; background:var(--card-bg); border:1px solid var(--border); border-radius:10px; }
+.structure-expenses-controls label, .structure-expense-form label { display:flex; flex-direction:column; gap:6px; font-weight:600; min-width:0; }
+.structure-expenses-controls input { min-width:215px; }
+.structure-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-bottom:20px; }
+.structure-comparison-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(240px,1fr); gap:16px; }
+.structure-chart { height:300px; min-width:0; }
+.structure-muted { color:var(--text3); font-weight:400; }
+.structure-legend { display:flex; align-items:center; gap:8px; font-size:12px; }
+.structure-legend span { width:12px; height:12px; border-radius:3px; background:var(--accent); flex:none; }
+.structure-variation { display:flex; flex-direction:column; gap:6px; padding:16px 0; border-bottom:1px solid var(--border); }
+.structure-variation strong { font-size:18px; font-variant-numeric:tabular-nums; }
+.structure-total { display:flex; justify-content:space-between; gap:16px; padding:12px 10px 0; }
+.structure-total strong { font-variant-numeric:tabular-nums; }
+.structure-method { margin-top:16px; color:var(--text3); }
+.structure-expenses summary { cursor:pointer; color:var(--link); }
+.structure-allocation-filter { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.structure-expense-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.structure-full { grid-column:1/-1; }
+.structure-upload { position:relative; overflow:hidden; }
+.structure-upload input { position:absolute; inset:0; opacity:0; width:100%; cursor:pointer; }
+.structure-upload:focus-within { outline:3px solid var(--focus); outline-offset:2px; }
+.structure-expenses .tgui-table .tgui-actions { flex-wrap:wrap; }
+@media(max-width:1023px) { .structure-comparison-grid { grid-template-columns:1fr; } }
+@media(max-width:600px) {
+  .structure-kpis { grid-template-columns:1fr; gap:10px; }
+  .structure-expenses-controls>label, .structure-expenses-controls input { width:100%; min-width:0; }
+  .structure-expense-form { grid-template-columns:1fr; }
+  .structure-chart { height:260px; }
+  .structure-allocation-filter, .structure-allocation-filter select { width:100%; }
 }

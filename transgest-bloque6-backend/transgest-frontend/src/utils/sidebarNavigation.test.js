@@ -21,6 +21,14 @@ test('Go, Pro, Intelligence and migrated Control can import, without enabling AI
   expect(planHasFeature('lite', 'ai')).toBe(false);
 });
 
+test('structure expenses belong to Finance / Costs without granting new permissions',()=>{
+  const result=organizeSidebar([{items:[item('gastos_estructura'),item('nominas'),item('hojas_ruta')]}],[],'contable')[0].items;
+  const finance=result.find(x=>x.id==='nav_finanzas');
+  expect(finance.children.find(x=>x.id==='nav_costes').children.map(x=>x.id)).toEqual(['gastos_estructura']);
+  expect(flattenNavigation(result).filter(x=>x.id==='gastos_estructura')).toHaveLength(1);
+  expect(flattenNavigation(organizeSidebar([{items:[item('pedidos')]}],[],'trafico')[0].items).some(x=>x.id==='nav_costes')).toBe(false);
+});
+
 test('warehouse belongs to Operations once, and grouping never grants a hidden warehouse', () => {
   const available = [{ items: [item('pedidos'), item('palets'), item('control_horario'), item('nominas'), item('hojas_ruta')] }];
   const result = organizeSidebar(available, [], 'gerente')[0].items;

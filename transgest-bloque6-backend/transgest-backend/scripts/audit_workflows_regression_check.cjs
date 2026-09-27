@@ -363,11 +363,28 @@ async function main(){
   token=login.token;
   const monthlyExpense=await call('Estructura: crear mensual','POST','/empresa/gastos-estructura',{nombre:'Alquiler sintético',importe:100,periodo:'mensual',fecha:'2026-09'});
   const oneOffExpense=await call('Estructura: crear puntual','POST','/empresa/gastos-estructura',{nombre:'Puntual sintético',importe:200,periodo:'unico',fecha:'2026-09'});
+  const expenseCompany=crypto.randomUUID();
+  await db.query("INSERT INTO empresas(id,nombre,cif,email_admin,plan,estado) VALUES($1,'GASTOS B SINTÉTICOS','B00000999','expense-b@example.invalid','enterprise','activa')",[expenseCompany]);
+  const foreignExpense=(await db.query("INSERT INTO gastos_estructura(empresa_id,nombre,tipo,importe,periodo,fecha) VALUES($1,'Gasto de otra empresa','Otros',9000,'mensual','2025-01') RETURNING id",[expenseCompany])).rows[0];
   const expenseSummary=await call('Estructura: resumen mensual','GET','/empresa/gastos-estructura/resumen?periodo=2026-09&empresa_id=ajena');
   assert.equal(expenseSummary.total,300);assert.ok(expenseSummary.gastos.every(g=>g.empresa_id===company));
   assert.equal(Math.round(expenseSummary.reparto.reduce((s,r)=>s+r.coste_igual,0)*100),30000);
   const nextExpenseSummary=await call('Estructura: recurrencia siguiente mes','GET','/empresa/gastos-estructura/resumen?periodo=2026-10');
   assert.equal(nextExpenseSummary.total,100);
+  assert.deepEqual(nextExpenseSummary.comparativa.periodos.map(p=>p.total),[100,300,null]);
+  assert.equal(nextExpenseSummary.comparativa.variacion_anterior.diferencia,-200);
+  assert.equal(expenseSummary.comparativa.periodos[0].total,expenseSummary.total);
+  token=(await call('Estructura: login conductor restringido','POST','/auth/login',{email:'driver-login@example.invalid',password})).token;
+  await call('Estructura: chófer sin acceso a comparativa','GET','/empresa/gastos-estructura/resumen?periodo=2026-09');
+  token=login.token;
+  await call('Estructura: no editar gasto de otra empresa','PUT','/empresa/gastos-estructura/'+foreignExpense.id,{importe:10});
+  const foreignUser=crypto.randomUUID();
+  await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Contable B sintético','expense-b@example.invalid',$3,'contable',true)",[foreignUser,expenseCompany,await req('bcryptjs').hash(password,10)]);
+  const foreignLogin=await call('Estructura: login contable B','POST','/auth/login',{email:'expense-b@example.invalid',password});
+  token=foreignLogin.token;
+  const foreignSummary=await call('Estructura: comparación B no filtra A','GET','/empresa/gastos-estructura/resumen?periodo=2026-09&empresa_id='+company);
+  assert.equal(foreignSummary.total,9000);assert.deepEqual(foreignSummary.comparativa.periodos.map(p=>p.total),[9000,9000,9000]);
+  token=login.token;
   await call('Estructura: cerrar mes compatible','POST','/empresa/meses-cerrados/2026-09-01',{});
   assert.ok((await call('Estructura: mes cerrado','GET','/empresa/meses-cerrados')).includes('2026-09'));
   await call('Estructura: bloqueo servidor de mes cerrado','PUT','/empresa/gastos-estructura/'+monthlyExpense.id,{importe:101});
@@ -377,6 +394,8 @@ async function main(){
   await call('Estructura: quitar puntual de ensayo','DELETE','/empresa/gastos-estructura/'+oneOffExpense.id);
   await call('Estructura: quitar mensual de ensayo','DELETE','/empresa/gastos-estructura/'+monthlyExpense.id);
   const expectedErrors=new Map([
+  ['Estructura: chófer sin acceso a comparativa',403],
+  ['Estructura: no editar gasto de otra empresa',404],
   ['Estructura: bloqueo servidor de mes cerrado',409],
   ['Rechazar ruta de otro cliente al editar',400],
   ['Exigir confirmación de carga real en otro día',409],
@@ -400,6 +419,7 @@ async function main(){
  evidence.passed=true;
  evidence.created={company:!!company,user:!!user,client:!!client.id,driver:!!driver.id,vehicle:!!vehicle.id};
  if(process.env.AUDIT_BROWSER==='1'){
+  await db.query("INSERT INTO gastos_estructura(empresa_id,nombre,tipo,importe,periodo,fecha) VALUES ($1,'Alquiler oficina · SINTÉTICO','Alquiler/Arrendamiento',950,'mensual','2025-01'),($1,'Licencia anual · SINTÉTICO','Software/Licencias',1200,'anual','2026-01'),($1,'Formación septiembre · SINTÉTICO','Formación',450,'unico','2026-09'),($1,'Formación agosto · SINTÉTICO','Formación',250,'unico','2026-08')",[company]);
   // Keep this order free of Planner reservations and customer debt so the
   // browser can exercise an ordinary save/reopen cycle without bypassing guards.
   const qaClient=await call('Cliente limpio para QA visual','POST','/clientes',{nombre:'Cliente QA visual',cif:'B87654321',direccion:'Calle de Ensayo 2',cp:'46002',ciudad:'Valencia',codigo_postal:'46002',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'visual@example.invalid',telefono:'960000002',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias'});

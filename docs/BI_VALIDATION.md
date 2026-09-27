@@ -176,3 +176,29 @@ Una vista HTML aislada con el CSS real y datos **sintéticos rotulados** se midi
 ## Evolución TMS fase 15 (27/09/2026)
 
 Se añaden pruebas de `financial_journeys_check.cjs` y HTTP `audit_physical_bi.cjs`: caso 1500/1250/800/200, población de 1501, reparto estable previo al filtro, anulaciones, empresa ajena, cero confirmado y costes duplicables excluidos. API, serie, matriz y detalle reconcilian; los exportadores conservan el contrato común y sus regresiones PDF/XLSX/CSV pasan. Evidencia y límites: `TMS_EVOLUTION_PHASE15_BI.md`. No hay validación nueva de producción.
+
+## Gastos de estructura — 27/09/2026
+
+Cambio solicitado después de las fases BI: Gestión y Comparativa en Finanzas → Costes, manteniendo el servicio común. Detalle funcional y revisión operativa: `TMS_STRUCTURE_EXPENSES_AND_OPERATIONS_20260927.md`.
+
+Comandos ejecutados en el worktree aislado:
+
+- Backend: `node scripts/structure_expenses_check.cjs`, código 0. Mensual/puntual, anual/trimestral, céntimos de reparto, mes anterior en cambio de año, febrero bisiesto, mes vacío, base cero, futuro excluido, categoría reconciliada y empresa ajena.
+- Backend: `npm run check`, código 0. Incluye regresiones económicas/BI, fiscalidad, pedidos, tráfico, app del chófer y documentos existentes. El primer intento en sandbox falló por permiso de crear un proceso Node (EPERM); la ejecución autorizada fuera de esa restricción terminó correctamente.
+- HTTP: `node scripts/audit_workflows_regression_check.cjs` con `AUDIT_BROWSER=0`, código 0, `passed=true`, 141 comprobaciones principales, cero errores de esquema, además de las suites delegadas por el propio script. Base PGlite sintética en memoria, correo/proveedores interceptados. A=300 €, B=9000 €; manipular empresa_id no cambia el alcance; editar un gasto ajeno devuelve 404; chófer 403; contable B consulta solo B; cierre impide edición (409), reapertura y justificante conservados. Mes siguiente=100 €, comparación=100/300/null.
+- Frontend: `CI=true npm test -- --watchAll=false --runInBand`: 63 suites / 151 pruebas correctas. Tras añadir un caso mensual y ajustar las etiquetas del gráfico: `npm test -- --watchAll=false --runInBand --runTestsByPath src/pages/GastosEstructura.test.js src/utils/sidebarNavigation.test.js`: 2 suites / 10 pruebas correctas. Comprueba altas mensuales/puntuales en mes seleccionado, permisos, cierre, errores/reintento, datos del servidor y respuestas antiguas descartadas.
+- Build final: `REACT_APP_LOCAL_SERVER=true GENERATE_SOURCEMAP=false CI=false npm run build`, código 0, limitando CPU a dos trabajadores mediante helper local. Avisos previos en Agenda, MiCuenta, Pedidos, Taller, Vehículos, PlannerWms, UI común y dependencia dinámica; ninguno en los archivos del módulo de gastos.
+- `git diff --check`: sin errores.
+
+El primer intento del banco HTTP ampliado encontró un ReferenceError en las nuevas variables de la prueba, no en una petición de la aplicación. Se corrigió creando una empresa B propia de la prueba y obteniendo el token restringido en su alcance; la ejecución final completa pasó.
+
+Navegador integrado contra API real local y datos rotulados SINTÉTICO:
+- Finanzas → Costes → Gastos de estructura; gestión y comparativa operativas.
+- 1500 / 1300 / 950 €: tarjetas, gráfico y tabla de periodos coherentes; categorías 950+100+450 para el mes seleccionado; diferencias +200 € (15,4 %) y +550 € (57,9 %).
+- Anchos 390, 768, 1440 y 1920; documento sin desbordamiento global. Medidas explícitas viewport/documento: 390/390, 768/768 y 1920/1920. Tablas con desplazamiento interno.
+- Se reprodujo solapamiento de meses largos a 390 px; corregido a «sept 26», «ago 26», «sept 25», conservando nombres completos en tablas/tooltip. Verificado otra vez en navegador.
+- Tema claro y oscuro; pestañas mediante flechas de teclado. Formulario a 390 px alineado, botones visibles y cierre sin perder la pantalla.
+- Diciembre 2024 sin registros muestra «Sin datos», no cero confirmado. Alta puntual sintética de 125,50 € desde el formulario: guardado, cierre del modal, total y reparto por camión de 125,50 €.
+- Consola de la pantalla final: ningún error capturado.
+
+Límites: no prueba nueva en Safari/iPhone físico; históricos reconstruidos con fichas vigentes, IVA no desglosado y flota actual expresamente indicados. No nueva migración, ningún cambio de documentos fiscales ni de datos reales. Estas pruebas locales no acreditan despliegue en producción.

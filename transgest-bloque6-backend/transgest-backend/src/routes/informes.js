@@ -82,9 +82,9 @@ router.get("/bi/resumen", async (req, res) => {
         COUNT(*) FILTER (WHERE estado::text <> 'cancelado' AND COALESCE(km_ruta,0) <= 0)::int AS sin_km,
         COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura)::int AS pendientes_facturar_count,
         COUNT(*) FILTER (WHERE estado::text IN ('pendiente','confirmado') AND vehiculo_id IS NULL AND chofer_id IS NULL AND colaborador_id IS NULL)::int AS sin_recurso,
-        COALESCE(SUM(importe),0)::numeric AS venta,
-        COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS venta_realizada,
-        COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura),0)::numeric AS pendiente_facturar_realizado,
+        COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)),0)::numeric AS venta,
+        COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS venta_realizada,
+        COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura),0)::numeric AS pendiente_facturar_realizado,
         COALESCE(AVG(NULLIF(COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0),0)) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS ticket_medio_realizado,
         COALESCE(SUM(COALESCE(importe_paralizacion, paralizacion_importe, 0)),0)::numeric AS paralizacion,
         COUNT(*) FILTER (WHERE COALESCE(importe_paralizacion, paralizacion_importe, 0) > 0)::int AS pedidos_con_paralizacion,
@@ -119,9 +119,9 @@ router.get("/bi/resumen", async (req, res) => {
         SELECT cliente_id,
                COUNT(*)::int AS pedidos,
                COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado'))::int AS realizados,
-               COALESCE(SUM(importe),0)::numeric AS venta,
-               COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS venta_realizada,
-               COALESCE(SUM(importe) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura),0)::numeric AS pendiente_facturar_realizado,
+               COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)),0)::numeric AS venta,
+               COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS venta_realizada,
+               COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)) FILTER (WHERE estado::text IN ('entregado','facturado') AND pendiente_factura),0)::numeric AS pendiente_facturar_realizado,
                COALESCE(SUM(coste_operativo) FILTER (WHERE estado::text IN ('entregado','facturado')),0)::numeric AS coste_realizado
           FROM pedidos_bi
          WHERE empresa_id=$1
@@ -163,8 +163,8 @@ router.get("/bi/resumen", async (req, res) => {
              COALESCE(NULLIF(destino,''),'Sin destino') AS destino,
              COUNT(*)::int AS viajes,
              COALESCE(AVG(NULLIF(COALESCE(km_ruta,0) + COALESCE(km_vacio,0),0)),0)::numeric AS km_medio,
-             COALESCE(SUM(importe),0)::numeric AS venta,
-             CASE WHEN COUNT(*) FILTER (WHERE coste_operativo > 0)>0 THEN SUM(importe - coste_operativo) ELSE NULL END::numeric AS margen
+             COALESCE(SUM(importe + COALESCE(importe_paralizacion,0)),0)::numeric AS venta,
+             CASE WHEN COUNT(*) FILTER (WHERE coste_operativo > 0)>0 THEN SUM(importe + COALESCE(importe_paralizacion,0) - coste_operativo) ELSE NULL END::numeric AS margen
         FROM pedidos_bi
        WHERE empresa_id=$1 AND fecha_bi BETWEEN $2 AND $3
          AND estado::text IN ('entregado','facturado')
@@ -284,7 +284,7 @@ router.get("/bi/resumen", async (req, res) => {
   const saldo = await db.query(`SELECT COALESCE(SUM(total) FILTER (WHERE estado::text <> 'cobrada'),0)::numeric AS saldo
     FROM facturas WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha <= $3 AND $2::date <= $3::date AND ${validInvoiceSql('')}`, params);
   const serie = await db.query(`WITH ${financialPedidosCte}, valores AS (
-    SELECT to_char(fecha_bi,'YYYY-MM') AS mes, 0::numeric AS facturado, importe AS pendiente
+    SELECT to_char(fecha_bi,'YYYY-MM') AS mes, 0::numeric AS facturado, (importe + COALESCE(importe_paralizacion,0)) AS pendiente
       FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3 AND estado::text IN ('entregado','facturado') AND pendiente_factura
     UNION ALL SELECT to_char(fecha,'YYYY-MM'),base_imponible,0 FROM facturas
       WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND ${validInvoiceSql('')}
@@ -292,7 +292,7 @@ router.get("/bi/resumen", async (req, res) => {
     FROM valores GROUP BY mes ORDER BY mes`,params);
   const clientIncome = clientes.rows.reduce((sum,c)=>sum+Number(c.ingreso_gestionado || 0),0);
   const metadata = reportMetadata({ desde, hasta }, {
-    venta_realizada: metric(ventaRealizada, 'Importe neto de pedidos entregados o facturados; fecha económica', { total: realizados }),
+    venta_realizada: metric(ventaRealizada, 'Porte neto y paralización registrada de pedidos entregados o facturados; fecha económica', { total: realizados }),
     facturado: metric(facturado, 'Base imponible de facturas emitidas en el periodo', { total: Number(facturas.rows[0]?.total || 0) }),
     cobrado: metric(cobrado, 'Total con impuestos de facturas del periodo marcadas cobradas; no movimientos de caja', { status: 'estimado', taxes: 'con impuestos' }),
     cobros_efectivos: metric(null, 'Sin libro de movimientos de cobro fechado en TransGest'),

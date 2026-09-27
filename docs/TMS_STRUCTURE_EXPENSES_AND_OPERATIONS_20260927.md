@@ -70,3 +70,7 @@ La prioridad recomendada para la siguiente evolución es **replanificación y re
 ## Verificación
 
 Los resultados y comandos finales se registran en `BI_VALIDATION.md`. El cambio de gastos es compatible con clientes anteriores del endpoint y no requiere SQL nuevo. La web nueva indica «Comparativa no disponible» si recibe un backend anterior. La reversión del cambio de gastos no altera registros ni documentos.
+
+## Continuación posterior solicitada
+
+La petición «Haz todo lo que quede pendiente de las mejoras operativas» desarrolla la tabla anterior en la rama `codex/operational-completion`. Estado vigente, alcance implementado, pruebas y pendientes: `TMS_OPERATIONAL_COMPLETION.md`. Se conserva aquí la revisión de partida como registro; sus pendientes y ausencia de nuevas migraciones describen el cambio inicial de gastos, no la ampliación posterior.

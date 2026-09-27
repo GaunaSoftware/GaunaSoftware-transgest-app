@@ -26,3 +26,7 @@ test('rounding uses cents per order and omits nonexistent fuel',()=>{
  expect(build([{importe:100}],'detalle')).toHaveLength(1);
  expect(build([],'linea','Porte')).toEqual([]);
 });
+test.each(['linea','detalle','kg'])('%s adds the separate agreed detention charge once',mode=>{
+ const lines=build([{id:'p1',numero:'PED-1',importe:1000,importe_revision_combustible:50,importe_paralizacion:150}],mode,'Servicio');
+ expect(total(lines)).toBe(1150);expect(lines.find(l=>l.paralizacion_pedido_id==='p1')).toEqual({concepto:'Paralización · PED-1',cantidad:1,precio_unit:150,paralizacion_pedido_id:'p1'});
+});

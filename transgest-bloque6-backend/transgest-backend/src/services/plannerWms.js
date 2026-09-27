@@ -30,7 +30,11 @@ async function act(db,company,user,input){
   if(prior){if(prior.fingerprint!==fingerprint||prior.created_by!==user)throw fail('Identificador utilizado para otra operación.',409);return prior.datos;}
   const scoped={query:(...a)=>tx.query(...a),transaction:fn=>fn(tx)};let result;
   const action=input.accion;
-  if(action==='ubicacion'){
+  if(action==='regla_reposicion'){
+   result=await require('./plannerAutomation').saveRule(tx,company,user,input);
+  }else if(action==='reponer_propuesta'){
+   result=await require('./plannerAutomation').apply(scoped,company,user,input);
+  }else if(action==='ubicacion'){
    const almacen=text(input.almacen),codigo=text(input.codigo);if(!almacen||!codigo)throw fail('Indica almacén y código de ubicación.');
    result=(await tx.query('INSERT INTO planner_ubicaciones(empresa_id,almacen,codigo,zona,pasillo,estanteria,nivel) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *',[company,almacen,codigo,text(input.zona),text(input.pasillo),text(input.estanteria),text(input.nivel)])).rows[0];
   }else if(action==='asn'){
@@ -71,7 +75,9 @@ async function act(db,company,user,input){
    const dest=await inventory.move(scoped,company,user,{...common,almacen:loc.almacen,ubicacion:loc.codigo,cantidad:amount,operacion:crypto.randomUUID()});
    await tx.query('UPDATE planner_existencias SET calidad=$3,recepcion_real_at=CASE WHEN cantidad=$5 THEN $4 WHEN recepcion_real_at IS NULL OR $4::timestamptz IS NULL THEN NULL ELSE LEAST(recepcion_real_at,$4) END WHERE id=$1 AND empresa_id=$2',[dest.id,company,s.calidad,s.recepcion_real_at,amount]);result={origen:s.id,destino:dest.id,cantidad:amount};
   }else if(action==='abrir_conteo'){
-   const s=await stock(tx,company,input.existencia_id);result=(await tx.query('INSERT INTO planner_conteos(empresa_id,existencia_id,stock_version,cantidad_sistema,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[company,s.id,s.version,s.cantidad,user])).rows[0];
+   const s=await stock(tx,company,input.existencia_id);
+   result=(await tx.query("SELECT * FROM planner_conteos WHERE empresa_id=$1 AND existencia_id=$2 AND estado='pendiente' AND stock_version=$3 ORDER BY created_at DESC LIMIT 1",[company,s.id,s.version])).rows[0];
+   if(!result)result=(await tx.query('INSERT INTO planner_conteos(empresa_id,existencia_id,stock_version,cantidad_sistema,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',[company,s.id,s.version,s.cantidad,user])).rows[0];
   }else if(action==='confirmar_conteo'){
    const count=(await tx.query('SELECT * FROM planner_conteos WHERE empresa_id=$1 AND id::text=$2 FOR UPDATE',[company,String(input.conteo_id)])).rows[0];
    if(!count||count.estado!=='pendiente')throw fail('Conteo no disponible.',409);

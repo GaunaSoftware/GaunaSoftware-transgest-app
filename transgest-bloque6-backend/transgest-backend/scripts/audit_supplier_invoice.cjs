@@ -3,6 +3,7 @@ module.exports=async({db,base,company,user,token,password,order})=>{
  let checks=0;const path='/supplier-invoice-review';
  async function call(method,url,body,status=200,session=token){const response=await fetch(base+url,{method,headers:{Authorization:'Bearer '+session,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
  const provider=(await db.query('SELECT c.* FROM colaboradores c JOIN pedidos p ON p.colaborador_id=c.id AND p.empresa_id=c.empresa_id WHERE p.id=$1 AND p.empresa_id=$2',[order.id,company])).rows[0];
+ const initialDocuments=(await db.query('SELECT count(*)::int n FROM facturas_proveedor WHERE empresa_id=$1 AND proveedor_id=$2',[company,provider.id])).rows[0].n;
  const xml='<Facturae><SellerParty><TaxIdentificationNumber>'+provider.cif+'</TaxIdentificationNumber></SellerParty><Invoice><InvoiceNumber>QA-001</InvoiceNumber><IssueDate>2026-09-27</IssueDate><InvoiceCurrencyCode>EUR</InvoiceCurrencyCode><TotalGrossAmountBeforeTaxes>360.00</TotalGrossAmountBeforeTaxes><TotalTaxOutputs>75.60</TotalTaxOutputs><TotalTaxesWithheld>0</TotalTaxesWithheld><InvoiceTotal>435.60</InvoiceTotal><InvoiceLine><ItemDescription>Servicio sintético</ItemDescription><ReceiverContractReference>'+order.numero+'</ReceiverContractReference><GrossAmount>360.00</GrossAmount></InvoiceLine></Invoice></Facturae>';
  const body={proveedor_id:provider.id,nombre:'factura-sintetica.xml',mime:'application/xml',base64:Buffer.from(xml).toString('base64')};
  const row=await call('POST',path,body,201);assert.equal((await call('POST',path,body,201)).id,row.id);
@@ -36,7 +37,7 @@ module.exports=async({db,base,company,user,token,password,order})=>{
  const paymentDetail=await call('GET',`/pedidos/${order.id}/colaborador-pago`);assert.ok(paymentDetail.factura_proveedor_id);assert.equal(paymentDetail.pagado,false);
  const original=await call('GET',path+'/'+row.id+'/original');assert.equal(original.base64,body.base64);
  const viewer=crypto.randomUUID();await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Solo lectura sintético','supplier-viewer@example.invalid',$3,'visualizador',true)",[viewer,company,await require('bcryptjs').hash(password,4)]);const viewToken=(await call('POST','/auth/login',{email:'supplier-viewer@example.invalid',password})).token;await call('GET',path+'?proveedor_id='+provider.id,null,403,viewToken);
- const list=await call('GET',path+'?proveedor_id='+provider.id);assert.equal(list.total,3);assert.equal(list.data[0].original,undefined);
+ const list=await call('GET',path+'?proveedor_id='+provider.id);assert.equal(list.total,initialDocuments+3);assert.equal(list.data[0].original,undefined);
  await db.query("UPDATE empresas SET plan='profesional' WHERE id=$1",[company]);await call('POST',path+'/'+row.id+'/extraer',{ia:true},403);await db.query("UPDATE empresas SET plan='enterprise' WHERE id=$1",[company]);
  return {checks,immutableOriginal:true,tenant:true,duplicate:true,netReconciliation:true,humanReview:true,noDuplicateForecast:true,noPayment:true,negativeCredit:true};
 };

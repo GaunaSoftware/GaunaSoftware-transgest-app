@@ -170,7 +170,7 @@ function buildOperationalMetrics({empresaId,range,orders=[],steps=[],docs=[],cli
       factor_kg_co2_litro:factor,consumo_l_100km:consumption,origen_factor:number(cfg.factor_kg_co2_litro)>0?'empresa':'valor orientativo existente',
       origen_consumo:number(cfg.consumo_l_100km)>0?'empresa':'valor orientativo existente',certificada:false},
     detalle:{servicios:paged(serviceRows),paradas:paged([...loadStops.map(s=>({...s,tipo:'carga'})),...unloadStops.map(s=>({...s,tipo:'descarga'}))].map(s=>({...s,arrival:s.arrival?.toISOString()||null,start:s.start?.toISOString()||null,finish:s.finish?.toISOString()||null})))},
-    pendientes:{resolucion_incidencias:'Falta evento de cierre enlazado a incidencia.',paralizaciones:'Importe documentado facturable, líneas emitidas y cobros aplicados no están conciliados por paralización.',
+    pendientes:{resolucion_incidencias:'Falta evento de cierre enlazado a incidencia.',paralizaciones:'El detalle del pedido concilia paralizaciones documentadas, aceptadas y líneas de factura. Falta atribución de cobros; el porcentaje emitido se muestra por separado del cobrado.',
       calidad_colaboradores:'Muestra histórica por proveedor y SLA acordado insuficientes para una puntuación fiable.',consumo:'Los repostajes no prueban consumo.',ocupacion:'Falta capacidad por tramo en unidad comparable.',planner:'Las reservas de muelle son del producto Planner y no se mezclan con esta cohorte transportista.'},
     fuentes_no_disponibles:missingSources};
 }

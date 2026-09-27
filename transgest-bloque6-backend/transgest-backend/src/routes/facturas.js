@@ -1275,8 +1275,8 @@ router.post("/", GERENTE_O_CONTABLE,
       for (const [i, l] of lineas.entries()) {
         const importeLinea = round2(Number(l.cantidad || 0) * Number(l.precio_unit || 0));
         await client.query(
-          `INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden) VALUES ($1,$2,$3,$4,$5,$6)`,
-          [fac.id, l.concepto, l.cantidad, l.precio_unit, importeLinea, i]
+          `INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden,paralizacion_pedido_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [fac.id, l.concepto, l.cantidad, l.precio_unit, importeLinea, i, pedidosIdsUnicos.includes(l.paralizacion_pedido_id)?l.paralizacion_pedido_id:null]
         );
       }
 

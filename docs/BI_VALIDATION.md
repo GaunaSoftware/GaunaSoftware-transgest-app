@@ -202,3 +202,9 @@ Navegador integrado contra API real local y datos rotulados SINTÉTICO:
 - Consola de la pantalla final: ningún error capturado.
 
 Límites: no prueba nueva en Safari/iPhone físico; históricos reconstruidos con fichas vigentes, IVA no desglosado y flota actual expresamente indicados. No nueva migración, ningún cambio de documentos fiscales ni de datos reales. Estas pruebas locales no acreditan despliegue en producción.
+
+## Continuación operativa — 27/09/2026
+
+Baterías ampliadas y resultados en `TMS_OPERATIONAL_COMPLETION.md`. Regresión económica: 1.000 de porte (50 de combustible ya incluido) + 150 de paralización = 1.150 netos; dos servicios suman 2.300 en tarjeta, evolución, detalle y exportaciones. Factura automática/manual conserva una sola línea separada. Recuperación: 200 documentado/150 emitido = 75 %, efectivo desconocido; facturas borrador excluidas, revisiones posteriores al corte excluidas, idempotencia y página independiente del agregado.
+
+Validación nativa local aprobada: 68 migraciones y repetición intacta, reintentos HTTP simultáneos sin duplicar gastos/movimientos/versiones, copia/restauración con 196 tablas / 852 filas sintéticas. React: 65 suites / 161 pruebas aprobadas; build final aprobado con avisos previos. Se conservaron las pruebas BI existentes. No acredita carga real ni producción; Render permanece suspendido por la incidencia de disco.

@@ -3,6 +3,7 @@ import {plannerApi} from '../services/api';
 import {Modal,Button} from '../ui';
 import {Panel,Empty,quantity} from './PlannerUI';
 import './PlannerWms.css';
+import PlannerAutomation from './PlannerAutomation';
 
 const api=(path='',body)=>plannerApi(`/wms${path}`,body?{method:'POST',body}:{});
 const day=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid'}).format(new Date());
@@ -33,6 +34,7 @@ export default function PlannerWms({articles=[],stock=[],preps=[],canEdit=false,
  <p>Recepciones y calidad → ubicación → preparación → embalaje → carga. El stock histórico sin inspección conserva el estado «Sin revisión registrada».</p>
  {error&&!form&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
  {!data?<Empty>Cargando procesos de almacén…</Empty>:<>
+ <PlannerAutomation articles={articles} locations={data.ubicaciones} canEdit={canEdit} onRefresh={async()=>{await load();await onRefresh?.();}}/>
  <Panel title="Recepciones previstas (ASN)" icon="warehouse" actions={<Button disabled={!canEdit||busy} onClick={()=>open('asn',{lineas:[{articulo_id:'',cantidad:1}],fecha_prevista:day()})}>Nueva recepción</Button>}>
  <div className="planner-table"><table><thead><tr><th>Referencia / fecha</th><th>Previsto y recibido</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{data.recepciones.map(r=><tr key={r.id}><td>{r.referencia}<small>{date(r.fecha_prevista)}</small></td><td>{r.lineas.map(l=><div key={l.id}>{l.referencia}: {quantity(l.recibida)} / {quantity(l.prevista)} <strong>{l.recibida>l.prevista?'Exceso':l.recibida<l.prevista?'Falta por recibir':'Completo'}</strong></div>)}</td><td>{r.estado}</td><td>{r.estado!=='cerrada'&&<><Button disabled={!canEdit||busy} onClick={()=>open('recibir',{asn_id:r.id,linea_id:r.lineas[0]?.id,cantidad:'',ubicacion_id:''})}>Recibir mercancía</Button><Button disabled={!canEdit||busy} onClick={()=>open('cerrar_asn',{asn_id:r.id})}>Cerrar recepción</Button></>}</td></tr>)}</tbody></table></div>{!data.recepciones.length&&<Empty>Registra un aviso antes de recibir. Las discrepancias quedan conservadas al cerrar.</Empty>}<small>Hasta {data.limites.recepciones} recepciones recientes.</small>
  </Panel>

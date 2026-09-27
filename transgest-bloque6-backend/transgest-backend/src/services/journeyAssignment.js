@@ -65,8 +65,8 @@ async function protectJourneyAssignment(tx, empresaId, previous, patch) {
   if (!keys.some(key => Object.prototype.hasOwnProperty.call(patch,key) && String(patch[key]||'') !== String(previous[key]||''))) return;
   let linked;
   try { linked = (await tx.query(`SELECT v.id FROM viajes_operativos v JOIN viaje_pedidos vp ON vp.empresa_id=v.empresa_id AND vp.viaje_id=v.id
-    WHERE vp.empresa_id=$1 AND vp.pedido_id=$2 AND vp.activo AND v.legacy_grupaje_id IS NOT NULL AND v.estado<>'cancelado'`, [empresaId,previous.id])).rows[0]; }
+    WHERE vp.empresa_id=$1 AND vp.pedido_id=$2 AND vp.activo AND (v.legacy_grupaje_id IS NOT NULL OR v.version>1) AND v.estado<>'cancelado'`, [empresaId,previous.id])).rows[0]; }
   catch(error) { if (['42P01','42703'].includes(error.code)) return; throw error; }
-  if (linked) fail('Este pedido forma parte de un viaje operativo. Cambia la asignación del grupaje completo desde Mesa de Tráfico.', 'JOURNEY_ASSIGNMENT_REQUIRED');
+  if (linked) fail('Este pedido forma parte de un viaje operativo. Usa Replanificación y relevos o la asignación del grupaje completo.', 'JOURNEY_ASSIGNMENT_REQUIRED');
 }
 module.exports = { assignGroupage, protectJourneyAssignment };

@@ -16,6 +16,8 @@ router.get('/',wrap(async(req,res)=>{
  });
 }));
 router.post('/accion',wrap(async(req,res)=>res.status(201).json(await wms.act(db,req.empresaId,req.user.id,req.body))));
+router.get('/automatismos',wrap(async(req,res)=>res.json(await require('../services/plannerAutomation').list(db,req.empresaId))));
+router.get('/muelles-propuestos',wrap(async(req,res)=>res.json(await require('../services/plannerAutomation').docks(db,req.empresaId,req.query))));
 router.post('/gs1',wrap(async(req,res)=>res.json(wms.parseGs1(req.body.codigo))));
 router.get('/reservas/:id/etiqueta',wrap(async(req,res)=>{
  const row=(await db.query("SELECT r.id,p.numero FROM planner_reservas r JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id WHERE r.id::text=$1 AND r.empresa_id=$2 AND r.tipo='carga'",[req.params.id,req.empresaId])).rows[0];

@@ -1039,6 +1039,7 @@ export const getResumenGastosEstructura = periodo => apiFetch(`/empresa/gastos-e
 export const getGastosEstructura   = ()        => apiFetch("/empresa/gastos-estructura");
 export const crearGastoEstructura  = (data)    => apiFetch("/empresa/gastos-estructura", {method:"POST",body:data});
 export const editarGastoEstructura = (id,data) => apiFetch(`/empresa/gastos-estructura/${id}`, {method:"PUT",body:data});
+export const cambiarVigenciaGasto = (id,data) => apiFetch(`/empresa/gastos-estructura/${id}/vigencia`, {method:"POST",body:data});
 export const borrarGastoEstructura = (id)      => apiFetch(`/empresa/gastos-estructura/${id}`, {method:"DELETE"});
 export const getMesesCerrados      = ()        => apiFetch("/empresa/meses-cerrados");
 export const cerrarMes             = (mes)     => apiFetch(`/empresa/meses-cerrados/${mes}`, {method:"POST"});
@@ -1379,6 +1380,8 @@ export async function uploadDocumentPackage(files){
 }
 
 export const getGroupagePlan = groupId => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/plan`);
+export const journeyOperation = (pedidoId,path='',options={}) => apiFetch(`/pedidos/${encodeURIComponent(pedidoId)}/operativa${path}`,options);
+export const pedidoParalizaciones = (id,body) => apiFetch(`/pedidos/${encodeURIComponent(id)}/paralizaciones`,body?{method:'POST',body}:{});
 export const saveGroupagePlan = (groupId,data) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/plan`,{method:'POST',body:{...data,client_operation_uuid:crypto.randomUUID()}});
 
 export const assignGroupage = (groupId,asignacion) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/asignacion`,{method:"POST",body:{asignacion,client_operation_uuid:crypto.randomUUID()}});

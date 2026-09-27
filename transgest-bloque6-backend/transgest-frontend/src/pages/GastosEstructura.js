@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import { getResumenGastosEstructura, crearGastoEstructura, editarGastoEstructura, borrarGastoEstructura,
+import { getResumenGastosEstructura, crearGastoEstructura, editarGastoEstructura, borrarGastoEstructura, cambiarVigenciaGasto,
   getMesesCerrados, cerrarMes, abrirMes } from '../services/api';
 import { confirmDialog, notify } from '../services/notify';
 import { useAuth } from '../context/AuthContext';
@@ -19,8 +19,11 @@ const TYPES = ['Salario personal oficina','Alquiler/Arrendamiento','Suministros 
 const FREQUENCIES = {mensual:'Todos los meses',unico:'Puntual',trimestral:'Trimestral',anual:'Anual'};
 const changes = v => !v || v.diferencia == null ? 'Sin datos comparables' : (v.diferencia > 0 ? '+' : '')+euros(v.diferencia)+' · '+percent(v.porcentaje);
 
-function ExpenseForm({expense,month,onClose,onSaved}) {
+function ExpenseForm({expense,month,onClose,onSaved,ending=false}) {
   const [form,setForm] = useState(expense || {nombre:'',tipo:TYPES[0],importe:'',periodo:'mensual',fecha:month,notas:''});
+  const recurrent=Boolean(expense && expense.periodo!=='unico');
+  const [effective,setEffective]=useState(month);
+  const [reason,setReason]=useState('');
   const [saving,setSaving] = useState(false);
   const [error,setError] = useState('');
   const field = key => event => setForm(previous=>({...previous,[key]:event.target.value}));
@@ -29,23 +32,29 @@ function ExpenseForm({expense,month,onClose,onSaved}) {
     event.preventDefault(); setError(''); setSaving(true);
     try {
       const payload = {...form,nombre:form.nombre.trim(),importe:Number(form.importe)};
-      if (expense?.id) await editarGastoEstructura(expense.id,payload);
+      if(recurrent) await cambiarVigenciaGasto(expense.id,{accion:ending?'finalizar':'cambiar',revision:expense.revision,desde:effective,hasta:effective,motivo:reason,datos:payload});
+      else if (expense?.id) await editarGastoEstructura(expense.id,payload);
       else await crearGastoEstructura(payload);
       onSaved();
     } catch (e) { setError(e.message || 'No se pudo guardar el gasto.'); }
     finally { setSaving(false); }
   }
-  return <Modal open title={expense ? 'Editar gasto' : 'Añadir gasto de estructura'} onClose={close} width={620}
+  return <Modal open title={ending?'Finalizar recurrencia':recurrent?'Cambiar gasto desde un mes':expense ? 'Editar gasto' : 'Añadir gasto de estructura'} onClose={close} width={620}
     footer={<><Button disabled={saving} onClick={close}>Cancelar</Button><Button variant="primary" type="submit" form="structure-expense-form" disabled={saving}>{saving ? 'Guardando…' : 'Guardar gasto'}</Button></>}>
     <form id="structure-expense-form" className="structure-expense-form" onSubmit={save}>
       {error && <p role="alert" className="structure-full">{error}</p>}
+      {recurrent && <><label>{ending?'Último mes incluido':'Aplicar desde el mes'}<input className="tgui-input" type="month" required min={expense.vigente_desde || String(expense.fecha).slice(0,7)} value={effective} onChange={e=>setEffective(e.target.value)}/></label>
+        <label className="structure-full">Motivo del cambio<textarea className="tgui-input" required maxLength={1000} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+        <p className="structure-full structure-muted">Los meses anteriores conservan sus importes. {ending?'Este será el último mes que incluya el gasto.':'Se registra una nueva vigencia con tu usuario y el motivo.'}</p></>}
+      {!ending && <>
       <label className="structure-full">Nombre / descripción<input className="tgui-input" required maxLength={200} value={form.nombre} onChange={field('nombre')} placeholder="Ej.: alquiler de oficina"/></label>
       <label className="structure-full">Categoría<select className="tgui-input" value={form.tipo} onChange={field('tipo')}>{!TYPES.includes(form.tipo) && <option>{form.tipo}</option>}{TYPES.map(t=><option key={t}>{t}</option>)}</select></label>
       <label>Importe (€)<input className="tgui-input" type="number" required min="0.01" step="0.01" value={form.importe} onChange={field('importe')}/></label>
-      <label>Frecuencia<select className="tgui-input" value={form.periodo} onChange={field('periodo')}>{Object.entries(FREQUENCIES).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-      <label>{form.periodo==='unico' ? 'Mes del gasto' : 'Desde el mes'}<input className="tgui-input" type="month" required value={String(form.fecha).slice(0,7)} onChange={field('fecha')}/></label>
+      <label>Frecuencia<select className="tgui-input" value={form.periodo} onChange={field('periodo')}>{Object.entries(FREQUENCIES).filter(([v])=>!recurrent || v!=='unico').map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+      {!recurrent && <label>{form.periodo==='unico' ? 'Mes del gasto' : 'Desde el mes'}<input className="tgui-input" type="month" required value={String(form.fecha).slice(0,7)} onChange={field('fecha')}/></label>}
       <label className="structure-full">Notas<textarea className="tgui-input" rows={3} value={form.notas || ''} onChange={field('notas')}/></label>
       <p className="structure-full structure-muted">{form.periodo==='unico' ? 'Se incluye únicamente en el mes indicado.' : 'Se incluye desde el mes indicado en adelante.'} {['anual','trimestral'].includes(form.periodo) && 'El importe se reparte entre los meses de la frecuencia elegida.'}</p>
+      </>}
     </form>
   </Modal>;
 }
@@ -142,7 +151,10 @@ export default function GastosEstructura() {
   const actions = expense => <div className="tgui-actions">
     {expense.factura_nombre && expense.factura_data && <a className="tgui-button" href={expense.factura_data} download={expense.factura_nombre}>Ver justificante</a>}
     {editable && <><label className="tgui-button structure-upload">{expense.factura_nombre ? 'Cambiar justificante' : 'Adjuntar justificante'}<input aria-label={'Adjuntar justificante de '+expense.nombre} type="file" accept=".pdf,.jpg,.jpeg,.png,.docx" onChange={e=>attach(expense,e.target.files[0])}/></label>
-      <Button onClick={()=>setModal({expense})}>Editar</Button><Button onClick={()=>remove(expense)}>Eliminar</Button></>}
+      {!expense.fecha_fin && <Button onClick={()=>setModal({expense})}>{expense.periodo==='unico'?'Editar':'Cambiar desde un mes'}</Button>}
+      {expense.periodo==='unico'?<Button onClick={()=>remove(expense)}>Eliminar</Button>:!expense.fecha_fin && <Button onClick={()=>setModal({expense,ending:true})}>Finalizar recurrencia</Button>}</>}
+    {expense.fecha_fin && <Badge>Finaliza en {monthLabel(expense.fecha_fin)}</Badge>}
+    {expense.vigencias?.length>0 && <details><summary>Historial de vigencias</summary>{expense.vigencias.map(v=><p key={v.desde}>{monthLabel(v.desde)}: {euros(v.datos.importe)} · {FREQUENCIES[v.datos.periodo]} · {v.motivo}</p>)}</details>}
   </div>;
   const rows = (data?.reparto || []).map(row=>({...row,id:row.v.id,matricula:row.v.matricula,
     coste:allocation==='igual'?row.coste_igual:row.coste_ingresos,peso:allocation==='igual'?row.peso_igual:row.peso_ingresos}));
@@ -183,6 +195,6 @@ export default function GastosEstructura() {
         </Section>
       </>)}
     </div>
-    {modal && <ExpenseForm expense={modal.expense} month={month} onClose={()=>setModal(null)} onSaved={()=>{setModal(null);refresh();}}/>}
+    {modal && <ExpenseForm expense={modal.expense} ending={modal.ending} month={month} onClose={()=>setModal(null)} onSaved={()=>{setModal(null);refresh();}}/>}
   </Page>;
 }

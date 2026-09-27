@@ -37,13 +37,14 @@ async function main(){
  // Exercise the actual production module boundaries, not authentication alone.
  const authMiddleware=req('./middleware/auth');
  const boundarySource=code.slice(code.indexOf('function pedidosAuthUnlessPublic'),code.indexOf('safeUse(`${api}/auth`'));
- const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission,colaboradoresAuthUnlessPublic})',authMiddleware);
+ const boundaries=vm.runInNewContext(boundarySource+'\n({pedidosAuthUnlessPublic,choferesPermissionUnlessApp,portalClientePermission,colaboradoresAuthUnlessPublic,routeOptimizerAuthUnlessPublic,routeOptimizerPlanUnlessPublic})',authMiddleware);
  if(process.env.AUDIT_BROWSER==='1')app.get('/health',(request,res)=>res.json({status:'ok',mode:'synthetic-browser-qa'}));
  app.get('/api/v1/producto',(request,res)=>res.json({producto:'tms'}));
  app.use('/api/v1/auth',auth);
  app.use('/api/v1/empresa',authMiddleware.authenticate,authMiddleware.requireModulePermission('empresa'),req('./routes/datos_empresa'));
  app.use('/api/v1/superadmin',req('./routes/superadminCore'));
  app.use('/api/v1/usuarios',authMiddleware.authenticate,req('./routes/usuarios'));
+ app.use('/api/v1/route-optimizer',boundaries.routeOptimizerAuthUnlessPublic,boundaries.routeOptimizerPlanUnlessPublic,req('./routes/route_optimizer'));
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
  app.use('/api/v1/planner-loading',authMiddleware.authenticate,req('./routes/planner_loading'));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
@@ -254,6 +255,7 @@ async function main(){
   evidence.plannerExchange=await require('./audit_network.cjs')({db,company,user,base,token,password,transportCompany,transportClient,sharedOrder,legacyToken:invitation,pdf,stock});
   evidence.supplierInvoice=await require('./audit_supplier_invoice.cjs')({db,base,company,user,token,password,order:sharedOrder});
   evidence.invoiceWorkflow=await require('./audit_invoice_workflow.cjs')({db,base,company,user,token,password});
+  evidence.operationalCompletion=await require('./audit_operational_completion.cjs')({db,base,company,user,token,password,pdf});
   evidence.fiscalDelivery=await require('./audit_fiscal_delivery.cjs')({db,company,user});
   evidence.physicalBi=await require('./audit_physical_bi.cjs')({db,base,company,token});
   evidence.integrationRegistry=await require('./audit_integration_registry.cjs')({db,base,company,token});
@@ -328,6 +330,7 @@ async function main(){
    evidence.controlTowerFlow=await require('./audit_control_tower_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,password});
    evidence.operationalModel=await require('./audit_operational_model.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    evidence.groupagePlan=await require('./audit_groupage_plan.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
+   evidence.journeyReplanning=await require('./audit_journey_replanning.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    evidence.orderInbox=await require('./audit_inbox_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client});
    evidence.driverJourney=await require('./audit_driver_journey.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,driver,vehicle});
    await call('Registrar conducción','POST','/choferes/app/jornada/actividad',{actividad:'conduccion'});

@@ -97,3 +97,9 @@ No se han creado tablas, migraciones, servicios externos ni datos de demostraci�
 - No requiere migración nueva. Históricos sin versiones de importe no se presentan como snapshots contables; metadatos y aviso de cobertura incluidos.
 - Revisión funcional tipo Dashdoc entregada en `TMS_STRUCTURE_EXPENSES_AND_OPERATIONS_20260927.md`. Las propuestas de replanificación, restricciones, paralizaciones y automatización son siguientes trabajos, no funciones declaradas terminadas.
 - Cambio separado sobre la rama previa de Control horario/Almacén. Publicación de aplicación pendiente; no inferir producción a partir de un build o una vista previa.
+
+## Continuación operativa posterior autorizada — 27/09/2026
+
+La nueva solicitud amplía los pendientes de la revisión operativa. Implementados: vigencias de costes recurrentes, secuencia pendiente y relevos, propuestas de ruta restringidas, paralizaciones documentadas/facturadas y recuperación BI, automatismos de almacén y factura original autorizada en Network. No cambia la fase BI histórica ni elimina sus límites.
+
+Estado detallado y pruebas: `TMS_OPERATIONAL_COMPLETION.md`. No declarados terminados: división física de tramos y atribución de sus históricos sin evidencia, libro de cobros aplicados/liquidación bancaria, envío externo de reclamaciones y eCMR contractual sin países/partes definidos. La publicación en producción sigue condicionada a recuperar PostgreSQL; no ampliar disco ni crear ensayos alojados.

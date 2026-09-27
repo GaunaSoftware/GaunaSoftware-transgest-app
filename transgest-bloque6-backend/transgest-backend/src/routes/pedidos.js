@@ -2595,7 +2595,8 @@ async function crearFacturaBorradorPedido(pedidoId, empresaId, userId = null) {
     const pedido = pedRows[0];
     if (!pedido || pedido.factura_id) return;
 
-    const base = Number(pedido.importe || pedido.precio_cliente_col || pedido.precio_unitario || 0);
+    const transportBase = Number(pedido.importe || pedido.precio_cliente_col || pedido.precio_unitario || 0);
+    const base = transportBase + Number(pedido.importe_paralizacion||0);
     if (!Number.isFinite(base) || base <= 0) return;
 
     const fecha = new Date();
@@ -2635,11 +2636,11 @@ async function crearFacturaBorradorPedido(pedidoId, empresaId, userId = null) {
       ]
     );
     const factura = facRows[0];
-    const invoiceLines = require('../services/invoiceFuelLines').fuelInvoiceLines(pedido, base);
+    const invoiceLines = require('../services/invoiceFuelLines').fuelInvoiceLines(pedido, transportBase);
     for (const [index, line] of invoiceLines.entries()) {
       await client.query(
-        "INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden) VALUES ($1,$2,1,$3,$3,$4)",
-        [factura.id, line.concepto, line.precio_unit, index]
+        "INSERT INTO factura_lineas (factura_id, concepto, cantidad, precio_unit, importe, orden,paralizacion_pedido_id) VALUES ($1,$2,1,$3,$3,$4,$5)",
+        [factura.id, line.concepto, line.precio_unit, index,line.paralizacion_pedido_id||null]
       );
     }
     await client.query(
@@ -3546,6 +3547,26 @@ router.post('/:id/operativa', GESTION_PEDIDOS_ESCRITURA, async (req,res,next)=>{
     res.set('Cache-Control','private, no-store');
     res.status(result.created?201:200).json(result);
   } catch(error){next(error);}
+});
+router.get('/:id/paralizaciones', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+ try{res.set('Cache-Control','private, no-store');res.json(await require('../services/detentionWorkflow').list(db,req.empresaId,req.params.id));}catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
+router.post('/:id/paralizaciones', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+ try{res.set('Cache-Control','private, no-store');res.json(await require('../services/detentionWorkflow').save(db,req.empresaId,req.user.id,req.params.id,req.body));}catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}
+});
+router.post('/:id/operativa/replanificar', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+  try {
+    if(!UUID_RE.test(req.params.id))return res.status(400).json({error:'Identificador de pedido no válido'});
+    res.set('Cache-Control','private, no-store');
+    res.json(await db.transaction(tx=>require('../services/journeyReplanning').replan(tx,{empresaId:req.user.empresa_id,pedidoId:req.params.id,actorId:req.user.id,body:req.body||{}})));
+  }catch(error){next(error);}
+});
+router.post('/:id/operativa/incorporar', GESTION_PEDIDOS_ESCRITURA, async(req,res,next)=>{
+  try {
+    if(!UUID_RE.test(req.params.id)||req.body?.confirmado!==true)return res.status(400).json({error:'Confirma la incorporación del viaje y sus eventos existentes.'});
+    res.set('Cache-Control','private, no-store');
+    res.json(await materializeSimpleOrder(db,{empresaId:req.user.empresa_id,pedidoId:req.params.id,actorId:req.user.id,operationId:req.body.client_operation_uuid,adoptProgress:true,motivo:req.body.motivo}));
+  }catch(error){next(error);}
 });
 
 function getMissingColumn(error) {

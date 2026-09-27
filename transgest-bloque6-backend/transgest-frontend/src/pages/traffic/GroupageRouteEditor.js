@@ -1,4 +1,5 @@
 import JourneyCosts from './JourneyCosts';
+import RouteConstraintsPanel from './RouteConstraintsPanel';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import RemolqueGrupaje from '../../components/RemolqueGrupaje';
 import RouteMapCanvas from '../../components/RouteMapCanvas';
@@ -64,9 +65,11 @@ export default function GroupageRouteEditor({groupId,orders,vehicle,onReload,can
     <button className="tgui-button" disabled={!editable} onClick={()=>{const next=nearestGroupageSequence(ordered);if(next)changeSequence(next);else notify('Completa las coordenadas de las paradas para proponer el orden.','warning');}}>Proponer orden por proximidad</button>
     <p>Propuesta geométrica, pendiente de revisar horarios y restricciones. Calcula después el recorrido por carretera.</p>
     <button className="tgui-button" disabled={!editable||routing} onClick={calculate}>{routing?'Calculando…':'Calcular ruta por carretera'}</button>
+    <RouteConstraintsPanel disabled={!editable} vehicle={vehicle} stops={ordered.map(s=>({id:s.key,shipment_id:s.pedido.id,type:s.tipo,name:s.pedido.numero+' · '+s.ciudad,address:[s.direccion,s.ciudad,s.cp,s.pais].filter(Boolean).join(', '),lat:s.lat,lng:s.lng??s.lon,weight_kg:s.pedido.peso_kg,date:s.fecha||s.pedido[s.tipo==='carga'?'fecha_carga':'fecha_descarga'],window:s.ventana||s.pedido[s.tipo==='carga'?'ventana_carga':'ventana_descarga'],window_start:s.hora_desde||s.hora_inicio,window_end:s.hora_hasta||s.hora_fin}))} onApply={proposal=>{changeSequence(proposal.stops.map(s=>s.id));setRoute(proposal);}}/>
     {route?.distance_km>0&&<p>{Number(route.distance_km).toLocaleString('es-ES',{maximumFractionDigits:1})} km · {Number(route.duration_min).toLocaleString('es-ES',{maximumFractionDigits:0})} min · estimación</p>}
     {!route?.truck_aware&&<p>Sin validación de restricciones para camiones. Revisa altura, peso y accesos.</p>}
     {route?.warning&&<p>{route.warning}</p>}
+    {route?.constraint_review&&<details><summary>Restricciones de la propuesta guardada · {route.constraint_review.estado}</summary><p>{route.constraint_review.definicion}</p><ul>{route.constraint_review.incidencias.map((x,i)=><li key={i}>{x.text}</li>)}</ul></details>}
     <ol>{ordered.map((stop,index)=><li key={stop.key} draggable={editable} onDragStart={e=>e.dataTransfer.setData('application/transgest-stop',stop.key)} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(editable)changeSequence(moveBefore(sequence,e.dataTransfer.getData('application/transgest-stop'),stop.key));}}>
      <strong>{stop.tipo==='carga'?'Carga':'Descarga'} {stop.ciudad}</strong><span>{stop.pedido.numero}</span>
      <button disabled={!editable||index===0} aria-label={`Subir parada ${index+1}`} onClick={()=>shiftStop(index,-1)}>↑</button><button disabled={!editable||index===ordered.length-1} aria-label={`Bajar parada ${index+1}`} onClick={()=>shiftStop(index,1)}>↓</button>

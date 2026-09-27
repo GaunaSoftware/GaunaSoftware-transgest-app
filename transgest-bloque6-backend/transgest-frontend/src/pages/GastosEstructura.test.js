@@ -7,7 +7,7 @@ import {confirmDialog} from '../services/notify';
 jest.mock('../context/AuthContext',()=>({useAuth:jest.fn()}));
 jest.mock('../services/notify',()=>({notify:jest.fn(),confirmDialog:jest.fn().mockResolvedValue(true)}));
 jest.mock('recharts',()=>({ResponsiveContainer:()=>null,BarChart:()=>null,Bar:()=>null,XAxis:()=>null,YAxis:()=>null,CartesianGrid:()=>null,Tooltip:()=>null}));
-jest.mock('../services/api',()=>Object.fromEntries(['getResumenGastosEstructura','crearGastoEstructura','editarGastoEstructura','borrarGastoEstructura','getMesesCerrados','cerrarMes','abrirMes'].map(name=>[name,jest.fn()])));
+jest.mock('../services/api',()=>Object.fromEntries(['getResumenGastosEstructura','crearGastoEstructura','editarGastoEstructura','borrarGastoEstructura','cambiarVigenciaGasto','getMesesCerrados','cerrarMes','abrirMes'].map(name=>[name,jest.fn()])));
 let root,host;
 const fixture=()=>({total:300,gastos:[{id:'one',nombre:'Gasto sintético',tipo:'Alquiler',importe:300,importe_periodo:300,periodo:'mensual',fecha:'2026-09'}],
   coste_medio_camion:150,reparto:[{v:{id:'v1',matricula:'0001-SYN'},peso_igual:.5,peso_ingresos:.8,coste_igual:150,coste_ingresos:240},{v:{id:'v2',matricula:'0002-SYN'},peso_igual:.5,peso_ingresos:.2,coste_igual:150,coste_ingresos:60}],
@@ -16,8 +16,24 @@ const fixture=()=>({total:300,gastos:[{id:'one',nombre:'Gasto sintético',tipo:'
     generado_at:'2026-09-27T12:00:00Z',version:'estructura.mensual.v1'}});
 const click=label=>act(async()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent===label);expect(b).toBeTruthy();b.click();});
 const change=(input,value)=>act(async()=>{
-  const proto=input.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;
+  const proto=input.tagName==='SELECT'?HTMLSelectElement.prototype:input.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto,'value').set.call(input,value);input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));
+});
+test('recurring changes and ending call the versioned API instead of overwriting historical amounts',async()=>{
+  const data=fixture();data.gastos[0].revision=3;api.getResumenGastosEstructura.mockResolvedValue(data);
+  await act(async()=>root.render(<GastosEstructura/>));
+  await change(host.querySelector('input[type="month"]'),'2026-10');
+  await click('Cambiar desde un mes');
+  let form=document.querySelector('#structure-expense-form');
+  await change(form.querySelector('textarea'),'Nuevo alquiler');
+  await change(form.querySelector('input[type="number"]'),'400');
+  await act(async()=>form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+  expect(api.cambiarVigenciaGasto).toHaveBeenCalledWith('one',expect.objectContaining({accion:'cambiar',revision:3,desde:'2026-10',motivo:'Nuevo alquiler',datos:expect.objectContaining({importe:400})}));
+  expect(api.editarGastoEstructura).not.toHaveBeenCalled();
+  await click('Finalizar recurrencia');form=document.querySelector('#structure-expense-form');
+  await change(form.querySelector('textarea'),'Fin contrato');
+  await act(async()=>form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+  expect(api.cambiarVigenciaGasto).toHaveBeenLastCalledWith('one',expect.objectContaining({accion:'finalizar',hasta:'2026-10',motivo:'Fin contrato'}));
 });
 beforeEach(()=>{
   jest.clearAllMocks();global.IS_REACT_ACT_ENVIRONMENT=true;

@@ -1187,8 +1187,9 @@ function expenseInput(body, previous = {}) {
   return data;
 }
 async function assertExpenseMonthOpen(tx, empresaId, expense) {
+  await require('../services/structureExpenses').expenseLock(tx,empresaId);
   const month = require('../services/structureExpenses').expenseMonth(expense.fecha);
-  const closed = await tx.query("SELECT mes FROM meses_cerrados WHERE empresa_id=$1 AND (mes=$2 OR ($3<>'unico' AND mes>$2)) LIMIT 1", [empresaId,month,expense.periodo]);
+  const closed = await tx.query("SELECT mes FROM meses_cerrados WHERE empresa_id=$1 AND (mes=$2 OR ($3<>'unico' AND mes>$2)) AND ($4::text IS NULL OR mes<=$4) LIMIT 1", [empresaId,month,expense.periodo,expense.fecha_fin||null]);
   if (closed.rows.length) throw Object.assign(new Error('Este gasto afecta a un mes cerrado. Reabre el mes antes de modificarlo.'), {status:409});
 }
 router.post("/gastos-estructura", GERENTE_O_CONTABLE, async (req,res,next) => {
@@ -1204,20 +1205,28 @@ router.post("/gastos-estructura", GERENTE_O_CONTABLE, async (req,res,next) => {
 router.put("/gastos-estructura/:id", GERENTE_O_CONTABLE, async (req,res,next) => {
   try {
     const row = await db.transaction(async tx => {
+      await require('../services/structureExpenses').expenseLock(tx,EID(req));
       const previous = (await tx.query('SELECT * FROM gastos_estructura WHERE id=$1 AND empresa_id=$2 AND activo=true FOR UPDATE',[req.params.id,EID(req)])).rows[0];
       if (!previous) throw Object.assign(new Error('Gasto no encontrado'),{status:404});
+      if ((previous.vigencias?.length || previous.fecha_fin) && Object.keys(req.body).some(k=>!['factura_nombre','factura_data'].includes(k))) throw Object.assign(new Error('Este gasto tiene historial. Usa Cambiar desde un mes.'),{status:409});
       const data = expenseInput(req.body,previous);
       await assertExpenseMonthOpen(tx,EID(req),previous);await assertExpenseMonthOpen(tx,EID(req),data);
-      return (await tx.query("UPDATE gastos_estructura SET nombre=$1,tipo=$2,importe=$3,periodo=$4,fecha=$5,notas=$6,factura_nombre=$7,factura_data=$8 WHERE id=$9 AND empresa_id=$10 RETURNING *", [data.nombre,data.tipo,data.importe,data.periodo,data.fecha,data.notas||null,data.factura_nombre||null,data.factura_data||null,req.params.id,EID(req)])).rows[0];
+      return (await tx.query("UPDATE gastos_estructura SET nombre=$1,tipo=$2,importe=$3,periodo=$4,fecha=$5,notas=$6,factura_nombre=$7,factura_data=$8,revision=revision+1 WHERE id=$9 AND empresa_id=$10 RETURNING *", [data.nombre,data.tipo,data.importe,data.periodo,data.fecha,data.notas||null,data.factura_nombre||null,data.factura_data||null,req.params.id,EID(req)])).rows[0];
     });
     res.json(row);
   } catch(error) { next(error); }
 });
+router.post('/gastos-estructura/:id/vigencia', GERENTE_O_CONTABLE, async(req,res,next)=>{
+  try {res.json(await db.transaction(tx=>require('../services/structureExpenses').changeEffectivity(tx,{empresaId:EID(req),id:req.params.id,actorId:req.user.id,body:req.body,validate:expenseInput})));}
+  catch(error){next(error);}
+});
 router.delete("/gastos-estructura/:id", GERENTE_O_CONTABLE, async (req,res,next) => {
   try {
     await db.transaction(async tx => {
+      await require('../services/structureExpenses').expenseLock(tx,EID(req));
       const previous = (await tx.query('SELECT * FROM gastos_estructura WHERE id=$1 AND empresa_id=$2 AND activo=true FOR UPDATE',[req.params.id,EID(req)])).rows[0];
       if (!previous) throw Object.assign(new Error('Gasto no encontrado'),{status:404});
+      if(previous.vigencias?.length || previous.fecha_fin) throw Object.assign(new Error('Conserva el histórico. Utiliza Finalizar recurrencia.'),{status:409});
       await assertExpenseMonthOpen(tx,EID(req),previous);
       await tx.query('UPDATE gastos_estructura SET activo=false WHERE id=$1 AND empresa_id=$2',[req.params.id,EID(req)]);
     });
@@ -1234,7 +1243,7 @@ router.get("/meses-cerrados", async (req,res,next) => {
 });
 router.post("/meses-cerrados/:mes", GERENTE_O_CONTABLE, async (req,res,next) => {
   try {
-    await db.query("INSERT INTO meses_cerrados (empresa_id,mes) VALUES ($1,$2) ON CONFLICT DO NOTHING",[EID(req),require('../services/structureExpenses').expenseMonth(req.params.mes)]);
+    await db.transaction(async tx=>{await require('../services/structureExpenses').expenseLock(tx,EID(req));await tx.query("INSERT INTO meses_cerrados (empresa_id,mes) VALUES ($1,$2) ON CONFLICT DO NOTHING",[EID(req),require('../services/structureExpenses').expenseMonth(req.params.mes)]);});
     res.json({ok:true});
   } catch(error) { next(error); }
 });

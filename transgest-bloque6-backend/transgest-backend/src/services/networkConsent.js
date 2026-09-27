@@ -2,6 +2,7 @@ const crypto=require('crypto'),{fail}=require('./plannerInventory'),{hash,canoni
 const {encryptSecret,decryptSecret}=require('./apiKeys');
 const normalized=v=>String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
 const catalog={pedidos:'Encargos y mercancía',estados:'Estados e incidencias',recursos:'Matrículas y nombre del conductor',eta:'ETA disponible',gps:'Posición GPS actual durante el servicio',documentos:'Documentos de transporte',pod:'Justificantes de entrega',slots:'Solicitudes y reservas de muelle'};
+catalog.facturas='Facturas de los encargos compartidos y estado de revisión';
 const allowed=(link,scope)=>Boolean(link?.activo&&!link.revocada_at&&link.consentimiento_origen_at&&link.consentimiento_destino_at&&link.scopes?.includes(scope));
 function scopes(value){if(!Array.isArray(value)||!value.includes('pedidos')||value.some(s=>!Object.hasOwn(catalog,s)))throw fail('Selecciona encargos y los permisos de intercambio admitidos.');return [...new Set(value)].sort();}
 function termsData(p){return {id:p.id,numero:p.numero,colaborador_id:p.colaborador_id,precio_colaborador:p.precio_colaborador,origen:p.origen,destino:p.destino,fecha_carga:p.fecha_carga,fecha_descarga:p.fecha_descarga};}

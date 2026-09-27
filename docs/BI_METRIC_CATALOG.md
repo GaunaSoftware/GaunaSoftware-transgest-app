@@ -151,3 +151,13 @@ Servicio común `structureExpenses.readStructure`, contrato aditivo `comparativa
 | Reparto por camión | Partes iguales o proporción de ingresos netos positivos de servicios realizados; ajuste acumulativo de céntimos | Orientativo, no escribe costes duplicados; importe no atribuido visible. Remolques excluidos |
 
 Permisos: módulo Gastos de estructura en el servidor, empresa del token; mutaciones gerente/contable y edición autorizada. Se conserva el contrato anterior. Cada comparación incluye límites temporales, definición, impuestos, cobertura, alcance y generación. El mes en curso puede estar incompleto. Los históricos se reconstruyen con fichas vigentes: no son snapshots contables por cierre. No se inventan costes anteriores.
+
+## Continuación operativa autorizada — 27/09/2026
+
+- Ingreso realizado: `financialKpis.serviceIncome = pedidos.importe + importe_paralizacion`; `importe` ya incluye combustible. Si falta el porte base devuelve null. La paralización nueva se incluye solo por el importe aceptado y se factura como línea separada enlazada; no se toca facturación histórica. Margen, €/km, evolución, detalle y exportaciones reutilizan esa misma definición.
+- Gastos recurrentes: `vigencias` aplica la última versión cuyo mes inicial no supera el seleccionado; `fecha_fin` es inclusiva. Las nuevas versiones tienen actor, motivo y revisión. No se reconstruyen versiones anteriores que nunca se registraron ni la flota histórica no disponible.
+- Recuperación de paralizaciones: cohorte autorizada filtrada de Operaciones; último evento de revisión anterior al fin del día de corte Europe/Madrid. Documentado facturable excluye rechazadas; aceptado solo estados aceptados. Facturado suma líneas vinculadas de facturas válidas (estado vigente, fecha hasta corte). Ratio = suma facturada / suma documentada facturable, nunca media de porcentajes. Moneda neta EUR. Sin expedientes => null; expediente con importe cero => cero confirmado; denominador cero => null. Facturado sin expediente se informa por separado, fuera del ratio. Cobrado => null, falta libro aplicado por concepto. Detalle paginado no altera totales.
+- Historial de relevos: `viajes_operativos.relevos` conserva asignaciones anteriores. Cuando un viaje pasó por varios recursos y no existe distancia verificable por tramo, no se atribuye íntegramente al último camión; queda sin atribución y se informa. Su distancia física se cuenta una sola vez.
+- Factura recibida por Network y pago declarado por el destinatario no equivalen a cobro bancario acreditado. Documentación de entrega disponible significa documento adjunto para revisión, no certificación de firma o conformidad.
+
+Evidencia, migraciones y límites: `TMS_OPERATIONAL_COMPLETION.md`.

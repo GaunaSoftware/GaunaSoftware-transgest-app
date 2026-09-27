@@ -1,0 +1,23 @@
+import {useEffect,useRef,useState} from 'react';
+import {pedidoParalizaciones} from '../../services/api';
+import {Button,Modal} from '../../ui';
+import './JourneyReplanning.css';
+const eur=v=>v==null?'No calculable':new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(v);
+const local=v=>{if(!v)return '';const d=new Date(v);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
+export default function DetentionPanel({pedido,canEdit,onApplied}){
+ const [open,setOpen]=useState(false),[data,setData]=useState(null),[form,setForm]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[reload,setReload]=useState(0);
+ const operation=useRef(null),changed=useRef(false);
+ useEffect(()=>{if(!open||!pedido?.id)return;let active=true;setBusy(true);pedidoParalizaciones(pedido.id).then(d=>{if(active)setData(d);}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setBusy(false);});return()=>{active=false;};},[open,pedido?.id,reload]);
+ if(!pedido?.id||!canEdit)return null;
+ const update=(k,v)=>{operation.current=null;setForm(f=>({...f,[k]:v}));};
+ const close=()=>{if(busy)return;setOpen(false);if(changed.current)onApplied?.();};
+ async function save(e){e.preventDefault();setBusy(true);setError('');operation.current||=crypto.randomUUID();try{await pedidoParalizaciones(pedido.id,{...form,inicio:new Date(form.inicio).toISOString(),fin:new Date(form.fin).toISOString(),operacion:operation.current});changed.current=true;setForm(null);setReload(n=>n+1);}catch(e){setError(e.message);}finally{setBusy(false);}}
+ return <><Button type="button" onClick={()=>{setOpen(true);setForm(null);setError('');changed.current=false;}}>Paralizaciones documentadas</Button>{open&&<Modal title={'Paralizaciones · '+pedido.numero} width={840} onClose={close}><div className="journey-replanning">
+ {error&&<p role="alert">{error}</p>}{busy&&<p role="status">Procesando…</p>}{data&&<><p>{data.definicion}</p><dl className="journey-replanning-fields">{[['documentado','Documentado'],['aceptado','Aceptado'],['facturado','Facturado'],['cobrado','Cobro acreditado']].map(([k,l])=><div key={k}><dt>{l}</dt><dd>{eur(data.resumen[k])}</dd></div>)}</dl>
+ <p>Los documentos se adjuntan desde la documentación del pedido. Guarda sus cambios antes de revisar la paralización. Las horas se introducen en la zona del dispositivo.</p>
+ <Button type="button" disabled={busy} onClick={()=>{operation.current=null;setForm({inicio:'',fin:'',estado:'reclamada',documentado:'',aceptado:'',acuerdo:'',motivo:'',documento_id:''});}}>Nueva reclamación</Button>
+ {data.reclamaciones.map(r=><div key={r.id}><strong>{r.estado} · {eur(r.documentado)} documentados · {eur(r.aceptado)} aceptados</strong><p>{new Date(r.inicio).toLocaleString('es-ES')} — {new Date(r.fin).toLocaleString('es-ES')} · {r.acuerdo}</p><Button type="button" disabled={busy} onClick={()=>{operation.current=null;setForm({...r,inicio:local(r.inicio),fin:local(r.fin),motivo:''});}}>Revisar</Button></div>)}
+ {data.facturas.length>0&&<details><summary>Líneas emitidas que justifican el importe</summary>{data.facturas.map((f,i)=><p key={f.id+':'+i}>{f.numero} · {f.estado} · {eur(f.importe)}</p>)}</details>}
+ {form&&<form onSubmit={save} className="journey-replanning-fields">{[['inicio','Llegada / inicio real','datetime-local'],['fin','Fin real de espera','datetime-local'],['documentado','Importe documentado sin IVA','number'],...(form.estado==='aceptada'?[['aceptado','Importe aceptado sin IVA','number']]:[])].map(([k,l,t])=><label key={k}>{l}<input required disabled={busy} type={t} min={t==='number'?0:undefined} step={t==='number'?'.01':undefined} value={form[k]??''} onChange={e=>update(k,e.target.value)}/></label>)}<label>Estado<select value={form.estado} onChange={e=>update('estado',e.target.value)}><option value="reclamada">Reclamada</option><option value="aceptada">Aceptada por el cliente</option><option value="rechazada">Rechazada</option></select></label><label>Documento acreditativo<select required value={form.documento_id} onChange={e=>update('documento_id',e.target.value)}><option value="">Seleccionar…</option>{data.documentos.map(d=><option key={d.id} value={d.id}>{d.nombre}</option>)}</select></label><label className="journey-full">Acuerdo / tarifa pactada<textarea required value={form.acuerdo} onChange={e=>update('acuerdo',e.target.value)}/></label><label className="journey-full">Motivo de la revisión<textarea required value={form.motivo} onChange={e=>update('motivo',e.target.value)}/></label><Button type="submit" disabled={busy}>Guardar revisión</Button></form>}
+ </>}<Button type="button" disabled={busy} onClick={close}>Cerrar y actualizar pedido</Button></div></Modal>}</>;
+}

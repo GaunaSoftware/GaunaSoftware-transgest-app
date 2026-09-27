@@ -1,6 +1,6 @@
 // Economic BI v2. Each source is read independently; never join one-to-many
 // invoices, stops, expenses and orders before summing money.
-const { day, money, ratio, isValidInvoice, metric } = require('./financialKpis');
+const { day, money, ratio, isValidInvoice, metric, serviceIncome } = require('./financialKpis');
 const value = v => v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
 const sum = (rows, get) => money(rows.reduce((n, row) => n + (value(get(row)) || 0), 0));
 const between = (date, range) => !!day(date) && day(date) >= range.desde && day(date) <= range.hasta;
@@ -87,7 +87,7 @@ function structureInPeriod(rows, range) {
 }
 function dimension(rows, key, label, manualEmpty = []) {
   return group(rows, key).map(([id, orders]) => {
-    const income = sum(orders, p => p.importe), cost = costBreakdown(orders);
+    const income = sum(orders, p => serviceIncome(p)), cost = costBreakdown(orders);
     const km = physicalKm(orders, manualEmpty.filter(r => String(r.vehiculo_id) === String(id)));
     return { id, nombre: label(orders[0], id), servicios: orders.length, ingreso: income,
       coste_directo_registrado: cost.directo_registrado,
@@ -106,8 +106,8 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
   const services = own(orders).filter(p => isDone(p) && between(serviceDate(p), range));
   const allInvoices = own(invoices).filter(f => isValidInvoice(f) && day(f.fecha) <= range.hasta);
   const issued = allInvoices.filter(f => between(f.fecha, range));
-  const incomeKnown = services.filter(p => value(p.importe) != null);
-  const income = incomeKnown.length ? sum(incomeKnown, p => p.importe) : null;
+  const incomeKnown = services.filter(p => value(serviceIncome(p)) != null);
+  const income = incomeKnown.length ? sum(incomeKnown, p => serviceIncome(p)) : null;
   const direct = costBreakdown(services);
   const directMargin = income == null || direct.directo_registrado == null ? null : money(income - direct.directo_registrado);
   const km = physicalKm(services, own(emptyKm).filter(r => between(r.fecha, range)));
@@ -128,9 +128,9 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
   const unpriced = [...fuelRows.filter(r => value(r.importe) == null && !(value(r.litros) > 0 && value(r.precio_litro) > 0)),
     ...driverRows.filter(r => r.estado !== 'registrado' || value(r.importe) == null), ...nightRows.filter(r => value(r.importe) == null)];
   const pending = services.filter(p => p.pendiente_factura === true);
-  const pendingAmount = sum(pending, p => p.importe);
+  const pendingAmount = sum(pending, p => serviceIncome(p));
   const pendingAges = { '0_30': 0, '31_60': 0, '61_90': 0, mas_90: 0 };
-  for (const p of pending) pendingAges[aged(daysSince(serviceDate(p), range.hasta))] += value(p.importe) || 0;
+  for (const p of pending) pendingAges[aged(daysSince(serviceDate(p), range.hasta))] += value(serviceIncome(p)) || 0;
   Object.keys(pendingAges).forEach(k => { pendingAges[k] = money(pendingAges[k]); });
   const outstanding = allInvoices.filter(f => f.estado !== 'cobrada');
   const balance = sum(outstanding, f => f.total);
@@ -154,7 +154,7 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
     .map(v => ({ vehiculo_id: v.id, ingreso_base: v.ingreso, importe: money(structureValue.importe * v.ingreso / income) }));
   const unallocatedStructure = structureValue.importe == null ? null : money(structureValue.importe - sum(structureShares, v => v.importe));
   const metrics = {
-    ingreso_realizado: metric(income, 'Suma del precio neto de pedidos entregados/facturados por fecha económica', { total: services.length, known: incomeKnown.length }),
+    ingreso_realizado: metric(income, 'Porte neto (incluye recargo combustible) más paralización registrada por separado; pedidos entregados/facturados por fecha económica', { total: services.length, known: incomeKnown.length }),
     coste_directo: metric(direct.directo_registrado, 'Costes directos registrados en pedido, sin tickets externos para evitar doble cómputo', { status: direct.directo_registrado == null ? 'sin_datos' : 'parcial', total: services.length, known: direct.cobertura.evaluables }),
     margen_directo: metric(directMargin, 'Ingreso realizado menos costes directos registrados; margen parcial', { status: directMargin == null ? 'sin_datos' : 'parcial', total: services.length, known: direct.cobertura.evaluables }),
     resultado_con_categorias: metric(result, 'Margen directo menos taller sin solape aparente, salario base y SS empresa registrados, y estructura estimada; faltan fuentes y conciliación', { status: result == null ? 'sin_datos' : 'parcial' }),
@@ -165,7 +165,7 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
     facturacion_emitida: metric(sum(issued, f => f.base_imponible), 'Base neta de facturas válidas emitidas en el periodo, con abonos firmados', { status: 'completo', total: issued.length, known: issued.length }),
     pendiente_facturar: metric(pendingAmount, 'Servicios realizados sin factura válida vinculada al corte; no se conoce importe parcial ya facturado', { status: 'parcial', total: services.length, known: pending.length }),
     vencido_al_corte: metric(sum(overdue, f => f.total), 'Total bruto hoy no cobrado y con vencimiento anterior al corte', { status: 'estimado', taxes: 'con impuestos', total: outstanding.length, known: overdue.length }),
-    margen_subcontratado: metric(subcontracted.length && subcontractCost.colaborador > 0 ? money(sum(subcontracted, p => p.importe) - subcontractCost.colaborador) : null,
+    margen_subcontratado: metric(subcontracted.length && subcontractCost.colaborador > 0 ? money(sum(subcontracted, p => serviceIncome(p)) - subcontractCost.colaborador) : null,
       'Ingreso subcontratado menos precio registrado del colaborador; faltan otros costes', { status: 'parcial', total: subcontracted.length, known: subcontracted.filter(p => value(p.precio_colaborador) > 0).length }),
     concentracion_principal: metric(income > 0 ? ratio(sorted[0]?.ingreso || 0, income, 100) : null,
       'Ingreso del cliente principal / ingreso total de servicios realizados', { unit: '%', status: income > 0 ? 'completo' : 'sin_datos', denominator: income, total: services.length, known: incomeKnown.length }),
@@ -193,8 +193,8 @@ function buildEconomics({ empresaId, range, orders = [], invoices = [], clients 
     kilometros: km, ingreso_km_total: metrics.ingreso_km_total.valor, coste_km_total: metrics.coste_km_total.valor,
     margen_km_total: metrics.margen_km_total.valor, porcentaje_vacio: metrics.km_vacios_pct.valor,
     por_cliente: paginate(byClient), por_ruta: paginate(byRoute), por_vehiculo: paginate(byVehicle), por_ejecucion: paginate(byExecution),
-    subcontratacion: { servicios: subcontracted.length, ingreso: sum(subcontracted, p => p.importe),
-      coste_colaborador: subcontractCost.colaborador, margen_registrado: subcontracted.length && subcontractCost.colaborador > 0 ? money(sum(subcontracted, p => p.importe) - subcontractCost.colaborador) : null },
+    subcontratacion: { servicios: subcontracted.length, ingreso: sum(subcontracted, p => serviceIncome(p)),
+      coste_colaborador: subcontractCost.colaborador, margen_registrado: subcontracted.length && subcontractCost.colaborador > 0 ? money(sum(subcontracted, p => serviceIncome(p)) - subcontractCost.colaborador) : null },
     pendiente_facturar: { servicios: pending.length, importe: pendingAmount, antiguedad: pendingAges,
       limite: 'Enlace factura-pedido sin importe por pedido: facturación parcial no cuantificable' },
     facturacion_emitida_neta: sum(issued, f => f.base_imponible), facturacion_emitida_total: sum(issued, f => f.total),

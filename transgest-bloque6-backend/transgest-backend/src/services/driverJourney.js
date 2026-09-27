@@ -29,7 +29,11 @@ async function driverJourneyContext(db,empresaId,pedidoId,authorize) {
   const journey=await loadJourney(db,empresaId,pedidoId);
   if(!journey)return null;
   // A saved shared plan never grants permission to its other orders.
-  for(const order of journey.orders)if(authorize&&!await authorize(order))fail('No puedes acceder a todos los servicios de este viaje.','JOURNEY_FORBIDDEN',403);
+  for(const order of journey.orders)if(authorize&&!await authorize(order)){
+    // The current driver may consult completed stops of the journey taken over,
+    // while the completed commercial order retains its historical assignment.
+    if(!journey.trip.relevos?.length||!['entregado','facturado'].includes(order.estado)||!await authorize({...order,...journey.trip.asignacion_snapshot}))fail('No puedes acceder a todos los servicios de este viaje.','JOURNEY_FORBIDDEN',403);
+  }
   const paradas=journey.stops.map(stop=>({id:stop.id,...ownerOf(stop,journey),orden:stop.orden,tipo:stop.tipo,
     label:stop.ubicacion.nombre||stop.ubicacion.direccion||stop.ubicacion.ciudad||stop.ubicacion.poblacion||'Ubicación pendiente',
     estado:stop.estado,completa:complete(stop),llegada_real_at:stop.llegada_real_at,inicio_real_at:stop.inicio_real_at,fin_real_at:stop.fin_real_at,

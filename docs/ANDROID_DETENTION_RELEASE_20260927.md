@@ -41,7 +41,16 @@ Cuenta y verificación Play, política de privacidad aprobada, clave custodiada/
 
 ## Estado del despliegue
 
-Pendiente de registrar el resultado real de la fusión y de los despliegues, no inferirlo de un push.
+Publicación completada el 27/09/2026, comprobada en producción:
+
+- PR #29 fusionado en `292ef57a1e9ae1e23a6e267aeabad9e9dd66bb38`. Conserva los historiales de #15, #27 y #28; GitHub confirma los cuatro como fusionados y cero PR abiertos.
+- CI previo `36331094920` y posterior de main `36331446927`: ocho trabajos aprobados, incluidos backend, seguridad, auditoría funcional, dependencias y frontend.
+- Exportación oficial Render solicitada a las 15:40 UTC, terminada antes de fusionar: `2026-09-27T15:40Z.dir.tar.gz`, disponible en Recovery durante al menos siete días. Se conserva además la recuperación a un punto en el tiempo ofrecida por Render (tres días). No se restauró esa copia en producción ni se creó otra base alojada.
+- Render `dep-dasjpso473hc73fu5j40`: predeploy terminado, migraciones pendientes aplicadas y estado Live a las 15:58:31 UTC. `/health` devuelve HTTP 200, base conectada, esquema preparado y SHA `292ef57a1e9ae1e23a6e267aeabad9e9dd66bb38`.
+- Ambas publicaciones Vercel del commit terminaron en success. Web pública: `main.161f333c.js` y `main.83605d05.css`. Acceso con gerente demo comprobado; Finanzas → Costes → Gastos de estructura → Comparativa carga los tres meses, cobertura y ausencia de datos sin convertirla en cero.
+- `DEPLOY_BASE_URL=https://transgest.app DEPLOY_API_URL=https://api.transgest.app DEPLOY_EXPECTED_RELEASE=292ef57... node scripts/deploy_smoke_check.js`: salida 0. Web y health correctos; pedidos sin autenticación devuelve 401. Se omitió expresamente el alta/borrado de cliente del smoke. No se crearon gastos, pedidos ni documentos fiscales en estas comprobaciones.
+
+La publicación web/API no equivale a publicar en Google Play ni a certificar los conectores fiscales externos. El APK de pruebas y el AAB sin firma conservan los límites anteriores. El contenedor sigue indicando que sus dumps locales son efímeros; la copia externa de Render, no ese directorio, es la evidencia de respaldo de esta publicación. Se conserva una advertencia de deprecación de pg sobre consultas concurrentes, sin error de arranque; no se declara resuelta.
 
 
 ### Cierre de regresiones tras integración

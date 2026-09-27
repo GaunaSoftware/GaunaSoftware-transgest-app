@@ -68,3 +68,9 @@ Se reprodujo un fallo real de confirmación de documentos: `column "descripcion"
 La migración aditiva `20260930_document_legacy_compatibility.sql` incorpora esos campos en ambas tablas documentales. No modifica documentos, fechas ni archivos existentes. Se ejecuta con `npm run migrate` antes de reintentar el lote fallido desde Importación; no debe volver a subirse el origen.
 
 Validación: `npm run import:regression` superado. Las pruebas de maestros y PDFs parten ahora de tablas con `tipo_doc NOT NULL` sin los campos legacy, cubren inserción de metadatos, adjunto privado, aislamiento de empresa y conservación de metadatos al repetir la migración. En una reversión de código pueden conservarse las columnas añadidas; no es necesario eliminar datos.
+
+## Avisos de documentos importados (27/09/2026)
+
+En la comprobación operativa, las fichas documentales importadas tenían `tipo='otro'` para compatibilidad con el enum antiguo y conservaban el tipo específico en `tipo_doc`. Avisos agrupaba exclusivamente por `tipo`; por ello, un DNI vigente podía ocultar un CAP vencido del mismo conductor. La lectura de Avisos y del listado documental ahora prioriza `tipo_doc` y mantiene el respaldo de `tipo` para registros antiguos. No reescribe documentos ni cambia fechas.
+
+`node scripts/notice_center_check.cjs` y `npm run security:regression` superados. La regresión cubre CAP vencido junto a DNI vigente y seguro vencido junto a ITV renovada, sin duplicar la fecha de la ficha; conserva pruebas de permisos y aislamiento por empresa. `node --check` de ambos archivos modificados y `git diff --check` sin errores. No requiere migración adicional.

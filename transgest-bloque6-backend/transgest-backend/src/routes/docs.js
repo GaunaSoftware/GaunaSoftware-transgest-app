@@ -117,7 +117,7 @@ router.get("/todos", cacheMiddleware(120), async (req, res) => {
     const empresaId = req.user?.empresa_id;
     if (!empresaId) return res.json([]);
     const vehiculos = await db.query(`
-      SELECT d.id, d.tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,d.storage_key,d.file_name,
+      SELECT d.id, COALESCE(NULLIF(to_jsonb(d)->>'tipo_doc',''),d.tipo) AS tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,d.storage_key,d.file_name,
              d.referencia, d.alerta_dias, d.created_at,
              'vehiculo' AS entidad_tipo,
              v.id AS entidad_id,
@@ -127,7 +127,7 @@ router.get("/todos", cacheMiddleware(120), async (req, res) => {
       WHERE v.empresa_id=$1
     `, [empresaId]).catch(() => ({ rows: [] }));
     const choferes = await db.query(`
-      SELECT d.id, d.tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,d.storage_key,d.file_name,
+      SELECT d.id, COALESCE(NULLIF(to_jsonb(d)->>'tipo_doc',''),d.tipo) AS tipo, d.descripcion, d.fecha_emision, d.fecha_vencimiento,d.storage_key,d.file_name,
              d.referencia, d.alerta_dias, d.created_at,
              'chofer' AS entidad_tipo,
              c.id AS entidad_id,

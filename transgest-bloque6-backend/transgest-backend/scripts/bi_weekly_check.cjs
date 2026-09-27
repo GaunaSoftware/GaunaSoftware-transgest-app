@@ -46,6 +46,7 @@ async function main() {
         ('${SECOND}','${A}','Gerente B','manager-b@example.test','gerente',true,'{}'),
         ('${OTHER}','${B}','Gerente C','manager-c@example.test','gerente',true,'{}'),
         ('${TRAFFIC}','${A}','Tráfico','traffic@example.test','trafico',true,'{}');`);
+    await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260927_multiempresa.sql'),'utf8'));
     db.query = (sql, params) => pg.query(sql, params);
     db.transaction = async fn => { await pg.exec('BEGIN'); try { const result = await fn({ query: (sql, params) => params ? pg.query(sql, params) : pg.exec(sql) }); await pg.exec('COMMIT'); return result; }
       catch (error) { await pg.exec('ROLLBACK'); throw error; } };

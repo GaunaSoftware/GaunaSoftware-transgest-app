@@ -41,6 +41,7 @@ async function main(){
  app.get('/api/v1/producto',(request,res)=>res.json({producto:'tms'}));
  app.use('/api/v1/auth',auth);
  app.use('/api/v1/superadmin',req('./routes/superadminCore'));
+ app.use('/api/v1/usuarios',authMiddleware.authenticate,req('./routes/usuarios'));
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
  app.use('/api/v1/planner-loading',authMiddleware.authenticate,req('./routes/planner_loading'));
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
@@ -252,6 +253,7 @@ async function main(){
   evidence.fiscalDelivery=await require('./audit_fiscal_delivery.cjs')({db,company,user});
   evidence.physicalBi=await require('./audit_physical_bi.cjs')({db,base,company,token});
   evidence.integrationRegistry=await require('./audit_integration_registry.cjs')({db,base,company,token});
+  evidence.multiempresa=await require('./audit_multiempresa.cjs')({db,base,company,token,password});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});
@@ -387,6 +389,7 @@ async function main(){
   // Explicit synthetic loaded fixture for visual QA; never applied to real orders.
   await db.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[qaOrder.id,company,JSON.stringify({carga_ok:true})]);
   await db.query("INSERT INTO usuarios(id,empresa_id,cliente_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,$3,'Cliente de pruebas','portal@example.invalid',$4,'cliente',true)",[crypto.randomUUID(),company,qaClient.id,await req('bcryptjs').hash(password,10)]);
+  await db.query("INSERT INTO superadmins(email,password_hash,nombre,activo) VALUES('superadmin-audit@example.invalid',$1,'SuperAdmin sintético',true) ON CONFLICT(email) DO UPDATE SET password_hash=EXCLUDED.password_hash",[await req('bcryptjs').hash(password,10)]);
   console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',portalEmail:'portal@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
   await new Promise(resolve=>process.once('SIGINT',resolve));
  }

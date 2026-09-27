@@ -24,6 +24,9 @@ router.use((req, res, next) => {
 // Inherits authenticate + informes module + plan gate from server.js and
 // GERENTE_O_CONTABLE from the router middleware above.
 router.use('/bi/reportes', require('./biReportCenter'));
+router.get('/bi/grupos',async(req,res,next)=>{try{res.json({groups:await require('../services/companyGroupBi').list(req.user.id)});}catch(e){next(e);}});
+router.get('/bi/consolidado',async(req,res,next)=>{try{res.json(await require('../services/companyGroupBi').read(req.user.id,req.query));}catch(e){next(e);}});
+
 
 const rangoPeriodo = periodRange;
 

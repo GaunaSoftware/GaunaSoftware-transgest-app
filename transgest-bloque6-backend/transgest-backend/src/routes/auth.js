@@ -123,6 +123,7 @@ async function authUserPayload(user = {}, extra = {}) {
     rol: user.rol,
     empresa_id: user.empresa_id,
     empresa_nombre: user.empresa_nombre || extra.empresa_nombre || "",
+    bi_consolidado: user.bi_consolidado === true,
     plan: user.plan,
     productos: user.productos || (await require("../services/companyProducts").get(user.empresa_id)).productos,
     demo_mode: Boolean(user.demo_mode ?? extra.demo_mode),
@@ -332,6 +333,20 @@ router.post("/login",
         [user.id]
       );
 
+      const membershipService=require('../services/companyMembership');
+      const available=await membershipService.memberships(user.id);
+      const requested=req.body.empresa_id || (available.some(m=>m.empresa_id===user.empresa_id)?user.empresa_id:available[0]?.empresa_id);
+      let member=requested?await membershipService.userForCompany(user.id,requested):null;
+      // A blocked primary subscription must not prevent entering another authorized company.
+      const blocked=m=>getSubscriptionState(m?{estado:m.empresa_estado,plan:m.plan,fecha_vencimiento:m.fecha_vencimiento,bloqueo_manual:m.bloqueo_manual,bloqueo_motivo:m.bloqueo_motivo}:null).blocked;
+      if(!req.body.empresa_id&&member&&blocked(member)){
+        for(const candidate of available){if(candidate.empresa_id===requested)continue;
+          const alternative=await membershipService.userForCompany(user.id,candidate.empresa_id);
+          if(alternative&&!blocked(alternative)){member=alternative;break;}
+        }
+      }
+      if(!member)return res.status(403).json({error:'No tienes una membresía activa en esa empresa.'});
+      Object.assign(user,member);
       const subState = getSubscriptionState(user.empresa_id ? {
         estado: user.empresa_estado,
         plan: user.plan,
@@ -364,19 +379,20 @@ router.post("/login",
 );
 
 // ── GET /api/v1/auth/me ───────────────────────────────
+router.get('/companies',authenticate,async(req,res,next)=>{try{if(!req.user.id||req.user.superadmin_impersonation)return res.json({companies:[]});res.json({companies:await require('../services/companyMembership').memberships(req.user.id)});}catch(e){next(e);}});
+router.post('/company',authenticate,async(req,res,next)=>{try{
+ if(!req.user.id||req.user.superadmin_impersonation)return res.status(403).json({error:'Esta sesión no permite cambiar de empresa'});
+ const member=await require('../services/companyMembership').userForCompany(req.user.id,req.body.empresa_id);
+ if(!member||!req.body.empresa_id)return res.status(403).json({error:'No tienes una membresía activa en esa empresa'});
+ const sub=getSubscriptionState({estado:member.empresa_estado,plan:member.plan,fecha_vencimiento:member.fecha_vencimiento,bloqueo_manual:member.bloqueo_manual,bloqueo_motivo:member.bloqueo_motivo});
+ if(sub.blocked)return res.status(402).json({error:sub.mensaje});
+ await db.query("INSERT INTO multiempresa_eventos(usuario_id,empresa_id,actor,accion) VALUES($1,$2,$3,'active_company_changed')",[member.id,member.empresa_id,member.id]);
+ res.json({token:signUserToken(member),user:await authUserPayload(member),suscripcion:sub.suscripcion});
+}catch(e){next(e);}});
+
 router.get("/me", authenticate, async (req, res) => {
   if (req.user.superadmin_impersonation) return res.json({ ...await authUserPayload(req.user), superadmin_impersonation: true, impersonado_por: req.user.impersonado_por });
-  const { rows } = await db.query(
-    `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
-            u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,
-            e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.plan, e.cfg_precios
-       FROM usuarios u
-       LEFT JOIN empresas e ON e.id=u.empresa_id
-      WHERE u.id=$1
-      LIMIT 1`,
-    [req.user.id]
-  ).catch(() => ({ rows: [] }));
-  const user = rows[0] || req.user;
+  const user = {...req.user};
   user.productos = req.user.productos;
   user.demo_mode = isDemoEmpresa(user);
   res.json(await authUserPayload(user));
@@ -503,16 +519,17 @@ router.post("/billing/checkout", async (req, res) => {
   }
 
   const { rows } = await db.query(
-    `SELECT u.id, u.nombre, u.email, u.rol, u.empresa_id,
+    `SELECT u.id, u.nombre, u.email, m.rol, m.empresa_id, u.password_changed_at,
             e.nombre AS empresa_nombre, e.email_admin, e.plan, e.ciclo_facturacion, e.metodo_pago, e.origen_comercial,
             e.stripe_customer_id
-     FROM usuarios u
-     JOIN empresas e ON e.id=u.empresa_id
-     WHERE u.id=$1`,
-    [payload.sub]
+     FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id AND m.empresa_id=COALESCE($2::uuid,u.empresa_id) AND m.activo=true
+     JOIN empresas e ON e.id=m.empresa_id
+     WHERE u.id=$1 AND u.activo=true`,
+    [payload.sub,payload.empresa_id||null]
   );
   const user = rows[0];
   if (!user) return res.status(401).json({ error: "Usuario no valido" });
+  if(user.password_changed_at && payload.iat*1000 < new Date(user.password_changed_at).getTime()-2000)return res.status(401).json({error:'Sesión expirada'});
   if (user.rol !== "gerente") return res.status(403).json({ error: "Solo gerencia puede abrir el pago" });
 
   const plan = user.plan || "profesional";

@@ -1,3 +1,4 @@
+import CompanySwitcher from "./CompanySwitcher";
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -643,6 +644,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
   if (user && FULLSCREEN_ROLES.includes(user.rol)) {
     return (
       <div style={{ minHeight:"100vh", background:"var(--bg)", fontFamily:"'DM Sans',sans-serif" }}>
+        <div style={{display:"flex",justifyContent:"flex-end",padding:8}}><CompanySwitcher /></div>
         {children}
       </div>
     );
@@ -865,6 +867,7 @@ export default function Layout({ children, vistaActiva, setVista, modulos, aviso
 
             {/* Bell + user */}
             <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+              <CompanySwitcher />
               {/* Theme toggle */}
               <button
                 onClick={toggle}

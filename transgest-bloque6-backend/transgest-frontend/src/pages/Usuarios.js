@@ -45,7 +45,7 @@ const RC = {
   cliente:"var(--accent-l)",
 };
 
-const MODULOS_PERM = [
+export const MODULOS_PERM = [
   ["agenda", "Agenda"],
   ["dashboard", "Dashboard"],
   ["control_tower", "Control Tower"],
@@ -245,6 +245,7 @@ export default function Usuarios() {
   }
 
   function abrirEditar(u) {
+    if(u.multiempresa){notify("Usuario multiempresa: gestiona sus accesos e identidad desde SuperAdmin.", "info");return;}
     setEditando(u);
     setForm({...u, permisos: normalizarPermisosUI(u.permisos, u.rol), trafico_config: normalizarTraficoConfigUI(u.trafico_config)});
     setErrors({});

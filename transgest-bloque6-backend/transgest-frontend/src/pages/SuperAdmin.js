@@ -1,3 +1,4 @@
+import MultiCompanyAdmin from "./MultiCompanyAdmin";
 import IntegrationRegistryAdmin from "./IntegrationRegistryAdmin";
 import SupportInbox from "../components/SupportInbox";
 import CompanyProducts from "../planner/CompanyProducts";
@@ -3144,6 +3145,7 @@ export default function SuperAdmin(){
   const navItems = [
     ["dashboard","Dashboard","DB"],
     ["empresas","Empresas","EM"],
+    ["multiempresas","Grupos y accesos","GR"],
     ["soporte","Soporte","SP"],
     ["salud","Implantación","SL"],
     ["integraciones","Integraciones","IN"],
@@ -3153,6 +3155,7 @@ export default function SuperAdmin(){
     ["config","Configuracion","CF"],
   ];
   const pageMeta = {
+    multiempresas:["Grupos y accesos","Membresías y permisos por sociedad"],
     dashboard:["Dashboard","Resumen general del entorno TransGest"],
     empresas:["Empresas","Gestion centralizada de clientes y suscripciones"],
     soporte:["Soporte","Solicitudes y conversaciones de las empresas"],
@@ -3320,6 +3323,7 @@ export default function SuperAdmin(){
         )}
 
         {/* Section */}
+        {tab==="multiempresas"&&<MultiCompanyAdmin saFetchFn={saFetch}/>}
         {tab==="empresas"&&(
           <div style={S.card}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:12,flexWrap:"wrap"}}>

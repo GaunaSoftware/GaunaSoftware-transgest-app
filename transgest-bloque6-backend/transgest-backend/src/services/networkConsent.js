@@ -6,7 +6,7 @@ const allowed=(link,scope)=>Boolean(link?.activo&&!link.revocada_at&&link.consen
 function scopes(value){if(!Array.isArray(value)||!value.includes('pedidos')||value.some(s=>!Object.hasOwn(catalog,s)))throw fail('Selecciona encargos y los permisos de intercambio admitidos.');return [...new Set(value)].sort();}
 function termsData(p){return {id:p.id,numero:p.numero,colaborador_id:p.colaborador_id,precio_colaborador:p.precio_colaborador,origen:p.origen,destino:p.destino,fecha_carga:p.fecha_carga,fecha_descarga:p.fecha_descarga};}
 function terms(p){return hash(canonical(termsData(p)));}
-async function manager(tx,company,user){if(!(await tx.query("SELECT id FROM usuarios WHERE id=$1 AND empresa_id=$2 AND rol='gerente' AND activo",[user,company])).rows.length)throw fail('Solo gerencia de esta empresa puede autorizar conexiones.',403);}
+async function manager(tx,company,user){if(!(await tx.query("SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE u.id=$1 AND m.empresa_id=$2 AND m.rol='gerente' AND u.activo AND m.activo",[user,company])).rows.length)throw fail('Solo gerencia de esta empresa puede autorizar conexiones.',403);}
 async function event(tx,company,user,type,{link=null,invite=null,data={}}={}){await tx.query('INSERT INTO network_eventos(empresa_id,created_by,tipo,conexion_id,invitacion_id,datos) VALUES($1,$2,$3,$4,$5,$6)',[company,user||null,type,link,invite,JSON.stringify(data)]);}
 async function target(tx,company,collaborator){
  const c=(await tx.query('SELECT nombre,cif FROM colaboradores WHERE id::text=$1 AND empresa_id=$2',[String(collaborator),company])).rows[0];if(!c||!normalized(c.cif))throw fail('Colaborador con NIF/CIF no encontrado.',404);

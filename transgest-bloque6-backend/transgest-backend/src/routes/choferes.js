@@ -288,7 +288,7 @@ async function notificarGerenciaTraficoJornada(empresaId, tipo, titulo, mensaje,
   ).catch(() => ({ rows: [] }));
   if (existing.rows[0]) return;
   const { rows } = await db.query(
-    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    "SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND u.activo=true AND m.activo=true AND m.rol IN ('gerente','trafico')",
     [empresaId]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(u => crearNotificacion({
@@ -460,7 +460,7 @@ async function notifyVacacionesGerenciaTrafico(empresaId, solicitud, chofer, act
   const title = action === "solicitada" ? "Nueva solicitud de vacaciones" : action === "aprobada" ? "Vacaciones aprobadas" : "Solicitud de vacaciones actualizada";
   const msg = `${nombre}: ${solicitud.fecha_inicio} a ${solicitud.fecha_fin} (${Number(solicitud.dias || 0)} dias).`;
   const { rows } = await db.query(
-    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    "SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND u.activo=true AND m.activo=true AND m.rol IN ('gerente','trafico')",
     [empresaId]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(u => crearNotificacion({
@@ -477,7 +477,7 @@ async function notifyVacacionesGerenciaTrafico(empresaId, solicitud, chofer, act
 async function notifyAsignacionConjunto(empresaId, tipo, titulo, mensaje, data = {}, actorId = null) {
   if (!empresaId) return;
   const { rows } = await db.query(
-    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    "SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND u.activo=true AND m.activo=true AND m.rol IN ('gerente','trafico')",
     [empresaId]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(u => crearNotificacion({

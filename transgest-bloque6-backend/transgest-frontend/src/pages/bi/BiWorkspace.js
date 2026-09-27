@@ -1,3 +1,4 @@
+import BiGroupPanel from "./BiGroupPanel";
 import {lazy, Suspense, useEffect, useRef, useState} from 'react';
 import {Bar, CartesianGrid, Cell, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {Badge, Button, Card, Modal} from '../../ui';
@@ -192,6 +193,7 @@ export default function BiWorkspace() {
           <select value={state[key]} onChange={e=>setFilter(key,e.target.value)}><option value="">Todos</option>{(choices[option]||[]).map(x=><option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label>)}
       </div><div className="bi-filter-foot"><div className="bi-chips">{active.length ? active.map(key=><button key={key} onClick={()=>setFilter(key,'')} aria-label={`Quitar filtro ${selectedLabel(key,state[key])}`}>{selectedLabel(key,state[key])} ×</button>) : <span>Sin filtros de dimensión</span>}</div>
         <Button onClick={()=>{setState(old=>clearBiFilters(old));setLocalSearch('');}}>Restablecer filtros</Button></div></Card>
+      {user?.bi_consolidado && data?.metadata?.periodo && <BiGroupPanel periodo={data.metadata.periodo}/>}
       {drillStack.length>0 && <Button onClick={undrill}>← Volver al periodo anterior</Button>}
       {loading && <Card className="bi-feedback" role="status">Calculando indicadores y preparando gráficos…</Card>}
       {!loading && result.error && <Card className="bi-feedback bi-feedback--error" role="alert">{result.error} <Button onClick={()=>setRetry(n=>n+1)}>Reintentar</Button></Card>}

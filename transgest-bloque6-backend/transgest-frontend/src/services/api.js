@@ -1383,3 +1383,17 @@ export const getGroupageCosts = groupId => apiFetch(`/pedidos/grupaje/${encodeUR
 export const recordGroupageCost = (groupId,data) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/costes`,{method:"POST",body:{...data,client_operation_uuid:crypto.randomUUID()}});
 
 export const invoiceWorkflow=(path="",options={})=>apiFetch("/facturas/operativa"+path,options);
+
+export const getCompanyMemberships = () => apiFetch('/auth/companies');
+export async function switchActiveCompany(empresa_id) {
+  const data=await apiFetch('/auth/company',{method:'POST',body:{empresa_id},silentSuccess:true});
+  // Stop old-company tracking and clear transient session values before installing the new context.
+  removeToken();
+  applyAuthSession(data);
+  localStorage.removeItem('tms_api_errors');
+  for(const key of Object.keys(sessionStorage))if(key.startsWith('tms_')&&!key.startsWith('tms_bi_workspace_'))sessionStorage.removeItem(key);
+  if(data.suscripcion)localStorage.setItem('tms_suscripcion',JSON.stringify(data.suscripcion));
+  return data;
+}
+export const getBiGroups = () => apiFetch('/informes/bi/grupos');
+export const getGroupBi = params => apiFetch('/informes/bi/consolidado?'+new URLSearchParams(params),{timeoutMs:120000});

@@ -518,16 +518,8 @@ async function authenticate(req, res, next) {
       req.suscripcion = { plan: "enterprise", estado: "activo" };
       return next();
     }
-    const { rows } = await db.query(
-      `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
-              u.perfil, u.permisos, u.trafico_config, u.password_changed_at,
-              e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
-              e.bloqueo_manual, e.bloqueo_motivo
-       FROM usuarios u
-       LEFT JOIN empresas e ON e.id = u.empresa_id
-       WHERE u.id = $1`,
-      [payload.sub]
-    );
+    const member = await require('../services/companyMembership').userForCompany(payload.sub,payload.empresa_id);
+    const rows = member ? [member] : [];
 
     if (!rows[0] || (!rows[0].activo && !payload.superadmin_impersonation)) {
       return res.status(401).json({ error: "Usuario no valido o desactivado" });

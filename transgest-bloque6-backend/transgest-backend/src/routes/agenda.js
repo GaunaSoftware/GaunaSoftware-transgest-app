@@ -70,12 +70,11 @@ async function ensureOwnerOrManager(req, eventoId) {
 router.get("/usuarios", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const { rows } = await db.query(
-    `SELECT id, nombre, email, username, rol, activo
-       FROM usuarios
-      WHERE empresa_id=$1
-        AND activo=true
+    `SELECT u.id, u.nombre, u.email, u.username, m.rol, (u.activo AND m.activo) AS activo
+       FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id
+      WHERE m.empresa_id=$1 AND m.activo=true AND u.activo=true
       ORDER BY
-        CASE rol
+        CASE m.rol
           WHEN 'gerente' THEN 1
           WHEN 'contable' THEN 2
           WHEN 'administrativo' THEN 3

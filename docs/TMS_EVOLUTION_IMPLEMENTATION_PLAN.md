@@ -1,6 +1,6 @@
 # Evolución integral controlada de TransGest
 
-Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescribe los inventarios y evidencias de cada fase. El encargo comprende **fases 0–17 de TMS**, distintas de las antiguas fases BI.
+Actualización: 27/09/2026. Documento de continuidad; no sustituye ni sobrescribe los inventarios y evidencias de cada fase. El encargo comprende **fases 0–17 de TMS**, distintas de las antiguas fases BI.
 
 ## Reglas que continúan vigentes
 
@@ -33,6 +33,6 @@ Actualización: 26/09/2026. Documento de continuidad; no sustituye ni sobrescrib
 | 14 Fiscalidad | Estabilización local verificada; piloto real pendiente | `TMS_EVOLUTION_PHASE14_FISCAL.md`: contrato común, cola atómica, idempotencia, inmutabilidad y conexión verificable. HTTP, npm check y build: código 0 |
 | 15 KPI/BI | Conciliación física implementada y verificada localmente | `TMS_EVOLUTION_PHASE15_BI.md`: reparto estable, datos históricos, dashboard, informes, Planner separado, pruebas y build 0 |
 | 16 Integration Registry | Registro y controles implementados y verificados localmente | `TMS_EVOLUTION_PHASE16_INTEGRATIONS.md`; evidencias por ámbito/versión, gates, salud y SuperAdmin; pruebas externas pendientes |
-| 17 Multiempresa | Pendiente de contrastar e implementar | Membresías, permisos y autorización efectiva; no confiar solo en parámetros o JWT |
+| 17 Multiempresa | Implementada y validada localmente | `TMS_EVOLUTION_PHASE17_MULTIEMPRESA.md`: membresías vivas, roles por sociedad, selector, BI autorizado, revocación y regresiones; prueba PostgreSQL/dispositivo pendiente |
 
 Antes de dar una fase por terminada, revisar todos sus requisitos del encargo original y resolver o identificar expresamente cada límite heredado. Los documentos 0–5 constituyen evidencia de lo realizado, no una certificación global. El usuario ha autorizado terminar las fases pendientes; no hay que pedir permiso otra vez para implementar. Continuar por los pendientes de fase 5 antes de declarar su cierre; no presentar como terminadas las fases 6–17 por existir módulos anteriores.

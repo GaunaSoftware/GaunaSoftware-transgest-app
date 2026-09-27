@@ -841,6 +841,16 @@ function superAuth(req, res, next) {
 
 router.use("/soporte", superAuth, require("./soporte").createSupportRouter(true));
 const integrationRegistry = require('../services/integrationRegistry');
+const memberships=require('../services/companyMembership');
+router.get('/multiempresas/referencias',superAuth,async(req,res,next)=>{try{
+ const result={};for(const [role,table] of [['cliente','clientes'],['chofer','choferes'],['colaborador','colaboradores']])result[role]=(await db.query(`SELECT id,nombre FROM ${table} WHERE empresa_id=$1 AND nombre ILIKE $2 ORDER BY nombre,id LIMIT 100`,[req.query.empresa_id,'%'+String(req.query.q||'').slice(0,100)+'%'])).rows;
+ res.json(result);
+}catch(e){next(e);}});
+
+router.get('/multiempresas',superAuth,async(req,res,next)=>{try{res.json(await memberships.adminList());}catch(e){next(e);}});
+router.post('/multiempresas/grupos',superAuth,async(req,res,next)=>{try{res.json(await memberships.saveGroup(req.body,req.superadmin.id||req.superadmin.email||'superadmin'));}catch(e){next(e);}});
+router.put('/multiempresas/membresias',superAuth,async(req,res,next)=>{try{res.json(await memberships.saveMembership(req.body,req.superadmin.id||req.superadmin.email||'superadmin'));}catch(e){next(e);}});
+
 router.get('/integraciones/registry', superAuth, async(req,res,next)=>{try{res.json(await integrationRegistry.list(req.query.empresa_id||null));}catch(e){next(e);}});
 router.put('/integraciones/registry/:provider', superAuth, async(req,res,next)=>{try{res.json(await integrationRegistry.change(req.body.empresa_id||null,req.params.provider,req.body,req.superadmin.id||req.superadmin.email));}catch(e){next(e);}});
 

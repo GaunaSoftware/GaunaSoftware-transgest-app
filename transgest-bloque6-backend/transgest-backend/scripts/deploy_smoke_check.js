@@ -121,6 +121,24 @@ async function run() {
     throw new Error("api protegida via proxy: no devuelve rechazo de autenticacion esperado");
   }
 
+  // A healthy API can still be unreachable from the installed Android WebView.
+  await withTimeout(async signal => {
+    const origin = 'https://localhost';
+    const preflight = await fetch(`${apiUrl}/api/v1/auth/login`, {
+      method: 'OPTIONS', signal,
+      headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization' },
+    });
+    if (preflight.status !== 204 || preflight.headers.get('access-control-allow-origin') !== origin
+      || !/authorization/i.test(preflight.headers.get('access-control-allow-headers') || '')) {
+      throw new Error('Android: el preflight CORS del origen del APK no esta autorizado.');
+    }
+    const protectedMobile = await fetch(`${apiUrl}/api/v1/pedidos`, { signal, headers: { Origin: origin } });
+    if (protectedMobile.status !== 401 || protectedMobile.headers.get('access-control-allow-origin') !== origin) {
+      throw new Error('Android: respuesta CORS o autenticacion de pedidos incorrecta.');
+    }
+    console.log('OK Android CORS y autenticacion (sin credenciales ni escrituras)');
+  }, 'Android CORS');
+
   await runClienteRoundtrip();
 
   console.log(`DEPLOY SMOKE OK: frontend=${baseUrl} api=${apiUrl} release=${healthData.release}`);

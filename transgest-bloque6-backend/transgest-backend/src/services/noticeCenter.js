@@ -65,7 +65,7 @@ async function readNotices(db, user, { now = new Date(), category = '', text = '
     if (!can(user, type)) continue;
     await read(type, async () => {
       const { rows } = await db.query(`SELECT id,to_jsonb(t) AS data FROM ${type} t WHERE empresa_id=$1 AND COALESCE((to_jsonb(t)->>'activo')::boolean,true)=true`, [user.empresa_id]);
-      const docs = await db.query(`SELECT d.id,d.tipo,d.fecha_vencimiento,d.fecha_emision,d.created_at,d.${type === 'vehiculos' ? 'vehiculo' : 'chofer'}_id AS entity_id FROM docs_${type} d JOIN ${type} t ON t.id=d.${type === 'vehiculos' ? 'vehiculo' : 'chofer'}_id WHERE t.empresa_id=$1`, [user.empresa_id]);
+      const docs = await db.query(`SELECT d.id,COALESCE(NULLIF(to_jsonb(d)->>'tipo_doc',''),d.tipo) AS tipo,d.fecha_vencimiento,d.fecha_emision,d.created_at,d.${type === 'vehiculos' ? 'vehiculo' : 'chofer'}_id AS entity_id FROM docs_${type} d JOIN ${type} t ON t.id=d.${type === 'vehiculos' ? 'vehiculo' : 'chofer'}_id WHERE t.empresa_id=$1`, [user.empresa_id]);
       const latest = new Map();
       for (const d of docs.rows) {
         const key = `${d.entity_id}:${String(d.tipo || '').toLocaleLowerCase('es')}`;

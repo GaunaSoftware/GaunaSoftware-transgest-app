@@ -34,6 +34,22 @@ async function run() {
     assert.equal(result.items.find(i=>i.category==='facturas').amount,1210);
     assert.ok(!result.items.some(i=>i.title.startsWith('ITV')), 'Renewed document supersedes expired history and ficha date');
     assert.ok(result.items.some(i=>i.category==='plataformas' && i.view==='vehiculos'));
+    // Imported documents use the compatible legacy enum 'otro' and retain their
+    // specific category in tipo_doc. A valid DNI must not conceal an expired CAP.
+    await pg.exec(`ALTER TABLE docs_choferes ADD COLUMN tipo_doc text;
+      ALTER TABLE docs_vehiculos ADD COLUMN tipo_doc text;
+      INSERT INTO docs_choferes(id,tipo,tipo_doc,chofer_id,fecha_emision,fecha_vencimiento,created_at)
+      VALUES('${U}','otro','cap','${U}','2021-09-01','2026-09-01',NOW()),
+      ('${V}','otro','dni','${U}','2025-01-01','2033-01-01',NOW());
+      INSERT INTO docs_vehiculos(id,tipo,tipo_doc,vehiculo_id,fecha_emision,fecha_vencimiento,created_at)
+      VALUES('${A}','otro','seguro','${U}','2025-09-01','2026-09-01',NOW()),
+      ('${B}','otro','itv','${U}','2026-09-01','2027-09-01',NOW());`);
+    const imported=await notices.readNotices(pg,manager,options);
+    assert.equal(imported.coverage,'completo');
+    assert.equal(imported.items.filter(i=>i.category==='choferes').length,1,'CAP is not hidden by DNI and does not duplicate the master date');
+    assert.ok(imported.items.some(i=>i.category==='choferes' && i.title.startsWith('cap')));
+    assert.ok(imported.items.some(i=>i.category==='vehiculos' && i.title.startsWith('seguro')));
+    assert.ok(!imported.items.some(i=>/^(itv|dni|otro)/i.test(i.title)));
     for (const state of ['borrador','anulada','cancelada','cobrada','rectificada']) {
       await pg.query('UPDATE facturas SET estado=$1 WHERE empresa_id=$2',[state,A]);
       assert.equal((await notices.readNotices(pg,manager,options)).items.filter(i=>i.category==='facturas').length,0,state);

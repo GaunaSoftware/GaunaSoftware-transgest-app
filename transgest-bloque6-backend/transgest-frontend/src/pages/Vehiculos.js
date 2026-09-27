@@ -2,6 +2,7 @@ import useRuntimeFocus from "../hooks/useRuntimeFocus";
 import "./workspace/unified-tools.css";
 import FleetWorkspace from "./fleet/FleetWorkspace";
 import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
+import StoredDocumentButton from "../components/StoredDocumentButton";
 import "./fleet/fleet.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
@@ -1672,15 +1673,13 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                       {docsVehiculo.map(doc => (
                         <div key={doc.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 11px",background:"var(--bg3)"}}>
                           <div>
-                            <div style={{fontWeight:800,color:"var(--text)",fontSize:13}}>{doc.file_nombre || doc.descripcion || doc.tipo_doc || "Documento"}</div>
+                            <div style={{fontWeight:800,color:"var(--text)",fontSize:13}}>{doc.file_name || doc.file_nombre || doc.descripcion || doc.tipo_doc || "Documento"}</div>
                             <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
                               {(doc.tipo_doc || doc.tipo || "otro")} {doc.fecha_vencimiento ? `- vence ${new Date(doc.fecha_vencimiento).toLocaleDateString("es-ES")}` : ""} {doc.file_size_kb ? `- ${doc.file_size_kb} KB` : ""}
                             </div>
                           </div>
                           <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                            {doc.file_url && (
-                              <a href={doc.file_url} target="_blank" rel="noreferrer" style={{...S.btn,textDecoration:"none",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)"}}>Abrir</a>
-                            )}
+                            <StoredDocumentButton doc={doc} scope="vehiculo" style={{...S.btn,textDecoration:"none",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)"}}/>
                             {canEdit && (
                               <button type="button" style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.22)"}} onClick={async()=>{
                                 if (!await confirmDialog({title:"Eliminar documento",message:"Eliminar este documento archivado?",confirmText:"Eliminar",tone:"danger"})) return;

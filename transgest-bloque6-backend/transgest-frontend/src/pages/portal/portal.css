@@ -81,7 +81,9 @@
 .tg-portal-cliente-page label[style*="uppercase"] { text-transform:none!important; letter-spacing:0!important; font-size:13px!important; color:var(--text3)!important; }
 .tg-portal-cliente-page table { width:100%; border-collapse:collapse; }
 .tg-portal-cliente-page th { background:var(--bg3); }
-.portal-timeline { overflow-x:auto; padding-bottom:8px; }
+.portal-timeline { overflow-x:auto; padding-bottom:8px; flex-wrap:nowrap!important; min-width:0; }
+.portal-timeline>div { flex-shrink:0!important; min-width:88px!important; }
+.portal-timeline>div>div:first-child { min-width:74px!important; }
 .portal-overlay { background:rgba(5,24,35,.6)!important; backdrop-filter:blur(3px); overflow:auto; padding:20px!important; }
 .portal-overlay>div { border-radius:16px!important; max-width:100%; max-height:calc(100dvh - 40px); overflow:auto; flex-wrap:nowrap!important; }
 .portal-load-error { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px; border:1px solid #fda4af; border-radius:10px; color:#be123c; background:rgba(225,29,72,.08); margin-bottom:16px; }

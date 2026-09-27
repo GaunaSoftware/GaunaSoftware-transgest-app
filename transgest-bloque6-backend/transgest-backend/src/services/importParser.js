@@ -13,7 +13,7 @@ function reject(message, code = 'IMPORT_FILE_INVALID', status = 422) {
   throw Object.assign(new Error(message), { code, status });
 }
 
-function inspectZip(buffer) {
+function inspectZip(buffer, { maxUncompressed = MAX_UNCOMPRESSED, maxEntry = 30 * 1024 * 1024 } = {}) {
   if (buffer.length < 22 || buffer.readUInt32LE(0) !== 0x04034b50) reject('XLSX no válido: se esperaba un ZIP');
   let eocd = -1;
   for (let i = buffer.length - 22; i >= Math.max(0, buffer.length - 65557); i--) {
@@ -37,7 +37,7 @@ function inspectZip(buffer) {
     const commentLength = buffer.readUInt16LE(cursor + 32);
     if (compressed === 0xffffffff || uncompressed === 0xffffffff || (flags & 1) || ![0,8].includes(method)) reject('Entrada ZIP no admitida', 'ZIP_LIMIT');
     total += uncompressed;
-    if (total > MAX_UNCOMPRESSED || uncompressed > 30 * 1024 * 1024 || (compressed < 1000 && uncompressed > 100000) || (compressed > 0 && uncompressed / compressed > 200)) reject('XLSX descomprimido excede el límite', 'ZIP_BOMB');
+    if (total > maxUncompressed || uncompressed > maxEntry || (compressed < 1000 && uncompressed > 100000) || (compressed > 0 && uncompressed / compressed > 200)) reject('XLSX descomprimido excede el límite', 'ZIP_BOMB');
     const name = buffer.toString('utf8', cursor + 46, cursor + 46 + nameLength);
     if (name.includes('..') || name.startsWith('/') || /vbaProject\.bin$/i.test(name)) reject('Ruta o macro no admitida en XLSX', 'XLSX_UNSAFE');
     cursor += 46 + nameLength + extraLength + commentLength;

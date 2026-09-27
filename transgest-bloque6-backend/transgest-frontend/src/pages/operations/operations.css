@@ -17,3 +17,32 @@
 @media(max-width:767px){.operations-workspace{padding:14px!important}.operations-workspace :is(input,select,textarea){font-size:16px!important}.operations-workspace .tg-responsive-modal{padding:16px!important}.operations-tower>div>div[style*="grid-template-columns"],.operations-requests>div[style*="grid-template-columns"]{grid-template-columns:minmax(0,1fr)!important}.operations-traffic .tg-traffic-board{max-height:65vh!important}.operations-workspace .tgui-page-header h1{font-size:24px}.operations-calculator-grid>div:first-child{padding:14px!important}}
 
 .operations-workspace input:is([type=checkbox],[type=radio]){width:16px!important;min-width:16px!important;height:16px!important;flex:0 0 16px!important;margin:0!important}.operations-calculator label>span{display:flex!important;align-items:center!important;gap:8px!important}.operations-calculator label>span>span{flex:1}.operations-workspace button[style*="color: var(--accent)"]{color:var(--accent-xl)!important}
+
+/* The weekly planner retains its table and gains a collapsible assignment queue. */
+.traffic-week-layout{display:flex;flex:0 0 auto;min-height:0;min-width:0;gap:10px;width:100%}
+.operations-traffic .traffic-week-layout>.tg-traffic-board{flex:1 1 0!important;width:0;min-width:0;max-width:100%}
+.traffic-week-pending{flex:0 0 260px;overflow:auto;padding:10px;border-right:1px solid var(--border);background:var(--bg2)}
+.traffic-week-pending.is-closed{flex:0 0 48px;padding:4px}
+.traffic-week-pending.is-closed>button{writing-mode:vertical-rl;min-height:170px;white-space:nowrap}
+.traffic-week-pending h2{font-size:14px}.traffic-week-pending p{font-size:12px;color:var(--text4)}
+.traffic-week-pending-item{border:1px solid var(--border);border-radius:8px;margin:8px 0;background:var(--card-bg)}
+.traffic-week-pending-item>button{display:grid;gap:5px;width:100%;text-align:left;padding:10px;color:var(--text);border:0;background:transparent;cursor:pointer;overflow-wrap:anywhere}
+.traffic-week-history{display:flex;align-items:center;gap:8px;padding:6px 16px;font-size:12px}
+@media(max-width:900px){.traffic-week-pending{display:none}.traffic-week-layout{min-height:0}}
+
+.groupage-route-editor{padding:14px;color:var(--text)}
+.groupage-plan-columns{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(260px,1.1fr) minmax(320px,1.4fr);gap:16px}
+.groupage-plan-columns>section{min-width:0}.groupage-plan-columns h3{font-size:14px}.groupage-plan-columns p{font-size:12px;color:var(--text4)}
+.groupage-order{display:grid;gap:4px;border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:12px}
+.groupage-plan-columns li{margin:8px 0;padding:6px;border-bottom:1px solid var(--border);font-size:12px;overflow-wrap:anywhere}.groupage-plan-columns li>span{display:block}.groupage-plan-columns li>button{min-width:32px;min-height:32px;margin:3px}
+.groupage-route-editor footer{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;font-size:12px}
+@media(max-width:1150px){.groupage-plan-columns{grid-template-columns:1fr}.groupage-plan-columns>section{width:100%}}
+
+.groupage-draft,.journey-costs {padding:16px;border:1px solid var(--border2);border-radius:12px;margin-block:12px;background:var(--bg2);}
+.groupage-draft-columns {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px;}
+.groupage-draft-columns section {border:1px dashed var(--border2);padding:12px;min-width:0;}
+.groupage-draft-columns section>div {margin-bottom:10px;}
+.journey-costs form {display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
+.journey-costs label {display:grid;gap:6px;flex:1 1 170px;min-width:0;}
+.journey-costs input {width:100%;min-width:0;}
+@media(max-width:768px){.groupage-draft-columns{grid-template-columns:1fr;}.journey-costs form{display:grid;grid-template-columns:minmax(0,1fr);}}

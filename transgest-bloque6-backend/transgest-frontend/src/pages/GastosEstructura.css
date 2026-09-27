@@ -1,0 +1,18 @@
+.structure-expenses-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.structure-expenses-controls > div { min-width: 0; }
+.structure-expenses-allocation {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 768px) {
+  .structure-expenses-controls > div { flex: 1 1 180px; }
+  .structure-expenses-allocation { grid-template-columns: minmax(0, 1fr); }
+}

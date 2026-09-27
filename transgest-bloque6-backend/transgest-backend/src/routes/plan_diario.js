@@ -129,6 +129,7 @@ function buildPedidoResumen(p, fecha) {
     ruta: buildRutaPedido(p),
     puntos_descarga: p.puntos_descarga,
     estado: normalizeEstadoPedido(p.estado),
+    estado_operativo: p.estado_operativo,
     fecha_carga: carga,
     hora_carga: p.hora_carga || null,
     fecha_descarga: descarga || null,
@@ -318,7 +319,7 @@ router.get("/", async (req, res, next) => {
     ]);
 
     const tallerData = tallerEstadoRes.rows[0]?.data || {};
-    const pedidos = pedidosRes.rows.map(p => buildPedidoResumen(p, fecha));
+    const pedidos = (await require('../services/transportProgress').withTransportProgress(db, empresa, pedidosRes.rows)).map(p => buildPedidoResumen(p, fecha));
     const pedidosByVehicle = new Map();
     pedidos.forEach(p => {
       if (!p.vehiculo_id) return;

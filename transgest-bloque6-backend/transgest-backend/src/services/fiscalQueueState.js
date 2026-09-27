@@ -8,16 +8,19 @@ async function logFiscalEvent(client, recordId, facturaId, empresaId, eventoTipo
 }
 
 async function markQueueAccepted(client, item, responsePayload, actorUserId) {
-  await client.query(
+  if (client.transaction) return client.transaction(tx => markQueueAccepted(tx, item, responsePayload, actorUserId));
+  const transition = await client.query(
     `UPDATE factura_envios_fiscales
-        SET estado='aceptado',
-            response=$1::jsonb,
+        SET estado='aceptado', retryable=false,
+            response=COALESCE(response,'{}'::jsonb) || $1::jsonb,
+            lease_until=NULL,
             error=NULL,
             processed_at=NOW(),
             updated_at=NOW()
-      WHERE id=$2`,
+      WHERE id=$2 AND estado NOT IN ('aceptado','omitido') RETURNING id`,
     [JSON.stringify(responsePayload), item.id]
   );
+  if (!transition.rowCount) return;
   await client.query(
     `UPDATE factura_envios_fiscales
         SET estado='omitido',
@@ -44,17 +47,20 @@ async function markQueueAccepted(client, item, responsePayload, actorUserId) {
 }
 
 async function markQueuePending(client, item, responsePayload, actorUserId, retryInMs = 2 * 60 * 1000, detail = "Pendiente de confirmacion externa") {
-  await client.query(
+  if (client.transaction) return client.transaction(tx => markQueuePending(tx, item, responsePayload, actorUserId, retryInMs, detail));
+  const transition = await client.query(
     `UPDATE factura_envios_fiscales
-        SET estado='pendiente',
-            response=$1::jsonb,
+        SET estado='pendiente', retryable=true,
+            response=COALESCE(response,'{}'::jsonb) || $1::jsonb,
+            lease_until=NULL,
             error=NULL,
             next_retry_at=$2,
             processed_at=NOW(),
             updated_at=NOW()
-      WHERE id=$3`,
+      WHERE id=$3 AND estado NOT IN ('aceptado','omitido') RETURNING id`,
     [JSON.stringify(responsePayload), new Date(Date.now() + retryInMs).toISOString(), item.id]
   );
+  if (!transition.rowCount) return;
   await client.query(
     `UPDATE factura_registros_fiscales
         SET estado_envio='pendiente',
@@ -72,17 +78,19 @@ async function markQueuePending(client, item, responsePayload, actorUserId, retr
 }
 
 async function markQueueError(client, item, message, actorUserId, retryable = true, responsePayload = null) {
-  await client.query(
+  if (client.transaction) return client.transaction(tx => markQueueError(tx, item, message, actorUserId, retryable, responsePayload));
+  const transition = await client.query(
     `UPDATE factura_envios_fiscales
-        SET estado='error',
-            response=COALESCE($1::jsonb, response),
+        SET estado='error', retryable=$5, lease_until=NULL,
+            response=COALESCE(response,'{}'::jsonb) || COALESCE($1::jsonb,'{}'::jsonb),
             error=$2,
             next_retry_at=$3,
             processed_at=NOW(),
             updated_at=NOW()
-      WHERE id=$4`,
-    [responsePayload ? JSON.stringify(responsePayload) : null, message, retryable ? new Date(Date.now() + 60 * 60 * 1000).toISOString() : null, item.id]
+      WHERE id=$4 AND estado NOT IN ('aceptado','omitido') RETURNING id`,
+    [responsePayload ? JSON.stringify(responsePayload) : null, message, retryable ? new Date(Date.now() + 60 * 60 * 1000).toISOString() : null, item.id, retryable]
   );
+  if (!transition.rowCount) return;
   await client.query(
     `UPDATE factura_registros_fiscales
         SET estado_envio='error',

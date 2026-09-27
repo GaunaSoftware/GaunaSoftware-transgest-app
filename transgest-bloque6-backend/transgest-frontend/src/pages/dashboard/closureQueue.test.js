@@ -29,3 +29,8 @@ test('calendar days remain exact across a daylight-saving transition', () => {
   const rows=pendingClosureRows([order('dst','2026-03-28')],new Date(2026,2,30,0,30));
   expect(rows[0].days).toBe(2);
 });
+
+test('search matches the town shown from a structured stop', () => {
+  const rows=pendingClosureRows([order('town','2026-09-14',{origen:'Población pendiente',puntos_carga:[{ciudad:'Castellón'}]})],now);
+  expect(filterPendingClosures(rows,'all','castellon','recent')).toHaveLength(1);
+});

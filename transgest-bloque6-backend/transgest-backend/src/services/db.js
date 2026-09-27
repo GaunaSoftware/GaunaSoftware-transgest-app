@@ -6,6 +6,7 @@ const DB_LOCK_TIMEOUT_MS = parseInt(process.env.DB_LOCK_TIMEOUT_MS || "5000", 10
 const DB_IDLE_IN_TX_TIMEOUT_MS = parseInt(process.env.DB_IDLE_IN_TX_TIMEOUT_MS || "15000", 10);
 
 const pool = new Pool({
+  types: require('./postgresTypes'),
   host:     process.env.DB_HOST     || "localhost",
   port:     parseInt(process.env.DB_PORT || "5432"),
   database: process.env.DB_NAME     || "transgest",

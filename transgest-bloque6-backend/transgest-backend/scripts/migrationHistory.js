@@ -17,4 +17,7 @@ function isPublishedHistoricalVariant(id, recorded, current) {
   return (id === '003_operational_normalization' && current === canonical003 && published003.has(recorded)) ||
     (id === '20260924_import_tenant_keys' && current === canonicalImportTenantKeys && recorded === stagingImportTenantKeys);
 }
-module.exports = { isPublishedHistoricalVariant };
+// Locale collation can place _groupage.sql before its base .sql migration.
+// Stable code-point order keeps the base first on every deployment host.
+function sortMigrationFiles(files) { return [...files].sort(); }
+module.exports = { isPublishedHistoricalVariant, sortMigrationFiles };

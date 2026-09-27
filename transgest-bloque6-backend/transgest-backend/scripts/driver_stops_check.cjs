@@ -1,5 +1,7 @@
 const assert=require('node:assert/strict');
 const {PGlite}=require('@electric-sql/pglite');
+const fs=require('node:fs');
+const path=require('node:path');
 const {driverStops,mergeStop,activeDriverStop,stopData,saveStop}=require('../src/services/driverStops');
 async function main(){
  const order={id:'11111111-1111-4111-8111-111111111111',empresa_id:'22222222-2222-4222-8222-222222222222',estado:'confirmado',puntos_carga:[{id:'a',direccion:'A'},{id:'b',direccion:'B'}],puntos_descarga:[{id:'c',direccion:'C'},{id:'d',direccion:'D'}]};
@@ -22,7 +24,8 @@ async function main(){
   assert.throws(()=>apply(i,{descarga_ok:true}),/mercancía/);
   assert.throws(()=>apply(i,{mercancia_confirmada:true,mercancia_cargada:'Sacos',mercancia_palets:'99',mercancia_peso_kg:'999'}),/supera/);
   apply(i,{mercancia_confirmada:true,mercancia_cargada:'Sacos',mercancia_palets:'2',mercancia_peso_kg:'100'});
-  apply(i,{descarga_ok:true});assert.notEqual(order.estado,'entregado');
+  const unloaded=apply(i,{descarga_ok:true});assert.notEqual(order.estado,'entregado');
+  assert.equal(unloaded.unloadingComplete,i===3,'Only the final physical unload completes the order unloading time');
   apply(i,{albaran_descarga:true});apply(i,{firma_entrega:true});assert.equal(order.estado,i===3?'entregado':'en_curso');
  }
  assert.equal(activeDriverStop(order,all),null);
@@ -33,8 +36,21 @@ async function main(){
  const pg=new PGlite();let fail=false;
  const db={transaction:fn=>pg.transaction(tx=>fn({query:(sql,args)=>{if(fail&&sql.startsWith('UPDATE pedidos SET mercancia'))throw Error('injected write failure');return tx.query(sql,args);}}))};
  try{
-  await pg.exec(`CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,numero text,estado text,vehiculo_id uuid,chofer_id uuid,chofer2_id uuid,puntos_carga jsonb,puntos_descarga jsonb,firma_evidencia jsonb,mercancia text,bultos numeric,peso_kg numeric,updated_at timestamptz);CREATE TABLE pedido_chofer_pasos(pedido_id uuid PRIMARY KEY,empresa_id uuid,chofer_id uuid,data jsonb,updated_at timestamptz);CREATE TABLE choferes(id uuid,empresa_id uuid,estado text);`);
-  await pg.query('INSERT INTO pedidos(id,empresa_id,estado,puntos_carga,puntos_descarga) VALUES($1,$2,$3,$4,$5)',[order.id,order.empresa_id,'confirmado',JSON.stringify(order.puntos_carga),JSON.stringify(order.puntos_descarga)]);
+  await pg.exec(`CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,numero text,estado text,vehiculo_id uuid,chofer_id uuid,chofer2_id uuid,puntos_carga jsonb,puntos_descarga jsonb,firma_evidencia jsonb,mercancia text,bultos numeric,peso_kg numeric,fecha_carga date,fecha_descarga date,fecha_entrega date,updated_at timestamptz);CREATE TABLE pedido_chofer_pasos(pedido_id uuid PRIMARY KEY,empresa_id uuid,chofer_id uuid,data jsonb,updated_at timestamptz);CREATE TABLE choferes(id uuid,empresa_id uuid,estado text);`);
+  await pg.query('INSERT INTO pedidos(id,empresa_id,estado,puntos_carga,puntos_descarga,fecha_carga,fecha_descarga) VALUES($1,$2,$3,$4,$5,$6,$7)',[order.id,order.empresa_id,'confirmado',JSON.stringify(order.puntos_carga),JSON.stringify(order.puntos_descarga),'2026-09-25','2026-09-26']);
+  const migration=fs.readFileSync(path.join(__dirname,'migrations/20260925_pedido_planned_actual_dates.sql'),'utf8');
+  await pg.exec(migration);
+  await pg.exec(migration);
+  let dated=(await pg.query('SELECT fecha_carga_planificada,fecha_descarga_planificada,planificacion_origen,carga_real_at FROM pedidos WHERE id=$1',[order.id])).rows[0];
+  assert.equal(dated.fecha_descarga_planificada.toISOString().slice(0,10),'2026-09-26');
+  assert.equal(dated.planificacion_origen,'legacy_sin_verificar');
+  assert.equal(dated.carga_real_at,null);
+  const legacyDeliveryId='66666666-6666-4666-8666-666666666666';
+  await pg.query("INSERT INTO pedidos(id,empresa_id,estado,fecha_carga,fecha_entrega) VALUES($1,$2,'confirmado','2026-09-25','2026-09-26')",[legacyDeliveryId,order.empresa_id]);
+  await pg.query("UPDATE pedidos SET fecha_entrega='2026-09-29',descarga_real_at=NOW(),estado='entregado' WHERE id=$1",[legacyDeliveryId]);
+  const legacyDelivery=(await pg.query('SELECT fecha_descarga_planificada,descarga_real_at FROM pedidos WHERE id=$1',[legacyDeliveryId])).rows[0];
+  assert.equal(legacyDelivery.fecha_descarga_planificada.toISOString().slice(0,10),'2026-09-26','actual delivery must not replace the planned date');
+  assert.ok(legacyDelivery.descarga_real_at);
   const truck='44444444-4444-4444-8444-444444444444';
   await pg.query('UPDATE pedidos SET vehiculo_id=$1',[truck]);
   await pg.query("INSERT INTO pedidos(id,empresa_id,estado,vehiculo_id) VALUES('55555555-5555-4555-8555-555555555555',$1,'en_curso',$2)",[order.empresa_id,truck]);
@@ -46,6 +62,17 @@ async function main(){
   assert.equal((await pg.query('SELECT data FROM pedido_chofer_pasos')).rows[0].data.paradas[stops[0].id].mercancia_confirmada,undefined);
   await send({mercancia_confirmada:true,mercancia_cargada:'Sacos',mercancia_palets:2,mercancia_peso_kg:100});await send({albaran_carga:true});
   await assert.rejects(send({firma_cargador:true}),/firma/);
+  await pg.query('UPDATE pedidos SET firma_evidencia=$1 WHERE id=$2',[JSON.stringify({paradas:{[stops[0].id]:{firma:{hash:'signed'}}}}),order.id]);
+  await send({firma_cargador:true});await send({carga_ok:true});
+  dated=(await pg.query('SELECT fecha_descarga,fecha_descarga_planificada,carga_real_at,descarga_real_at FROM pedidos WHERE id=$1',[order.id])).rows[0];
+  assert.equal(dated.fecha_descarga.toISOString().slice(0,10),'2026-09-26');
+  assert.equal(dated.fecha_descarga_planificada.toISOString().slice(0,10),'2026-09-26');
+  assert.ok(dated.carga_real_at);
+  assert.equal(dated.descarga_real_at,null);
+  await pg.query('UPDATE pedidos SET fecha_descarga=$1 WHERE id=$2',['2026-09-27',order.id]);
+  dated=(await pg.query('SELECT fecha_descarga_planificada,planificacion_origen FROM pedidos WHERE id=$1',[order.id])).rows[0];
+  assert.equal(dated.fecha_descarga_planificada.toISOString().slice(0,10),'2026-09-27');
+  assert.equal(dated.planificacion_origen,'capturada');
   await assert.rejects(saveStop(db,{pedidoId:order.id,empresaId:'33333333-3333-4333-8333-333333333333',patch:{parada_id:stops[0].id,carga_ok:true}}),/encontrado/);
   assert.equal(Number((await pg.query('SELECT peso_kg FROM pedidos WHERE id=$1',[order.id])).rows[0].peso_kg),100);
  }finally{await pg.close();}

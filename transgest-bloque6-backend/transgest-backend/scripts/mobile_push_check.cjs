@@ -1,0 +1,25 @@
+const assert=require('node:assert/strict'),crypto=require('crypto'),fs=require('fs'),path=require('path'),{PGlite}=require('@electric-sql/pglite');
+const push=require('../src/services/mobilePush');
+(async()=>{const pg=new PGlite();const db={query:(...args)=>pg.query(...args)};
+try{
+ await pg.exec('CREATE TABLE usuarios(id UUID,empresa_id UUID,activo boolean); CREATE TABLE notificaciones_internas(id UUID,empresa_id UUID,usuario_id UUID,created_at timestamptz DEFAULT NOW(),leida boolean DEFAULT false);');
+ const sql=fs.readFileSync(path.join(__dirname,'migrations/20260926_mobile_push.sql'),'utf8');await pg.exec(sql);await pg.exec(sql);
+ const a=crypto.randomUUID(),b=crypto.randomUUID(),u=crypto.randomUUID(),v=crypto.randomUUID(),note=crypto.randomUUID(),wrong=crypto.randomUUID();
+ await pg.query('INSERT INTO usuarios VALUES($1,$2,true),($3,$4,true)',[u,a,v,b]);
+ const token='synthetic-device-token-'.repeat(4),device=await push.register(db,a,u,token);
+ const row=(await pg.query('SELECT * FROM mobile_push_devices')).rows[0];assert.notEqual(row.encrypted_token,token);assert.ok(row.encrypted_token.startsWith('v1:'));
+ await assert.rejects(push.register(db,b,u,token),{status:403});
+ await push.unregister(db,b,v,device.id);assert.equal((await pg.query('SELECT enabled FROM mobile_push_devices')).rows[0].enabled,true);
+ await pg.query('INSERT INTO notificaciones_internas(id,empresa_id,usuario_id) VALUES($1,$2,$3),($4,$2,$5)',[note,a,u,wrong,v]);
+ const sent=[];const send=async(t,n)=>{sent.push([t,n]);return 'projects/synthetic/messages/id';};
+ await Promise.all([push.processPending(db,send),push.processPending(db,send)]);assert.deepEqual(sent,[[token,note]],'Concurrent dispatch must claim once and never cross notification ownership');
+ await push.processPending(db,send);assert.equal(sent.length,1);
+ await push.register(db,b,v,token);assert.equal((await pg.query('SELECT empresa_id FROM mobile_push_devices')).rows[0].empresa_id,b);
+ const uncertain=crypto.randomUUID();await pg.query('INSERT INTO notificaciones_internas(id,empresa_id,usuario_id) VALUES($1,$2,$3)',[uncertain,b,v]);
+ let attempts=0;await push.processPending(db,async()=>{attempts++;throw new Error('timeout');});await push.processPending(db,send);assert.equal(attempts,1);assert.equal(sent.length,1);assert.equal((await pg.query('SELECT status FROM mobile_push_deliveries WHERE notification_id=$1',[uncertain])).rows[0].status,'unknown');
+ const retry=crypto.randomUUID();await pg.query('INSERT INTO notificaciones_internas(id,empresa_id,usuario_id) VALUES($1,$2,$3)',[retry,b,v]);
+ await push.processPending(db,async()=>{throw {response:{status:429}};});assert.equal((await pg.query('SELECT status FROM mobile_push_deliveries WHERE notification_id=$1',[retry])).rows[0].status,'retry');
+ await push.unregister(db,b,v,device.id);assert.equal((await pg.query('SELECT enabled FROM mobile_push_devices')).rows[0].enabled,false);
+ assert.equal(push.configured({}),false);assert.equal(push.configured({MOBILE_PUSH_ENABLED:'true',MOBILE_PUSH_PROJECT_ID:'demo-project',GOOGLE_APPLICATION_CREDENTIALS:'isolated-fixture'}),true);
+ console.log('PASS push: additive migration, encrypted tokens, tenant/user ownership, concurrent claims, retry/uncertain distinction, account changes and logout. Provider mocked; no outbound notification.');
+}finally{await pg.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

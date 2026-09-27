@@ -18,6 +18,7 @@ async function main() {
     await pg.exec(fs.readFileSync(path.join(__dirname,'install_completo.sql'),'utf8'));
     const migration=fs.readFileSync(path.join(__dirname,'migrations/016_security_tables.sql'),'utf8');
     await pg.exec(migration);await pg.exec(migration);
+    await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260927_integration_registry.sql'),'utf8'));
     const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
     const clientA='33333333-3333-4333-8333-333333333333',clientB='44444444-4444-4444-8444-444444444444';
     await pg.query("INSERT INTO empresas(id,nombre,cif,email_admin) VALUES($1,'A','A-test','a@example.test'),($2,'B','B-test','b@example.test')",[A,B]);
@@ -120,6 +121,7 @@ async function main() {
       ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS ubicacion_ts TIMESTAMPTZ;
       ALTER TABLE vehiculos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
       CREATE TABLE gps_position_log(id UUID DEFAULT gen_random_uuid(),empresa_id UUID,vehiculo_id UUID,provider TEXT,external_id TEXT,lat NUMERIC,lng NUMERIC,ubicacion TEXT,velocidad_kmh NUMERIC,odometro_km NUMERIC,raw JSONB,recorded_at TIMESTAMPTZ)`);
+    for(const file of ['20260926_operational_model.sql','20260926_vehicle_tracking.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
     const hashToken=require('node:crypto').createHash('sha256').update('gps-A-secret').digest('hex');
     await pg.query("INSERT INTO gps_webhook_tokens(empresa_id,provider,token_hash) VALUES($1,'gps_generic',$2)",[A,hashToken]);
     const gpsHeaders={headers:{'x-transgest-gps-token':'gps-A-secret'},params:{empresaId:A,provider:'gps_generic'}};

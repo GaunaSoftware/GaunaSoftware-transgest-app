@@ -83,12 +83,13 @@ function withComputedFields(row) {
     ...row,
     clientes_ids: Array.isArray(row?.clientes_ids) ? row.clientes_ids.map(String) : [],
     google_maps_url: metadata.google_maps_url || "",
+    location_incomplete: !!row?.location_incomplete || !cleanText(row?.direccion),
     es_general: !row?.cliente_id,
     punto_general: !row?.cliente_id,
   };
 }
 
-async function findExistingPoint({ empresa, clienteId, direccion, ciudad, provincia, pais }) {
+async function findExistingPoint({ empresa, clienteId, direccion, nombre, ciudad, provincia, pais }) {
   const { rows } = await db.query(
     `SELECT * FROM puntos_interes WHERE empresa_id=$1
       AND cliente_id IS NOT DISTINCT FROM $2::uuid AND activo=true
@@ -96,8 +97,9 @@ async function findExistingPoint({ empresa, clienteId, direccion, ciudad, provin
       AND tg_point_text(ciudad)=tg_point_text($4)
       AND tg_point_text(provincia)=tg_point_text($5)
       AND tg_point_text(COALESCE(NULLIF(trim(pais),''),'Espana'))=tg_point_text($6)
+      AND (trim($3::text)<>'' OR tg_point_text(nombre)=tg_point_text($7))
       LIMIT 1`,
-    [empresa, clienteId, direccion, ciudad, provincia, pais || DEFAULT_COUNTRY]
+    [empresa, clienteId, direccion, ciudad, provincia, pais || DEFAULT_COUNTRY, nombre || ""]
   );
   return rows[0] || null;
 }
@@ -176,6 +178,7 @@ async function normalizeLocationFields({
   if (addressNeedsContext) {
     const err = new Error("Indica poblacion y provincia para direcciones de calle, o pega un enlace de Google Maps con coordenadas.");
     err.status = 400;
+    err.incompleteLocation = true;
     throw err;
   }
 
@@ -196,6 +199,7 @@ async function normalizeLocationFields({
   if (isCountryOnly(cleanDireccion) || (!nextCiudad && !nextProvincia && !hasFinalCoords)) {
     const err = new Error("El punto necesita poblacion/provincia o coordenadas. No se guardan puntos solo con pais o texto ambiguo.");
     err.status = 400;
+    err.incompleteLocation = true;
     throw err;
   }
 
@@ -210,6 +214,40 @@ async function normalizeLocationFields({
     location_quality: coordsSource === "local_dictionary" ? "municipio" : hasFinalCoords ? "precisa" : "estructurada",
     normalized_query: [cleanDireccion, nextCiudad, nextProvincia, nextPais].filter(Boolean).join(", "),
   };
+}
+
+async function normalizePointLocation(body = {}, empresa = null) {
+  const cleanDireccion = cleanText(body.direccion);
+  const cleanCiudad = cleanOptionalText(body.ciudad);
+  const cleanProvincia = cleanOptionalText(body.provincia);
+  const allowIncomplete = boolFromBody(body.allow_incomplete_location);
+  let location;
+  try {
+    location = await normalizeLocationFields({
+      cleanDireccion, cleanCiudad, cleanProvincia, pais: body.pais,
+      lat: body.lat, lng: body.lng, google_maps_url: body.google_maps_url,
+      empresaId: empresa,
+    });
+  } catch (error) {
+    if (!allowIncomplete || !error.incompleteLocation) throw error;
+    const context = { ciudad: cleanCiudad, provincia: cleanProvincia, pais: cleanOptionalText(body.pais) || DEFAULT_COUNTRY };
+    const candidate = coordsFromText(body.google_maps_url || "") || { lat: numberOrNull(body.lat), lng: numberOrNull(body.lng) };
+    const compatible = candidate.lat !== null && candidate.lng !== null && coordinatesCompatible(candidate, context);
+    location = {
+      ciudad: cleanCiudad, provincia: cleanProvincia, pais: context.pais,
+      lat: compatible ? candidate.lat : null, lng: compatible ? candidate.lng : null,
+      googleMapsUrl: cleanOptionalText(body.google_maps_url),
+      location_quality: "incomplete", coords_source: compatible ? "manual" : "",
+      normalized_query: [cleanDireccion, cleanCiudad, cleanProvincia, context.pais].filter(Boolean).join(", "),
+    };
+  }
+  const locationIncomplete = !cleanDireccion || !location.ciudad || !cleanOptionalText(body.codigo_postal);
+  if (locationIncomplete && !allowIncomplete) {
+    const error = new Error("Faltan dirección, población o código postal. Confirma expresamente que deseas guardar el punto incompleto.");
+    error.status = 400;
+    throw error;
+  }
+  return { location, locationIncomplete };
 }
 
 router.get("/", async (req, res) => {
@@ -254,9 +292,8 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   if (!empresa) return res.status(401).json({ error: "Sin empresa_id" });
 
   const {
-    nombre, cif, direccion, codigo_postal, ciudad, provincia, pais,
-    lat, lng, tipo, ventana, contacto_nombre, contacto_telefono,
-    email, notas, metadata, google_maps_url, cliente_id,
+    nombre, cif, direccion, codigo_postal, tipo, ventana, contacto_nombre,
+    contacto_telefono, email, notas, metadata, cliente_id,
   } = req.body || {};
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
   if (clienteId) {
@@ -266,25 +303,14 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   const cleanNombre = cleanText(nombre);
   const cleanDireccion = cleanText(direccion);
   const direccionKey = foldPointKey(cleanDireccion);
-  const cleanCiudad = cleanOptionalText(ciudad);
-  const cleanProvincia = cleanOptionalText(provincia);
 
-  if (!cleanNombre || !cleanDireccion) {
-    return res.status(400).json({ error: "Nombre y direccion son obligatorios" });
+  if (!cleanNombre) {
+    return res.status(400).json({ error: "El nombre del punto es obligatorio" });
   }
 
-  let location;
+  let location, locationIncomplete;
   try {
-    location = await normalizeLocationFields({
-      cleanDireccion,
-      cleanCiudad,
-      cleanProvincia,
-      pais,
-      lat,
-      lng,
-      google_maps_url,
-      empresaId: empresa,
-    });
+    ({ location, locationIncomplete } = await normalizePointLocation(req.body, empresa));
   } catch (err) {
     return res.status(err.status || 400).json({ error: err.message || "No se pudo validar la ubicacion del punto." });
   }
@@ -304,8 +330,8 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   const { rows } = await db.query(
     `INSERT INTO puntos_interes
       (empresa_id,cliente_id,nombre,cif,direccion,codigo_postal,ciudad,provincia,pais,lat,lng,tipo,ventana,
-       contacto_nombre,contacto_telefono,email,notas,direccion_key,metadata)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       contacto_nombre,contacto_telefono,email,notas,direccion_key,metadata,location_incomplete)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      ON CONFLICT DO NOTHING
      RETURNING *`,
     [
@@ -328,6 +354,7 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       cleanOptionalText(notas),
       direccionKey,
       normalizeMetadata(metadata, location.googleMapsUrl, location),
+      locationIncomplete,
     ]
   );
 
@@ -352,9 +379,8 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
   if (!empresa) return res.status(401).json({ error: "Sin empresa_id" });
 
   const {
-    nombre, cif, direccion, codigo_postal, ciudad, provincia, pais,
-    lat, lng, tipo, ventana, contacto_nombre, contacto_telefono,
-    email, notas, metadata, google_maps_url, cliente_id,
+    nombre, cif, direccion, codigo_postal, tipo, ventana, contacto_nombre,
+    contacto_telefono, email, notas, metadata, cliente_id,
   } = req.body || {};
   const clienteId = puntoGeneralFromBody(req.body) ? null : emptyToNull(cliente_id);
   if (clienteId) {
@@ -364,25 +390,14 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
   const cleanNombre = cleanText(nombre);
   const cleanDireccion = cleanText(direccion);
   const direccionKey = foldPointKey(cleanDireccion);
-  const cleanCiudad = cleanOptionalText(ciudad);
-  const cleanProvincia = cleanOptionalText(provincia);
 
-  if (!cleanNombre || !cleanDireccion) {
-    return res.status(400).json({ error: "Nombre y direccion son obligatorios" });
+  if (!cleanNombre) {
+    return res.status(400).json({ error: "El nombre del punto es obligatorio" });
   }
 
-  let location;
+  let location, locationIncomplete;
   try {
-    location = await normalizeLocationFields({
-      cleanDireccion,
-      cleanCiudad,
-      cleanProvincia,
-      pais,
-      lat,
-      lng,
-      google_maps_url,
-      empresaId: empresa,
-    });
+    ({ location, locationIncomplete } = await normalizePointLocation(req.body, empresa));
   } catch (err) {
     return res.status(err.status || 400).json({ error: err.message || "No se pudo validar la ubicacion del punto." });
   }
@@ -405,7 +420,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
      `UPDATE puntos_interes SET
        nombre=$1,cif=$2,direccion=$3,codigo_postal=$4,ciudad=$5,provincia=$6,pais=$7,
        lat=$8,lng=$9,tipo=$10,ventana=$11,contacto_nombre=$12,contacto_telefono=$13,
-       email=$14,notas=$15,direccion_key=$16,metadata=$17,cliente_id=$18,updated_at=NOW()
+       email=$14,notas=$15,direccion_key=$16,metadata=$17,cliente_id=$18,location_incomplete=$21,updated_at=NOW()
      WHERE id=$19 AND empresa_id=$20 AND activo=true
     RETURNING *`,
     [
@@ -429,6 +444,7 @@ router.put("/:id", PUEDE_EDITAR, async (req, res) => {
       clienteId,
       req.params.id,
       empresa,
+      locationIncomplete,
     ]
   );
   if (!rows[0]) return res.status(404).json({ error: "Punto no encontrado" });
@@ -445,5 +461,5 @@ router.delete("/:id", PUEDE_EDITAR, async (req, res) => {
   res.json({ ok: true });
 });
 
-router._test = { normalizeLocationFields, normalizeMetadata };
+router._test = { normalizeLocationFields, normalizePointLocation, normalizeMetadata };
 module.exports = router;

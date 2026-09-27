@@ -23,21 +23,27 @@ export function cargoLength(p){
  return auto||ml;
 }
 export function cargoPayload(p){
- const count=cargoCount(p),length=cargoLength(p);
+ const count=cargoCount(p);
+ const recorded=number(p.carga_largo_m)>0?number(p.carga_largo_m):number(p.metros_lineales);
+ // A legacy order has no persisted mode. Never turn its recorded length into
+ // a pallet estimate merely because another field is edited and saved.
+ const length=p.id&&p.longitud_ocupada_mode == null ? recorded :
+  p.longitud_ocupada_mode==='manual' ? recorded :
+  p.longitud_ocupada_mode==='auto' && (p.tipo_carga||'completa')==='completa' ? (recorded||13.65) : cargoLength(p);
  return {...p,bultos:count,palets_cantidad:p.palets_tipo==='granel'?null:count,carga_largo_m:length||null,metros_lineales:length||null};
 }
 export function updateCargo(p,key,value){
  const previous=palletLayout(cargoCount(p),p.palets_tipo||'europeo',p.palets_apilables);
  const next={...p,[key]:value};
  if(key==='palets_cantidad'){next.bultos=value;}
- if(key==='carga_largo_m'){next.metros_lineales=value;next._cargoLengthManual=true;}
+ if(key==='carga_largo_m'){next.metros_lineales=value;next._cargoLengthManual=true;next.longitud_ocupada_mode='manual';}
  if(key==='carga_ancho_m')next._cargoWidthManual=true;
  if(['palets_cantidad','palets_tipo','palets_apilables'].includes(key)){
   const layout=palletLayout(cargoCount(next),next.palets_tipo||'europeo',next.palets_apilables);
   const oldLength=cargoLength(p);
-  const manualLength=p._cargoLengthManual||(oldLength>0&&oldLength!==13.65&&Math.abs(oldLength-previous.length)>0.001);
+  const manualLength=p.longitud_ocupada_mode==='manual'||(p.longitud_ocupada_mode!=='auto'&&(p._cargoLengthManual||(oldLength>0&&oldLength!==13.65&&Math.abs(oldLength-previous.length)>0.001)));
   const manualWidth=p._cargoWidthManual||(number(p.carga_ancho_m)>0&&Math.abs(number(p.carga_ancho_m)-previous.width)>0.001);
-  if(!manualLength){next.carga_largo_m=layout.length||'';next.metros_lineales=layout.length||'';}
+  if(!manualLength&&!(p.tipo_carga==='completa'&&p.longitud_ocupada_mode==='auto')){next.carga_largo_m=layout.length||'';next.metros_lineales=layout.length||'';}
   if(!manualWidth)next.carga_ancho_m=layout.width||'';
  }
  return next;
@@ -47,5 +53,25 @@ export function fullLoadLength(form, vehicles = []) {
  const tractor=vehicles.find(v=>v.id===form.vehiculo_id);
  const trailer=vehicles.find(v=>v.id===(form.remolque_id_manual||form.remolque_id||tractor?.remolque_id));
  const length=number(trailer?.metros_carga);
- return length>0?length:13.65;
+ return length>0?Math.min(13.65,length):13.65;
+}
+
+export function resolveQuickFullLoadLength(form, vehicles = []) {
+ const raw=String(form.metros_lineales ?? '').trim();
+ if (!raw) return {length:fullLoadLength(form,vehicles),mode:'auto'};
+ const length=Number(raw.replace(',','.'));
+ if (!Number.isFinite(length)||length<=0) throw new Error('La longitud ocupada debe ser mayor que cero.');
+ return {length,mode:'manual'};
+}
+
+export function cargoLengthMode(form = {}) {
+ if (form.longitud_ocupada_mode === 'auto' || form.longitud_ocupada_mode === 'manual') return form.longitud_ocupada_mode;
+ // Rows created before this field existed retain their recorded length.
+ return form.id ? 'manual' : 'auto';
+}
+
+export function syncFullLoadLength(form = {}, length = 13.65) {
+ if ((form.tipo_carga || 'completa') !== 'completa' || cargoLengthMode(form) !== 'auto') return form;
+ if (form.longitud_ocupada_mode === 'auto' && Number(String(form.carga_largo_m || '').replace(',','.')) === length && Number(String(form.metros_lineales || '').replace(',','.')) === length) return form;
+ return { ...form, longitud_ocupada_mode:'auto', carga_largo_m:length, metros_lineales:length, _cargoLengthManual:false };
 }

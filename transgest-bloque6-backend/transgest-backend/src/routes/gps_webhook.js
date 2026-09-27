@@ -35,6 +35,8 @@ function normalizePositions(body) {
       velocidad_kmh: item.velocidad_kmh ?? item.speed_kmh ?? item.speed ?? null,
       odometro_km: item.odometro_km ?? item.odometer_km ?? item.odometer ?? item.km_actuales ?? null,
       recorded_at: item.recorded_at || item.timestamp || item.fecha || null,
+      heading: item.heading ?? item.bearing ?? null,
+      accuracy_m: item.accuracy_m ?? item.accuracy ?? null,
       raw: item,
     }));
 }
@@ -87,8 +89,7 @@ router.post("/webhook/:empresaId/:provider", async (req, res) => {
     const updatedVehicles = [];
     await db.transaction(async client => {
       for (const pos of positions) {
-        const lat = numericOrNull(pos.lat);
-        const lng = numericOrNull(pos.lng);
+
         if (!pos.external_id && !pos.matricula) {
           ignored += 1;
           errors.push({ reason: "sin external_id ni matricula" });
@@ -112,49 +113,10 @@ router.post("/webhook/:empresaId/:provider", async (req, res) => {
         }
 
         const current = veh.rows[0];
-        const update = await client.query(
-          `UPDATE vehiculos
-           SET ubicacion_actual=COALESCE(NULLIF($1,''), ubicacion_actual),
-               ubicacion_fuente=$2,
-               ubicacion_ts=COALESCE($3::timestamptz, NOW()),
-               gps_lat=COALESCE($4, gps_lat),
-               gps_lng=COALESCE($5, gps_lng),
-               gps_provider=$2,
-               gps_external_id=COALESCE(NULLIF($6,''), gps_external_id),
-               km_actuales=COALESCE($7, km_actuales),
-               updated_at=NOW()
-           WHERE id=$8 AND empresa_id=$9
-           RETURNING id, matricula, ubicacion_actual, gps_lat, gps_lng, km_actuales`,
-          [
-            pos.ubicacion,
-            provider,
-            pos.recorded_at || null,
-            lat,
-            lng,
-            pos.external_id || current.gps_external_id || null,
-            numericOrNull(pos.odometro_km),
-            current.id,
-            empresaId,
-          ]
-        );
-        await client.query(
-          `INSERT INTO gps_position_log
-            (empresa_id,vehiculo_id,provider,external_id,lat,lng,ubicacion,velocidad_kmh,odometro_km,raw,recorded_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,COALESCE($11::timestamptz,NOW()))`,
-          [
-            empresaId,
-            current.id,
-            provider,
-            pos.external_id || current.gps_external_id || null,
-            lat,
-            lng,
-            pos.ubicacion || null,
-            numericOrNull(pos.velocidad_kmh),
-            numericOrNull(pos.odometro_km),
-            JSON.stringify(pos.raw || {}),
-            pos.recorded_at || null,
-          ]
-        );
+        const tracking=require('../services/vehicleTracking');
+        try { tracking.position(pos); }catch(e){ignored++;errors.push({external_id:pos.external_id,reason:e.message});continue;}
+        await tracking.record({query:(...args)=>client.query(...args),transaction:fn=>fn(client)}, {empresaId,vehiculoId:current.id,provider,input:pos,externalId:pos.external_id||current.gps_external_id,raw:pos.raw});
+        const update=await client.query("UPDATE vehiculos SET gps_provider=$3,gps_external_id=COALESCE(NULLIF($4,''),gps_external_id) WHERE empresa_id=$1 AND id=$2 RETURNING id,matricula,ubicacion_actual,gps_lat,gps_lng,km_actuales",[empresaId,current.id,provider,pos.external_id]);
         updated += 1;
         updatedVehicles.push(update.rows[0]);
       }

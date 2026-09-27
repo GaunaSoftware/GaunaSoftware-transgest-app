@@ -13,7 +13,7 @@ async function createIsolatedPostgres() {
   const port=Number(process.env.AUDIT_PG_PORT);
   if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Indica un puerto local de pruebas entre 1024 y 65535.');
   const password=fs.readFileSync(process.env.AUDIT_PG_PASSWORD_FILE,'utf8').trim();
-  const config={host:'127.0.0.1',port,user:'audit_admin',password};
+  const config={host:'127.0.0.1',port,user:'audit_admin',password,types:require('../src/services/postgresTypes')};
   const admin=new Pool({...config,database:'postgres'});
   const database='transgest_audit_'+crypto.randomBytes(8).toString('hex');
   await admin.query(`CREATE DATABASE "${database}"`);
@@ -22,7 +22,18 @@ async function createIsolatedPostgres() {
   adapter.transaction=async fn=>{const client=await pool.connect();try{await client.query('BEGIN');const result=await fn(createAdapter(client));await client.query('COMMIT');return result;}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}};
   adapter.close=async()=>{await pool.end();await admin.end();};
   Object.assign(process.env,{DB_HOST:config.host,DB_PORT:String(port),DB_USER:config.user,DB_PASSWORD:password,DB_NAME:database,
+    DB_SSL:'false',
     PG_DUMP_BIN:path.join(process.env.AUDIT_PG_BIN,'pg_dump.exe'),BACKUP_DIR:path.resolve(process.env.AUDIT_BACKUP_DIR || path.join(__dirname,'audit-backups'))});
+  adapter.applyMigrations=async()=>{
+    const root=path.resolve(__dirname,'..');
+    const run=()=>exec(process.execPath,[path.join(__dirname,'migrate.js')],{cwd:root,env:{...process.env},windowsHide:true,timeout:120000,maxBuffer:2*1024*1024});
+    const first=await run();
+    const before=(await pool.query('SELECT id,checksum,applied_at FROM schema_migrations ORDER BY id')).rows;
+    const second=await run();
+    const after=(await pool.query('SELECT id,checksum,applied_at FROM schema_migrations ORDER BY id')).rows;
+    if(JSON.stringify(before)!==JSON.stringify(after)||second.stdout.includes('APLICADA '))throw Error('Migration replay changed its ledger.');
+    return {runner:'scripts/migrate.js',applied:before.length,replayPreserved:true,firstApplications:(first.stdout.match(/APLICADA /g)||[]).length};
+  };
   adapter.verifyBackup=async()=>{
     const service=require('../src/services/backup');
     const file=await service.runBackup();

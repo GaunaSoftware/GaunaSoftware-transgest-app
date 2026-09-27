@@ -1,6 +1,6 @@
 export const PLANNER_MODULES = [
   ['pedidos', 'Cargas y muelles'],
-  ['palets', 'Almacén y stock'],
+  ['palets', 'Almacén y stock'], ['loading','Carga en muelle'],
   ['ia', 'Intelligence'], ['colaboradores', 'Proveedores de transporte'],
   ['clientes', 'Clientes / Destinatarios'], ['documentos', 'Documentos'], ['facturacion', 'Facturación'], ['empresa', 'Empresa'],
 ];
@@ -16,7 +16,8 @@ export function visiblePlannerModules(user, puedeVer) {
     (hasProduct(user, 'transgest') || !['viajes','choferes','gestion_trafico','vehiculos','ia'].includes(id)) &&
     (id !== 'muelles' || user.rol !== 'contable') &&
     (id !== 'documentos' || (puedeVer('palets') && puedeVer('pedidos'))) &&
-    puedeVer(['muelles', 'viajes'].includes(id) ? 'pedidos' : id));
+    (id !== 'loading' || ['gerente','trafico','administrativo'].includes(user.rol)) &&
+    puedeVer(id==='loading'?'palets':['muelles', 'viajes'].includes(id) ? 'pedidos' : id));
 }
 
 export function isPlannerRoute(path, product, search = '') {

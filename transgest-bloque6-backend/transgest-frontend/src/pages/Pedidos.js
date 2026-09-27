@@ -1,3 +1,8 @@
+import { TUTORIALS_ENABLED } from "../services/tutorialPolicy";
+import OrderAiInbox, {notifyInboxChanged} from './orders/OrderAiInbox';
+import {getOrderInbox} from '../services/api';
+import TransportDocumentVersions from './TransportDocumentVersions';
+import { buildWaybillHtml, waybillLocation } from '../utils/waybillDocument';
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import OrderNotesFields from "./orders/editor/OrderNotesFields";
 import OrderEditorShell, { OrderSection } from "./orders/editor/OrderEditorShell";
@@ -11,14 +16,16 @@ import OrderAssignmentFields from "./orders/editor/OrderAssignmentFields";
 import OrderDocumentFields from "./orders/editor/OrderDocumentFields";
 import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
 import { driverName, stopSchedule } from "./orders/quickInfo";
+import { hasCustomerDependentValues, recoverExistingTripPrice, routesForCustomer, switchCustomerDraft } from "./orders/clientTariffDraft";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
-import { cargoPayload, fullLoadLength } from "../utils/cargoDimensions";
+import { cargoPayload, fullLoadLength, resolveQuickFullLoadLength, syncFullLoadLength } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
-import { orderTown } from '../utils/orderTown';
+import { displayLocation, displayOrderLocation, missingLocationFields } from '../utils/orderTown';
+import { transportStateMeta } from '../utils/transportStateCatalog';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
 
@@ -34,7 +41,7 @@ import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPed
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
          crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
-         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, generarPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
+         getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, setClienteMercanciaHabitual, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken, revocarColaboradorLiquidacionToken,
          getPuntosInteres as getPuntosInteresApi, interpretarPedidoIA, getAiInboxRuns, getAiInboxStatus, getPlanificacionCargaIA, getRutaOptimizadaPedido, optimizarRuta, resolveGeoPlace,
@@ -49,6 +56,7 @@ import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import RutaMapa from "../components/RutaMapa";
+import VehicleTrackingPanel from "../components/VehicleTrackingPanel";
 import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
 
 import { pedidoOriginalMonth } from "../utils/pedidoBillingMonth";
@@ -749,10 +757,7 @@ function buildPedidoCriticalAlertKey(item) {
 
 const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
 const ESTADOS_ACTIVOS = ESTADOS_RAW.filter(estado => !["entregado", "cancelado"].includes(estado));
-const LABEL_ESTADO = {
-  pendiente:"Pendiente", confirmado:"Confirmado", espera_carga:"Espera carga", cargando:"Cargando", en_curso:"En curso", espera_descarga:"Espera descarga",
-  descarga:"En descarga", entregado:"Entregado", cancelado:"Cancelado", incidencia:"Incidencia"
-};
+const LABEL_ESTADO = Object.fromEntries(ESTADOS_RAW.map(estado => [estado, transportStateMeta(estado).label]));
 
 const INCIDENCIA_TIPOS_PEDIDO = [
   { v:"cancelado_cliente", l:"Cancelado por el cliente" },
@@ -1233,8 +1238,13 @@ function compactNumberInput(value) {
 
 function normalizePedidoTarifaDraft(draft = {}) {
   const tipo = draft.tipo_precio || "viaje";
+  const recoveredPrice = recoverExistingTripPrice(
+    draft,
+    sumAdditionalStopPrices(draft.puntos_carga) + sumAdditionalStopPrices(draft.puntos_descarga)
+  );
   const next = {
     ...draft,
+    ...(recoveredPrice !== null ? { precio_unitario: recoveredPrice } : {}),
     tipo_iva: draft.tipo_iva ?? 21,
     iva_regimen: draft.iva_regimen || ivaOptionValue(draft),
   };
@@ -1565,8 +1575,11 @@ function looksLikeStreetAddress(value) {
 }
 
 function hasNumericMapCoords(draft = {}) {
-  const lat = Number(draft.lat ?? draft.latitud);
-  const lng = Number(draft.lng ?? draft.longitud ?? draft.lon);
+  const rawLat = draft.lat ?? draft.latitud;
+  const rawLng = draft.lng ?? draft.longitud ?? draft.lon;
+  if (rawLat == null || rawLng == null || String(rawLat).trim() === "" || String(rawLng).trim() === "") return false;
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
   return Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lng) && Math.abs(lng) <= 180;
 }
 
@@ -1660,9 +1673,9 @@ function resolvePuntoInteresQuery(place, puntos = null) {
 }
 
 function savePuntoInteres(punto) {
-  const direccion = (punto?.direccion || direccionCompletaPunto(punto)).trim();
+  const direccion = String(punto?.direccion || "").trim();
   const nombre = (punto?.nombre || punto?.cliente_nombre || direccion).trim();
-  if (!direccion) return getPuntosInteres();
+  if (!nombre) return getPuntosInteres();
   const id = punto?.id || `poi_${Date.now()}`;
   const googleMapsUrl = cleanMapsUrl(punto?.google_maps_url || punto?.metadata?.google_maps_url || "");
   const mapsCoords = coordsFromMapsUrl(googleMapsUrl);
@@ -1670,6 +1683,8 @@ function savePuntoInteres(punto) {
     id,
     nombre,
     direccion,
+    location_incomplete: !!punto?.location_incomplete || !direccion,
+    synced: punto?.synced !== false,
     cif: (punto?.cif || "").trim(),
     telefono: (punto?.telefono || "").trim(),
     email: (punto?.email || "").trim(),
@@ -1685,7 +1700,7 @@ function savePuntoInteres(punto) {
     cliente_id: punto?.cliente_id || "",
     punto_general: punto?.punto_general ?? punto?.es_general ?? !punto?.cliente_id,
     es_general: punto?.es_general ?? punto?.punto_general ?? !punto?.cliente_id,
-    direccion_key: punto?.direccion_key || normalizePlaceText([direccion, punto?.ciudad, punto?.provincia, punto?.pais || "España"].filter(Boolean).join(", ")),
+    direccion_key: direccion ? (punto?.direccion_key || normalizePlaceText([direccion, punto?.ciudad, punto?.provincia, punto?.pais || "España"].filter(Boolean).join(", "))) : "",
     google_maps_url: googleMapsUrl,
     lat: punto?.lat ?? punto?.latitud ?? punto?.metadata?.lat ?? mapsCoords?.lat ?? null,
     lng: punto?.lng ?? punto?.longitud ?? punto?.metadata?.lng ?? mapsCoords?.lng ?? null,
@@ -1775,8 +1790,9 @@ function puntoScopeLabel(punto = {}, clienteId = "") {
 }
 
 function puntoLocationLabel(punto = {}) {
+  const locality = displayLocation(punto);
   return [
-    punto.ciudad || punto.poblacion || punto.localidad || punto.municipio,
+    locality === "Ubicación incompleta" || normalizePlaceText(locality) === normalizePlaceText(punto.nombre) ? "" : locality,
     punto.provincia || punto.region,
     punto.pais,
   ].map(v => String(v || "").trim()).filter(Boolean).join(", ");
@@ -2012,9 +2028,13 @@ function stopDisplayParts(stop = {}, fallback = "", clienteId = "", tipo = "ambo
 
 
 
-function pedidoStopListLabel(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
+function pedidoStopLocation(stop = {}, fallback = "", clienteId = "", tipo = "ambos") {
   const saved = findPuntoInteresForStop(stop, fallback, clienteId, tipo);
-  return orderTown({...(saved || {}), ...stop}, fallback);
+  const point = { ...(saved || {}) };
+  for (const [key, value] of Object.entries(stop || {})) {
+    if (value !== null && value !== undefined && String(value).trim() !== "") point[key] = value;
+  }
+  return { label: displayLocation(point, fallback), missing: missingLocationFields(point) };
 }
 
 function stopPostalLine(stop = {}, fallbackProvincia = "", fallbackPais = "España", clienteId = "", tipo = "ambos") {
@@ -2168,9 +2188,9 @@ function calcIvaPedido(form = {}, baseOverride = null) {
 
 function PuntoInteresPicker({ onPick, placeholder = "Usar punto de interes", style, puntos: puntosProp = null, clienteId = "", tipo = "ambos", includeGenerales = true }) {
   const [puntos, setPuntos] = useState(getPuntosInteres);
-  const puntosDisponibles = Array.isArray(puntosProp)
+  const puntosDisponibles = (Array.isArray(puntosProp)
     ? filterPuntosForPedido(puntosProp, { clienteId, tipo, includeGenerales: false })
-    : filterPuntosForPedido(puntos, { clienteId, tipo, includeGenerales });
+    : filterPuntosForPedido(puntos, { clienteId, tipo, includeGenerales })).filter(p => !p.location_incomplete);
 
   useEffect(() => {
     const refresh = () => setPuntos(getPuntosInteres());
@@ -2309,6 +2329,8 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
   const [draggingFile, setDraggingFile] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
   const [voiceListening, setVoiceListening] = useState(false);
+  const previewRef = useRef(null);
+  useEffect(()=>{ if(preview){previewRef.current?.focus();previewRef.current?.scrollIntoView({block:"start"});} },[preview]);
   const fileInputRef = useRef(null);
   const speechSupported = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
@@ -2358,8 +2380,8 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     try {
       const data = await getAiInboxRuns(8);
       setRuns(Array.isArray(data) ? data : []);
-    } catch {
-      setRuns([]);
+    } catch (e) {
+      setError(e.message || "No se pudo cargar el historial de análisis.");
     } finally {
       setRunsLoading(false);
     }
@@ -2367,7 +2389,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
 
   useEffect(() => {
     cargarHistorialIA();
-    getAiInboxStatus().then(setAiStatus).catch(() => setAiStatus(null));
+    getAiInboxStatus().then(setAiStatus).catch(e => setError(e.message));
   }, [cargarHistorialIA]);
 
   async function interpretar() {
@@ -2395,6 +2417,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
         })),
       });
       setPreview(data);
+      notifyInboxChanged();
       cargarHistorialIA();
     } catch(e) {
       setError("No se pudo interpretar el pedido: " + (e.message || "verifica los datos pegados."));
@@ -2465,10 +2488,9 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     recognition.start();
   }
 
-  return (
-    <div style={embedded ? {width:"100%"} : {position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:14,padding:24,width:embedded ? "100%" : "min(640px,96vw)",maxHeight:embedded ? "none" : "92vh",overflowY:embedded ? "visible" : "auto",boxSizing:"border-box"}}>
-        <div style={{fontFamily:"'Syne',sans-serif",fontSize:16,fontWeight:700,color:"var(--text)",marginBottom:6}}>Bandeja IA de pedidos</div>
+  const content = (
+      <div className="order-inbox-content">
+        <OrderAiInbox revision={preview?.inbox_id} onOpenOrder={onCreado} onPrepared={data=>{setPreview(data);setArchivos([]);setError('');}}/>
         <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>
           Pega el email, WhatsApp u orden de carga. La bandeja detecta cliente, ruta, matricula, tarifa, conflictos y huecos antes de abrir el pedido.
         </div>
@@ -2556,7 +2578,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
                 {voiceListening ? "Escuchando..." : "Dictar pedido"}
               </button>
             )}
-            <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+            <textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)}
               placeholder={"Ej: Cliente: Transportes Garcia\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancia: palets fruta\nPeso: 24000 kg\nPrecio: 850 EUR\nReferencia: OC-1234"}
               style={{width:"100%",minHeight:132,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
           </div>
@@ -2573,12 +2595,12 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.doc,.docx,.rtf,.odt,.ppt,.pptx,.xls,.xlsx,application/pdf,text/plain,message/rfc822,text/html,text/csv,application/xml,image/jpeg,image/png,image/webp,application/msword,application/rtf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.docx,.xlsx"
               onChange={handleFile}
               style={{display:"none"}}
             />
             <div style={{fontSize:18,fontWeight:800,marginBottom:8,color:"var(--text)"}}>{fileLoading ? "Leyendo documento..." : "Seleccionar documentos"}</div>
-            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>PDF, Word, Excel, PowerPoint, email, texto o imagen</div>
+            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>PDF, Word DOCX, Excel XLSX, email EML, texto o imagen</div>
             <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
               Los PDF con texto se leen en el servidor. Imagenes y PDF escaneados usan la IA documental configurada para la empresa.
             </div>
@@ -2606,7 +2628,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
                 ))}
               </div>
             )}
-            <textarea value={texto} onChange={e=>setTexto(e.target.value)}
+            <textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)}
               placeholder={"Opcional: pega aqui el cuerpo del email o texto adicional si el documento es escaneado."}
               style={{width:"100%",minHeight:92,marginTop:14,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box",textAlign:"left"}}/>
           </div>
@@ -2621,7 +2643,7 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
         </div>
         {error && <div style={{color:"var(--red)",fontSize:12,marginBottom:10}}>{error}</div>}
         {preview && (
-          <div>
+          <div ref={previewRef} tabIndex={-1} aria-label="Pedido interpretado para revisar">
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10,flexWrap:"wrap"}}>
               <div style={{fontSize:12,fontWeight:700,color:"var(--green)"}}>Pedido interpretado - revisa y confirma</div>
               <div style={{display:"inline-flex",alignItems:"center",gap:8}}>
@@ -2678,12 +2700,15 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
             </div>
             {archivos.length > 0 && (
               <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:8,padding:"8px 12px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
-                Se adjuntaran {archivos.length} documento(s) al guardar el pedido. Quedaran trazados como origen Bandeja IA.
+                Los originales se conservan en la bandeja. Los PDF, imágenes y documentos de Office también se adjuntarán al guardar el pedido.
               </div>
             )}
-            <button onClick={()=>onCreado({
+            <button onClick={async()=>{
+              if(preview.pedido_id){try{onCreado(await getPedido(preview.pedido_id));}catch(e){setError(e.message);}return;}
+              onCreado({
               ...(pedidoPreview || {}),
               _ai_meta: {
+                inbox_id: preview.inbox_id,
                 source: preview.source?.type || "bandeja_ia",
                 filename: preview.source?.filename || archivos.map(a => a.name).join(", ") || null,
                 confidence: Math.round(Math.min(100, Number(preview.confidence || 0))),
@@ -2694,22 +2719,22 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
                 visual_provider: preview.source?.ai_visual?.provider || null,
                 visual_ok: Boolean(preview.source?.ai_visual?.ok),
               },
-              _ai_docs: archivos.map(a => ({
+              _ai_docs: archivos.filter(a=>/\.(pdf|png|jpg|jpeg|webp|docx|xlsx)$/i.test(a.name)).map(a => ({
                 nombre: a.name,
                 tipo: inferPedidoDocTipo(a.name),
                 file_base64: a.base64,
                 file_mime: a.mediaType || "application/pdf",
                 file_size_kb: a.sizeKb,
               })),
-            })}
+            });}}
               style={{padding:"9px 18px",borderRadius:7,border:"none",background:"var(--green)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-              Continuar con estos datos
+              {preview.pedido_id ? "Ver pedido ya creado" : "Revisar y completar el pedido"}
             </button>
           </div>
         )}
       </div>
-    </div>
   );
+  return embedded ? content : <WorkspaceModal title="Bandeja IA de pedidos" width={980} onClose={onClose} closeOnBackdrop={false}>{content}</WorkspaceModal>;
 }
 
 
@@ -2785,6 +2810,10 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   const vehiculoPorMatriculaRapida = form.matricula_rapida
     ? vehiculosConjunto.find(v => String(v.matricula || "").replace(/[\s-]/g, "").toUpperCase() === String(form.matricula_rapida || "").replace(/[\s-]/g, "").toUpperCase())
     : null;
+  const vehiculoParaLongitudRapida = vehiculoSeleccionado || vehiculoPorMatriculaRapida;
+  const remolqueParaLongitudRapida = vehiculos.find(v => String(v.id) === String(form.remolque_id_manual || vehiculoParaLongitudRapida?.remolque_id));
+  const metrosUtilesRapidos = parseLocaleNumber(remolqueParaLongitudRapida?.metros_carga, 0);
+  const metrosManualesRapidos = parseLocaleNumber(form.metros_lineales, 0);
   const choferAsignado = choferes.find(c => c.id === form.chofer_id);
   const colaboradorSeleccionado = colaboradores.find(c => c.id === form.colaborador_id);
   const labelConjunto = v => {
@@ -3017,6 +3046,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
       const matriculaManualRapida = !vehiculoRapidoId && !colaboradorId
         ? String(form.matricula_rapida || "").trim().toUpperCase()
         : matriculaColaborador;
+      const longitudRapida = resolveQuickFullLoadLength(
+        { ...form, vehiculo_id: vehiculoRapidoId, remolque_id: form.remolque_id_manual || vehiculoRapido?.remolque_id }, vehiculos
+      );
       const tipoPrecio = form.tipo_precio || ruta?.tarifa_tipo || "viaje";
       const kmRuta = toNullableNumber(form.km_ruta) ?? toNullableNumber(ruta?.km);
       const precioUnitario = toNullableNumber(form.precio_unitario) ?? toNullableNumber(ruta?.precio_base) ?? 0;
@@ -3081,7 +3113,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         importe_minimo: tipoPrecio === "viaje" ? toNullableNumber(tarifaDraft.importe_minimo) : null,
         minimo_unidades: tipoPrecio !== "viaje" ? toNullableNumber(tarifaDraft.minimo_unidades) : null,
         km_ruta: kmRuta,
-        metros_lineales: form.metros_lineales || null,
+        metros_lineales: longitudRapida.length,
+        carga_largo_m: longitudRapida.length,
+        longitud_ocupada_mode: longitudRapida.mode,
         precio_cliente_col: colaboradorId ? importeCalculado : null,
         precio_colaborador: null,
         precio_colaborador_unitario: null,
@@ -3110,14 +3144,22 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         <div style={quickGrid}>
           <div style={{gridColumn:"1/-1"}}>
             <label style={S.label}>Cliente *</label>
-            <input list="clientes-pedido-rapido" style={inp} value={form.cliente_nombre} onChange={e=>{
+            <input list="clientes-pedido-rapido" style={inp} value={form.cliente_nombre} onChange={async e=>{
               const value = e.target.value;
               const exact = clientes.find(c => (c.nombre || "").trim().toLowerCase() === value.trim().toLowerCase());
+              const customerChanged = String(exact?.id || "") !== String(form.cliente_id || "");
+              if (customerChanged && hasCustomerDependentValues(form)) {
+                const accepted = await confirmDialog({
+                  title: "Cambiar cliente del pedido",
+                  message: "Se limpiarán la tarifa, el precio, los mínimos, las ventanas y la referencia del cliente anterior. Los datos maestros no se modificarán.",
+                  confirmText: "Cambiar cliente",
+                });
+                if (!accepted) return;
+              }
               setForm(p => ({
-                ...p,
+                ...(customerChanged ? switchCustomerDraft(p, exact || null) : p),
                 cliente_nombre: value,
                 cliente_id: exact?.id || "",
-                ruta_id: exact?.id === p.cliente_id ? p.ruta_id : "",
               }));
             }} placeholder="Nombre del cliente"/>
             <datalist id="clientes-pedido-rapido">
@@ -3343,7 +3385,8 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
           </div>
           <div>
             <label style={S.label}>ML</label>
-            <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder="Metros lineales"/>
+            <input type="text" inputMode="decimal" style={inp} value={form.metros_lineales || ""} onChange={f("metros_lineales")} placeholder={`${fullLoadLength({...form,vehiculo_id:vehiculoParaLongitudRapida?.id||form.vehiculo_id},vehiculos).toLocaleString("es-ES")} m automáticos si se deja vacío`}/>
+            {metrosUtilesRapidos > 0 && metrosManualesRapidos > metrosUtilesRapidos + 0.01 && <small role="alert" style={{color:"var(--red)"}}>La longitud indicada supera los {metrosUtilesRapidos.toLocaleString("es-ES")} m útiles del remolque.</small>}
           </div>
           <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a22)",borderRadius:8,padding:"8px 10px"}}>
             <label style={S.label}>EUR/km venta</label>
@@ -3402,7 +3445,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   const initialPoint = normalizePuntoInteresForForm(initial || {});
   const geoRequestRef = React.useRef(0);
   function inferPuntoGeoDraft(draft = {}) {
-    const inferred = inferPlaceGeo(draft, draft.ciudad, draft.direccion, draft.nombre);
+    const inferred = inferPlaceGeo({ ...draft, nombre:"", cliente_nombre:"" }, draft.ciudad, draft.direccion);
     if (!inferred) return draft;
     return {
       ...draft,
@@ -3416,7 +3459,7 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
   async function completarPuntoGeo(draft = form) {
     const requestId = geoRequestRef.current + 1;
     geoRequestRef.current = requestId;
-    const next = await resolveGeoDraft(draft, draft.pais || "España", draft.ciudad, draft.direccion, draft.nombre);
+    const next = await resolveGeoDraft({ ...draft, nombre:"", cliente_nombre:"" }, draft.pais || "España", draft.ciudad, draft.direccion);
     let merged = next;
     setForm(current => {
       if (requestId !== geoRequestRef.current) {
@@ -3488,10 +3531,20 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
 
   async function guardar() {
     if (!form.nombre.trim()) { notify("Indica el nombre de la empresa o punto.", "warning"); return; }
-    if (!form.direccion.trim()) { notify("Indica la direccion del punto.", "warning"); return; }
     const resolvedForm = await completarPuntoGeo(form);
+    const missing = missingLocationFields(resolvedForm);
     const locationIssue = pointLocationValidationIssue(resolvedForm);
-    if (locationIssue) { notify(locationIssue, "warning"); return; }
+    if (locationIssue && (!missing.length || (resolvedForm.google_maps_url && !isGoogleMapsReference(resolvedForm.google_maps_url)))) {
+      notify(locationIssue, "warning"); return;
+    }
+    if (missing.length) {
+      const confirmed = await confirmDialog({
+        title: "Ubicación incompleta",
+        message: `Faltan ${missing.join(", ")}. El punto se guardará incompleto y no podrá seleccionarse para un viaje hasta completar su ubicación. ¿Guardarlo igualmente?`,
+        confirmText: "Guardar incompleto", cancelText: "Completar datos", tone: "warning",
+      });
+      if (!confirmed) return;
+    }
     const mapsCoords = coordsFromMapsUrl(resolvedForm.google_maps_url);
     const payload = {
       ...resolvedForm,
@@ -3499,6 +3552,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
       punto_general: !!resolvedForm.punto_general,
       pais: canonicalCountry(resolvedForm.pais || form.pais || "España") || "España",
       provincia: String(resolvedForm.provincia || "").trim(),
+      allow_incomplete_location: missing.length > 0,
+      location_incomplete: missing.length > 0,
       google_maps_url: cleanMapsUrl(resolvedForm.google_maps_url),
       lat: resolvedForm.lat || mapsCoords?.lat || null,
       lng: resolvedForm.lng || mapsCoords?.lng || null,
@@ -3507,7 +3562,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     try {
       saved = payload.id ? await editarPuntoInteres(payload.id, payload) : await crearPuntoInteres(payload);
     } catch (e) {
-      notify("Punto guardado localmente, pero no se ha sincronizado con la base de datos: " + e.message, "warning");
+      saved = { ...payload, id: payload.id || `poi_${Date.now()}`, synced:false };
+      notify("Punto guardado solo en este navegador; no se sincronizó con la base de datos: " + e.message, "warning");
     }
     const next = savePuntoInteres(saved || payload);
     onSave?.(next, saved || payload);
@@ -4034,7 +4090,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
     setPoiDraft({
       ...newStop,
       nombre: newStop.cliente_nombre || texto,
-      direccion: newStop.direccion || texto,
+      direccion: newStop.direccion || "",
       tipo,
       cliente_id: form.cliente_id || "",
     });
@@ -4218,7 +4274,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
       </datalist>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
         <span style={{fontSize:11,fontWeight:700,color:"var(--text5)",textTransform:"uppercase"}}>{tipo === "carga" ? "Carga principal" : "Descarga principal"}</span>
-        <span style={{fontSize:11,color:"var(--text5)"}}>-&gt; {mainLugar||"Sin direccion"} - {mainFecha||"Sin fecha"}{mainHora?` - ${mainHora}`:""}</span>
+        <span style={{fontSize:11,color:"var(--text5)"}}>-&gt; {displayOrderLocation(form,tipo)} - {mainFecha||"Sin fecha"}{mainHora?` - ${mainHora}`:""}</span>
       </div>
 
       {stopsOrdenados.length > 0 && (
@@ -4924,20 +4980,6 @@ ${bloqueCombustible}
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  async function generarDeCADocControl() {
-    if (!pedido?.id) return;
-    try {
-      setDocControlLoading(true);
-      const data = await generarPedidoDocumentoControl(pedido.id);
-      setDocControl(data || null);
-      notify("DeCA generado y archivado en repositorio.", "success");
-    } catch (e) {
-      notify(e.message || "No se pudo generar el DeCA.", "error");
-    } finally {
-      setDocControlLoading(false);
-    }
-  }
-
   async function descargarExportDocControl() {
     if (!pedido?.id) return;
     try {
@@ -5169,6 +5211,7 @@ ${bloqueCombustible}
         </div>
 
         <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
+          <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
@@ -5177,14 +5220,6 @@ ${bloqueCombustible}
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {docControl?.documento && (
-                <button
-                  onClick={generarDeCADocControl}
-                  disabled={docControlLoading}
-                  style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:docControlLoading?"rgba(148,163,184,.12)":"rgba(16,185,129,.10)",color:docControlLoading?"var(--text5)":"#10b981",fontSize:12,fontWeight:700,cursor:docControlLoading?"wait":"pointer"}}>
-                  {docControlLoading ? "Generando..." : "Generar DeCA"}
-                </button>
-              )}
               {docControlSupportUrl && (
                 <button
                   onClick={()=>abrirSoporteDocControl(false)}
@@ -6163,28 +6198,32 @@ function PedidoTimeline({ pedido, compact = false }) {
 function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!pedido?.id) return;
+    let active = true;
     setLoading(true);
+    setError(false);
     getPedidoRentabilidadPredictiva(pedido.id)
-      .then(res => setData(res && typeof res === "object" ? res : null))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+      .then(res => { if (active) setData(res && typeof res === "object" ? res : null); })
+      .catch(() => { if (active) { setData(null); setError(true); } })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [pedido?.id]);
 
   if (!pedido?.id) return null;
-  const color = data?.margen?.color === "rojo" ? "#ef4444" : data?.margen?.color === "amarillo" ? "#f59e0b" : "#10b981";
+  const color = data?.margen?.color === "rojo" ? "#ef4444" : "#f59e0b";
   const riesgos = Array.isArray(data?.riesgos) ? data.riesgos : [];
   const acciones = Array.isArray(data?.acciones) ? data.acciones : [];
-  const fmtRent = n => Number(n || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtRent = n => Number(n).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
         <div>
           <div style={{fontSize:12,fontWeight:800,color:"var(--text4)",textTransform:"uppercase",letterSpacing:".06em"}}>Rentabilidad predictiva</div>
-          <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Decision economica con precio, costes, kilometros, documentos y riesgos operativos.</div>
+          <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>Estimación con precio, costes registrados, kilómetros y riesgos operativos.</div>
         </div>
         {data?.decision && (
           <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:900,textTransform:"uppercase",color,background:`${color}16`,border:`1px solid ${color}30`}}>
@@ -6194,6 +6233,8 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
       </div>
       {loading ? (
         <div style={{fontSize:12,color:"var(--text5)"}}>Calculando rentabilidad...</div>
+      ) : error ? (
+        <div role="alert" style={{fontSize:12,color:"var(--danger)"}}>No se pudo consultar la rentabilidad. Vuelve a abrir el pedido para reintentar.</div>
       ) : !data || !(Number(data.ingreso?.total)>0 || Number(ingresoLive)>0) || !data.costes ? (
         <div style={{fontSize:12,color:"var(--text5)"}}>Sin datos suficientes para calcular rentabilidad.</div>
       ) : (
@@ -6204,18 +6245,22 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
             // desfasado. Recalculamos margen, margen % y EUR/km en consecuencia.
             const ingresoBackend = Number(data.ingreso?.total || 0);
             const ingresoTotal = Number.isFinite(ingresoLive) && ingresoLive > 0 ? ingresoLive : ingresoBackend;
-            const costeTotal = Number(data.costes?.total || 0);
-            const margenImporte = ingresoTotal - costeTotal;
-            const margenPct = ingresoTotal > 0 ? (margenImporte / ingresoTotal) * 100 : null;
-            const kmRef = (ingresoBackend > 0 && data.ingreso?.eur_km) ? ingresoBackend / Number(data.ingreso.eur_km) : null;
+            const costeTotal = data.costes.total == null ? null : Number(data.costes.total);
+            const margenImporte = costeTotal == null ? null : ingresoTotal - costeTotal;
+            const margenPct = margenImporte != null && ingresoTotal > 0 ? (margenImporte / ingresoTotal) * 100 : null;
+            const kmRef = Number(data.ruta?.km) || null;
             const eurKmLive = kmRef && kmRef > 0 ? ingresoTotal / kmRef : (data.ingreso?.eur_km ?? null);
-            const colorLive = margenImporte < 0 ? "#ef4444" : (margenPct != null && margenPct < 8) ? "#f59e0b" : color;
+            const colorLive = margenImporte != null && margenImporte < 0 ? "#ef4444" : color;
             return (
+          <>
+          <div role="status" style={{marginBottom:8,fontSize:11,color:"var(--text3)"}}>
+            {costeTotal == null ? "Sin costes registrados: el margen no es calculable." : "Margen provisional: solo incluye costes directos registrados; pueden faltar gastos."}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:8}}>
             {[
               ["Ingreso", `${fmtRent(ingresoTotal)} EUR`, "#10b981"],
-              ["Coste", `${fmtRent(costeTotal)} EUR`, "#f59e0b"],
-              ["Margen", `${fmtRent(margenImporte)} EUR`, colorLive],
+              ["Coste registrado", costeTotal == null ? "Sin datos" : `${fmtRent(costeTotal)} EUR`, "#f59e0b"],
+              ["Margen provisional", margenImporte == null ? "No calculable" : `${fmtRent(margenImporte)} EUR`, colorLive],
               ["Margen %", margenPct == null ? "-" : `${fmtRent(margenPct)}%`, colorLive],
               ["EUR/km", eurKmLive == null ? "-" : `${fmtRent(eurKmLive)}`, "var(--accent)"],
             ].map(([label,value,c]) => (
@@ -6225,6 +6270,7 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
               </div>
             ))}
           </div>
+          </>
             );
           })()}
           <div style={{marginTop:10,padding:"9px 11px",borderRadius:8,background:"var(--bg3)",border:"1px solid var(--border2)",fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
@@ -6347,12 +6393,13 @@ function getPedidoMapPoint(pedido = {}, side = "origen", stop = null, idx = 0) {
   };
   const lat = mapCoordinate(sourceStop.lat ?? sourceStop.latitude ?? (idx === 0 ? pedido[`${side}_lat`] : null), -90, 90);
   const lng = mapCoordinate(sourceStop.lng ?? sourceStop.longitude ?? (idx === 0 ? pedido[`${side}_lng`] : null), -180, 180);
-  const label = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
+  const geocodeLabel = sourceStop.nombre || sourceStop.name || sourceStop.cliente_nombre || sourceStop.direccion || pedido[side] || "";
+  const label = displayLocation(sourceStop, pedido[side]);
   const provincia = sourceStop.provincia || pedido[`${side}_provincia`] || "";
   const pais = sourceStop.pais || pedido[`${side}_pais`] || "España";
   const localidad = sourceStop.ciudad || sourceStop.poblacion || sourceStop.localidad || sourceStop.municipio || "";
   const direccion = sourceStop.direccion || sourceStop.address || "";
-  const query = buildMapQueryFromStop(sourceStop, label, pais);
+  const query = buildMapQueryFromStop(sourceStop, geocodeLabel, pais);
   const pointDetails = {
     google_maps_url: googleMapsUrl,
     provincia,
@@ -6456,22 +6503,21 @@ function buildPedidoMapPoints(pedido = {}, choferPasos = null) {
 }
 
 function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
+  const [trackingPosition,setTrackingPosition]=useState(null);
   const mapPoints = buildPedidoMapPoints(pedido, choferPasos);
   if (!mapPoints.length) return null;
   const pasos = getPedidoMapaPasos(pedido, choferPasos);
   const estado = String(pedido?.estado || "pendiente").toLowerCase();
-  const currentLabel = pasos.descarga_ok || ["entregado","facturado"].includes(estado)
-    ? "Viaje entregado"
-    : pasos.descarga_iniciada || estado === "descarga"
-      ? "Descargando"
-      : pasos.posicionado_descarga
-        ? "En punto de descarga"
-        : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso"
-          ? "En ruta"
-          : pasos.carga_proceso || pasos.carga_iniciada
-            ? "En carga"
-          : LABEL_ESTADO[estado] || estado;
-  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{pedido?.origen || "Origen pendiente"} → {pedido?.destino || "Destino pendiente"}</h4><p>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame/></div></OrderSection>;
+  const mapState = ["incidencia","cancelado"].includes(estado) ? estado
+    : pasos.descarga_ok || ["entregado","facturado"].includes(estado) ? "entregado"
+    : pasos.descarga_iniciada || estado === "descarga" ? "descarga"
+    : pasos.posicionado_descarga ? "espera_descarga"
+    : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso" ? "en_curso"
+    : pasos.carga_proceso || pasos.carga_iniciada ? "cargando"
+    : estado;
+  const mapStateMeta = transportStateMeta(pedido?.estado_operativo ? pedido : mapState);
+  const currentLabel = pasos.posicionado_descarga && mapState === "espera_descarga" ? "En punto de descarga" : mapStateMeta.label;
+  if (compact) return <OrderSection title="Ruta y mapa" icon="route"><div className="order-editor-map-grid"><div><h4>{displayOrderLocation(pedido, "carga")} → {displayOrderLocation(pedido, "descarga")}</h4><p style={{borderLeft:`3px solid ${mapStateMeta.color}`,paddingLeft:8}}>{currentLabel}</p><small className="order-editor-help">La ruta se actualiza al cambiar los puntos.</small></div><RutaMapa compact points={mapPoints} vehiclePosition={pedido.id?trackingPosition:getPedidoVehiclePosition(pedido)} stableFrame/></div><VehicleTrackingPanel pedidoId={pedido.id} onPosition={setTrackingPosition}/></OrderSection>;
   return (
     <div className={`tg-pedido-map-section ${compact ? "order-editor-map" : ""}`} style={{border:"1px solid var(--border)",borderRadius:10,padding:12,background:"var(--bg2)",marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:9,flexWrap:"wrap"}}>
@@ -6479,11 +6525,12 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
           <div style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Ruta operativa</div>
           <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>Ruta, paradas y posicion conocida del vehiculo.</div>
         </div>
-        <span style={{fontSize:10,fontWeight:900,border:"1px solid var(--accent-a30)",background:"var(--accent-a10)",color:"var(--accent-xl)",borderRadius:999,padding:"4px 8px"}}>
+        <span style={{fontSize:10,fontWeight:900,border:`1px solid ${mapStateMeta.border}`,background:mapStateMeta.bg,color:"var(--text)",borderRadius:999,padding:"4px 8px"}}>
           {currentLabel}
         </span>
       </div>
-      <RutaMapa compact={compact} key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={getPedidoVehiclePosition(pedido)} stableFrame />
+      <RutaMapa compact={compact} key={pedido?.id || "nuevo"} points={mapPoints} vehiclePosition={pedido.id?trackingPosition:getPedidoVehiclePosition(pedido)} stableFrame />
+      <VehicleTrackingPanel pedidoId={pedido.id} onPosition={setTrackingPosition}/>
       {!compact && <>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:8,marginTop:9}}>
         {mapPoints.map(point => (
@@ -6515,7 +6562,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const [editorStep, setEditorStep] = useState(editando?._focus_asignacion ? 2 : 1);
   const [choferPasosMapa, setChoferPasosMapa] = useState(null);
   const [clientes, setClientes] = useState(clientesProp || []);
-  const [rutas,    setRutas]    = useState(rutas_prop || []);
+  const [rutasCargadas, setRutas] = useState(() => routesForCustomer(rutas_prop, editando?.cliente_id));
   const [etiquetasCatalogo, setEtiquetasCatalogo] = useState(() => {
     const cat = (typeof window !== "undefined" && window.__TMS_EMPRESA_CONFIG?.cfg_trafico?.etiquetas_catalogo);
     return Array.isArray(cat) ? cat.filter(e => e && String(e.nombre || "").trim()) : [];
@@ -6607,6 +6654,7 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
       ? withPedidoGeoDefaults(normalizePedidoTarifaDraft({...editando, remolque_id_manual: editando.remolque_id||""}))
       : withPedidoGeoDefaults({ estado:"pendiente", tipo_precio:"viaje",  fecha_pedido:new Date().toISOString().slice(0,10), importe_minimo:"", importe_paralizacion:"", paralizacion_horas:"", tipo_iva:21, iva_regimen:"general" })
   );
+  const rutas = React.useMemo(() => routesForCustomer(rutasCargadas, form.cliente_id), [rutasCargadas, form.cliente_id]);
   const [mapPedidoDraft, setMapPedidoDraft] = useState(() => form);
   const [saving,     setSaving]     = useState(false);
   const [nombreBusqueda, setNombreBusqueda]= useState("");
@@ -6690,8 +6738,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
 
   useEffect(() => {
     let alive = true;
+    setRutas([]);
     if (!form.cliente_id) {
-      setRutas([]);
       return undefined;
     }
     getRutasCliente(form.cliente_id, { silentError: true })
@@ -6847,10 +6895,8 @@ function PedidoModal({ editando, onClose, onSaved, onReload, onFacturaDesvincula
   const remolqueActual = vehiculosLocal.find(v => v.id === (form.remolque_id_manual || vehiculoActual?.remolque_id));
   const longitudCargaCompleta = fullLoadLength(form, vehiculosLocal);
   useEffect(() => {
-    if ((form.tipo_carga || 'completa') !== 'completa') return;
-    setForm(previous => Number(previous.carga_largo_m) === longitudCargaCompleta && Number(previous.metros_lineales) === longitudCargaCompleta
-      ? previous : { ...previous, carga_largo_m: longitudCargaCompleta, metros_lineales: longitudCargaCompleta, _cargoLengthManual: true });
-  }, [form.id, form.tipo_carga, longitudCargaCompleta]);
+    setForm(previous => syncFullLoadLength(previous, longitudCargaCompleta));
+  }, [form.id, form.tipo_carga, form.longitud_ocupada_mode, longitudCargaCompleta]);
   // Aviso si la carga (metros lineales) supera los metros de carga del remolque
   // asignado (p. ej. viaje de 13,65 m en una plataforma de 11 m).
   const cargaMetrosLineales = parseFloat(String(form.metros_lineales ?? "").replace(",", ".")) || 0;
@@ -7012,7 +7058,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       ...(clone ? {} : { id: point.id }),
       nombre: point.nombre || point.direccion || "",
       cif: point.cif || "",
-      direccion: point.direccion || point.nombre || "",
+      direccion: point.direccion || "",
       codigo_postal: point.codigo_postal || "",
       ciudad: point.ciudad || "",
       provincia: point.provincia || "",
@@ -7035,6 +7081,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   async function ensurePointForClient(point) {
     const targetClienteId = String(clienteId || "").trim();
     if (!targetClienteId) {
+      if (point.punto_general || point.es_general || !point.cliente_id) return { point, changed: false };
       notify("Selecciona primero un cliente para poder asociar el punto.", "warning");
       return null;
     }
@@ -7047,6 +7094,17 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     if (!payload.nombre || !payload.direccion) {
       notify("El punto necesita nombre y direccion antes de poder seleccionarse.", "warning");
       return null;
+    }
+    const missing = missingLocationFields(payload);
+    if (missing.length) {
+      const confirmed = await confirmDialog({
+        title: "Ubicación incompleta",
+        message: `Al asociar este punto faltan ${missing.join(", ")}. ¿Guardar la copia como incompleta?`,
+        confirmText: "Guardar incompleta", cancelText: "Cancelar", tone: "warning",
+      });
+      if (!confirmed) return null;
+      payload.allow_incomplete_location = true;
+      payload.location_incomplete = true;
     }
 
     let saved = null;
@@ -7071,7 +7129,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
       ...base,
       id: base.id || `poi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       nombre: (base.nombre || base.direccion || "").trim(),
-      direccion: (base.direccion || base.nombre || "").trim(),
+      direccion: String(base.direccion || "").trim(),
       cliente_id: targetClienteId,
       punto_general: false,
       es_general: false,
@@ -7087,8 +7145,18 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
   }
 
   async function selectPoint(point) {
+    if (point?.location_incomplete) {
+      setEditing(point);
+      notify("Completa la ubicación antes de usar este punto en un viaje.", "warning");
+      return;
+    }
     const result = await ensurePointForClient(point);
     if (!result?.point) return;
+    if (result.point.location_incomplete) {
+      setEditing(result.point);
+      notify("Completa la ubicación antes de usar este punto en un viaje.", "warning");
+      return;
+    }
     onSelectPoint?.(result.point);
     if (result.changed) {
       notify(result.cloned ? "Punto copiado al cliente y seleccionado." : "Punto asociado al cliente y seleccionado.", "success");
@@ -7116,7 +7184,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
     const text = pointSearch.trim();
     setEditing({
       nombre:text,
-      direccion:text,
+      direccion:"",
       tipo: modo || "ambos",
       pais:"España",
       cliente_id: clienteId || "",
@@ -7185,9 +7253,10 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                         {scope}
                       </span>
                     </div>
-                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || puntoLocationLabel(point) || "-"}</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>{point.direccion || "Dirección pendiente"}</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
                       {point.tipo && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(59,130,246,.12)",color:"#60a5fa",border:"1px solid rgba(59,130,246,.22)"}}>{point.tipo}</span>}
+                      {point.location_incomplete && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(245,158,11,.12)",color:"#b45309"}}>Ubicación incompleta</span>}
                       {puntoLocationLabel(point) && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a22)"}}>{puntoLocationLabel(point)}</span>}
                       {point.ventana && <span style={{fontSize:10,padding:"2px 8px",borderRadius:999,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.22)"}}>{point.ventana}</span>}
                       {point.google_maps_url && <a href={point.google_maps_url} target="_blank" rel="noreferrer" style={{fontSize:10,color:"var(--accent)"}}>Google Maps</a>}
@@ -7195,7 +7264,7 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                     {onSelectPoint && (
-                      <button type="button" onClick={()=>selectPoint(point)} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)",padding:"6px 10px"}}>Seleccionar</button>
+                      <button type="button" onClick={()=>selectPoint(point)} disabled={!!point.location_incomplete} title={point.location_incomplete ? "Completa la ubicación para usarla en un viaje" : ""} style={{...S.btn,background:"var(--accent-a12)",color:"var(--accent)",border:"1px solid var(--accent-a28)",padding:"6px 10px"}}>Seleccionar</button>
                     )}
                     <button type="button" onClick={()=>setEditing(point)} style={{...S.btn,background:"transparent",color:"var(--accent)",border:"1px solid var(--border2)",padding:"6px 10px"}}>Editar</button>
                     <button type="button" onClick={()=>removePoint(point)} style={{...S.btn,background:"rgba(239,68,68,.08)",color:"#ef4444",border:"1px solid rgba(239,68,68,.2)",padding:"6px 10px"}}>Eliminar</button>
@@ -7215,13 +7284,19 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
             setPuntos(next);
             onApply?.(next);
             setEditing(null);
-            if (onSelectPoint && saved && !editing?.id) {
+            if (onSelectPoint && saved && !saved.location_incomplete && !editing?.id) {
               const ensured = await ensurePointForClient({ ...saved, tipo: saved.tipo || modo || "ambos" });
+              if (!ensured) return;
               const normalized = ensured?.point || normalizePuntoInteresForForm({
                 ...saved,
                 cliente_id: saved.cliente_id || clienteId || "",
                 tipo: saved.tipo || modo || "ambos",
               });
+              if (normalized.location_incomplete) {
+                setEditing(normalized);
+                notify("Completa la ubicación antes de usar este punto en un viaje.", "warning");
+                return;
+              }
               onSelectPoint(normalized);
               notify("Punto guardado y seleccionado.", "success");
               onClose?.();
@@ -7635,6 +7710,11 @@ async function guardar() {
   setSaving(true);
   try {
     const payload = buildPedidoUpdatePayload(form);
+    if(!editando?.id && payload.ai_metadata?.inbox_id){
+      const reviewed=await confirmDialog({title:'Crear pedido desde la bandeja',message:'Confirma que has revisado cliente, paradas, fechas, mercancía y precio de este formulario.',confirmText:'He revisado: crear pedido',cancelText:'Seguir revisando'});
+      if(!reviewed){setSaving(false);return;}
+      payload.ai_metadata={...payload.ai_metadata,human_reviewed:true};
+    }
 
     if (form.vehiculo_id) {
       const veh = vehiculosLocal.find(v => v.id === form.vehiculo_id);
@@ -7662,6 +7742,7 @@ async function guardar() {
       notify("Pedido guardado con aviso de festivo aceptado. Gerencia queda notificada.", "success");
     }
 
+    if(payload.ai_metadata?.inbox_id)notifyInboxChanged();
     const pedidoId = pedidoGuardado?.id || editando?.id;
     const esNuevoPedido = !editando?.id;
 
@@ -8367,6 +8448,8 @@ useEffect(() => {
 // CartaPorteModal - Genera y muestra la Carta de Porte / CMR / Albaran
 // ---------------------------------------------------------------------------
 function CartaPorteModal({ data, onClose }) {
+  const origen = waybillLocation(data, 'carga');
+  const destino = waybillLocation(data, 'descarga');
   const docNumero = data.carta_porte_numero || data.numero || "";
   const pedidoNumero = data.pedido_numero || data.numero || "";
   const cargaPrincipalGeo = parseStops(data.puntos_carga)[0] || {};
@@ -8449,218 +8532,7 @@ function CartaPorteModal({ data, onClose }) {
   }
 
   function generarHTML() {
-    const d = data;
-    const anexosHtml = anexosConArchivo.length ? `
-<div class="page-break"></div>
-<h1>Anexos de la carta de porte / DCD</h1>
-<div style="font-size:10px;color:#555;text-align:center;margin-bottom:12px">
-  Albaranes, POD o CMR subidos al viaje una vez firmados.
-</div>
-${anexosConArchivo.map((a, idx) => `
-  <div class="box anexo-box">
-    <h2>Anexo ${idx + 1}: ${a.etiqueta || a.tipo || "Documento adjunto"}</h2>
-    <div class="grid3" style="margin-bottom:8px">
-      <div><div class="lbl">Nombre</div><div class="val">${a.nombre || "-"}</div></div>
-      <div><div class="lbl">Tipo</div><div class="val">${a.tipo || "-"}</div></div>
-      <div><div class="lbl">Fecha subida</div><div class="val">${a.created_at ? new Date(a.created_at).toLocaleString("es-ES") : "-"}</div></div>
-    </div>
-    ${a.data_url
-      ? `<img src="${a.data_url}" class="anexo-img" alt="${a.nombre || "Anexo"}"/>`
-      : `<div class="anexo-pdf">PDF adjunto al expediente DCD: ${a.nombre || "Documento"}${a.size_kb ? ` (${a.size_kb} KB)` : ""}</div>`}
-  </div>
-`).join("")}` : "";
-    return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
-<title>${documentoTitulo} - ${docNumero}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,sans-serif;font-size:11px;color:#111;padding:20px}
-  h1{font-size:16px;font-weight:700;text-align:center;letter-spacing:1px;margin-bottom:4px}
-  h2{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;color:#1e3a5f;border-bottom:1px solid #1e3a5f;padding-bottom:3px}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #1e3a5f}
-  .empresa{flex:1}
-  .doc-info{text-align:right;min-width:180px}
-  .doc-num{font-size:20px;font-weight:700;color:#1e3a5f}
-  .doc-label{font-size:9px;color:#666;letter-spacing:1px;text-transform:uppercase}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
-  .box{border:1px solid #ccc;border-radius:4px;padding:10px}
-  .lbl{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
-  .val{font-size:11px;font-weight:600}
-  .val-big{font-size:14px;font-weight:700;color:#1e3a5f}
-  table{width:100%;border-collapse:collapse;margin-bottom:12px}
-  th{background:#1e3a5f;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
-  td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}
-  .firma-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:20px}
-  .firma-box{border:1px solid #ccc;border-radius:4px;padding:10px;min-height:80px}
-  .firma-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-  .firma-line{margin-top:50px;border-top:1px solid #999;font-size:9px;color:#666;padding-top:3px}
-  .status{display:inline-block;padding:3px 10px;border-radius:12px;font-size:10px;font-weight:700}
-  .badge-ok{background:#d1fae5;color:#065f46}
-  .badge-warn{background:#fef3c7;color:#92400e}
-  .cmr-note{border-color:var(--accent);background:#f0fdfa;margin-bottom:12px}
-  .cmr-note h2{color:var(--accent);border-bottom-color:var(--accent)}
-  .page-break{break-before:page;page-break-before:always}
-  .anexo-box{margin-bottom:14px;break-inside:avoid;page-break-inside:avoid}
-  .anexo-img{display:block;max-width:100%;max-height:920px;margin:10px auto 0;border:1px solid #ddd;object-fit:contain}
-  .anexo-pdf{border:1px dashed #999;border-radius:4px;padding:14px;background:#f8fafc;color:#334155;font-size:12px}
-  @media print{@page{margin:1cm}body{padding:0}}
-</style></head><body>
-<div class="header">
-  <div class="empresa">
-    <div style="font-size:18px;font-weight:700;color:#1e3a5f">${d.empresa_nombre||"-"}</div>
-    <div style="color:#555">CIF: ${d.empresa_cif||"-"} - ${d.empresa_direccion||""} - Tel: ${d.empresa_telefono||"-"}</div>
-    <div style="color:#555">${d.empresa_email||""}</div>
-  </div>
-  <div class="doc-info">
-    <div class="doc-label">${documentoTitulo}</div>
-    <div class="doc-num">${docNumero||"-"}</div>
-    <div style="font-size:10px;color:#555;margin-top:4px">Pedido: ${pedidoNumero||"-"}</div>
-    <div style="font-size:10px;color:#555;margin-top:4px">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>
-    <div style="margin-top:6px">
-      <span class="status ${["entregado","facturado"].includes(d.estado)?"badge-ok":"badge-warn"}">${(d.estado||"").toUpperCase()}</span>
-    </div>
-  </div>
-</div>
-
-${isCmrInternacional ? `<div class="box cmr-note">
-  <h2>CMR internacional</h2>
-  <div class="grid3" style="margin-bottom:0">
-    <div><div class="lbl">CP / poblacion / provincia carga</div><div class="val">${origenPostalGeo || origenGeo || "-"}</div></div>
-    <div><div class="lbl">CP / poblacion / provincia entrega</div><div class="val">${destinoPostalGeo || destinoGeo || "-"}</div></div>
-    <div><div class="lbl">Regimen</div><div class="val">Transporte internacional por carretera sujeto al Convenio CMR cuando proceda</div></div>
-  </div>
-  <div style="margin-top:8px;font-size:10px;color:#134e4a">
-    Verifica remitente, transportista, destinatario, lugar y fecha de toma de mercancia, lugar de entrega, descripcion, bultos, marcas/numeros, peso/cantidad, gastos, instrucciones y documentos entregados.
-  </div>
-</div>` : ""}
-
-<div class="grid2">
-  <div class="box">
-    <h2>Transportista (Porteador)</h2>
-    <div class="lbl">Empresa</div><div class="val">${d.empresa_nombre||"-"}</div>
-    <div class="lbl" style="margin-top:6px">CIF</div><div class="val">${d.empresa_cif||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Direccion</div><div class="val">${d.empresa_direccion||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Telefono / Email</div>
-    <div class="val">${d.empresa_telefono||"-"} - ${d.empresa_email||"-"}</div>
-  </div>
-  <div class="box">
-    <h2>Remitente / Cliente</h2>
-    <div class="lbl">Empresa / Persona</div><div class="val">${d.cliente_nombre||"-"}</div>
-    <div class="lbl" style="margin-top:6px">CIF / NIF</div><div class="val">${d.cliente_cif||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Direccion</div><div class="val">${d.cliente_dir||d.cliente_ciudad||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Telefono / Email</div>
-    <div class="val">${d.cliente_tel||"-"} - ${d.cliente_email||"-"}</div>
-  </div>
-</div>
-
-<div class="grid2">
-  <div class="box">
-    <h2>Origen (Carga)</h2>
-    <div class="val-big">${d.origen||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Pais / provincia</div>
-    <div class="val">${origenGeo || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Codigo postal / poblacion / provincia</div>
-    <div class="val">${origenPostalGeo || "-"}</div>
-    <div class="lbl" style="margin-top:8px">Fecha de carga</div>
-    <div class="val">${new Date(d.fecha_carga||Date.now()).toLocaleDateString("es-ES")}${d.hora_carga?" - "+d.hora_carga:""}</div>
-    ${d.ventana_carga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_carga}</div>`:""}
-    ${d.referencia_cliente?`<div class="lbl" style="margin-top:4px">Ref. cliente</div><div class="val">${d.referencia_cliente}</div>`:""}
-  </div>
-  <div class="box">
-    <h2>Destino (Descarga)</h2>
-    <div class="val-big">${d.destino||"-"}</div>
-    <div class="lbl" style="margin-top:6px">Pais / provincia</div>
-    <div class="val">${destinoGeo || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Codigo postal / poblacion / provincia</div>
-    <div class="val">${destinoPostalGeo || "-"}</div>
-    <div class="lbl" style="margin-top:8px">Fecha de entrega</div>
-    <div class="val">${d.fecha_entrega?new Date(d.fecha_entrega).toLocaleDateString("es-ES"):"-"}${d.hora_descarga?" - "+d.hora_descarga:""}</div>
-    ${d.ventana_descarga?`<div class="lbl" style="margin-top:4px">Ventana horaria</div><div class="val">${d.ventana_descarga}</div>`:""}
-  </div>
-</div>
-
-<h2>Mercancia</h2>
-<table>
-  <thead><tr>
-    <th style="width:40%">Descripcion</th><th>Bultos</th><th>Peso (kg)</th>
-    <th>Volumen (m3)</th><th>ML</th><th>Tipo carga</th><th>Valor</th>
-  </tr></thead>
-  <tbody><tr>
-    <td>${d.mercancia||"-"}</td>
-    <td>${d.bultos||"-"}</td>
-    <td>${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"}</td>
-    <td>${d.volumen||"-"}</td>
-    <td>${d.metros_lineales||"-"}</td>
-    <td>${d.tipo_carga||"-"}</td>
-    <td>${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</td>
-  </tr></tbody>
-</table>
-
-${isCmrInternacional ? `<div class="grid2">
-  <div class="box">
-    <h2>Documentos / Aduanas</h2>
-    <div class="lbl">Documentos entregados al transportista</div>
-    <div class="val">${d.documentos_aduaneros || d.condiciones_adicionales || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Instrucciones del remitente</div>
-    <div class="val">${d.instrucciones_aduaneras || d.notas || "-"}</div>
-  </div>
-  <div class="box">
-    <h2>Reservas y gastos</h2>
-    <div class="lbl">Reservas del transportista</div>
-    <div class="val">${d.reservas_transportista || "-"}</div>
-    <div class="lbl" style="margin-top:6px">Gastos / porte</div>
-    <div class="val">${d.importe?Number(d.importe).toLocaleString("es-ES",{minimumFractionDigits:2})+" EUR":"-"}</div>
-  </div>
-</div>` : ""}
-
-<div class="grid3">
-  <div class="box">
-    <h2>Vehiculo Tractor</h2>
-    <div class="val-big">${d.veh_matricula||"-"}</div>
-    <div class="val" style="color:#555">${[d.veh_marca,d.veh_modelo].filter(Boolean).join(" ")||""}</div>
-  </div>
-  <div class="box">
-    <h2>Remolque / Semirremolque</h2>
-    <div class="val-big">${d.rem_matricula||"-"}</div>
-  </div>
-  <div class="box">
-    <h2>Chofer</h2>
-    <div class="val-big">${[d.chofer_nombre,d.chofer_apellidos].filter(Boolean).join(" ")||"-"}</div>
-    ${d.chofer_dni?`<div class="lbl" style="margin-top:4px">DNI/NIE</div><div class="val">${d.chofer_dni}</div>`:""}
-    ${d.chofer_tel?`<div class="lbl" style="margin-top:4px">Telefono</div><div class="val">${d.chofer_tel}</div>`:""}
-  </div>
-</div>
-
-${d.notas?`<div class="box" style="margin-bottom:12px"><h2>Observaciones</h2><div style="white-space:pre-line">${d.notas}</div></div>`:""}
-
-<div class="firma-row">
-  <div class="firma-box">
-    <div class="firma-label">Firma Remitente</div>
-    ${firmas.remitente
-      ? `<img src="${firmas.remitente}" style="max-width:100%;max-height:60px;margin-top:4px"/>`
-      : `<div class="firma-line">Nombre y sello</div>`}
-  </div>
-  <div class="firma-box">
-    <div class="firma-label">Firma Chofer / Transportista</div>
-    ${firmas.chofer
-      ? `<img src="${firmas.chofer}" style="max-width:100%;max-height:60px;margin-top:4px"/>`
-      : `<div class="firma-line">Nombre y sello</div>`}
-  </div>
-  <div class="firma-box">
-    <div class="firma-label">Firma Destinatario</div>
-    ${firmas.destinatario
-      ? `<img src="${firmas.destinatario}" style="max-width:100%;max-height:60px;margin-top:4px"/>
-         <div style="font-size:9px;color:#555;margin-top:3px">${firmaNombre||""}</div>
-         <div style="font-size:9px;color:#555;">Fecha: ${new Date().toLocaleDateString("es-ES")}</div>`
-      : `<div class="firma-line">Nombre, sello y fecha de recepcion</div>`}
-  </div>
-</div>
-
-<div style="text-align:center;margin-top:16px;font-size:9px;color:#999;border-top:1px solid #eee;padding-top:8px">
-  Documento generado por TransGest TMS - ${new Date().toLocaleString("es-ES")}
-</div>
-${anexosHtml}
-</body></html>`;
+    return buildWaybillHtml({data, docNumero, pedidoNumero, documentoTitulo, isCmrInternacional, origenGeo, destinoGeo, origenPostalGeo, destinoPostalGeo, anexosConArchivo, firmas, firmaNombre});
   }
 
   const O = {
@@ -8683,18 +8555,18 @@ ${anexosHtml}
 
   return (
     <div style={O.overlay} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={O.modal}>
+      <div className="waybill-modal" role="dialog" aria-modal="true" aria-label={`${documentoTitulo} - ${docNumero}`} style={O.modal}>
         <div style={O.header}>
           <div>
             <div style={{fontWeight:800,fontSize:16,color:"var(--text)"}}>{documentoTitulo} - {docNumero}</div>
             <div style={{fontSize:12,color:"var(--text4)",marginTop:2}}>
-              Pedido {pedidoNumero} · {d.origen} -> {d.destino} · {fmtD(d.fecha_carga)}
+              Pedido {pedidoNumero} · {origen.label} → {destino.label} · {fmtD(d.fecha_carga)}
             </div>
           </div>
           <button onClick={onClose} style={{...O.btn,background:"var(--bg4)",color:"var(--text3)",padding:"6px 12px"}}>Cerrar</button>
         </div>
 
-        <div style={O.body}>
+        <div className="waybill-modal-body" style={O.body}>
           {isCmrInternacional && (
             <div style={{background:"var(--accent-a08)",border:"1px solid var(--accent-a24)",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
               <div style={{fontSize:12,fontWeight:800,color:"var(--accent)"}}>CMR internacional</div>
@@ -8704,12 +8576,14 @@ ${anexosHtml}
             </div>
           )}
           {/* Preview compacto */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:12,marginBottom:14}}>
             {[
               {l:"Transportista", v:d.empresa_nombre||"-"},
               {l:"Cliente / Remitente", v:d.cliente_nombre||"-"},
-              {l:"Origen", v:d.origen||"-"},
-              {l:"Destino", v:d.destino||"-"},
+              {l:"Origen", v:origen.label},
+              {l:"Destino", v:destino.label},
+              {l:"Dirección de carga", v:origen.address || "-"},
+              {l:"Dirección de descarga", v:destino.address || "-"},
               {l:"Pais / provincia carga", v:origenGeo || "-"},
               {l:"Pais / provincia descarga", v:destinoGeo || "-"},
               {l:"CP / poblacion carga", v:origenPostalGeo || "-"},
@@ -8723,7 +8597,7 @@ ${anexosHtml}
               {l:"Peso / Bultos", v:`${d.peso_kg?Number(d.peso_kg).toLocaleString("es-ES")+" kg":"-"} - ${d.bultos||"-"} bultos`},
               {l:"Importe", v:fmt2(d.importe)},
             ].map(({l,v})=>(
-              <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px"}}>
+              <div key={l} style={{background:"var(--bg3)",borderRadius:8,padding:"10px 14px",minWidth:0,overflowWrap:"anywhere"}}>
                 <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"var(--text5)",marginBottom:3}}>{l}</div>
                 <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{v}</div>
               </div>
@@ -8874,6 +8748,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
 }
 
 function readGuidedPedidoTutorial() {
+  if (!TUTORIALS_ENABLED) return null;
   const focus = readRuntimeFocus("tms_guided_tutorial");
   return focus?.type === "pedido_create" ? focus : null;
 }
@@ -8980,6 +8855,13 @@ export default function Pedidos() {
   const empresaPlan = getEmpresaPlanLocal();
   const aiVisualPlanActivo = planHasFeature(empresaPlan, "ai");
   const aiDisponible = planHasFeature(empresaPlan, "ai");
+  const [inboxCount,setInboxCount]=useState(null);
+  useEffect(()=>{
+    if(!aiDisponible)return;let active=true;
+    const refresh=()=>getOrderInbox({summary:true}).then(data=>{if(active)setInboxCount(data.counts.filter(row=>!['creado','descartado'].includes(row.state)).reduce((n,row)=>n+row.count,0));}).catch(()=>{if(active)setInboxCount(null);});
+    refresh();window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
+    return()=>{active=false;window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
+  },[aiDisponible]);
   const [focusPedido] = useState(() => readPedidosFocus());
   // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de
   // estado, busqueda...). Si no se limpia aqui, vive en memoria toda la sesion y
@@ -9073,9 +8955,10 @@ export default function Pedidos() {
     savePedidosCollapsedGroups(collapsedClientes);
   }, [collapsedClientes]);
 
-  const guidedPedidoActive = !!guidedPedido?.active;
+  const guidedPedidoActive = TUTORIALS_ENABLED && !!guidedPedido?.active;
 
   const startGuidedPedido = useCallback(() => {
+    if (!TUTORIALS_ENABLED) return;
     setGuidedPedido({ active:true, modalOpened:false, saved:false, progress:buildGuidedPedidoProgress({}, { modalOpened:false, saved:false }) });
   }, []);
 
@@ -9111,7 +8994,7 @@ export default function Pedidos() {
   }, []);
 
   useEffect(() => {
-    if (guidedPedidoActive) return undefined;
+    if (!TUTORIALS_ENABLED || guidedPedidoActive) return undefined;
     const pending = readGuidedPedidoTutorial();
     if (pending) startGuidedPedido();
     const onStart = e => {
@@ -9519,6 +9402,23 @@ export default function Pedidos() {
     if (validationIssues.length) {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
       return false;
+    }
+    const confirmaCargaReal = estado === "en_curso" &&
+      ["confirmado", "espera_carga", "cargando"].includes(String(p?.estado || "").toLowerCase()) &&
+      !p?.carga_real_at;
+    if (confirmaCargaReal && user?.rol !== "chofer") {
+      const fechaPlan = String(p?.fecha_carga_planificada || p?.fecha_carga || "").slice(0, 10);
+      const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone:"Europe/Madrid", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+      if (fechaPlan && fechaPlan !== hoyMadrid) {
+        const confirmed = await confirmDialog({
+          title:"Registrar carga real",
+          message:`El pedido estaba planificado para ${fechaPlan}. ¿Registrar la carga real como realizada hoy (${hoyMadrid})? La fecha planificada se conservará.`,
+          confirmText:"Registrar carga de hoy",
+          tone:"warning",
+        });
+        if (!confirmed) return false;
+        extra = { ...extra, confirmar_carga_real:true };
+      }
     }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
@@ -10340,7 +10240,7 @@ export default function Pedidos() {
 
   return (
     <div className="orders-page">
-      <OrdersWorkspace vehicles={vehiculos}
+      <OrdersWorkspace vehicles={vehiculos} inboxAction={aiDisponible&&canEdit?()=>setAiCreando(true):null} inboxCount={inboxCount}
         items={pedidosVisibles} allItems={pedidosConMeta} loading={loading} error={loadError} reload={() => cargar()}
         clients={clientes} drivers={choferes} labels={LABEL_ESTADO}
         serverPage={page} serverPages={totalPages} totalCount={totalCount} setServerPage={setPage}
@@ -10449,7 +10349,16 @@ export default function Pedidos() {
           notifyDriver:notificarChoferAppAccion, sendTo:(p,target)=>enviarWhatsappPedidoAccion(p,target)}}
         describe={p => {
           const loads = pedidoStopsForList(p,"carga"), unloads = pedidoStopsForList(p,"descarga");
-          return {origin:pedidoStopListLabel(loads[0] || {},p.origen,p.cliente_id || "","carga"), destination:pedidoStopListLabel(unloads[0] || {},p.destino,p.cliente_id || "","descarga"), loads:loads.length, unloads:unloads.length, loadDetails:loads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.origen:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n"), unloadDetails:unloads.map((stop,i)=>`${i+1}. ${[...new Set([stop.nombre, stopAddress(stop) || (i===0?p.destino:""), stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))].join(" · ") || "Ubicación pendiente"}`).join("\n")};
+          const origin = pedidoStopLocation(loads[0] || {},p.origen,p.cliente_id || "","carga");
+          const destination = pedidoStopLocation(unloads[0] || {},p.destino,p.cliente_id || "","descarga");
+          const detail = (stop, index, type) => {
+            const fallback = index === 0 ? (type === "carga" ? p.origen : p.destino) : "";
+            const location = pedidoStopLocation(stop, fallback, p.cliente_id || "", type);
+            const fields = [...new Set([stop.nombre, stopAddress(stop) || fallback, stop.ciudad || stop.poblacion, stop.codigo_postal || stop.cp, stopSchedule(stop)].filter(Boolean))];
+            if (location.missing.length) fields.push(`Faltan: ${location.missing.join(", ")}`);
+            return `${index+1}. ${fields.join(" · ") || location.label}`;
+          };
+          return {origin:origin.label, destination:destination.label, loads:loads.length, unloads:unloads.length, originMissing:origin.missing, destinationMissing:destination.missing, loadDetails:loads.map((stop,i)=>detail(stop,i,"carga")).join("\n"), unloadDetails:unloads.map((stop,i)=>detail(stop,i,"descarga")).join("\n")};
         }}
         filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
           setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},

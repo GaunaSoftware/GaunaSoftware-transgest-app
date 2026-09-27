@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { getImportCatalog, getImportBatches, getImportBatch, getImportRows,
   simulateImportBatch, confirmImportBatch, uploadImportFile, downloadImportTemplate,
   uploadDocumentPackage, simulateDocumentBatch, confirmDocumentBatch } from '../services/api';
@@ -12,12 +12,13 @@ const GROUPS=[
   {title:'Finanzas',items:[['Facturas_Historicas','Facturas históricas'],['Facturas_Lineas','Líneas de factura'],['Facturas_Pendientes','Saldos / facturas pendientes'],['Gastos_Operativos','Gastos operativos'],['Repostajes','Repostajes'],['Gastos_Estructura','Gastos de estructura']]},
   {title:'Documentación',items:[['Docs_Conductores','Documentos de conductores'],['Docs_Vehiculos','Documentos de vehículos']]},
 ];
-const STEPS=['Archivo','Validación','Revisión','Importación','Resultado'];
+const STEPS=['Archivo','Validación y revisión','Simulación y confirmación','Importación','Resultado'];
 const SUPPORTED=new Set(GROUPS.flatMap(group=>group.items.map(([key])=>key)));
 const fmt=value=>Number(value||0).toLocaleString('es-ES');
 const eur=value=>Number(value||0).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
 const HISTORIC_TYPES=new Set(['Facturas_Historicas','Facturas_Lineas','Facturas_Pendientes','Viajes_Historicos','Pack_TransGest']);
 const STATUS={review:'Revisión',ready:'Simulación lista',validating:'Simulando',running:'Importando',completed:'Completado',completed_with_errors:'Completado con incidencias',failed:'Fallido',cancelled:'Cancelado',rolled_back:'Revertido'};
+const ROW_STATUS={uploaded:'Recibida',valid:'Válida',warning:'Con aviso',invalid:'No válida',ready:'Lista',running:'En proceso',created:'Creada',updated:'Asociada',skipped:'Omitida',failed:'Error',cancelled:'Cancelada',rolled_back:'Revertida'};
 function saveBlob(blob,filename){
   const link=document.createElement('a');
   link.href=URL.createObjectURL(blob);link.download=filename;document.body.appendChild(link);link.click();link.remove();
@@ -33,6 +34,7 @@ function currentStep(batch){
 function ErrorBox({message}){return message?<div className="mig-error" role="alert">{message}</div>:null;}
 
 export default function ImportacionWizard(){
+  const view=useRef(0);
   const [catalog,setCatalog]=useState(null);
   const [history,setHistory]=useState([]);
   const [type,setType]=useState(null);
@@ -52,33 +54,45 @@ export default function ImportacionWizard(){
 
   const loadHistory=useCallback(()=>getImportBatches().then(data=>setHistory(data.batches||[])).catch(cause=>setError(cause.message)),[]);
   useEffect(()=>{getImportCatalog().then(setCatalog).catch(cause=>setError(cause.message));loadHistory();},[loadHistory]);
-  const refresh=useCallback(async id=>{
-    const result=await getImportBatch(id);setBatch(result);
+  const refresh=useCallback(async (id,generation=view.current)=>{
+    const result=await getImportBatch(id);
+    if(view.current===generation)setBatch(result);
     return result;
   },[]);
   useEffect(()=>{
     if (!batch?.id || !['validating','running'].includes(batch.status)) return undefined;
-    const id=batch.id;
-    const timer=setInterval(()=>refresh(id).catch(cause=>setError(cause.message)),1500);
-    return ()=>clearInterval(timer);
-  },[batch?.id,batch?.status,refresh]);
-  useEffect(()=>{
-    if (!batch?.id) return;
-    getImportRows(batch.id,{limit:50,offset:rowPage*50}).then(data=>setRows(data.rows||[])).catch(cause=>setError(cause.message));
-  },[batch?.id,batch?.status,rowPage]);
-  useEffect(()=>{
-    if(!batch?.id||!['completed','completed_with_errors','failed','cancelled','rolled_back'].includes(batch.status))return;
-    getImportReport(batch.id).then(setReport).catch(cause=>setError(cause.message));
+    const id=batch.id,generation=view.current;let pending=false,active=true;
+    const timer=setInterval(async()=>{
+      if(pending)return;pending=true;
+      try{const result=await getImportBatch(id);if(active&&view.current===generation)setBatch(result);}
+      catch(cause){if(active&&view.current===generation)setError(cause.message);}finally{pending=false;}
+    },1500);
+    return ()=>{active=false;clearInterval(timer);};
   },[batch?.id,batch?.status]);
   useEffect(()=>{
-    if(!batch?.id||!HISTORIC_TYPES.has(batch.tipo)||!['completed','completed_with_errors','rolled_back'].includes(batch.status))return;
-    getImportHistoricalOverview(batch.id).then(setHistorical).catch(cause=>setError(cause.message));
+    let active=true;setRows([]);
+    if(batch?.id)getImportRows(batch.id,{limit:50,offset:rowPage*50})
+      .then(data=>{if(active)setRows(data.rows||[]);}).catch(cause=>{if(active)setError(cause.message);});
+    return()=>{active=false;};
+  },[batch?.id,batch?.status,rowPage]);
+  useEffect(()=>{
+    let active=true;setReport(null);
+    if(batch?.id&&['completed','completed_with_errors','failed','cancelled','rolled_back'].includes(batch.status))
+      getImportReport(batch.id).then(data=>{if(active)setReport(data);}).catch(cause=>{if(active)setError(cause.message);});
+    return()=>{active=false;};
+  },[batch?.id,batch?.status]);
+  useEffect(()=>{
+    let active=true;setHistorical(null);
+    if(batch?.id&&HISTORIC_TYPES.has(batch.tipo)&&['completed','completed_with_errors','rolled_back'].includes(batch.status))
+      getImportHistoricalOverview(batch.id).then(data=>{if(active)setHistorical(data);}).catch(cause=>{if(active)setError(cause.message);});
+    return()=>{active=false;};
   },[batch?.id,batch?.tipo,batch?.status]);
+  useEffect(()=>()=>{view.current++;},[]);
 
   const definition=useMemo(()=>catalog?.templates?.find(item=>item.type===type),[catalog,type]);
   const dryRun=batch?.config?.dry_run;
   const step=currentStep(batch);
-  function selectType(next){setType(next);setBatch(null);setRows([]);setFile(null);setDocumentFiles([]);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);setReport(null);setHistorical(null);setRollbackPreview(null);}
+  function selectType(next){view.current++;setBusy(false);setType(next);setBatch(null);setRows([]);setFile(null);setDocumentFiles([]);setMapping({});setUnknownHeader(null);setError('');setRowPage(0);setReport(null);setHistorical(null);setRollbackPreview(null);}
   async function download(typeName){
     try{const result=await downloadImportTemplate(typeName);saveBlob(result.blob,result.filename);}
     catch(cause){setError(cause.message);}
@@ -86,42 +100,46 @@ export default function ImportacionWizard(){
   async function upload(){
     if (!type || (type==='Docs_PDF'?!documentFiles.length:!file)) return;
     if (type!=='Docs_PDF'&&!sourceSystem.trim()){setError('Indica el sistema de origen para identificar futuras cargas.');return;}
-    setBusy(true);setError('');
+    const generation=view.current;setBusy(true);setError('');
     try{
       const result=type==='Docs_PDF'?await uploadDocumentPackage(documentFiles):await uploadImportFile(file,type,sourceSystem.trim(),mapping);
+      if(view.current!==generation)return;
       setBatch(result.batch);setRows(result.preview?.flatMap(sheet=>sheet.rows)||[]);setUnknownHeader(null);setRowPage(0);
       await loadHistory();
     }catch(cause){
+      if(view.current!==generation)return;
       const match=/Columna no reconocida: ([^;]+)/.exec(cause.message||'');
       setUnknownHeader(match?.[1]||null);setError(cause.message);
-    }finally{setBusy(false);}
+    }finally{if(view.current===generation)setBusy(false);}
   }
   async function simulate(){
-    setBusy(true);setError('');
-    try{if(type==='Docs_PDF')await simulateDocumentBatch(batch.id);else await simulateImportBatch(batch.id);await refresh(batch.id);}
-    catch(cause){setError(cause.message);}finally{setBusy(false);}
+    const generation=view.current;setBusy(true);setError('');
+    try{if(type==='Docs_PDF')await simulateDocumentBatch(batch.id);else await simulateImportBatch(batch.id);await refresh(batch.id,generation);}
+    catch(cause){if(view.current===generation)setError(cause.message);}finally{if(view.current===generation)setBusy(false);}
   }
   async function confirm(){
-    setBusy(true);setError('');
-    try{if(type==='Docs_PDF')await confirmDocumentBatch(batch.id);else await confirmImportBatch(batch.id);await refresh(batch.id);}
-    catch(cause){setError(cause.message);}finally{setBusy(false);}
+    const generation=view.current;setBusy(true);setError('');
+    try{if(type==='Docs_PDF')await confirmDocumentBatch(batch.id);else await confirmImportBatch(batch.id);await refresh(batch.id,generation);}
+    catch(cause){if(view.current===generation)setError(cause.message);}finally{if(view.current===generation)setBusy(false);}
   }
   async function openBatch(item){
-    setType(item.tipo);setFile(null);setRowPage(0);setError('');setReport(null);setHistorical(null);setRollbackPreview(null);
-    try{await refresh(item.id);}catch(cause){setError(cause.message);}
+    const generation=++view.current;
+    setType(item.tipo);setBatch(null);setRows([]);setFile(null);setBusy(true);setRowPage(0);setError('');setReport(null);setHistorical(null);setRollbackPreview(null);
+    try{await refresh(item.id,generation);}catch(cause){if(view.current===generation)setError(cause.message);}
+    finally{if(view.current===generation)setBusy(false);}
   }
   async function runAction(action){
-    setBusy(true);setError('');
+    const generation=view.current;setBusy(true);setError('');
     try{
-      if(action==='rollback-preview')setRollbackPreview(await simulateImportRollback(batch.id));
+      if(action==='rollback-preview'){const result=await simulateImportRollback(batch.id);if(view.current===generation)setRollbackPreview(result);}
       else if(action==='rollback-confirm'){
-        await confirmImportRollback(batch.id);setRollbackPreview(null);await refresh(batch.id);
+        await confirmImportRollback(batch.id);if(view.current===generation)setRollbackPreview(null);await refresh(batch.id,generation);
       }else{
         const fn={cancel:cancelImportBatch,continue:continueImportBatch,retry:retryImportErrors}[action];
-        await fn(batch.id);await refresh(batch.id);
+        await fn(batch.id);await refresh(batch.id,generation);
       }
       await loadHistory();
-    }catch(cause){setError(cause.message);}finally{setBusy(false);}
+    }catch(cause){if(view.current===generation)setError(cause.message);}finally{if(view.current===generation)setBusy(false);}
   }
   async function downloadResult(kind){
     try{saveBlob(await downloadImportResult(batch.id,kind),`${kind.startsWith('report')?'Informe_Migracion':'Errores_TransGest'}_${batch.id.slice(0,8)}.${kind.split('.').pop()}`);}
@@ -154,7 +172,7 @@ export default function ImportacionWizard(){
     </>:<>
       <div className="mig-back"><button className="mig-link" onClick={()=>selectType(null)}>← Tipos de importación</button><strong>{selectedLabel}</strong></div>
       <ol className="mig-steps" aria-label="Progreso de importación">{STEPS.map((name,index)=><li key={name} className={step===index+1?'current':step>index+1?'done':''} aria-current={step===index+1?'step':undefined}><span>{index+1}</span>{name}</li>)}</ol>
-      {!batch?<section className="mig-panel mig-form">
+      {!batch&&busy?<p role="status">Cargando lote…</p>:!batch?<section className="mig-panel mig-form">
         <h2>1. Prepara el archivo</h2><p>Usa las cabeceras del formato TransGest. No se importarán columnas desconocidas sin una asignación explícita.</p>
         {type==='Docs_PDF'?<><p>Nombra los archivos <strong>CHOFER_DNI_TIPO.pdf</strong> o <strong>VEH_MATRICULA_TIPO.pdf</strong>. Los documentos ambiguos quedarán pendientes de revisión.</p>
           <div className="mig-drop" onDragOver={event=>event.preventDefault()} onDrop={event=>{event.preventDefault();setDocumentFiles(Array.from(event.dataTransfer.files||[]));}}>
@@ -193,7 +211,7 @@ export default function ImportacionWizard(){
           </div>}
         </section>
         {report?.summary?.length>0&&<section className="mig-panel"><h2>Resultado por entidad</h2><div className="mig-table-wrap"><table><thead><tr><th>Entidad</th><th>Estado</th><th>Filas</th></tr></thead><tbody>
-          {report.summary.map(item=><tr key={`${item.entity_type}-${item.status}`}><td>{item.entity_type}</td><td>{item.status}</td><td>{fmt(item.count)}</td></tr>)}
+          {report.summary.map(item=><tr key={`${item.entity_type}-${item.status}`}><td>{item.entity_type}</td><td>{ROW_STATUS[item.status]||item.status}</td><td>{fmt(item.count)}</td></tr>)}
         </tbody></table></div></section>}
         {historical&&<section className="mig-panel"><h2>Histórico de origen de este lote</h2>
           <p className="mig-muted">Estos importes conservan el significado del software anterior. No se suman a los KPI netos ni a la cartera actual sin conciliación fiscal y de cobros.</p>
@@ -204,7 +222,7 @@ export default function ImportacionWizard(){
         </section>}
         <section className="mig-panel"><div className="mig-panel-head"><h2>Filas del lote</h2><span className="mig-muted">Página {rowPage+1}</span></div>
           <div className="mig-table-wrap"><table><thead><tr><th>Hoja</th><th>Fila</th><th>ID origen</th><th>Estado</th><th>Simulación / incidencia</th></tr></thead><tbody>
-            {rows.map(row=><tr key={row.id||`${row.entity_type}-${row.row_number}`}><td>{row.entity_type}</td><td>{row.row_number}</td><td>{row.source_id||'—'}</td><td>{row.status}</td><td>{row.error_message||row.simulation?.reason||'—'}</td></tr>)}
+            {rows.map(row=><tr key={row.id||`${row.entity_type}-${row.row_number}`}><td>{row.entity_type}</td><td>{row.row_number}</td><td>{row.source_id||'—'}</td><td>{ROW_STATUS[row.status]||row.status}</td><td>{row.error_message||row.simulation?.reason||'—'}</td></tr>)}
             {!rows.length&&<tr><td colSpan={5}>Sin filas en esta página.</td></tr>}
           </tbody></table></div><div className="mig-actions"><button className="mig-button mig-button-secondary" disabled={!rowPage} onClick={()=>setRowPage(page=>page-1)}>Anterior</button>
             <button className="mig-button mig-button-secondary" disabled={rows.length<50} onClick={()=>setRowPage(page=>page+1)}>Siguiente</button></div>

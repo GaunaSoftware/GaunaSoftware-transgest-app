@@ -1,0 +1,50 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const {PGlite}=require('@electric-sql/pglite');
+const service=require('../src/services/transportDocumentVersions');
+async function main(){
+ const pg=new PGlite(),company=crypto.randomUUID(),other=crypto.randomUUID(),order=crypto.randomUUID();
+ const db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
+ try{
+  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz);');
+  for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
+  await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_document_versions.sql'),'utf8'));
+  await pg.query('INSERT INTO pedidos VALUES($1,$2,NOW())',[order,company]);
+  const d={codigo_control:'SINTETICO',referencia_pedido:'QA-DeCA-001',fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético SL',nif:'SINTETICO-NO-VALIDO',domicilio:'Calle de ensayo 1, Madrid'},transportista_efectivo:{nombre:'Transportista de prueba',nif:'SINTETICO-NO-VALIDO'},empresa:{nombre:'DEMOSTRACIÓN SINTÉTICA'},origen:{nombre:'Almacén de ensayo',direccion:'Madrid, España'},destino:{nombre:'Destino sintético',direccion:'Valencia, España',destinatario:'Destinatario de prueba'},mercancia:{descripcion:'Cerámica de ensayo',peso_kg:1250,bultos:64,embalaje:'Paletizado'},vehiculo:{tractora:'QA-0000'},cargas:[],descargas:[],observaciones:'DATOS SINTÉTICOS. Documento de prueba sin valor para un transporte real.'};
+  const args={empresaId:company,pedidoId:order,payload:{documento:d},baseUrl:'https://example.invalid',reason:'Ensayo inicial'};
+  d.observaciones_publicas=d.observaciones;d.observaciones='NOTA INTERNA QUE NO SE PUBLICA';
+  const first=await service.issue(db,args);assert.equal(first.created,true);
+  const repeated=await service.issue(db,args);assert.equal(repeated.id,first.id);assert.equal(repeated.created,false);
+  const initial=(await service.list(db,company,order))[0];const token=new URL(initial.public_url).searchParams.get('token');
+  await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250},{}),{code:'DECA_REVIEW_REQUIRED'});
+  const reviewed={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[initial.id]};
+  await service.assertDeparture(db,company,{id:order,peso_kg:1250},reviewed);
+  await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1251},reviewed),{code:'DECA_GOODS_CHANGED'});
+  const original=await service.publicOriginal(db,initial.id,token);assert.equal(service.hash(original.pdf),initial.pdf_hash);
+  assert.doesNotMatch((await require('pdf-parse')(original.pdf)).text,/NOTA INTERNA/);
+  assert.equal(await service.publicOriginal(db,initial.id,'wrong'),null);
+  assert.equal(await service.read(db,other,order,initial.id),null);assert.deepEqual(await service.list(db,other,order),[]);
+  await assert.rejects(service.issue(db,{...args,empresaId:other}),{code:'ORDER_NOT_FOUND'});
+  await assert.rejects(pg.query('UPDATE transport_document_versions SET reason=$2 WHERE id=$1',[initial.id,'Rewrite']),{code:'55000'});
+  await assert.rejects(pg.query('DELETE FROM transport_document_versions WHERE id=$1',[initial.id]),{code:'55000'});
+  d.mercancia.peso_kg=1400;await assert.rejects(service.issue(db,{...args,reason:''}),{code:'VERSION_REASON_REQUIRED'});
+  const second=await service.issue(db,{...args,reason:'Peso revisado'});assert.equal(second.version,2);
+  await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1400},reviewed),{code:'DECA_REVIEW_REQUIRED'});
+  const versions=await service.list(db,company,order);assert.deepEqual(versions.map(v=>v.estado),['activa','superada']);
+  assert.notEqual(versions[0].public_url,initial.public_url);assert.notEqual(versions[0].pdf_hash,initial.pdf_hash);
+  assert.deepEqual((await service.publicOriginal(db,initial.id,token)).pdf,original.pdf,'Old URL never regenerates current order data');
+  await assert.rejects(service.issue(db,{...args,payload:{documento:{...d,vehiculo:{}}}}),{code:'DECA_FIELDS_REQUIRED'});
+  await assert.rejects(service.issue(db,{...args,baseUrl:'http://example.invalid'}),{code:'HTTPS_REQUIRED'});
+  await assert.rejects(service.issue(db,{...args,payload:{documento:{...d,cargas:[{},{}]}}}),{code:'SHIPMENT_MAPPING_REQUIRED'});
+  const external=await service.issue(db,{...args,source:'external',externalPdf:original.pdf.toString('base64'),nativeConfirmed:true,reason:'Original del cargador'});
+  const stored=await service.read(db,company,order,external.id);assert.deepEqual(Buffer.from(stored.pdf),original.pdf);
+  await assert.rejects(service.issue(db,args),{code:'EXTERNAL_DECA_ACTIVE'});
+  await assert.rejects(service.issue(db,{...args,source:'external',externalPdf:original.pdf.toString('base64'),nativeConfirmed:false}),{code:'NATIVE_PDF_REQUIRED'});
+  await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'service_completed',NOW()-INTERVAL '8 days','Fin real sintético')",[company,initial.id]);
+  await assert.rejects(service.publicOriginal(db,initial.id,token),{code:'PUBLIC_EXPIRED'});
+  assert.ok((await service.read(db,company,order,initial.id)).pdf,'Authenticated retention survives public expiry');
+  const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-deca-synthetic.pdf'),original.pdf);
+  const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/firma certificada|AdES|QES/);
+  console.log('PASS document versions: exact bytes/old URL, external originals, payload/PDF hashes, no auto-generation over external, immutable SQL, tenant isolation, scope/readiness, retry deduplication, native PDF/HTTPS, actual-completion expiry and retained private access. PDF pages:',parsed.numpages);
+ }finally{await pg.close();}
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

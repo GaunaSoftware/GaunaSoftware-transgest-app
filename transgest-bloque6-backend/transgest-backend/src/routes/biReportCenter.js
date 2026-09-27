@@ -21,11 +21,11 @@ router.get('/catalogo',async(req,res)=>{try{
 }catch(e){error(res,e);}});
 router.get('/semanal/configuracion',async(req,res)=>{if(req.user?.rol!=='gerente')return res.status(403).json({error:'Solo gerencia puede configurar los envíos'});try{
   const [managers,subscriptions,deliveries]=await Promise.all([
-    db.query(`SELECT id,nombre,email FROM usuarios WHERE empresa_id=$1 AND rol='gerente' AND activo=true
+    db.query(`SELECT u.id,u.nombre,u.email FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND m.rol='gerente' AND u.activo=true AND m.activo=true
       AND email IS NOT NULL AND btrim(email)<>'' ORDER BY nombre,id`,[company(req)]),
     db.query('SELECT user_id FROM bi_weekly_subscriptions WHERE empresa_id=$1 AND enabled=true',[company(req)]),
     db.query(`SELECT d.user_id,d.week_start,d.status,d.updated_at,d.error,u.email
-      FROM bi_weekly_deliveries d JOIN usuarios u ON u.id=d.user_id AND u.empresa_id=d.empresa_id
+      FROM bi_weekly_deliveries d JOIN usuarios u ON u.id=d.user_id
       WHERE d.empresa_id=$1 ORDER BY d.week_start DESC,d.updated_at DESC LIMIT 15`,[company(req)])
   ]);
   res.json({hora:'Lunes desde las 09:00 Europe/Madrid',gerentes:managers.rows,
@@ -36,7 +36,7 @@ router.put('/semanal/configuracion',async(req,res)=>{if(req.user?.rol!=='gerente
   if(!Array.isArray(ids)||ids.length>10||ids.some(id=>typeof id!=='string'||!uuid.test(id))||new Set(ids).size!==ids.length)
     return res.status(400).json({error:'Selecciona hasta 10 cuentas Gerente válidas'});
   await db.transaction(async client=>{
-    const allowed=await client.query(`SELECT id FROM usuarios WHERE empresa_id=$1 AND rol='gerente' AND activo=true
+    const allowed=await client.query(`SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND m.rol='gerente' AND u.activo=true AND m.activo=true
       AND email IS NOT NULL AND btrim(email)<>'' AND id=ANY($2::uuid[]) FOR UPDATE`,[company(req),ids]);
     if(allowed.rows.length!==ids.length)throw Object.assign(new Error('Algún destinatario ya no es Gerente activo de esta empresa'),{status:400});
     await client.query('DELETE FROM bi_weekly_subscriptions WHERE empresa_id=$1',[company(req)]);

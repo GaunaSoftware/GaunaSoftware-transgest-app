@@ -688,6 +688,12 @@ async function assertGpsExternalIdAvailable(empresaId, vehiculoId, provider, ext
 async function updateVehiclePosition({ empresaId, vehiculoId, provider = "manual", externalId = null, lat = null, lng = null, ubicacion = "", velocidad = null, odometro = null, raw = {}, recordedAt = null }) {
   const cleanUbicacion = String(ubicacion || "").trim();
   const safeProvider = GPS_PROVIDERS[provider] ? provider : "gps_generic";
+  if(lat!==null&&lat!==''||lng!==null&&lng!==''){
+    await require('../services/vehicleTracking').record(db,{empresaId,vehiculoId,provider:safeProvider,externalId,
+      input:{lat,lng,velocidad_kmh:velocidad,odometro_km:odometro,recorded_at:recordedAt,accuracy_m:raw.accuracy_m??raw.accuracy,heading:raw.heading??raw.bearing},raw});
+    return (await db.query('SELECT * FROM vehiculos WHERE empresa_id=$1 AND id=$2',[empresaId,vehiculoId])).rows[0]||null;
+  }
+  if(recordedAt&&(!Number.isFinite(Date.parse(recordedAt))||Date.parse(recordedAt)>Date.now()+60000))throw Object.assign(Error('Fecha GPS inválida o futura'),{status:422});
   const { rows } = await db.query(
     `UPDATE vehiculos
      SET ubicacion_actual=COALESCE(NULLIF($1,''), ubicacion_actual),

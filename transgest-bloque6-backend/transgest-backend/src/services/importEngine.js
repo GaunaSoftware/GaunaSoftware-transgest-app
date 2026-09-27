@@ -31,7 +31,14 @@ function stagedDependency(row, planned) {
   return false;
 }
 function createImportEngine(db = defaultDb) {
-  function evaluate(client,empresaId,sourceSystem,row) {
+  async function evaluate(client,empresaId,sourceSystem,row) {
+    if(row.source_id){
+      const prior=(await client.query('SELECT fingerprint FROM import_identities WHERE empresa_id=$1 AND entity_type=$2 AND source_system=$3 AND source_id=$4',
+        [empresaId,row.entity_type,sourceSystem,row.source_id])).rows[0];
+      if(prior && (!prior.fingerprint || prior.fingerprint!==row.fingerprint))
+        return {action:'review',reason:'El source_id ya existe con datos distintos o sin huella verificable. Revisa la ficha importada; no se sobrescribe.'};
+    }
+
     const args=[client,empresaId,sourceSystem,row.entity_type,row.normalized_data,row.source_id,row.fingerprint];
     return COST_TABLES[row.entity_type] ? evaluateCost(...args)
       : HISTORY_TABLES[row.entity_type] ? evaluateHistory(...args)

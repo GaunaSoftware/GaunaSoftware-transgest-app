@@ -7,7 +7,7 @@ import { useMemo } from "react";
 // rojo pero deja seguir, porque en trafico la carga real difiere de la prevista.
 
 // Trailer estandar espanol, usado solo si el vehiculo no trae sus medidas.
-export const REMOLQUE_DEFECTO = { metros: 13.6, peso: 24000, palets: 33 };
+export const REMOLQUE_DEFECTO = { metros: 13.65, peso: 24000, palets: 33 };
 
 // Ocupacion de los palets en el remolque, con las disposiciones reales de un
 // trailer estandar (13,60 x 2,45 m interior). Verificado contra las cifras del
@@ -35,7 +35,8 @@ export const paletsDeCarga = p => p.palets_tipo === 'granel' ? 0 : cargoCount(p)
 export function capacidadRemolque(vehiculo) {
   const metros = Number(vehiculo?.metros_carga || 0)
     || (Number(vehiculo?.longitud_mm || 0) ? Number(vehiculo.longitud_mm) / 1000 : 0);
-  const peso = Number(vehiculo?.masa_total_kg || 0);
+  // Gross vehicle mass is not payload capacity.
+  const peso = Number(vehiculo?.carga_max_kg || 0);
   const palets = Number(vehiculo?.capacidad_palets || 0);
   return {
     metros: metros > 0 ? metros : REMOLQUE_DEFECTO.metros,
@@ -72,7 +73,7 @@ function Barra({ etiqueta, valor, max, unidad, decimales = 1 }) {
   );
 }
 
-export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelect = null, seleccionadoId = "" }) {
+export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelect = null, seleccionadoId = "", onReorder = null }) {
   const cap = useMemo(() => capacidadRemolque(vehiculo), [vehiculo]);
 
   const cargas = useMemo(() => pedidos.map((p, i) => ({
@@ -111,7 +112,7 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
           <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)" }}>Ocupacion del remolque</div>
           <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 2 }}>
             {vehiculo?.matricula ? `${vehiculo.matricula} - ` : ""}
-            {fmt(cap.metros)} m de carga, {fmt(cap.peso, 0)} kg, {cap.palets} palets
+            {fmt(cap.metros, 2)} m de carga, {fmt(cap.peso, 0)} kg, {cap.palets} palets
             {cap.estimado ? " (medidas estimadas: completa la ficha del vehiculo)" : ""}
           </div>
         </div>
@@ -133,6 +134,10 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
             const sel = String(c.pedido.id) === String(seleccionadoId);
             return (
               <div key={c.pedido.id || i}
+                draggable={!!onReorder}
+                onDragStart={event=>{if(onReorder)event.dataTransfer.setData('application/transgest-cargo',String(c.pedido.id));}}
+                onDragOver={event=>{if(onReorder)event.preventDefault();}}
+                onDrop={event=>{if(!onReorder)return;event.preventDefault();const source=event.dataTransfer.getData('application/transgest-cargo');if(source)onReorder(source,c.pedido.id);}}
                 onClick={() => onSelect && onSelect(c.pedido)}
                 title={`${c.pedido.numero || "Viaje"} - ${c.pedido.cliente_nombre || ""} | ${fmt(c.ml)} ML, ${fmt(c.peso, 0)} kg, ${c.palets} palets`}
                 style={{

@@ -78,9 +78,10 @@ function detail(services, clients, vehicles, invoices, sort, direction, page, li
     const cost = costBreakdown([p]).directo_registrado;
     return { id:p.id, numero:p.numero || String(p.id), fecha:dateOf(p), cliente_id:p.cliente_id,
       cliente:clientNames.get(String(p.cliente_id)) || 'Sin cliente', ruta:`${p.origen || '?'} → ${p.destino || '?'}`,
-      vehiculo_id:p.vehiculo_id || null, vehiculo:plates.get(String(p.vehiculo_id)) || p.matricula || 'Sin vehículo',
+      vehiculo_id:p.vehiculo_id || null, vehiculo:p.bi_assignment_warning?'Varios recursos históricos':plates.get(String(p.vehiculo_id)) || p.matricula || 'Sin vehículo',
       ejecucion:execution(p), ingreso:euro(p.importe), coste:cost, margen:cost == null || euro(p.importe) == null ? null : euro(Number(p.importe) - cost),
       km_pedido:p.km_ruta == null ? null : Number(p.km_ruta), km_vacio_pedido:p.km_vacio == null ? null : Number(p.km_vacio),
+      viajes_operativos:(p.bi_legs||[]).map(l=>l.id), coste_viaje_atribuido:p.bi_journey_cost||0, advertencia:p.bi_cost_warning||p.bi_assignment_warning||null,
       pendiente_factura:p.pendiente_factura === true,
       factura_id:p.factura_id && validInvoices.has(String(p.factura_id)) ? p.factura_id : null };
   });
@@ -111,6 +112,7 @@ function reviewItems(services, invoices, range, invoiceScope) {
   const items = [];
   for (const p of services) {
     const cost = costBreakdown([p]).directo_registrado;
+    if (p.bi_cost_warning || p.bi_assignment_warning) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:p.bi_cost_warning||p.bi_assignment_warning,prioridad:0});
     if (cost == null) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Coste directo sin valorar',prioridad:1});
     else if (Number(p.importe || 0) < cost) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Margen directo negativo',prioridad:0});
     if (!(Number(p.km_ruta) > 0)) items.push({tipo:'pedido',id:p.id,numero:p.numero,motivo:'Kilómetros sin informar',prioridad:2});
@@ -129,6 +131,7 @@ function comparison(current, previous) {
 }
 async function readWorkspace(empresaId, query = {}, access = {}) {
   if (!empresaId) throw Object.assign(new Error('Sin empresa_id'), {status:401});
+  if (query.vista==='planner' && !access.plannerAuthorized) throw Object.assign(new Error('Planner no autorizado'),{status:403});
   const range = reportRange(query), previousRange = equivalentPrevious(range), filters = validateFilters(query);
   const page = Number(query.page || 1), limit = Number(query.limit || 20);
   const invoicePage = Number(query.invoice_page || 1), invoiceLimit = 20;
@@ -144,7 +147,7 @@ async function readWorkspace(empresaId, query = {}, access = {}) {
   const source = await loadAnalyticsSources(empresaId,range,previousRange.desde,queryDb);
   const currentAll = source.orders.filter(p => done(p) && dateOf(p) >= range.desde && dateOf(p) <= range.hasta);
   const filtered = currentAll.filter(p => matches(p,filters));
-  const operationalView = ['operaciones','flota','calidad'].includes(String(query.vista||''));
+  const operationalView = ['operaciones','flota','calidad','planner'].includes(String(query.vista||''));
   const operationalOrders = operationalView ? source.orders.filter(p => String(p.origen_producto||'transgest')!=='planner' && dateOf(p) >= range.desde && dateOf(p) <= range.hasta && matches(p,filters)) : [];
   const evidence = operationalView ? await loadOperationalEvidence(empresaId,operationalOrders.map(p=>p.id),queryDb) : null;
   const operations = operationalView ? buildOperationalMetrics({empresaId,range,orders:operationalOrders,
@@ -152,7 +155,7 @@ async function readWorkspace(empresaId, query = {}, access = {}) {
     emptyKm:source.emptyKm.filter(r=>!filters.vehiculo_id||String(r.vehiculo_id)===filters.vehiculo_id),
     config:evidence.config,missingSources:[...source.missingSources,...evidence.missingSources],page,limit,
     attributionScope:!filters.cliente_id&&!filters.ruta&&!filters.ejecucion}) : null;
-  if (operations && query.vista==='operaciones' && access.plannerAuthorized && !Object.values(filters).some(Boolean))
+  if (operations && ['operaciones','planner'].includes(query.vista) && access.plannerAuthorized && !Object.values(filters).some(Boolean))
     operations.planner=await loadPlannerMetrics(empresaId,range,queryDb);
   const prior = source.orders.filter(p => done(p) && dateOf(p) >= previousRange.desde && dateOf(p) <= previousRange.hasta && matches(p,filters));
   const invoiceScope = !filters.ruta && !filters.vehiculo_id && !filters.ejecucion;
@@ -212,8 +215,21 @@ async function readWorkspace(empresaId, query = {}, access = {}) {
   const invoicesDue = invoiceScope ? invoices.filter(f => isValidInvoice(f) && f.estado !== 'cobrada' && day(f.fecha_vencimiento) && day(f.fecha_vencimiento) < range.hasta)
     .map(f => ({id:f.id,numero:f.numero,cliente:f.cliente_nombre,fecha_vencimiento:day(f.fecha_vencimiento),total:f.total == null ? null : Number(f.total)}))
     .sort((a,b) => {const av=a[invoiceSort],bv=b[invoiceSort];const delta=invoiceSort==='total'?Number(av||0)-Number(bv||0):String(av||'').localeCompare(String(bv||''),'es');return (invoiceDirection==='asc'?delta:-delta)||String(a.id).localeCompare(String(b.id));}) : [];
-  return { metadata:{ version:'bi.workspace.v1',periodo:range,comparacion:previousRange,
-      actualizado_en:new Date().toISOString(),zona_horaria:'Europe/Madrid',alcance:'empresa autenticada; agregados antes de paginación',
+  const updatedAt=new Date().toISOString();
+  const selectedJourneyIds=new Set(filtered.flatMap(p=>(p.bi_legs||[]).map(l=>l.id)));
+  const unallocated=(source.reconciliation?.referencias_sin_conciliar||[]).filter(r=>selectedJourneyIds.has(r.viaje_id));
+  for (const [key,m] of Object.entries(economy.metricas)) {
+    const previousValue=previous.metricas[key]?.valor;
+    Object.assign(m,{fuente:key.includes('saldo')||key.includes('vencido')||key.includes('facturacion')?'facturas; estado fiscal y fecha de corte':'pedidos; viajes_operativos/viaje_costes si materializados',
+      periodo:range,updated_at:updatedAt,comparacion:{periodo:previousRange,valor_anterior:previousValue??null},
+      tendencia:m.valor!=null&&previousValue!=null?m.valor>previousValue?'sube':m.valor<previousValue?'baja':'estable':'no_calculable',
+      objetivo:key==='km_vacios_pct'?objective?.pct_km_vacio??null:null,
+      drill_down:{tipo:key.includes('saldo')||key.includes('vencido')?'facturas':'servicios'}});
+    if (['coste_directo','margen_directo','margen_km_total'].includes(key)) m.costes_incluidos='Costes de pedido y costes físicos conciliados; excluye registros con posible solape';
+  }
+  if(operations)for(const m of Object.values(operations.metricas)) Object.assign(m,{periodo:range,updated_at:updatedAt,comparacion:null,tendencia:'no_calculable',objetivo:null,drill_down:{tipo:'operaciones'}});
+  return { conciliacion_fisica:{costes_sin_conciliar:unallocated.reduce((n,r)=>n+r.importe,0),registros:unallocated,criterio:source.reconciliation?.criterio}, metadata:{ version:'bi.workspace.v1' ,periodo:range,comparacion:previousRange,
+      planner_autorizado:!!access.plannerAuthorized,actualizado_en:updatedAt,zona_horaria:'Europe/Madrid',alcance:'empresa autenticada; agregados antes de paginación',
       facturas_atribuibles:invoiceScope },
     filtros:{aplicados:filters,opciones:filterChoices(source,currentAll)},
     economia:economy, comparacion:comparison(economy,previous), evolucion:evolution(filtered,granularity),granularidad:granularity,

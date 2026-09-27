@@ -1,3 +1,5 @@
+import MultiCompanyAdmin from "./MultiCompanyAdmin";
+import IntegrationRegistryAdmin from "./IntegrationRegistryAdmin";
 import SupportInbox from "../components/SupportInbox";
 import CompanyProducts from "../planner/CompanyProducts";
 import { getBrandDisplayName } from "../branding";
@@ -1375,7 +1377,7 @@ function IntegracionesAdmin({ saFetchFn }) {
         Cada empresa utiliza la clave general o la propia según el modo guardado para cada proveedor.
       </div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-        {integrationTabs.map(([id, label]) => (
+        {[...integrationTabs,["registry","Registro verificable"]].map(([id, label]) => (
           <button
             key={id}
             onClick={()=>setIntegrationTab(id)}
@@ -1392,6 +1394,7 @@ function IntegracionesAdmin({ saFetchFn }) {
         ))}
       </div>
 
+      {integrationTab==="registry" && <IntegrationRegistryAdmin saFetchFn={saFetchFn} empresas={data?.empresas || []} />}
       <div style={{display:integrationTab==="salud" ? "block" : "none",background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
@@ -3142,6 +3145,7 @@ export default function SuperAdmin(){
   const navItems = [
     ["dashboard","Dashboard","DB"],
     ["empresas","Empresas","EM"],
+    ["multiempresas","Grupos y accesos","GR"],
     ["soporte","Soporte","SP"],
     ["salud","Implantación","SL"],
     ["integraciones","Integraciones","IN"],
@@ -3151,6 +3155,7 @@ export default function SuperAdmin(){
     ["config","Configuracion","CF"],
   ];
   const pageMeta = {
+    multiempresas:["Grupos y accesos","Membresías y permisos por sociedad"],
     dashboard:["Dashboard","Resumen general del entorno TransGest"],
     empresas:["Empresas","Gestion centralizada de clientes y suscripciones"],
     soporte:["Soporte","Solicitudes y conversaciones de las empresas"],
@@ -3318,6 +3323,7 @@ export default function SuperAdmin(){
         )}
 
         {/* Section */}
+        {tab==="multiempresas"&&<MultiCompanyAdmin saFetchFn={saFetch}/>}
         {tab==="empresas"&&(
           <div style={S.card}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:12,flexWrap:"wrap"}}>

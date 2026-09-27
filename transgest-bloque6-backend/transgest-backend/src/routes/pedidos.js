@@ -1,11 +1,17 @@
+const { WRITABLE_STATES, ACTIVE_STATES, assertTransportTransition, stateFromProgress } = require('../services/transportTransitions');
+const { readOperationalModel, materializeSimpleOrder } = require('../services/operationalModel');
 const { assertDriverWorkday } = require('../services/driverWorkday');
 const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
+const transportDocuments = require("../services/transportDocumentVersions");
+const orderInbox = require("../services/orderInbox");
 const express = require("express");
+const { syncOrderIncidents } = require('../services/agendaIncidents');
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
+const { hasRecordedCost } = require("../services/financialEconomics");
 const logger  = require("../services/logger");
 const crypto  = require("crypto");
 const zlib = require("zlib");
@@ -860,6 +866,7 @@ function normalizeChoferPasosPayload(value = {}) {
     "dcd_disponible",
   ];
   const next = {};
+  if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(v=>typeof v==='string'&&UUID_RE.test(v)).slice(0,100);
   for (const key of boolKeys) {
     if (source[key] !== undefined) next[key] = Boolean(source[key]);
   }
@@ -928,6 +935,12 @@ function normalizeChoferPasosPayload(value = {}) {
   }
   if(source.paradas && typeof source.paradas==='object') next.paradas=source.paradas;
   if(source.parada_id) next.parada_id=String(source.parada_id).slice(0,180);
+  if(source.parada_id){
+    if(source.incidencia_parada)next.incidencia_parada=String(source.incidencia_parada).trim().slice(0,3000);
+    if(source.client_operation_uuid)next.client_operation_uuid=String(source.client_operation_uuid);
+    if(source.observed_at)next.observed_at=String(source.observed_at);
+    if(source.event_location)next.event_location=source.event_location;
+  }
   return next;
 }
 
@@ -996,28 +1009,6 @@ function minutosEntreIso(a, b) {
   const end = new Date(b).getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
   return Math.round((end - start) / 60000);
-}
-
-function buildLocalDateTime(fecha, hora = "00:00") {
-  const date = normalizePedidoDate(fecha);
-  if (!date) return null;
-  const time = normalizePedidoTime(hora) || "00:00";
-  const d = new Date(`${date}T${time}:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function addMinutesDate(date, minutes = 0) {
-  if (!date || Number.isNaN(date.getTime())) return null;
-  return new Date(date.getTime() + Number(minutes || 0) * 60000);
-}
-
-function splitPedidoDateTime(date) {
-  if (!date || Number.isNaN(date.getTime())) return { fecha: null, hora: null };
-  const pad = n => String(n).padStart(2, "0");
-  return {
-    fecha: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    hora: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
-  };
 }
 
 async function notificarGestionPedido(empresaId, tipo, titulo, mensaje, data = {}, createdBy = null) {
@@ -1753,14 +1744,15 @@ async function savePedidoChoferPasos({
   patch = {},
   actorTipo = "sistema",
   actorId = null,
+  authorize = null,
 }) {
   await ensureColaboradorWorkflowSchema();
   let stopResult=null;
   if(patch.parada_id){
-    const result=await require('../services/driverStops').saveStop(db,{pedidoId,empresaId,choferId,patch});
+    const result=await require('../services/driverStops').saveStop(db,{pedidoId,empresaId,choferId,patch,actorId,authorize});
+    if(result.idempotent)return result.data;
     await logPedidoEvento(pedidoId,empresaId,'chofer_parada.actualizada',{parada_id:patch.parada_id,parada:result.data.paradas[patch.parada_id]},actorTipo,actorId);
     if(result.state==='entregado')await programarAutomatismosEntrega(pedidoId,empresaId,actorId,{});
-    if(result.idempotent)return result.data;
     stopResult=result;
   }
   const current = await getPedidoChoferPasos(pedidoId, empresaId);
@@ -1800,14 +1792,8 @@ async function savePedidoChoferPasos({
       params.push(value);
       updates.push(`${sql}=$${params.length}`);
     };
-    let nextEstado = null;
-    if (patch.descarga_ok || nextData.descarga_ok) nextEstado = "entregado";
-    else if (patch.descarga_iniciada || nextData.descarga_iniciada) nextEstado = "descarga";
-    else if (patch.posicionado_descarga || patch.aviso_espera_descarga || nextData.posicionado_descarga || nextData.aviso_espera_descarga) nextEstado = "espera_descarga";
-    else if (patch.viaje_iniciado || patch.carga_ok || nextData.viaje_iniciado || nextData.carga_ok) nextEstado = "en_curso";
-    else if (patch.carga_iniciada || nextData.carga_iniciada) nextEstado = "cargando";
-    else if (patch.aviso_espera_carga || nextData.aviso_espera_carga) nextEstado = "espera_carga";
-    if (nextEstado && !["cancelado", "entregado"].includes(String(pedido.estado || "").toLowerCase())) {
+    const nextEstado = stateFromProgress(nextData, { deliveryComplete: nextData.descarga_ok === true });
+    if (nextEstado && !["cancelado", "entregado", "facturado"].includes(String(pedido.estado || "").toLowerCase())) {
       await assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino: nextEstado });
       addUpdate("estado", nextEstado);
     }
@@ -1822,22 +1808,11 @@ async function savePedidoChoferPasos({
       if (referenciaReal) addUpdate("referencia_cliente", referenciaReal);
     }
 
-    const cargaPlan = buildLocalDateTime(pedido.fecha_carga, pedido.hora_carga || "00:00");
-    const descargaPlan = buildLocalDateTime(pedido.fecha_descarga || pedido.fecha_entrega, pedido.hora_descarga || "00:00");
-    const cargaReal = nextData.carga_iniciada_at ? new Date(nextData.carga_iniciada_at) : null;
-    const referenciaRetraso = cargaReal && Number.isFinite(cargaReal.getTime()) ? cargaReal : new Date();
-    const debeEvaluarRetraso = cargaPlan && descargaPlan && (
-      patch.carga_iniciada || patch.carga_ok || patch.viaje_iniciado || patch.posicionado_descarga || patch.descarga_iniciada || patch.descarga_ok || !nextData.carga_iniciada
-    );
-    const retrasoMin = debeEvaluarRetraso ? minutosEntreIso(cargaPlan.toISOString(), referenciaRetraso.toISOString()) : 0;
-    if (retrasoMin > 5) {
-      const nuevaDescarga = splitPedidoDateTime(addMinutesDate(descargaPlan, retrasoMin));
-      if (nuevaDescarga.fecha) {
-        if (pedido.fecha_descarga) addUpdate("fecha_descarga", nuevaDescarga.fecha);
-        else addUpdate("fecha_entrega", nuevaDescarga.fecha);
-      }
-      if (nuevaDescarga.hora) addUpdate("hora_descarga", nuevaDescarga.hora);
-    }
+    // Driver progress must never rewrite the date agreed with the customer.
+    // A forecast needs its own explicitly sourced field and is not inferred
+    // from the planned date using the application server's local timezone.
+    if (patch.carga_ok) updates.push("carga_real_at=COALESCE(carga_real_at,NOW())");
+    if (patch.descarga_ok) updates.push("descarga_real_at=COALESCE(descarga_real_at,NOW())");
 
     if (updates.length) {
       params.push(pedidoId, empresaId);
@@ -1847,7 +1822,8 @@ async function savePedidoChoferPasos({
       ).catch(e => logger.warn("No se pudo sincronizar pedido desde pasos de chofer:", e.message));
       await logPedidoEvento(pedidoId, empresaId, "pedido.sincronizado_app_chofer", {
         estado: nextEstado,
-        retraso_min: retrasoMin > 5 ? retrasoMin : 0,
+        carga_real_registrada: !!patch.carga_ok,
+        descarga_real_registrada: !!patch.descarga_ok,
       }, actorTipo, actorId);
       if (nextEstado === "entregado") {
         await aplicarAutomatismosEntrega(pedidoId, empresaId, actorId || null, {}).catch(e => logger.warn("No se pudo aplicar automatismo de entrega desde app chofer:", e.message));
@@ -1957,6 +1933,8 @@ async function savePedidoChoferPasos({
     await guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location: patch.carga_ubicacion, actorId, paradaId:patch.parada_id })
       .catch(e => logger.warn("No se pudo guardar ubicacion de carga desde app chofer:", e.message));
   }
+  await syncOrderIncidents({ empresaId, pedidoId })
+    .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda desde app chofer:", e.message));
   return stopResult?.data || nextData;
 }
 
@@ -1992,7 +1970,7 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
            co.id AS colaborador_ref_id, co.nombre AS colaborador_nombre, co.cif AS colaborador_cif, co.email AS colaborador_email, co.telefono AS colaborador_telefono, co.contacto_nombre AS colaborador_contacto,
            TRIM(BOTH ' ' FROM CONCAT_WS(' ', co.calle, co.num_ext)) AS colaborador_direccion, co.codigo_postal AS colaborador_cp, co.ciudad AS colaborador_ciudad, co.provincia AS colaborador_provincia, co.pais AS colaborador_pais
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
     LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
     LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
@@ -2007,7 +1985,7 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
            v.matricula AS veh_matricula, r.matricula AS rem_matricula,
            NULL AS colaborador_ref_id, NULL AS colaborador_nombre, NULL AS colaborador_cif, NULL AS colaborador_email, NULL AS colaborador_telefono, NULL AS colaborador_contacto, NULL AS colaborador_direccion, NULL AS colaborador_cp, NULL AS colaborador_ciudad, NULL AS colaborador_provincia, NULL AS colaborador_pais
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
     LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
     LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN vehiculos r ON r.id=COALESCE(p.remolque_id, v.remolque_id) AND r.empresa_id=p.empresa_id
@@ -2184,9 +2162,29 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
   const repositorio = await getDocumentoControlRepositorioByPedido(ctx.pedido.id, empresaId).catch(() => null);
   const regulatoryCore = await getPedidoRegulatoryCoreSummary(ctx.pedido.id, empresaId).catch(() => null);
+  const versions = await transportDocuments.list(db,empresaId,ctx.pedido.id);
+  const shipments = (await db.query('SELECT id,referencia FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at,id',[empresaId,ctx.pedido.id])).rows;
+  const current = versions.find(v=>v.estado==='activa');
+  if (current) {
+    payload.documento = {...current.payload.documento,sistema:'qr_url'};
+    payload.status = {...payload.status,ready:true,summary:`DeCA ${current.source==='external'?'externo':'TransGest'} · versión ${current.version}`,faltantes:[],version_id:current.id};
+    payload.remision = {...payload.remision,download_url:current.public_url+'&download=1'};
+  } else if (repositorio?.pdf_base64) {
+    payload.documento = {...(repositorio.payload?.documento || payload.documento),soporte_url:'',qr_url:''};
+    payload.status = {...payload.status,ready:false,summary:'Original anterior conservado en el expediente privado. Emite una versión administrativa para su consulta pública.'};
+    payload.remision = {...payload.remision,download_url:''};
+  } else {
+    payload.documento = {...payload.documento,soporte_url:'',qr_url:''};
+    payload.status = {...payload.status,ready:false,summary:'DeCA pendiente de emitir o adjuntar antes del transporte.',faltantes:transportDocuments.requiredFields(payload.documento)};
+    payload.remision = {...payload.remision,download_url:''};
+  }
   const qrDataUrl = await buildDocumentoControlQrDataUrl(payload.documento).catch(() => "");
   return {
     ...payload,
+    versiones: versions.map(({payload: archivedPayload,...metadata})=>metadata),
+    envios: shipments,
+    consolidacion_permitida:ctx.empresa?.documento_control?.permitir_consolidado===true,
+    puntos_envio: require('../services/driverStops').driverStops(ctx.pedido).map(p=>({id:p.id,tipo:p.tipo,label:p.label})),
     qr: {
       url: payload.documento?.qr_url || payload.documento?.soporte_url || "",
       data_url: qrDataUrl,
@@ -2361,140 +2359,23 @@ async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userI
   return rows[0] || null;
 }
 
-async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado" }) {
-  await ensureDocumentoControlRepositorioSchema();
-  const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
-  if (!ctx?.pedido) return null;
-  const payload = buildDocumentoControlPayload({
-    empresaId,
-    pedido: ctx.pedido,
-    empresa: ctx.empresa,
-    cliente: ctx.cliente,
-    colaborador: ctx.colaborador,
-    appBaseUrl,
-  });
-  const expedienteData = await getPedidoDocumentoControlExpedienteData(ctx.pedido.id, empresaId);
-  attachDocumentoControlAnexos(payload, expedienteData.documentos);
-  const postSignatureIntegrity = buildFirmaPostSignatureIntegrity(ctx.pedido, ctx.pedido?.firma_evidencia || null);
-  const expediente = buildDocumentoControlExpediente(payload, {
-    ...expedienteData,
-    firma: {
-      firma_fecha: ctx.pedido?.firma_fecha || null,
-      firma_nombre: ctx.pedido?.firma_nombre || "",
-      firma_hash: ctx.pedido?.firma_hash || "",
-      firma_evidencia: ctx.pedido?.firma_evidencia || null,
-    },
-    postSignatureIntegrity,
-  });
-  const exportData = buildDocumentoControlStructuredExport(payload);
-  const html = await buildDocumentoControlHtml({
-    documento: payload.documento,
-    empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-    generatedAt: new Date().toISOString(),
-    autoPrint: false,
-  });
-  const generatedAt = new Date().toISOString();
-  const pdf = await generateDocumentoControlPdf({
-    documento: payload.documento,
-    empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-    generatedAt,
-  });
-  const payloadHash = sha256Hex(stableJson({ payload, expediente, exportData }));
-  const htmlHash = sha256Hex(html);
-  const filename = buildDocumentoControlFilename(payload.documento);
-  const exportFilename = buildDocumentoControlExportFilename(payload.documento);
-  const publicExpiresAt = buildDocumentoControlPublicExpiresAt(ctx.pedido);
-  const { rows } = await db.query(`
-    INSERT INTO documento_control_repositorio
-      (empresa_id,pedido_id,codigo_control,pedido_numero,cliente_nombre,estado,activo,payload,expediente,export_json,html,filename,pdf_base64,pdf_mime,pdf_filename,pdf_hash_sha256,public_activo,public_expires_at,created_metadata,updated_metadata,export_filename,payload_hash_sha256,html_hash_sha256,archivado_at,archivado_por,retencion_minima_hasta,retencion_politica)
-    VALUES
-      ($1,$2,$3,$4,$5,'archivado',false,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13,$14,true,$15,$16::jsonb,$16::jsonb,$17,$18,$19,NOW(),$20,(CURRENT_DATE + INTERVAL '1 year')::date,'minimo_1_ano')
-    ON CONFLICT (empresa_id,pedido_id)
-    DO UPDATE SET
-      codigo_control=EXCLUDED.codigo_control,
-      pedido_numero=EXCLUDED.pedido_numero,
-      cliente_nombre=EXCLUDED.cliente_nombre,
-      estado='archivado',
-      activo=false,
-      payload=EXCLUDED.payload,
-      expediente=EXCLUDED.expediente,
-      export_json=EXCLUDED.export_json,
-      html=EXCLUDED.html,
-      filename=EXCLUDED.filename,
-      pdf_base64=EXCLUDED.pdf_base64,
-      pdf_mime=EXCLUDED.pdf_mime,
-      pdf_filename=EXCLUDED.pdf_filename,
-      pdf_hash_sha256=EXCLUDED.pdf_hash_sha256,
-      public_activo=CASE
-        WHEN documento_control_repositorio.public_desactivado_at IS NULL THEN true
-        ELSE documento_control_repositorio.public_activo
-      END,
-      public_expires_at=GREATEST(COALESCE(documento_control_repositorio.public_expires_at, EXCLUDED.public_expires_at), EXCLUDED.public_expires_at),
-      updated_metadata=EXCLUDED.updated_metadata,
-      export_filename=EXCLUDED.export_filename,
-      payload_hash_sha256=EXCLUDED.payload_hash_sha256,
-      html_hash_sha256=EXCLUDED.html_hash_sha256,
-      archivado_at=COALESCE(documento_control_repositorio.archivado_at, NOW()),
-      archivado_por=COALESCE(documento_control_repositorio.archivado_por, EXCLUDED.archivado_por),
-      retencion_minima_hasta=COALESCE(documento_control_repositorio.retencion_minima_hasta, EXCLUDED.retencion_minima_hasta),
-      retencion_politica='minimo_1_ano',
-      updated_at=NOW()
-    RETURNING id,empresa_id,pedido_id,codigo_control,estado,activo,filename,pdf_filename,payload_hash_sha256,html_hash_sha256,pdf_hash_sha256,public_activo,public_expires_at,archivado_at,retencion_minima_hasta
-  `, [
-    empresaId,
-    pedidoId,
-    payload.documento?.codigo_control || "",
-    ctx.pedido?.numero || "",
-    ctx.cliente?.nombre || ctx.pedido?.cliente_nombre || "",
-    JSON.stringify(payload),
-    JSON.stringify(expediente),
-    JSON.stringify(exportData),
-    html,
-    filename,
-    pdf.base64,
-    pdf.mime,
-    pdf.filename,
-    pdf.hash_sha256,
-    publicExpiresAt,
-    JSON.stringify(pdf.metadata || {}),
-    exportFilename,
-    payloadHash,
-    htmlHash,
-    userId || null,
-  ]);
-  const repo = rows[0] || null;
-  if (repo) {
-    await syncPedidoRegulatoryCore({
-      empresaId,
-      pedidoId,
-      payload,
-      structuredExport: exportData,
-      repository: repo,
-      userId: userId || null,
-      reason: motivo,
-    }).catch(e => logger.warn("No se pudo sincronizar nucleo regulatorio:", e.message));
-    await insertDocumentoControlRepoHistory(repo, {
-      motivo,
-      pdf_metadata: pdf.metadata || {},
-      public_expires_at: repo.public_expires_at || publicExpiresAt,
-      retencion_minima_hasta: repo.retencion_minima_hasta,
-    }, userId || null, "archivar").catch(() => {});
-    await logPedidoEvento(pedidoId, empresaId, "documento_control.archivado", {
-      motivo,
-      repositorio_id: repo.id,
-      codigo_control: repo.codigo_control,
-      estado: repo.estado,
-      activo: repo.activo,
-      payload_hash_sha256: repo.payload_hash_sha256,
-      html_hash_sha256: repo.html_hash_sha256,
-      pdf_hash_sha256: repo.pdf_hash_sha256,
-      public_activo: repo.public_activo,
-      public_expires_at: repo.public_expires_at,
-      retencion_minima_hasta: repo.retencion_minima_hasta,
-      retencion_politica: "minimo_1_ano",
-    }, "sistema", userId || null).catch(() => {});
+async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null }) {
+  // Signatures, uploads and closing a journey must never regenerate its DeCA.
+  const versions = await transportDocuments.list(db, empresaId, pedidoId);
+  if (!["generacion_manual", "creacion_app_chofer_dcd"].includes(motivo)) {
+    if (motivo === "viaje_finalizado" && versions.length) {
+      await db.query(`INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,created_by,reason)
+        SELECT d.empresa_id,d.id,'service_completed',p.descarga_real_at,$3,'Cierre registrado del servicio'
+        FROM transport_document_versions d JOIN pedidos p ON p.empresa_id=d.empresa_id AND p.id=d.pedido_id
+        WHERE d.empresa_id=$1 AND d.pedido_id=$2 AND p.descarga_real_at IS NOT NULL
+          AND NOT EXISTS(SELECT 1 FROM transport_document_events e WHERE e.empresa_id=d.empresa_id AND e.document_id=d.id AND e.event='service_completed')`, [empresaId,pedidoId,userId]);
+    }
+    return versions[0] || null;
   }
-  return repo;
+  const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
+  if (!ctx) return null;
+  const payload = buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl});
+  return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:appBaseUrl,expectedUpdatedAt:ctx.pedido.updated_at});
 }
 
 async function ensurePedidoOrdenCargaSchema() {
@@ -3076,10 +2957,10 @@ async function procesarPedidosEntregaVencida() {
        AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
        AND COALESCE(p.pendiente_completar,false) = false
        AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
-       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= CURRENT_DATE - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= (NOW() AT TIME ZONE 'Europe/Madrid')::date - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
        -- Solo vencidos recientes: evita marcar datos historicos antiguos de golpe.
-       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= CURRENT_DATE - 60
-     RETURNING p.id
+       AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
+     RETURNING p.id, p.empresa_id
   `).catch(e => { logger.warn("Auto-incidencia por entrega vencida fallo:", e.message); return { rows: [] }; });
   return { marcados: rows.length };
 }
@@ -3091,6 +2972,25 @@ function startPedidosVencidosScheduler() {
   const run = async () => {
     const r = await procesarPedidosEntregaVencida();
     if (r.marcados) logger.info(`[Incidencias] Auto-incidencia entrega vencida: ${r.marcados} pedido(s) marcados`);
+    const candidates = await db.query(`
+      SELECT p.id, p.empresa_id FROM pedidos p JOIN empresas e ON e.id=p.empresa_id
+       WHERE (COALESCE(e.estado,'activo')='activo'
+         AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
+         AND p.estado::text NOT IN ('entregado','facturado','cancelado')
+         AND ((p.fecha_carga >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
+               AND p.fecha_carga < (NOW() AT TIME ZONE 'Europe/Madrid')::date)
+           OR (COALESCE(p.fecha_entrega,p.fecha_descarga) >= (NOW() AT TIME ZONE 'Europe/Madrid')::date - 60
+               AND COALESCE(p.fecha_entrega,p.fecha_descarga) < (NOW() AT TIME ZONE 'Europe/Madrid')::date)))
+          OR EXISTS (SELECT 1 FROM agenda_eventos a WHERE a.empresa_id=p.empresa_id
+              AND a.source_type='pedido' AND a.source_id=p.id::text AND a.resolved_at IS NULL)
+       ORDER BY p.empresa_id, p.id
+    `).catch(e => { logger.warn("No se pudieron leer pedidos para incidencias de agenda:", e.message); return { rows: [] }; });
+    for (let start = 0; start < candidates.rows.length; start += 8) {
+      await Promise.all(candidates.rows.slice(start, start + 8).map(p =>
+        syncOrderIncidents({ empresaId:p.empresa_id, pedidoId:p.id })
+          .catch(e => logger.warn("No se pudo reconciliar incidencia de agenda:", e.message))
+      ));
+    }
   };
   try {
     const cron = require("node-cron");
@@ -3166,44 +3066,14 @@ function colaboradorPage(title, body) {
 }
 
 async function getColaboradorDocumentoControlPayload(req, pedidoId, empresaId) {
-  try {
-    const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
-    if (!ctx?.pedido) return null;
-    return buildDocumentoControlPayload({
-      empresaId,
-      pedido: ctx.pedido,
-      empresa: ctx.empresa,
-      cliente: ctx.cliente,
-      colaborador: ctx.colaborador,
-      appBaseUrl: publicBaseUrl(req),
-    });
-  } catch (error) {
-    logger.warn("No se pudo preparar el documento de control para colaborador:", error.message);
-    return null;
-  }
+  return require('../services/supplierTransportDocuments').summary(db,empresaId,pedidoId);
 }
 
 function renderColaboradorDocumentoControlBox(docControl) {
-  if (!docControl?.documento) return "";
-  const supportFromDownload = String(docControl.remision?.download_url || "").replace(/([?&])download=1\b/, "").replace(/[?&]$/, "");
-  const soporteUrl = docControl.soporte_url || docControl.documento?.url_publica || supportFromDownload || "";
-  const downloadUrl = docControl.remision?.download_url || soporteUrl;
-  const faltantes = Array.isArray(docControl.status?.faltantes) ? docControl.status.faltantes.slice(0, 4) : [];
-  return `
-    <div class="card">
-      <h2>Documento de control digital</h2>
-      <p class="meta"><strong>${htmlEscape(docControl.remision?.etiqueta || docControl.documento?.sistema_label || "Soporte documental")}</strong></p>
-      <p class="meta">Codigo: <strong>${htmlEscape(docControl.documento.codigo_control || "-")}</strong></p>
-      ${docControl.status?.ready
-        ? `<div class="ok">El soporte documental del viaje ya esta disponible para consulta e impresion.</div>`
-        : `<div class="warn">Aun faltan datos por completar en el documento.${faltantes.length ? ` Revisar: ${htmlEscape(faltantes.join(", "))}.` : ""}</div>`}
-      <div class="actions">
-        ${soporteUrl ? `<a class="btn" href="${htmlEscape(soporteUrl)}" target="_blank" rel="noreferrer">Abrir soporte</a>` : ""}
-        ${downloadUrl ? `<a class="btn" href="${htmlEscape(downloadUrl)}" target="_blank" rel="noreferrer">Descargar soporte</a>` : ""}
-      </div>
-      ${docControl.remision?.instrucciones ? `<p class="muted">${htmlEscape(docControl.remision.instrucciones)}</p>` : ""}
-    </div>
-  `;
+  const versions=docControl?.versiones||[];
+  return '<div class="card"><h2>DeCA originales vigentes</h2>' + (versions.length
+    ? versions.map(v=>`<p><a class="btn" target="_blank" rel="noopener noreferrer" href="${htmlEscape(v.url)}">Abrir DeCA v${htmlEscape(v.version)} · ${htmlEscape(v.filename)}</a></p>`).join('')
+    : '<p class="warn">Tráfico debe emitir o adjuntar el DeCA antes de salir.</p>')+'</div>';
 }
 
 function getColaboradorPrecioTonelada(data) {
@@ -3241,6 +3111,7 @@ function renderColaboradorConfirmacionPreview(data, docControl) {
 
 function renderColaboradorPedidoBox(data, { mostrarPrecio = false } = {}) {
   if (!data) return "";
+  const measure=(value,unit)=>value==null||value===''||!Number.isFinite(Number(value))?'':Number(value).toLocaleString('es-ES',{maximumFractionDigits:3})+' '+unit;
   const precioTonelada = mostrarPrecio ? getColaboradorPrecioTonelada(data) : null;
   const precioCerrado = mostrarPrecio && !precioTonelada ? getColaboradorPrecioCerradoTonelada(data) : null;
   const precioRow = precioTonelada
@@ -3261,8 +3132,8 @@ function renderColaboradorPedidoBox(data, { mostrarPrecio = false } = {}) {
         <div class="f"><div class="fl">Carga</div><div class="fv">${htmlEscape([data.fecha_carga, data.hora_carga || data.ventana_carga].filter(Boolean).join(" ") || "-")}</div></div>
         <div class="f"><div class="fl">Descarga</div><div class="fv">${htmlEscape([data.fecha_descarga || data.fecha_entrega, data.hora_descarga || data.ventana_descarga].filter(Boolean).join(" ") || "-")}</div></div>
         <div class="f"><div class="fl">Mercancia</div><div class="fv">${htmlEscape(data.mercancia || "-")}</div></div>
-        <div class="f"><div class="fl">Peso / bultos</div><div class="fv">${htmlEscape([data.peso_kg ? `${data.peso_kg} kg` : "", data.bultos ? `${data.bultos} bultos` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
-        <div class="f"><div class="fl">M3 / ML</div><div class="fv">${htmlEscape([data.volumen ? `${data.volumen} m3` : "", data.metros_lineales ? `${data.metros_lineales} ML` : ""].filter(Boolean).join(" - ") || "-")}</div></div>
+        <div class="f"><div class="fl">Peso / bultos</div><div class="fv">${htmlEscape([measure(data.peso_kg,'kg'),measure(data.bultos,'bultos')].filter(Boolean).join(" - ") || "-")}</div></div>
+        <div class="f"><div class="fl">M3 / ML</div><div class="fv">${htmlEscape([measure(data.volumen,'m³'),measure(data.metros_lineales,'ML')].filter(Boolean).join(" - ") || "-")}</div></div>
         <div class="f"><div class="fl">Tractora</div><div class="fv">${htmlEscape(data.matricula_colaborador || "Pendiente")}</div></div>
         <div class="f"><div class="fl">Remolque</div><div class="fv">${htmlEscape(data.remolque_matricula_colaborador || "-")}</div></div>
         ${precioRow}
@@ -3477,6 +3348,7 @@ router.post("/colaborador/carga/:token", async (req, res) => {
       UPDATE pedidos
       SET estado='en_curso',
           colaborador_carga_confirmada_at=NOW(),
+          carga_real_at=COALESCE(carga_real_at,NOW()),
           notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
       WHERE id=$2 AND empresa_id=$3
     `, [notas ? `CARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
@@ -3507,11 +3379,13 @@ router.get("/colaborador/camino/:token", async (req, res) => {
       ${renderColaboradorPedidoBox(data)}
       ${renderColaboradorDocumentoControlBox(docControl)}
       <form method="post">
+        <input type="hidden" name="document_versions" value="${htmlEscape(JSON.stringify((docControl?.versiones||[]).map(v=>v.id)))}">
+        <label><input style="width:auto" type="checkbox" name="deca_revisado" value="true" required> He revisado los DeCA vigentes y los llevo disponibles</label>
         <label>Observacion durante el viaje</label><textarea name="notas" rows="3"></textarea>
         <button type="submit">Marcar como en camino</button>
       </form>
     `));
-  } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
+  } catch(e) { res.status(e.status||500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
 router.post("/colaborador/camino/:token", async (req, res) => {
@@ -3519,27 +3393,20 @@ router.post("/colaborador/camino/:token", async (req, res) => {
     const data = await getColaboradorTokenData(req.params.token, "camino");
     if (!data) return res.status(404).send(colaboradorPage("Enlace no disponible", `<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>`));
     const notas = String(req.body.notas || "").trim();
-    await db.query(`
-      UPDATE pedidos
-      SET estado='en_curso',
-          colaborador_en_camino_confirmada_at=NOW(),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
-      WHERE id=$2 AND empresa_id=$3
-    `, [notas ? `EN CAMINO COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
-    await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.en_camino_confirmado", { notas: notas || null }, "colaborador");
-    await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
+    let versions;try{versions=JSON.parse(req.body.document_versions||'[]');}catch{versions=[];}
+    const departure=await require('../services/supplierTransportDocuments').emailDeparture(db,{tokenHash:hashToken(req.params.token),notes:notas,body:{deca_revisado:req.body.deca_revisado==='true',document_versions:versions}});
 
     const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
-    if (pedido?.colaborador_email) {
+    if (!departure.replayed && pedido?.colaborador_email) {
       const tokenDescarga = await createColaboradorToken(pedido, "descarga", 720);
       await sendColaboradorEmail(req, pedido, "descarga", tokenDescarga).catch(e => logger.error("Email colaborador descarga:", e.message));
     }
     res.send(colaboradorPage("Viaje en camino", `
       <h1>Viaje en camino</h1>
-      <div class="ok">Hemos registrado que el transporte va en camino. Se ha enviado el enlace para confirmar descarga y subir albaranes.</div>
+      <div class="ok">Hemos registrado que el transporte va en camino. Conserva los DeCA revisados durante el viaje.</div>
       ${renderColaboradorAcuseBox("Acuse de salida hacia destino", data, { notas })}
     `));
-  } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
+  } catch(e) { res.status(e.status||500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
 router.get("/colaborador/descarga/:token", async (req, res) => {
@@ -3594,6 +3461,7 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
       UPDATE pedidos
       SET estado='entregado',
           colaborador_descarga_confirmada_at=NOW(),
+          descarga_real_at=COALESCE(descarga_real_at,NOW()),
           fecha_entrega=COALESCE(fecha_entrega, CURRENT_DATE),
           notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
       WHERE id=$2 AND empresa_id=$3
@@ -3629,132 +3497,56 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get("/public/documento-control/:empresaId/:pedidoId", async (req, res) => {
+function sendTransportOriginal(res, bytes, filename, hash, download = false) {
+  res.setHeader('X-Robots-Tag','noindex, nofollow, noarchive');
+  res.setHeader('Cache-Control','private, no-store');
+  res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('Content-Type','application/pdf');
+  res.setHeader('Content-Disposition',`${download?'attachment':'inline'}; filename="${String(filename||'DeCA.pdf').replace(/[^a-zA-Z0-9_.-]/g,'_')}"`);
+  res.setHeader('X-Document-SHA256',hash);
+  return res.send(bytes);
+}
+router.get('/public/documento-version/:versionId', async (req,res) => {
   try {
-    const empresaId = req.params.empresaId;
-    const pedidoId = req.params.pedidoId;
-    if (!verifyPublicToken({ empresaId, pedidoId, token: req.query.token })) {
-      return res.status(403).send("Token no valido");
-    }
-    if (!verifyPublicVerificationCode({ empresaId, pedidoId, code: req.query.verify })) {
-      return res.status(403).send("Codigo de verificacion no valido");
-    }
-    const archived = await getDocumentoControlRepositorioByPedido(pedidoId, empresaId).catch(() => null);
-    const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
-    if (!ctx?.pedido) return res.status(404).send("Pedido no encontrado");
-    const isDownload = ["1", "true", "yes"].includes(String(req.query.download || "").toLowerCase());
-    const isPrint = ["1", "true", "yes"].includes(String(req.query.print || "").toLowerCase());
-    const wantsHtml = isPrint || ["html", "1", "true"].includes(String(req.query.html || req.query.format || "").toLowerCase());
-    if (archived?.html || archived?.pdf_base64) {
-      const publicExpired = archived.public_expires_at && new Date(archived.public_expires_at).getTime() < Date.now();
-      if (archived.public_activo === false || publicExpired) {
-        await logPedidoEvento(pedidoId, empresaId, "documento_control.publico_bloqueado", {
-          source: "public_documento_control_repositorio",
-          repositorio_id: archived.id,
-          codigo_control: archived.codigo_control || null,
-          public_activo: archived.public_activo,
-          public_expires_at: archived.public_expires_at,
-          motivo: archived.public_activo === false ? "desactivado" : "caducado",
-          user_agent: String(req.get("user-agent") || "").slice(0, 180),
-        }, "publico").catch(() => {});
-        return res.status(410).send("La descarga publica del DeCA ya no esta activa. Solicita el documento a la empresa transportista.");
-      }
-      const eventoArchivado = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
-      await logPedidoEvento(pedidoId, empresaId, eventoArchivado, {
-        source: "public_documento_control_repositorio",
-        repositorio_id: archived.id,
-        codigo_control: archived.codigo_control || null,
-        archived: true,
-        estado_repositorio: archived.estado,
-        activo: archived.activo,
-        print: isPrint,
-        download: isDownload,
-        user_agent: String(req.get("user-agent") || "").slice(0, 180),
-      }, "publico");
-      res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-      res.setHeader("Cache-Control", "private, no-store");
-      res.setHeader("X-DCD-Repository-State", archived.estado || "archivado");
-      res.setHeader("X-DCD-Archived", "true");
-      res.setHeader("X-DCD-Public-Expires-At", archived.public_expires_at || "");
-      const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
-      const livePayload = buildDocumentoControlPublicPayload(attachDocumentoControlAnexos(buildDocumentoControlPayload({
-        empresaId,
-        pedido: ctx.pedido,
-        empresa: ctx.empresa,
-        cliente: ctx.cliente,
-        colaborador: ctx.colaborador,
-        appBaseUrl: publicBaseUrl(req),
-      }), expedienteData.documentos));
-      if (!wantsHtml) {
-        const pdf = await generateDocumentoControlPdf({
-          documento: livePayload.documento,
-          empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-          generatedAt: new Date().toISOString(),
-          publicView: true,
-        });
-        res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
-        res.setHeader("Content-Type", pdf.mime);
-        return res.send(pdf.buffer);
-      }
-      if (isDownload) {
-        res.setHeader("Content-Disposition", `attachment; filename="${archived.filename || "documento-control.html"}"`);
-      }
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(await buildDocumentoControlHtml({
-        documento: livePayload.documento,
-        empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-        generatedAt: new Date().toISOString(),
-        autoPrint: isPrint,
-        publicView: true,
-      }));
-    }
-    const expedienteData = await getPedidoDocumentoControlExpedienteData(pedidoId, empresaId);
-    const payload = buildDocumentoControlPublicPayload(attachDocumentoControlAnexos(buildDocumentoControlPayload({
-      empresaId,
-      pedido: ctx.pedido,
-      empresa: ctx.empresa,
-      cliente: ctx.cliente,
-      colaborador: ctx.colaborador,
-      appBaseUrl: publicBaseUrl(req),
-    }), expedienteData.documentos));
-    const eventoDcd = isDownload ? "documento_control.descargado" : isPrint ? "documento_control.impreso" : "documento_control.consultado";
-    await logPedidoEvento(pedidoId, empresaId, eventoDcd, {
-      source: "public_documento_control",
-      codigo_control: payload.documento?.codigo_control || null,
-      print: isPrint,
-      download: isDownload,
-      user_agent: String(req.get("user-agent") || "").slice(0, 180),
-    }, "publico");
-    if (isDownload) {
-      res.setHeader("Content-Disposition", `attachment; filename="${buildDocumentoControlFilename(payload.documento)}"`);
-    }
-    res.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
-    res.setHeader("Cache-Control", "private, no-store");
-    if (!wantsHtml) {
-      const pdf = await generateDocumentoControlPdf({
-        documento: payload.documento,
-        empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-        generatedAt: new Date().toISOString(),
-        publicView: true,
-      });
-      res.setHeader("Content-Disposition", `${isDownload ? "attachment" : "inline"}; filename="${pdf.filename}"`);
-      res.setHeader("Content-Type", pdf.mime);
-      return res.send(pdf.buffer);
-    }
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(await buildDocumentoControlHtml({
-      documento: payload.documento,
-      empresaNombre: ctx.empresa?.razon_social || ctx.empresa?.nombre || "TransGest TMS",
-      generatedAt: new Date().toISOString(),
-      autoPrint: isPrint,
-      publicView: true,
-    }));
-  } catch (e) {
-    res.status(500).send(e.message);
-  }
+    const row = await transportDocuments.publicOriginal(db,req.params.versionId,req.query.token);
+    if (!row) return res.status(404).send('Documento no encontrado');
+    return sendTransportOriginal(res,row.pdf,row.filename,row.pdf_hash,req.query.download==='1');
+  } catch(e) { res.status(e.status||500).send(e.status?e.message:'No se pudo consultar el original'); }
+});
+router.get("/public/documento-control/:empresaId/:pedidoId", async (req,res) => {
+  try {
+    const {empresaId,pedidoId}=req.params;
+    if (!verifyPublicToken({empresaId,pedidoId,token:req.query.token}) || !verifyPublicVerificationCode({empresaId,pedidoId,code:req.query.verify})) return res.status(403).send('Enlace no válido');
+    const archived = await getDocumentoControlRepositorioByPedido(pedidoId,empresaId);
+    if (!archived?.pdf_base64) return res.status(404).send('No existe un PDF original archivado. Tráfico debe emitir una versión.');
+    // The legacy archive contains the private PDF (payment terms and internal
+    // checklist). It must not become public when replacing live regeneration.
+    // Keep its original available to the company; issue a new administrative
+    // version, with its own QR, for public access.
+    return res.status(410).send('Este archivo anterior se conserva en el expediente privado. Solicita a la empresa la versión administrativa con su nuevo QR.');
+  } catch(e) { res.status(e.status||500).send('No se pudo consultar el original'); }
 });
 
 router.use(authenticate);
+
+// Office-only graph: shared journeys may contain several customers/orders.
+// Driver/customer views must use their existing, individually authorized APIs.
+router.get('/:id/operativa', requireRole('gerente','trafico','administrativo','contable','visualizador'), async (req,res,next)=>{
+  try {
+    if(!UUID_RE.test(req.params.id))return res.status(400).json({error:'Identificador de pedido no válido'});
+    res.set('Cache-Control','private, no-store');
+    res.json(await readOperationalModel(db,req.user.empresa_id,req.params.id));
+  } catch(error){next(error);}
+});
+router.post('/:id/operativa', GESTION_PEDIDOS_ESCRITURA, async (req,res,next)=>{
+  try {
+    if(!UUID_RE.test(req.params.id))return res.status(400).json({error:'Identificador de pedido no válido'});
+    const result=await materializeSimpleOrder(db,{empresaId:req.user.empresa_id,pedidoId:req.params.id,
+      operationId:req.body?.client_operation_uuid,actorId:req.user.id});
+    res.set('Cache-Control','private, no-store');
+    res.status(result.created?201:200).json(result);
+  } catch(error){next(error);}
+});
 
 function getMissingColumn(error) {
   if (!error || error.code !== "42703") return null;
@@ -3776,6 +3568,28 @@ const NUMERIC_PEDIDO_FIELDS = new Set([
   "importe_minimo", "minimo_unidades", "importe_paralizacion",
   "paralizacion_horas", "grupaje_id",
 ]);
+function normalizeCargoLengthMode(value) {
+  if (value === undefined || value === null || value === '') return null;
+  if (value === 'auto' || value === 'manual') return value;
+  throw Object.assign(new Error('Modo de longitud ocupada no válido'), { status: 400 });
+}
+async function initialCargoLength(client, empresaId, remolqueId, body = {}) {
+  if (body.workspace === 'planner' || (body.tipo_carga && body.tipo_carga !== 'completa')) return null;
+  const requestedMode = normalizeCargoLengthMode(body.longitud_ocupada_mode);
+  const requestedLength = parseLocaleNumber(body.carga_largo_m ?? body.metros_lineales);
+  if (requestedMode === 'manual' || (!requestedMode && requestedLength > 0)) {
+    return { mode: 'manual', length: requestedLength > 0 ? requestedLength : null };
+  }
+  let trailerLength = null;
+  if (remolqueId) {
+    const { rows } = await client.query(
+      "SELECT data->>'metros_carga' AS metros_carga FROM vehiculos_ext WHERE empresa_id=$1 AND vehiculo_id=$2",
+      [empresaId, remolqueId]
+    );
+    trailerLength = parseLocaleNumber(rows[0]?.metros_carga);
+  }
+  return { mode: 'auto', length: trailerLength > 0 ? Math.min(13.65, trailerLength) : 13.65 };
+}
 const UUID_PEDIDO_FIELDS = new Set([
   "cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id",
   "colaborador_id", "remolque_id", "viaje_enlazado_id", "grupo_ida_vuelta",
@@ -4063,10 +3877,11 @@ function parseZipEntries(buffer) {
     let data = Buffer.alloc(0);
     try {
       if (method === 0) data = raw;
-      else if (method === 8) data = zlib.inflateRawSync(raw);
+      else if (method === 8) data = zlib.inflateRawSync(raw, { maxOutputLength: 4 * 1024 * 1024 });
     } catch {
       data = Buffer.alloc(0);
     }
+    if(entries.length >= 300 || entries.reduce((sum,entry)=>sum+entry.data.length,0)+data.length>12*1024*1024) throw Object.assign(Error("Contenido del documento demasiado grande"),{status:413});
     entries.push({ name, data });
     offset = dataEnd;
   }
@@ -4088,14 +3903,27 @@ function xmlToPlainText(xml = "") {
   );
 }
 
-function extractOfficeZipText(buffer, name = "") {
-  const lower = String(name || "").toLowerCase();
-  const entries = parseZipEntries(buffer);
-  if (!entries.length) return "";
-  const wanted = lower.endsWith(".xlsx")
-    ? entries.filter(e => /xl\/sharedStrings\.xml$|xl\/worksheets\/sheet\d+\.xml$/i.test(e.name))
-    : entries.filter(e => /word\/document\.xml$|word\/header\d+\.xml$|word\/footer\d+\.xml$/i.test(e.name));
-  return cleanAiDocumentText(wanted.map(e => xmlToPlainText(e.data.toString("utf8"))).filter(Boolean).join("\n")).slice(0, 16000);
+async function extractOfficeZipText(buffer, name = "") {
+  require('../services/importParser').inspectZip(buffer, { maxUncompressed: 12 * 1024 * 1024, maxEntry: 4 * 1024 * 1024 });
+  if (String(name).toLowerCase().endsWith('.xlsx')) {
+    const workbook = new (require('exceljs').Workbook)();
+    await workbook.xlsx.load(buffer);
+    const lines = []; let rows = 0;
+    for (const sheet of workbook.worksheets) sheet.eachRow(row => {
+      if (++rows > 2000 || row.cellCount > 70) throw Object.assign(Error('La orden Excel supera 2.000 filas o 70 columnas. Divide el documento.'), {status: 422});
+      const values = [];
+      row.eachCell(cell => {
+        if (cell.formula) throw Object.assign(Error('La orden contiene fórmulas. Sustitúyelas por valores.'), {status: 422});
+        values.push(cell.value instanceof Date ? cell.value.toISOString().slice(0,10) : cell.text);
+      });
+      lines.push(values.join(values.length === 2 ? ': ' : ' '));
+    });
+    return cleanAiDocumentText(lines.join('\n')).slice(0,16000);
+  }
+  const zip = await require('jszip').loadAsync(buffer);
+  const names = Object.keys(zip.files).filter(n=>/word\/document\.xml$|word\/header\d+\.xml$|word\/footer\d+\.xml$/i.test(n));
+  const texts = await Promise.all(names.map(async n=>xmlToPlainText(await zip.file(n).async('string'))));
+  return cleanAiDocumentText(texts.join('\n')).slice(0,16000);
 }
 
 async function extractAiAttachmentText(attachment = {}) {
@@ -4816,6 +4644,11 @@ async function resolveCompatibleRutaId(queryClient, empresaId, rutaId, payload =
       WHERE r.id=$1
         AND COALESCE(r.activa,true)=true
         AND (r.empresa_id=$2 OR r.empresa_id IS NULL)
+        AND $3::uuid IS NOT NULL
+        AND (r.cliente_id=$3 OR rpc.cliente_id=$3 OR
+             (r.cliente_id IS NULL AND NOT EXISTS (
+               SELECT 1 FROM ruta_precios_cliente other_price WHERE other_price.ruta_id=r.id
+             )))
       LIMIT 1`,
     [rutaIdNorm, empresaId, clienteId]
   );
@@ -5154,19 +4987,27 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
   const ingresoParalizacion = Math.max(0, Number(pedido.importe_paralizacion || 0));
   const ingreso = roundMoney(ingresoBase + ingresoParalizacion);
   const esColaborador = Boolean(pedido.colaborador_id);
-  const costeColaborador = esColaborador ? Math.max(0, Number(pedido.precio_colaborador || 0)) : 0;
-  const costePropio = esColaborador ? 0 : [
+  const costeColaborador = Number(pedido.precio_colaborador || 0);
+  const costePropio = [
     pedido.coste_gasoil,
     pedido.coste_peajes,
     pedido.coste_dietas,
     pedido.coste_otros,
-  ].reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
+  ].reduce((sum, value) => sum + Number(value || 0), 0);
   const costeExtra = Array.isArray(extras)
-    ? extras.reduce((sum, x) => sum + Math.max(0, Number(x.importe || 0)), 0)
+    ? extras.reduce((sum, x) => sum + Number(x.importe || 0), 0)
     : 0;
-  const coste = roundMoney(costeColaborador + costePropio);
-  const margen = roundMoney(ingreso - coste);
-  const margenPct = ingreso > 0 ? roundMoney((margen / ingreso) * 100) : null;
+  const hayCosteRegistrado = hasRecordedCost({
+    precio_colaborador: pedido.precio_colaborador,
+    coste_gasoil: pedido.coste_gasoil,
+    coste_peajes: pedido.coste_peajes,
+    coste_dietas: pedido.coste_dietas,
+    coste_otros: pedido.coste_otros,
+    extracostes_importe: costeExtra,
+  }) || (Array.isArray(extras) && extras.some(x => Number(x.importe || 0) !== 0));
+  const coste = hayCosteRegistrado ? roundMoney(costeColaborador + costePropio + costeExtra) : null;
+  const margen = coste !== null && ingreso > 0 ? roundMoney(ingreso - coste) : null;
+  const margenPct = margen !== null ? roundMoney((margen / ingreso) * 100) : null;
   const kmRuta = Math.max(0, Number(pedido.km_ruta || 0));
   const estado = String(pedido.estado || "").toLowerCase();
   const hoy = new Date();
@@ -5184,7 +5025,8 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
 
   if (ingreso <= 0) push("sin_precio", "alta", "El pedido no tiene precio de venta usable.", "Completar precio cliente antes de aceptar o facturar.");
   if (esColaborador && costeColaborador <= 0) push("colaborador_sin_coste", "alta", "Hay colaborador asignado sin precio acordado.", "Registrar precio del colaborador.");
-  if (ingreso > 0 && margen < 0) push("margen_negativo", "critica", "El coste previsto supera al ingreso.", "Revisar precio, coste o alternativa de asignacion.");
+  if (!hayCosteRegistrado) push("sin_costes_registrados", "alta", "No hay costes registrados; el margen no es calculable.", "Registrar o confirmar los costes de este servicio.");
+  if (ingreso > 0 && margen !== null && margen < 0) push("margen_negativo", "critica", "El coste previsto supera al ingreso.", "Revisar precio, coste o alternativa de asignacion.");
   else if (ingreso > 0 && margenPct !== null && margenPct < 8) push("margen_bajo", "media", "El margen previsto esta por debajo del 8%.", "Revisar precio minimo rentable o buscar retorno.");
   if (kmRuta <= 0) push("sin_km", "media", "Faltan kilometros de ruta para evaluar EUR/km y coste real.", "Calcular o completar kilometros de ruta.");
   if ((estado === "entregado" || estado === "facturado") && Number(docs.albaranes || 0) === 0) {
@@ -5197,12 +5039,12 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
     push("cobro_vencido", "alta", "La factura vinculada esta vencida.", "Revisar reclamacion de cobro.");
   }
 
-  let decision = "aceptar";
-  let recomendacion = "Operacion viable con los datos actuales.";
-  if (riesgos.some(r => r.tipo === "sin_precio" || r.tipo === "colaborador_sin_coste" || r.tipo === "sin_km")) {
+  let decision = "revisar_costes";
+  let recomendacion = "Margen provisional basado solo en costes registrados; confirmar los gastos pendientes antes de aceptar.";
+  if (riesgos.some(r => ["sin_precio", "colaborador_sin_coste", "sin_costes_registrados", "sin_km"].includes(r.tipo))) {
     decision = "completar_datos";
-    recomendacion = "Completar datos economicos y kilometros antes de decidir.";
-  } else if (margen < 0) {
+    recomendacion = "Completar precio, costes y kilometros antes de decidir.";
+  } else if (margen !== null && margen < 0) {
     decision = "revisar_precio";
     recomendacion = "No aceptar en estas condiciones salvo ajuste de precio, coste o retorno compensatorio.";
   } else if (margenPct !== null && margenPct < 8) {
@@ -5210,7 +5052,7 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
     recomendacion = "Aceptar solo si hay retorno, urgencia comercial o posibilidad de recuperar esperas/extras.";
   } else if (riesgos.some(r => ["pod_pendiente", "posible_retraso", "cobro_vencido"].includes(r.tipo))) {
     decision = "vigilar_operacion";
-    recomendacion = "Operacion rentable, pero requiere seguimiento documental, operativo o de cobro.";
+    recomendacion = "Revisar los riesgos documentales, operativos o de cobro y completar costes pendientes.";
   }
 
   return {
@@ -5230,12 +5072,15 @@ function buildRentabilidadPedido(pedido = {}, extras = [], docs = {}) {
       propios: roundMoney(costePropio),
       extras_registrados: roundMoney(costeExtra),
       total: coste,
-      eur_km: kmRuta > 0 ? roundMoney(coste / kmRuta) : null,
+      eur_km: kmRuta > 0 && coste !== null ? roundMoney(coste / kmRuta) : null,
+      cobertura: hayCosteRegistrado ? "parcial" : "sin_datos",
+      definicion: "Costes directos registrados: colaborador, gasoil, peajes, dietas, otros y extras. No incluye costes no registrados.",
     },
     margen: {
       importe: margen,
       pct: margenPct,
-      color: margen < 0 ? "rojo" : margenPct !== null && margenPct < 8 ? "amarillo" : "verde",
+      color: margen !== null && margen < 0 ? "rojo" : "amarillo",
+      definicion: "Ingreso menos costes directos registrados; provisional hasta completar la cobertura.",
     },
     documentos: {
       albaranes: Number(docs.albaranes || 0),
@@ -5885,7 +5730,7 @@ router.get("/", async (req, res) => {
       i++;
     }
     if (access.vehiculoIds.length) {
-      ownClauses.push(`p.vehiculo_id = ANY($${i}::uuid[])`);
+      ownClauses.push(`(p.chofer_id IS NULL AND p.chofer2_id IS NULL AND p.vehiculo_id = ANY($${i}::uuid[]))`);
       params.push(access.vehiculoIds);
       i++;
     }
@@ -6040,7 +5885,7 @@ router.get("/", async (req, res) => {
   const limitN = parseInt(req.query.limit || 50);
 
   res.json({
-    data: rows.map(pedidoConImporteVisible),
+    data: (await require('../services/journeyProjection').withJourneyProjection(db, empresaId, await require('../services/transportProgress').withTransportProgress(db, empresaId, rows))).map(pedidoConImporteVisible),
     pagination: {
       total,
       page: pageN,
@@ -6246,66 +6091,118 @@ router.get("/disponibilidad", async (req, res) => {
 // (grupaje): les pone un grupaje_id comun y tipo_carga='grupaje'. Si alguno ya
 // esta en un grupaje, se reutiliza ese id. Luego aparecen como un solo grupo en
 // la pestana Grupajes, con sus cargas/descargas ordenables y asignables.
-router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
-    if (ids.length < 2) return res.status(400).json({ error: "Selecciona al menos 2 pedidos para agruparlos en un grupaje." });
-    const { rows } = await db.query(
-      "SELECT id, grupaje_id, factura_id FROM pedidos WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
-      [empresaId, ids]
-    );
-    if (rows.length !== ids.length) return res.status(404).json({ error: "Alguno de los pedidos no existe o no pertenece a la empresa." });
-    if (rows.some(p => p.factura_id)) return res.status(400).json({ error: "No se pueden agrupar pedidos ya facturados." });
-    const grupajeId = rows.map(p => p.grupaje_id).find(Boolean) || crypto.randomUUID();
-    // Grupaje provisional: se guarda y se ve como grupaje, pero queda marcado
-    // como no definitivo hasta que se confirme.
-    const esBorrador = req.body?.borrador === true || req.body?.borrador === "true";
-    await db.query(
-      "UPDATE pedidos SET grupaje_id=$1::uuid, tipo_carga='grupaje', grupaje_borrador=$4, updated_at=NOW() WHERE empresa_id=$2 AND id = ANY($3::uuid[])",
-      [grupajeId, empresaId, ids, esBorrador]
-    );
-    for (const id of ids) {
-      logPedidoEvento(id, empresaId, esBorrador ? "grupaje.borrador_guardado" : "grupaje.combinado", { grupaje_id: grupajeId, pedidos: ids }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
-    }
-    return res.json({ ok: true, grupaje_id: grupajeId, count: ids.length, borrador: esBorrador });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req,res,next)=>{
+ try{
+  const empresaId=req.user.empresa_id;
+  const ids=[...new Set((req.body?.pedido_ids||[]).map(normalizePedidoUuid).filter(Boolean))].sort();
+  if(ids.length<2)return res.status(400).json({error:'Selecciona al menos dos pedidos.'});
+  const result=await db.transaction(async tx=>{
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
+   const rows=(await tx.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[empresaId,ids])).rows;
+   if(rows.length!==ids.length)throw Object.assign(Error('Pedido no encontrado'),{status:404});
+   if(rows.some(p=>p.factura_id||!['pendiente','confirmado'].includes(p.estado)))throw Object.assign(Error('Solo se agrupan pedidos sin iniciar ni facturar.'),{status:409});
+   rows.forEach(order=>assertGroupageTrafficScope(req,order));
+   const groups=[...new Set(rows.map(p=>p.grupaje_id).filter(Boolean))];
+   if(groups.length>1)throw Object.assign(Error('Deshaz primero los grupajes que quieras reorganizar.'),{status:409});
+   const group=groups[0]||crypto.randomUUID();
+   if(groups.length){const siblings=(await tx.query('SELECT id FROM pedidos WHERE empresa_id=$1 AND grupaje_id=$2::uuid',[empresaId,group])).rows;if(siblings.some(p=>!ids.includes(p.id)))throw Object.assign(Error('Selecciona todos los pedidos del grupaje.'),{status:409});}
+   const existing=(await tx.query('SELECT id,client_operation_uuid,estado FROM viajes_operativos WHERE empresa_id=$1 AND legacy_grupaje_id=$2',[empresaId,group])).rows[0];
+   if(existing){
+    if(existing.client_operation_uuid===req.body.client_operation_uuid)return {ok:true,viaje_id:existing.id,grupaje_id:group,count:ids.length,borrador:existing.estado==='borrador',sin_cambios:true};
+    throw Object.assign(Error('El grupaje ya tiene un plan operativo. Edítalo desde su recorrido.'),{status:409});
+   }
+   await tx.query("UPDATE pedidos SET grupaje_id=$1::uuid,tipo_carga='grupaje',grupaje_borrador=true WHERE empresa_id=$2 AND id=ANY($3::uuid[])",[group,empresaId,ids]);
+   const draft=req.body?.borrador===true||req.body?.borrador==='true';
+   if(draft)return {ok:true,grupaje_id:group,count:ids.length,borrador:true};
+   return require('../services/groupagePlan').saveGroupagePlan(tx,{empresaId,grupajeId:group,operationId:req.body.client_operation_uuid||crypto.randomUUID(),actorId:req.user.id,confirm:true});
+  });res.json(result);
+ }catch(error){next(error);}
 });
-
-// POST /pedidos/grupaje/confirmar - pasa un grupaje de borrador a definitivo.
-router.post("/grupaje/confirmar", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const grupajeId = normalizePedidoUuid(req.body?.grupaje_id);
-    if (!grupajeId) return res.status(400).json({ error: "Indica el grupaje a confirmar." });
-    const { rows } = await db.query(
-      "UPDATE pedidos SET grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND grupaje_id=$2::uuid RETURNING id",
-      [empresaId, grupajeId]
-    );
-    if (!rows.length) return res.status(404).json({ error: "Grupaje no encontrado." });
-    for (const r of rows) {
-      logPedidoEvento(r.id, empresaId, "grupaje.confirmado", { grupaje_id: grupajeId }, req.user?.rol || "usuario", req.user?.id || null).catch(() => {});
-    }
-    res.json({ ok: true, grupaje_id: grupajeId, count: rows.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /pedidos/grupaje/separar - saca pedidos de su grupaje.
-router.post("/grupaje/separar", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user?.empresa_id;
-    const ids = [...new Set((Array.isArray(req.body?.pedido_ids) ? req.body.pedido_ids : []).map(normalizePedidoUuid).filter(Boolean))];
-    if (!ids.length) return res.status(400).json({ error: "Sin pedidos." });
-    await db.query(
-      "UPDATE pedidos SET grupaje_id=NULL, grupaje_borrador=false, updated_at=NOW() WHERE empresa_id=$1 AND id = ANY($2::uuid[])",
-      [empresaId, ids]
-    );
-    return res.json({ ok: true, count: ids.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+function assertGroupageTrafficScope(req, order) {
+  if (req.user.rol === 'trafico' && !traficoConfigMatchesPedido(req.user.trafico_config, order)) {
+    throw Object.assign(new Error('Pedido fuera de tu ámbito de tráfico.'), { status: 403 });
   }
+}
+async function checkGroupageScope(req, groupId, queryable=db) {
+  const rows = (await queryable.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND grupaje_id=$2::uuid', [req.user.empresa_id, groupId])).rows;
+  rows.forEach(order => assertGroupageTrafficScope(req, order));
+}
+router.post('/grupaje/:grupo/asignacion', GERENTE_O_TRAFICO, async(req,res,next)=>{
+  try {
+    const result = await db.transaction(tx => require('../services/journeyAssignment').assignGroupage(tx, {
+      empresaId:req.user.empresa_id, groupId:req.params.grupo, actorId:req.user.id,
+      operationId:req.body.client_operation_uuid, patch:req.body.asignacion||{},
+      authorize:order=>assertGroupageTrafficScope(req,order)
+    }));
+    res.json(result);
+  } catch(error) { res.status(error.status||500).json({error:error.message,code:error.code,advertencias:error.advertencias}); }
+});
+router.get('/grupaje/:grupo/costes',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{await checkGroupageScope(req,req.params.grupo);
+  const rows=(await db.query('SELECT c.* FROM viaje_costes c JOIN viajes_operativos v ON v.empresa_id=c.empresa_id AND v.id=c.viaje_id WHERE c.empresa_id=$1 AND v.legacy_grupaje_id=$2 ORDER BY c.fecha,c.id',[req.user.empresa_id,req.params.grupo])).rows;
+  res.set('Cache-Control','no-store').json({data:rows,definicion:'Costes netos registrados en el viaje. No duplicar gastos ya imputados en pedidos, tickets o facturas. Conciliación BI pendiente en fase 15.'});
+ }catch(error){next(error);}
+});
+router.post('/grupaje/:grupo/costes',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{const result=await db.transaction(async tx=>{
+  await checkGroupageScope(req,req.params.grupo,tx);
+  const trip=(await tx.query('SELECT id FROM viajes_operativos WHERE empresa_id=$1 AND legacy_grupaje_id=$2',[req.user.empresa_id,req.params.grupo])).rows[0];
+  if(!trip)throw Object.assign(Error('Guarda primero el plan del viaje.'),{status:409});
+  return require('../services/journeyCosts').recordJourneyCost(tx,{...req.body,empresaId:req.user.empresa_id,journeyId:trip.id,actorId:req.user.id,operationId:req.body.client_operation_uuid});
+ });res.json(result);}catch(error){next(error);}
+});
+router.get('/grupaje/:grupo/plan',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{await checkGroupageScope(req,req.params.grupo);
+  if(!normalizePedidoUuid(req.params.grupo))return res.status(400).json({error:'Grupaje no válido'});
+  res.set('Cache-Control','private, no-store');res.json(await require('../services/groupagePlan').readGroupagePlan(db,req.user.empresa_id,req.params.grupo));
+ }catch(error){next(error);}
+});
+router.post('/grupaje/:grupo/plan',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{
+  await checkGroupageScope(req,req.params.grupo);
+  const input={empresaId:req.user.empresa_id,grupajeId:req.params.grupo,operationId:req.body.client_operation_uuid,actorId:req.user.id,
+   version:req.body.version,sequence:req.body.paradas,layout:req.body.disposicion,route:req.body.ruta,confirm:req.body.confirmar===true};
+  res.json(await db.transaction(tx=>require('../services/groupagePlan').saveGroupagePlan(tx,input)));
+ }catch(error){next(error);}
+});
+router.post('/grupaje/confirmar',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{
+  const empresaId=req.user.empresa_id,group=normalizePedidoUuid(req.body?.grupaje_id);
+  if(!group)return res.status(400).json({error:'Indica el grupaje a confirmar.'});
+  const result=await db.transaction(async tx=>{
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage:${group}`]);
+   const previous=(await tx.query('SELECT id,version,estado FROM viajes_operativos WHERE empresa_id=$1 AND legacy_grupaje_id=$2',[empresaId,group])).rows[0];
+   await checkGroupageScope(req,group,tx);
+   if(previous?.estado==='confirmado')return {ok:true,viaje_id:previous.id,grupaje_id:group,version:previous.version,sin_cambios:true};
+   return require('../services/groupagePlan').saveGroupagePlan(tx,{empresaId,grupajeId:group,operationId:req.body.client_operation_uuid||crypto.randomUUID(),actorId:req.user.id,version:req.body.version??previous?.version,confirm:true});
+  });res.json(result);
+ }catch(error){next(error);}
+});
+router.post('/grupaje/separar',GERENTE_O_TRAFICO,async(req,res,next)=>{
+ try{
+  const empresaId=req.user.empresa_id,ids=[...new Set((req.body?.pedido_ids||[]).map(normalizePedidoUuid).filter(Boolean))];
+  if(!ids.length)return res.status(400).json({error:'Sin pedidos.'});
+  const result=await db.transaction(async tx=>{
+   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
+   const orders=(await tx.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[empresaId,ids])).rows;
+   orders.forEach(order=>assertGroupageTrafficScope(req,order));
+   if(orders.length!==ids.length)throw Object.assign(Error('Pedido no encontrado'),{status:404});
+   if(orders.some(p=>!['pendiente','confirmado'].includes(p.estado)||p.factura_id))throw Object.assign(Error('No se separan pedidos iniciados o facturados.'),{status:409});
+   const normalized=(await tx.query('SELECT viaje_id FROM viaje_pedidos WHERE empresa_id=$1 AND pedido_id=ANY($2::uuid[]) AND activo',[empresaId,ids])).rows;
+   for(const journeyId of [...new Set(normalized.map(row=>row.viaje_id))]){
+    const linked=(await tx.query('SELECT pedido_id FROM viaje_pedidos WHERE empresa_id=$1 AND viaje_id=$2 AND activo',[empresaId,journeyId])).rows;
+    if(linked.some(row=>!ids.includes(row.pedido_id)))throw Object.assign(Error('Separa todos los pedidos del viaje conjuntamente.'),{status:409});
+    const journey=(await tx.query('SELECT * FROM viajes_operativos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,journeyId])).rows[0];
+    if(!['borrador','pendiente','confirmado'].includes(journey.estado))throw Object.assign(Error('El viaje ya está iniciado.'),{status:409});
+    const updated=(await tx.query("UPDATE viajes_operativos SET estado='cancelado',version=version+1,legacy_grupaje_id=NULL,updated_at=NOW() WHERE empresa_id=$1 AND id=$2 RETURNING *",[empresaId,journeyId])).rows[0];
+    await tx.query('UPDATE viaje_pedidos SET activo=false WHERE empresa_id=$1 AND viaje_id=$2',[empresaId,journeyId]);
+    await tx.query('INSERT INTO viaje_plan_versiones(empresa_id,viaje_id,version,snapshot,motivo,actor_id) VALUES($1,$2,$3,$4,$5,$6)',[empresaId,journeyId,updated.version,JSON.stringify({anterior:journey,pedidos:linked,estado:'cancelado'}),'Grupaje deshecho por tráfico',req.user.id]);
+   }
+   await tx.query('UPDATE pedidos SET grupaje_id=NULL,grupaje_borrador=false WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[empresaId,ids]);
+   return {ok:true,count:ids.length};
+  });res.json(result);
+ }catch(error){next(error);}
 });
 
 // GET /pedidos/resumen-lista - listado operativo ligero para pantallas de trafico
@@ -6352,7 +6249,7 @@ router.get("/resumen-lista", async (req, res) => {
         i++;
       }
       if (access.vehiculoIds.length) {
-        ownClauses.push(`p.vehiculo_id = ANY($${i++}::uuid[])`);
+        ownClauses.push(`(p.chofer_id IS NULL AND p.chofer2_id IS NULL AND p.vehiculo_id = ANY($${i++}::uuid[]))`);
         params.push(access.vehiculoIds);
       }
       where.push(`(${ownClauses.join(" OR ")})`);
@@ -6412,7 +6309,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
              p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
              p.paralizacion_importe, p.paralizacion_moneda, p.paralizacion_norma, p.paralizacion_pais,
-             p.tipo_carga, p.tipo_viaje, p.factura_id,
+             p.tipo_carga, p.tipo_viaje, p.factura_id, p.grupaje_id, p.grupaje_borrador,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
@@ -6444,7 +6341,7 @@ router.get("/resumen-lista", async (req, res) => {
              p.notas, p.incidencia_tipo, p.incidencia_descripcion, p.incidencia_origen,
              p.incidencia_creada_at, p.incidencia_automatica, p.paralizacion_minutos,
              p.paralizacion_importe, p.paralizacion_moneda, p.paralizacion_norma, p.paralizacion_pais,
-             p.tipo_carga, p.tipo_viaje, p.factura_id,
+             p.tipo_carga, p.tipo_viaje, p.factura_id, p.grupaje_id, p.grupaje_borrador,
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
@@ -6467,7 +6364,7 @@ router.get("/resumen-lista", async (req, res) => {
 
     const totalAproximado = offset + rows.length + (rows.length === limitN ? 1 : 0);
     res.json({
-      data: rows.map(pedidoConImporteVisible),
+      data: (await require('../services/journeyProjection').withJourneyProjection(db, empresaId, await require('../services/transportProgress').withTransportProgress(db, empresaId, rows))).map(pedidoConImporteVisible),
       pagination: {
         total: totalAproximado,
         page: pageN,
@@ -6735,17 +6632,84 @@ router.get("/:id/colaborador/preview", GERENTE_O_TRAFICO, async (req, res) => {
 
 router.get("/:id/documento-control-digital", async (req, res) => {
   try {
+    if (!['gerente','trafico','administrativo','chofer'].includes(req.user?.rol)) return res.status(403).json({error:'No tienes permiso para consultar el documento'});
     const empresaId = req.empresaId || req.user.empresa_id;
+    // Authorize before constructing context, which can allocate document numbers.
+    if (req.user?.rol === "chofer") {
+      const { rows } = await db.query("SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);
+      if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+      if (!(await usuarioPuedeGestionarPedido(req, rows[0]))) return res.status(403).json({ error: "No puedes acceder a este pedido" });
+    }
     const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
     if (req.user?.rol === "chofer" && !(await usuarioPuedeGestionarPedido(req, ctx.pedido))) {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
-    if(req.user?.rol==='chofer' && !await (async()=>{const d=(await getPedidoChoferPasos(req.params.id,empresaId)).data;return d.carga_ok||Object.values(d.paradas||{}).some(s=>s.tipo==='carga'&&s.carga_ok);})()) return res.status(409).json({error:'El documento estará disponible cuando marques la carga como finalizada.'});
     res.json(await buildPedidoDocumentoControlResponse(req, ctx, empresaId));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+async function authorizeTransportDocument(req,res) {
+  const empresaId=req.empresaId||req.user.empresa_id;
+  if (!['gerente','trafico','administrativo','chofer'].includes(req.user?.rol)) {res.status(403).json({error:'No tienes permiso para consultar el expediente'});return null;}
+  const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+  if (!order) {res.status(404).json({error:'Pedido no encontrado'});return null;}
+  if (req.user.rol==='chofer' && !await usuarioPuedeGestionarPedido(req,order)) {res.status(403).json({error:'No puedes acceder a este pedido'});return null;}
+  return empresaId;
+}
+router.get('/:id/expediente-transporte.zip',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {
+    await ensureDocumentoControlRepositorioSchema();
+    const buffer=await require('../services/transportDossier').dossier(db,req.empresaId||req.user.empresa_id,req.params.id);
+    res.setHeader('Content-Type','application/zip');res.setHeader('Cache-Control','private, no-store');res.setHeader('Content-Disposition','attachment; filename=expediente-transporte.zip');res.send(buffer);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/:id/firma/historial',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const rows=(await db.query(`SELECT e.id,e.operation_id,e.replaces_id,e.package_hash,e.created_at,o.parada_id,o.version,o.payload->>'operacion' AS operacion,e.payload->'identidad' AS identidad,a.reason AS anulacion
+      FROM signature_evidence e JOIN operacion_evidencias o ON o.empresa_id=e.empresa_id AND o.id=e.operation_id
+      LEFT JOIN signature_evidence_annulments a ON a.empresa_id=e.empresa_id AND a.signature_id=e.id
+      WHERE e.empresa_id=$1 AND o.pedido_id=$2 ORDER BY e.created_at DESC`,[empresaId,req.params.id])).rows;
+    res.json(rows);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/:id/firma/:evidenceId/justificante.pdf',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const row=(await db.query('SELECT e.receipt_pdf,e.receipt_hash FROM signature_evidence e JOIN operacion_evidencias o ON o.empresa_id=e.empresa_id AND o.id=e.operation_id WHERE e.empresa_id=$1 AND o.pedido_id=$2 AND e.id=$3',[empresaId,req.params.id,req.params.evidenceId])).rows[0];
+    if(!row)return res.status(404).json({error:'Justificante no encontrado'});
+    const bytes=Buffer.from(row.receipt_pdf);if(transportDocuments.hash(bytes)!==row.receipt_hash)throw Error('Fallo de integridad');
+    sendTransportOriginal(res,bytes,'justificante-firmado.pdf',row.receipt_hash,true);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/:id/documento-control-digital/versiones/:versionId/pdf',async(req,res)=>{
+  try {
+    const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const row=await transportDocuments.read(db,empresaId,req.params.id,req.params.versionId);
+    if(!row)return res.status(404).json({error:'Versión no encontrada'});
+    const bytes=Buffer.from(row.pdf);
+    if(transportDocuments.hash(bytes)!==row.pdf_hash)return res.status(500).json({error:'Fallo de integridad del original'});
+    return sendTransportOriginal(res,bytes,row.filename,row.pdf_hash,true);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.post('/:id/documento-control-digital/externo',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {
+    const empresaId=req.empresaId||req.user.empresa_id;
+    const ctx=await getPedidoDocumentoControlContext(req.params.id,empresaId);
+    if(!ctx)return res.status(404).json({error:'Pedido no encontrado'});
+    const payload=buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl:publicBaseUrl(req)});
+    await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId:req.body.envio_id,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicBaseUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt:ctx.pedido.updated_at});
+    res.json(await buildPedidoDocumentoControlResponse(req,ctx,empresaId));
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code,fields:e.fields});}
+});
+
+router.post('/:id/envios',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {
+    await require('../services/transportShipments').declare(db,{empresaId:req.user.empresa_id,pedidoId:req.params.id,operationId:req.body.client_operation_uuid,rows:req.body.envios,actorId:req.user.id});
+    const ctx=await getPedidoDocumentoControlContext(req.params.id,req.user.empresa_id);
+    res.json(await buildPedidoDocumentoControlResponse(req,ctx,req.user.empresa_id));
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
 router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (req, res) => {
@@ -6759,6 +6723,9 @@ router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (
       appBaseUrl: publicBaseUrl(req),
       userId: req.user?.id || null,
       motivo: "generacion_manual",
+      envioId: req.body?.envio_id || null,
+      consolidated: req.body?.consolidado === true,
+      versionReason: req.body?.motivo || null,
     });
     const refreshed = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     res.json({
@@ -6767,7 +6734,7 @@ router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (
       ...(await buildPedidoDocumentoControlResponse(req, refreshed || ctx, empresaId)),
     });
   } catch (e) {
-    res.status(500).json({ error: e.message || "No se pudo generar el DeCA" });
+    res.status(e.status || 500).json({ error: e.message || "No se pudo generar el DeCA", code:e.code, fields:e.fields });
   }
 });
 
@@ -7338,7 +7305,7 @@ router.get("/:id/rentabilidad-predictiva", GERENTE_O_TRAFICO, async (req, res) =
           WHERE pedido_id=$1
           ORDER BY id ASC`,
         [req.params.id]
-      ).catch(() => ({ rows: [] })),
+      ),
       db.query(
         `SELECT COUNT(*)::int AS documentos,
                 COUNT(*) FILTER (
@@ -7460,6 +7427,11 @@ router.post("/:id/avisar-cliente", GERENTE_O_TRAFICO, async (req, res) => {
 
 router.get("/:id/ida-retorno", async (req, res) => {
   try {
+    // El resumen enlazado incluye precios y datos del otro servicio. Su acceso
+    // corresponde a la mesa de gestión, no a la vista operativa del conductor.
+    if (!ROLES_GESTION_PEDIDOS.has(req.user?.rol)) {
+      return res.status(403).json({ error: "No puedes acceder al resumen de ida y retorno" });
+    }
     await ensureColaboradorWorkflowSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows } = await db.query(
@@ -7691,10 +7663,10 @@ router.get("/:id", async (req, res) => {
            ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
     LEFT JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
-    LEFT JOIN choferes ch ON ch.id=p.chofer_id
-    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id
+    LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, `
@@ -7707,9 +7679,9 @@ router.get("/:id", async (req, res) => {
            ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos, v.matricula,
            f.estado AS factura_estado, f.numero AS factura_numero
     FROM pedidos p
-    LEFT JOIN clientes c ON c.id=p.cliente_id
-    LEFT JOIN choferes ch ON ch.id=p.chofer_id
-    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id
+    LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
+    LEFT JOIN choferes ch ON ch.id=p.chofer_id AND ch.empresa_id=p.empresa_id
+    LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
     LEFT JOIN facturas f ON f.id=p.factura_id AND f.empresa_id=p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, [req.params.id, empresaId]);
@@ -7730,7 +7702,8 @@ router.get("/:id", async (req, res) => {
       WHERE pe.pedido_id=$1 AND p.empresa_id=$2`,
     [req.params.id, empresaId]
   );
-  res.json(normalizePedidoForClient({ ...rows[0], extracostes: extras.rows }));
+  const [withProgress] = await require('../services/transportProgress').withTransportProgress(db, empresaId, rows);
+  res.json(normalizePedidoForClient({ ...withProgress, extracostes: extras.rows }));
 });
 
 // POST /pedidos
@@ -7777,9 +7750,10 @@ router.get("/:id/chofer-pasos", async (req, res) => {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
     const payload = await getPedidoChoferPasos(req.params.id, empresaId);
+    payload.viaje_operativo=await require('../services/driverJourney').driverJourneyContext(db,empresaId,req.params.id,order=>usuarioPuedeGestionarPedido(req,order));
     res.json(payload);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status||500).json({ error: e.message,code:e.code });
   }
 });
 
@@ -7797,11 +7771,16 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
     }
     if(req.body?.paradas) return res.status(400).json({error:'Envía únicamente los cambios de la parada actual.'});
     const patch = normalizeChoferPasosPayload(req.body || {});
+    if(patch.viaje_iniciado===true&&!patch.parada_id)return res.status(409).json({error:'Actualiza la app y confirma la salida desde la parada correspondiente, tras revisar los DeCA vigentes.',code:'DRIVER_STOP_REQUIRED'});
+
     if(req.user?.rol==='chofer'&&!patch.parada_id&&Object.keys(patch).some(key=>!key.startsWith('dcd_')&&key!=='updated_at')) {
       const existing=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
-      if(existing.paradas || require('../services/driverStops').driverStops(pedido).length>2)return res.status(409).json({error:'Actualiza la app para confirmar cada carga y descarga por separado.',code:'DRIVER_STOP_REQUIRED'});
+      if(existing.paradas || require('../services/driverStops').driverStops(pedido).length>2 || await require('../services/driverJourney').loadJourney(db,empresaId,req.params.id))return res.status(409).json({error:'Actualiza la app para confirmar cada carga y descarga por separado.',code:'DRIVER_STOP_REQUIRED'});
     }
     if(Object.keys(patch).some(key=>!key.startsWith("dcd_") && key!=="updated_at")) await assertDriverWorkday(req);
+    const driverAccess=req.user?.rol==='chofer'?await getChoferAccessForUser(req.user,empresaId):null;
+    const authorize=driverAccess?order=>driverAccess.choferIds.some(id=>id===String(order.chofer_id||'')||id===String(order.chofer2_id||''))
+      ||(!order.chofer_id&&!order.chofer2_id&&driverAccess.vehiculoIds.some(id=>id===String(order.vehiculo_id||''))):null;
     const saved = await savePedidoChoferPasos({
       pedidoId: req.params.id,
       empresaId,
@@ -7809,8 +7788,10 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
       patch,
       actorTipo: req.user?.rol === "chofer" ? "chofer" : "usuario",
       actorId: req.user?.id || null,
+      authorize,
     });
-    res.json({ ok: true, data: saved });
+    const currentOrder=(await db.query('SELECT estado,origen,destino,puntos_carga,puntos_descarga FROM pedidos WHERE id=$1 AND empresa_id=$2',[req.params.id,empresaId])).rows[0];
+    res.json({ ok: true, data: saved, estado:currentOrder?.estado, estado_operativo:currentOrder?require('../services/transportProgress').transportProgress(currentOrder,saved):null });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message, code: e.code || undefined, pedido_activo: e.pedido_activo || undefined });
   }
@@ -7943,12 +7924,15 @@ router.get("/colaborador-pagos/pendientes", GERENTE_O_TRAFICO, async (req, res) 
       `SELECT p.id AS pedido_id, p.numero, p.estado, p.fecha_carga, p.fecha_descarga,
               p.origen, p.destino, p.precio_colaborador,
               co.id AS colaborador_id, co.nombre AS colaborador_nombre, co.forma_pago AS colaborador_forma_pago,
-              pay.id AS pago_id, pay.factura_nombre, pay.factura_data, pay.fecha_recepcion, pay.fecha_pago_calculada,
+              pay.id AS pago_id, COALESCE(NULLIF(pay.factura_nombre,''),recibida.nombre) AS factura_nombre, recibida.id AS factura_proveedor_id, pay.factura_data, COALESCE(pay.fecha_recepcion,recibida.created_at::date) AS fecha_recepcion, pay.fecha_pago_calculada,
               pay.fecha_pago_real, pay.importe, pay.pagado, pay.documentacion_recibida,
               pay.fecha_documentacion_recepcion, pay.notas_pago
          FROM pedidos p
          JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
          LEFT JOIN pedido_colaborador_pagos pay ON pay.pedido_id=p.id AND pay.empresa_id=p.empresa_id
+         LEFT JOIN LATERAL (SELECT f.id,f.nombre,f.created_at FROM colaborador_facturas cf JOIN facturas_proveedor f ON f.id=cf.factura_proveedor_id AND f.empresa_id=cf.empresa_id
+           WHERE cf.empresa_id=p.empresa_id AND cf.pedido_id=p.id AND cf.colaborador_id=p.colaborador_id AND f.estado='revisada'
+           ORDER BY (cf.total>=0) DESC,f.created_at DESC LIMIT 1) recibida ON true
         WHERE p.empresa_id=$1
           AND p.colaborador_id IS NOT NULL
           AND COALESCE(p.precio_colaborador,0) > 0
@@ -8000,9 +7984,12 @@ router.get("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
         LIMIT 1`,
       [req.params.id, empresaId]
     );
+    const recibida=(await db.query("SELECT f.id,f.nombre,f.created_at FROM colaborador_facturas cf JOIN facturas_proveedor f ON f.id=cf.factura_proveedor_id AND f.empresa_id=cf.empresa_id WHERE cf.empresa_id=$1 AND cf.pedido_id=$2 AND cf.colaborador_id=$3 AND f.estado='revisada' ORDER BY (cf.total>=0) DESC,f.created_at DESC LIMIT 1",[empresaId,pedido.id,pedido.colaborador_id])).rows[0];
     const row = rows[0];
+    const receipt=recibida?{factura_proveedor_id:recibida.id,factura_nombre:row?.factura_nombre||recibida.nombre,fecha_recepcion:normalizePedidoDate(row?.fecha_recepcion||recibida.created_at)}:{};
     if (!row) {
       return res.json({
+        ...receipt,
         pedido_id: pedido.id,
         colaborador_id: pedido.colaborador_id || null,
         importe: Number(pedido.precio_colaborador || 0),
@@ -8012,7 +7999,8 @@ router.get("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
     }
     res.json({
       ...row,
-      fecha_recepcion: normalizePedidoDate(row.fecha_recepcion),
+      ...receipt,
+      fecha_recepcion: receipt.fecha_recepcion||normalizePedidoDate(row.fecha_recepcion),
       fecha_pago_calculada: normalizePedidoDate(row.fecha_pago_calculada),
       fecha_pago_real: normalizePedidoDate(row.fecha_pago_real),
       fecha_documentacion_recepcion: normalizePedidoDate(row.fecha_documentacion_recepcion),
@@ -8113,6 +8101,36 @@ router.put("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
   }
 });
 
+router.use('/ai-inbox', GERENTE_O_TRAFICO, require('../middleware/auth').requirePlanFeature('ai'), require('../middleware/auth').requireModulePermission('pedidos'), (req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
+router.get('/ai-inbox/entries',async(req,res)=>{
+ try{
+  const company=req.empresaId||req.user.empresa_id;
+  const states=['nuevo','revisar','listo','creado','descartado','error'];
+  const state=String(req.query.state||'');if(state&&!states.includes(state))return res.status(400).json({error:'Estado no válido'});
+  const page=Math.max(1,Math.min(100000,parseInt(req.query.page,10)||1));
+  const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
+  const counts=(await db.query('SELECT state,COUNT(*)::int AS count FROM ai_inbox_items WHERE empresa_id=$1 GROUP BY state',[company])).rows;
+  res.json({items:rows,counts,page,page_size:25,inbound:orderInbox.inboundConfiguration(company)});
+ }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/ai-inbox/entries/:entry',async(req,res)=>{
+ try{res.json(await orderInbox.get(db,req.empresaId||req.user.empresa_id,req.params.entry));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.post('/ai-inbox/entries',async(req,res)=>{
+ try{res.status(201).json(await orderInbox.receive(db,req.empresaId||req.user.empresa_id,req.user.id,req.body));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.patch('/ai-inbox/entries/:entry',async(req,res)=>{
+ try{res.json(await orderInbox.changeState(db,req.empresaId||req.user.empresa_id,req.params.entry,req.user.id,req.body));}catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.get('/ai-inbox/entries/:entry/attachments/:index',async(req,res)=>{
+ try{
+  const item=await orderInbox.get(db,req.empresaId||req.user.empresa_id,req.params.entry,{payload:true});
+  if(!/^\d+$/.test(req.params.index))return res.status(404).json({error:'Adjunto no encontrado'});
+  const file=item.payload.attachments[Number(req.params.index)];if(!file)return res.status(404).json({error:'Adjunto no encontrado'});
+  res.set('X-Content-Type-Options','nosniff');res.set('Content-Type',file.mediaType);res.set('Content-Disposition',`attachment; filename="documento"; filename*=UTF-8''${encodeURIComponent(file.name)}`);res.send(Buffer.from(file.base64,'base64'));
+ }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+
 router.get("/ai-inbox/runs", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     await ensureColaboradorWorkflowSchema();
@@ -8149,12 +8167,13 @@ router.get("/ai-inbox/status", GERENTE_O_TRAFICO, async (req, res) => {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const iaConfig = await getPedidoAiRuntimeConfig(empresaId);
     res.json({
+      inbound: orderInbox.inboundConfiguration(empresaId),
       basic_available: true,
       visual_available: Boolean(iaConfig.apiKey),
       provider: iaConfig.provider || "local",
       model: iaConfig.model || null,
       provider_configured_from: iaConfig.apiKey ? (iaConfig.source || "configuracion") : null,
-      supported_basic_documents: ["pdf_texto", "doc", "docx", "rtf", "odt", "xls", "xlsx", "csv", "tsv", "txt", "eml", "html", "xml", "json"],
+      supported_basic_documents: ["pdf_texto", "docx", "xlsx", "csv", "tsv", "txt", "eml", "html", "xml", "json"],
       supported_visual_documents: ["jpg", "jpeg", "png", "webp", "pdf_escaneado"],
       mode_label: iaConfig.apiKey ? "Documentos + IA visual" : "Extraccion local",
       guidance: iaConfig.apiKey
@@ -8168,6 +8187,15 @@ router.get("/ai-inbox/status", GERENTE_O_TRAFICO, async (req, res) => {
 
 router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
+  let inboxEntry, analysis;
+  let sourceAttachments = [];
+  try {
+    inboxEntry = req.body?.inbox_id
+      ? await orderInbox.get(db,empresaId,req.body.inbox_id)
+      : await orderInbox.receive(db,empresaId,req.user.id,req.body);
+    analysis = await orderInbox.claim(db,empresaId,inboxEntry.id,req.user.id);
+    if(analysis.replay)return res.json({...analysis.item.result,inbox_id:inboxEntry.id,inbox_state:analysis.item.state,duplicate:true,pedido_id:analysis.item.pedido_id});
+    req.body = await orderInbox.expandEmails(analysis.item.payload);
   const textoOriginal = String(req.body?.texto || req.body?.text || "").trim();
   const attachments = Array.isArray(req.body?.attachments)
     ? req.body.attachments.slice(0, 8).map(a => ({
@@ -8188,15 +8216,13 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     .slice(0, 20000);
   const hasAiAttachment = attachments.some(a => a.base64);
   const hasDocumentAttachment = attachments.some(a => a.base64) || attachmentTexts.length > 0;
-  const sourceAttachments = attachments.map(({ base64, ...a }) => a);
+  sourceAttachments = attachments.map(({ base64, ...a }) => a);
   if ((!texto || texto.length < 12) && !hasDocumentAttachment) {
-    return res.status(400).json({ error: "Pega texto o sube un PDF/DOCX/XLSX/TXT/email de la orden para generar el borrador." });
+    throw Object.assign(Error("Pega texto o sube un documento legible para generar el borrador."),{status:400});
   }
   if (texto.length > 20000) {
     return res.status(400).json({ error: "El texto es demasiado largo. Resume o pega solo la orden de carga." });
   }
-  try {
-    await ensureColaboradorWorkflowSchema();
     let draft = extractAiPedidoDraft(texto);
     let tarifaUnitariaDetectada = Boolean(draft._tarifa_unitaria_detectada);
     const issues = [];
@@ -8381,7 +8407,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       suggestions,
       error: visualAi.used && !visualAi.parsed ? "Respuesta IA sin JSON interpretable" : "",
     });
-    res.json({
+    const result = {
       source: {
         type: req.body?.source || "texto",
         filename: req.body?.filename || null,
@@ -8404,8 +8430,11 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
         ? "Completa los campos bloqueantes y revisa tarifa/asignacion antes de guardar."
         : "Revisa el borrador y guardalo si los datos son correctos.",
       operational_summary: operationalSummary,
-    });
+    };
+    const saved = await orderInbox.finish(db,empresaId,inboxEntry.id,analysis.token,req.user.id,result);
+    res.json({...result,inbox_id:saved.id,inbox_state:saved.state});
   } catch (e) {
+    if(analysis?.token)await orderInbox.finish(db,empresaId,inboxEntry.id,analysis.token,req.user.id,null,e.message).catch(()=>{});
     await logAiInboxRun({
       empresaId,
       userId: req.user?.id || null,
@@ -8417,7 +8446,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       attachments: sourceAttachments,
       error: e.message || "No se pudo interpretar el pedido",
     });
-    res.status(500).json({ error: e.message || "No se pudo interpretar el pedido" });
+    res.status(e.status || 500).json({ error: e.message || "No se pudo interpretar el pedido", inbox_id: inboxEntry?.id || null });
   }
 });
 
@@ -8525,6 +8554,8 @@ router.post("/chofer", async (req, res) => {
         ]
       );
       pedido = rows[0];
+      const remolqueId = normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null;
+      const cargoLength = await initialCargoLength(client, empresaId, remolqueId, req.body);
 
       const extraFields = [
         ["fecha_descarga", fechaDescargaNorm],
@@ -8538,10 +8569,12 @@ router.post("/chofer", async (req, res) => {
         ["cmr_tipo", cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body?.cmr_tipo)],
         ["referencia_cliente", req.body?.referencia_cliente || null],
         ["tipo_carga", req.body?.tipo_carga || null],
-        ["metros_lineales", normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
+        ["metros_lineales", cargoLength ? cargoLength.length : normalizePedidoValue("metros_lineales", req.body?.metros_lineales)],
+        ["carga_largo_m", cargoLength ? cargoLength.length : normalizePedidoValue("carga_largo_m", req.body?.carga_largo_m)],
+        ["longitud_ocupada_mode", cargoLength ? cargoLength.mode : normalizeCargoLengthMode(req.body?.longitud_ocupada_mode)],
         ["puntos_carga", JSON.stringify(puntosCarga)],
         ["puntos_descarga", JSON.stringify(puntosDescarga)],
-        ["remolque_id", normalizePedidoUuid(req.body?.remolque_id) || chofer.remolque_id || null],
+        ["remolque_id", remolqueId],
       ].filter(([, value]) => value !== undefined);
       const updated = await updateExistingPedidoFields(client, extraFields, pedido.id, empresaId);
       pedido = updated || pedido;
@@ -8627,6 +8660,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
             remolque_id_manual, remolque_id } = req.body; // remolque_id_manual si se especifica uno distinto al del conjunto
 
     const empresaId = req.empresaId||req.user.empresa_id;
+    if(req.body.ai_metadata?.inbox_id && (!require('../middleware/auth').planHasFeature(req.user.plan,'ai') || !['gerente','trafico'].includes(req.user.rol)))return res.status(403).json({error:'No puedes crear pedidos desde esta bandeja.'});
     const plannerCreation=req.body.workspace==='planner';
     if(plannerCreation){
       if(!require('../services/companyProducts').moduleAvailable(req.user?.productos,'planner'))return res.status(403).json({error:'Planner no está habilitado para tu empresa.'});
@@ -8682,8 +8716,11 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
     }
 
     let pedidoCreado = null;
+    let inboxReplayed = false;
     let remolqueMatCreado = null;
     await db.transaction(async (client) => {
+      const inboxCreation = await orderInbox.lockForCreation(client,empresaId,req.user.id,req.body.ai_metadata,req.body);
+      if(inboxCreation?.replay){pedidoCreado=inboxCreation.replay;inboxReplayed=true;return;}
       await assertClienteAdmiteNuevoPedido(client, req, cliente_id, importeInicial);
       // Resolver el remolque efectivo para este pedido
       const remolqueSolicitado = remolque_id_manual || remolque_id || null;
@@ -8765,6 +8802,8 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         pedido.origen_producto='planner';
       }
 
+      const cargoLength = await initialCargoLength(client, empresaId, remolque_id_efectivo, req.body);
+
       const ivaPedido = (req.body.tipo_iva !== undefined || req.body.iva_regimen !== undefined)
         ? normalizeIvaRegimen(req.body.tipo_iva, req.body.iva_regimen)
         : null;
@@ -8803,11 +8842,12 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         km_ruta: req.body.km_ruta ?? null,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
-        metros_lineales: req.body.metros_lineales ?? null,
+        metros_lineales: cargoLength ? cargoLength.length : (req.body.metros_lineales ?? null),
+        longitud_ocupada_mode: cargoLength ? cargoLength.mode : normalizeCargoLengthMode(req.body.longitud_ocupada_mode),
         palets_tipo: req.body.palets_tipo ?? null,
         palets_cantidad: req.body.palets_cantidad ?? null,
         palets_apilables: req.body.palets_apilables ?? false,
-        carga_largo_m: req.body.carga_largo_m ?? null,
+        carga_largo_m: cargoLength ? cargoLength.length : (req.body.carga_largo_m ?? null),
         carga_ancho_m: req.body.carga_ancho_m ?? null,
         carga_alto_m: req.body.carga_alto_m ?? null,
         tipo_precio: req.body.tipo_precio ?? "viaje",
@@ -8896,6 +8936,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         (k in req.body) ||
         (k === "precio_colaborador" && supplierPriceUpdated) ||
         ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
+        (cargoLength && ["metros_lineales", "carga_largo_m", "longitud_ocupada_mode"].includes(k)) ||
         ["origen_pais","destino_pais","cmr_tipo"].includes(k) ||
         (["origen_provincia","destino_provincia"].includes(k) && (req.body.puntos_carga !== undefined || req.body.puntos_descarga !== undefined)) ||
         (k === "coste_gasoil" && normalizedExtraFieldMap.colaborador_id) ||
@@ -8963,9 +9004,15 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         origen: pedido.origen || origen || null,
         destino: pedido.destino || destino || null,
       }, req.user?.rol || "usuario", req.user?.id || null, client);
+      if(inboxCreation)await orderInbox.created(client,empresaId,inboxCreation.id,req.user.id,pedido.id,inboxCreation.creationHash);
       pedidoCreado = pedido;
       remolqueMatCreado = remolque_mat;
     });
+    if(inboxReplayed)return res.json({...pedidoCreado,inbox_duplicate:true});
+    // Assignment can confirm the order during creation, without going through
+    // PATCH /estado. Reconcile its incidents after the transaction commits.
+    await syncOrderIncidents({ empresaId, pedidoId:pedidoCreado.id })
+      .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras crear pedido:", e.message));
     // Sugerir fijar la mercancia como habitual del cliente si se repite lo suficiente
     // y el cliente todavia no la tiene fijada. No debe romper la creacion.
     let sugerenciaMercancia = null;
@@ -9028,14 +9075,14 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
           cliente: e.cliente || null,
         });
       }
-      res.status(500).json({ error: e.message || "No se pudo crear el pedido" });
+      res.status(e.status>=400&&e.status<500?e.status:500).json({ error: e.message || "No se pudo crear el pedido" });
     }
   }
 );
 
 // PATCH /pedidos/:id/estado
 router.patch("/:id/estado",
-  body("estado").isIn(["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"]),
+  body("estado").isIn(WRITABLE_STATES),
   async (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -9059,8 +9106,42 @@ router.patch("/:id/estado",
     if (req.user?.rol === "chofer" && !["espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","incidencia"].includes(estado)) {
       return res.status(403).json({ error: "El chofer no puede aplicar este estado" });
     }
+    if(req.user?.rol==='chofer'&&estado!=='incidencia'&&(require('../services/driverStops').driverStops(rows[0]).length>2||await require('../services/driverJourney').loadJourney(db,empresaId,req.params.id))){
+      return res.status(409).json({error:'Confirma la acción en la parada correspondiente; no puedes completar el viaje con un estado global.',code:'DRIVER_STOP_REQUIRED'});
+    }
     if (String(rows[0].estado || "").toLowerCase() === "entregado" && String(estado || "").toLowerCase() !== "entregado" && req.user?.rol !== "gerente") {
       return res.status(403).json({ error: "Solo gerencia puede cambiar el estado de un pedido entregado" });
+    }
+    assertTransportTransition(rows[0].estado, estado, { actor: req.user?.rol, correction: req.user?.rol === 'gerente' });
+    // Reintentos de una transición ya aplicada no deben generar de nuevo
+    // eventos, correos ni automatismos de entrega. La incidencia se excluye:
+    // un nuevo aviso en el mismo estado puede aportar información distinta.
+    if (String(rows[0].estado || "").toLowerCase() === estado && estado !== "incidencia") {
+      if (estado === "entregado" && facturacionMes && normalizePedidoDate(rows[0].facturacion_mes) !== facturacionMes) {
+        await db.query(
+          "UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3",
+          [facturacionMes, req.params.id, empresaId]
+        );
+      }
+      return res.json({ ok: true, estado, sin_cambios: true, facturacion_auto: false });
+    }
+    const cargaRealDesdeEstado = estado === "en_curso" &&
+      ["confirmado", "espera_carga", "cargando"].includes(String(rows[0].estado || "").toLowerCase()) &&
+      !rows[0].carga_real_at;
+    const descargaRealDesdeEstado = estado === "entregado" &&
+      String(rows[0].estado || "").toLowerCase() !== "entregado" &&
+      !rows[0].descarga_real_at;
+    if (cargaRealDesdeEstado && req.user?.rol !== "chofer") {
+      const fechaPlan = normalizePedidoDate(rows[0].fecha_carga_planificada || rows[0].fecha_carga);
+      const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      if (fechaPlan && fechaPlan !== hoyMadrid && req.body.confirmar_carga_real !== true) {
+        return res.status(409).json({
+          code: "FECHA_REAL_CARGA_CONFIRMAR",
+          error: `El pedido estaba planificado para ${fechaPlan}. Confirma que la carga se ha completado hoy (${hoyMadrid}).`,
+          fecha_planificada: fechaPlan,
+          fecha_real: hoyMadrid,
+        });
+      }
     }
     if(req.user?.rol==='chofer'&&estado==='entregado') {
       const progress=(await getPedidoChoferPasos(req.params.id,empresaId)).data;
@@ -9069,7 +9150,7 @@ router.patch("/:id/estado",
     // Proteccion: cuando el chofer ya esta haciendo los pasos del viaje (en curso),
     // nadie desde trafico/pedidos puede cambiarle el estado. Solo el propio chofer
     // (desde su app) o gerencia. Asi no se pisa el estado real del viaje.
-    const ESTADOS_EN_CURSO_CHOFER = ["cargando", "en_curso", "espera_carga", "espera_descarga", "descarga"];
+    const ESTADOS_EN_CURSO_CHOFER = ACTIVE_STATES;
     if (
       ESTADOS_EN_CURSO_CHOFER.includes(String(rows[0].estado || "").toLowerCase()) &&
       req.user?.rol !== "chofer" &&
@@ -9094,6 +9175,7 @@ router.patch("/:id/estado",
         return res.status(400).json({ error: "Indica el motivo de cancelacion para cancelar este pedido.", code: "MOTIVO_CANCELACION_REQUERIDO" });
       }
     }
+    let estadoActualizado = true;
     if (estado === "incidencia") {
       const incidenciaNota = `INCIDENCIA: ${incidenciaData.label} - ${incidencia}`;
       try {
@@ -9131,7 +9213,7 @@ router.patch("/:id/estado",
         ).catch(colErr => logger.warn(`Campos estructurados de incidencia no guardados (${colErr?.code || "?"}): ${colErr.message}`));
       }
     } else if (estado === "cancelado") {
-      await db.query(
+      const result = await db.query(
         `UPDATE pedidos
          SET estado=$1,
              motivo_cancelacion=$2::text,
@@ -9141,21 +9223,33 @@ router.patch("/:id/estado",
                WHEN NULLIF($2::text,'') IS NULL THEN notas
                ELSE TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $4::text))
              END
-         WHERE id=$5 AND empresa_id=$6`,
+         WHERE id=$5 AND empresa_id=$6 AND estado<>$1::estado_pedido`,
         [estado, motivoCancelacion || null, actorUsuarioId, `CANCELACION: ${motivoCancelacion}`, req.params.id, empresaId]
       );
+      estadoActualizado = result.rowCount > 0;
     } else if (estado === "entregado" && facturacionMes) {
       // La entrega y el mes elegido se guardan juntos, sin exito parcial.
-      await db.query(
-        "UPDATE pedidos SET estado=$1, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
-        [estado, req.params.id, empresaId, facturacionMes]
+      const result = await db.query(
+        "UPDATE pedidos SET estado=$1::estado_pedido, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
+        [estado, req.params.id, empresaId, facturacionMes, descargaRealDesdeEstado]
       );
+      estadoActualizado = result.rowCount > 0;
     } else {
-      await db.query(
-        "UPDATE pedidos SET estado=$1, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL WHERE id=$2 AND empresa_id=$3",
-        [estado, req.params.id, empresaId]
+      const result = await db.query(
+        "UPDATE pedidos SET estado=$1::estado_pedido, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
+        [estado, req.params.id, empresaId, cargaRealDesdeEstado, descargaRealDesdeEstado]
       );
+      estadoActualizado = result.rowCount > 0;
     }
+    if (!estadoActualizado) {
+      if (estado === "entregado" && facturacionMes) {
+        await db.query("UPDATE pedidos SET facturacion_mes=$1 WHERE id=$2 AND empresa_id=$3 AND estado::text='entregado'", [facturacionMes, req.params.id, empresaId]);
+      }
+      return res.json({ ok: true, estado, sin_cambios: true, facturacion_auto: false });
+    }
+
+    await syncOrderIncidents({ empresaId, pedidoId:req.params.id })
+      .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras estado:", e.message));
 
     if (estado === "descarga" && rows[0].vehiculo_id && rows[0].destino) {
       await db.query(
@@ -9237,6 +9331,13 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
   await ensureColaboradorWorkflowSchema();
   const empresaId = req.empresaId||req.user?.empresa_id;
   const body = req.body;
+  let longitudOcupadaModeUpdate;
+  try {
+    longitudOcupadaModeUpdate = body.longitud_ocupada_mode === undefined
+      ? undefined : normalizeCargoLengthMode(body.longitud_ocupada_mode);
+  } catch (modeError) {
+    return res.status(modeError.status || 400).json({ error: modeError.message });
+  }
   if (body.tipo_precio_colaborador != null && !["viaje", "tonelada"].includes(body.tipo_precio_colaborador)) {
     return res.status(400).json({ error: "Tipo de tarifa del proveedor no valido" });
   }
@@ -9245,6 +9346,15 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     [req.params.id, empresaId]
   );
   if (!pedidoActualRows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+  if (body.cliente_id !== undefined && String(body.cliente_id || '') !== String(pedidoActualRows[0].cliente_id || '') && body.ruta_id === undefined) {
+    body.ruta_id = null;
+  }
+  if (body.ruta_id) {
+    const routeOwner = await resolveCompatibleRutaId(db, empresaId, body.ruta_id, {
+      cliente_id: body.cliente_id || pedidoActualRows[0].cliente_id,
+    });
+    if (!routeOwner.rutaId) return res.status(400).json({ error: 'La ruta no pertenece al cliente de este pedido.' });
+  }
   await require("../services/orderFuelCost").fillMissingFuelCost(db,body,pedidoActualRows[0],empresaId);
   if('precio_venta_total' in body){
     const total=parseLocaleNumber(body.precio_venta_total);
@@ -9352,6 +9462,7 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
     metros_lineales: body.metros_lineales ?? null,
+    longitud_ocupada_mode: longitudOcupadaModeUpdate,
     // Detalle de la carga (ocupacion real del remolque en los grupajes)
     palets_tipo: body.palets_tipo ?? null,
     palets_cantidad: body.palets_cantidad ?? null,
@@ -9531,7 +9642,9 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         throw Object.assign(new Error("El pedido ya está asignado a otro vehículo o colaborador. Actualiza la mesa y revisa su asignación."), {status:409});
       }
       await require('../services/plannerCargoGuard').assertCargoEditable(tx, empresaId, current.rows[0], body);
+      await require('../services/journeyAssignment').protectJourneyAssignment(tx,empresaId,current.rows[0],body);
       await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+      await require('../services/trafficAssignment').validateTrafficAssignment(tx, empresaId, current.rows[0], body, req.user.id);
       if ('colaborador_id' in body && String(body.colaborador_id || '') !== String(current.rows[0].colaborador_id || '')) {
         await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
         await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
@@ -9542,6 +9655,10 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     let pedidoActualizado = rows[0];
     pedidoActualizado = await limpiarPendienteCompletarSiProcede(pedidoActualizado, empresaId, req.user);
     pedidoActualizado = await confirmarPedidoPorAsignacionSiProcede(pedidoActualizado, empresaId, req.user);
+    if (assignmentFieldsTouched || ["estado", "fecha_carga", "fecha_entrega", "fecha_descarga", "puntos_carga"].some(key => key in body)) {
+      await syncOrderIncidents({ empresaId, pedidoId:pedidoActualizado.id })
+        .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda tras editar pedido:", e.message));
+    }
     if (assignmentFieldsTouched) await sincronizarConjuntoChoferDesdePedido(db, pedidoActualizado, empresaId);
     if (assignmentFieldsTouched && pedidoAntesAsignacion) {
       const changed = ["vehiculo_id", "chofer_id", "chofer2_id", "remolque_id", "colaborador_id"].some(
@@ -9605,14 +9722,16 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     asociarPuntosInteresUsados(empresaId, pedidoActualizado.cliente_id, pedidoActualizado.puntos_carga, pedidoActualizado.puntos_descarga);
     res.json(pedidoActualizado);
   } catch(e) {
-    if (e.status) return res.status(e.status).json({error:e.message,code:e.code,requiere_confirmacion:e.requiere_confirmacion||e.code==='VEHICULO_EN_TALLER',vehiculos:e.vehiculos});
+    if (e.status) return res.status(e.status).json({error:e.message,code:e.code,requiere_confirmacion:e.requiere_confirmacion||e.code==='VEHICULO_EN_TALLER',vehiculos:e.vehiculos,advertencias:e.advertencias});
     if (e.code === '42703') {
       let updatedPedido = await db.transaction(async tx => {
         const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id,empresaId]);
         if (!current.rows[0]) return null;
         if (body.asignar_solo_si_libre === true && (current.rows[0].colaborador_id || (current.rows[0].vehiculo_id && String(current.rows[0].vehiculo_id)!==String(body.vehiculo_id)))) throw Object.assign(new Error("El pedido ya tiene una asignación. Actualiza la mesa."),{status:409});
         await require('../services/plannerCargoGuard').assertCargoEditable(tx, empresaId, current.rows[0], body);
-        await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+        await require('../services/journeyAssignment').protectJourneyAssignment(tx,empresaId,current.rows[0],body);
+      await confirmWorkshopAssignment(tx, empresaId, body, current.rows[0]);
+        await require('../services/trafficAssignment').validateTrafficAssignment(tx, empresaId, current.rows[0], body, req.user.id);
         if ('colaborador_id' in body && String(body.colaborador_id || '') !== String(current.rows[0].colaborador_id || '')) {
           await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
           await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
@@ -9770,13 +9889,9 @@ router.delete("/:id/factura", async (req, res) => {
 
 
 // GET /pedidos/:id/carta-porte
-router.get("/:id/carta-porte", async (req, res) => {
+async function getCartaPorte(req, res) {
   try {
     const empresaId = req.user && req.user.empresa_id;
-    const cartaPorte = await ensurePedidoCartaPorteNumero(req.params.id, empresaId).catch((error) => {
-      logger.warn("No se pudo asegurar la numeracion de carta de porte:", error.message);
-      return null;
-    });
     const { rows } = await db.query(`
       SELECT
         p.*,
@@ -9795,13 +9910,23 @@ router.get("/:id/carta-porte", async (req, res) => {
         v.modelo       AS veh_modelo,       v.modelo       AS vehiculo_modelo,
         r2.matricula   AS rem_matricula,    r2.matricula   AS remolque_matricula
       FROM pedidos p
-      LEFT JOIN clientes  c   ON c.id  = p.cliente_id
-      LEFT JOIN choferes  ch  ON ch.id = p.chofer_id
-      LEFT JOIN vehiculos v   ON v.id  = p.vehiculo_id
-      LEFT JOIN vehiculos r2  ON r2.id = p.remolque_id
+      LEFT JOIN clientes  c   ON c.id  = p.cliente_id AND c.empresa_id=p.empresa_id
+      LEFT JOIN choferes  ch  ON ch.id = p.chofer_id AND ch.empresa_id=p.empresa_id
+      LEFT JOIN vehiculos v   ON v.id  = p.vehiculo_id AND v.empresa_id=p.empresa_id
+      LEFT JOIN vehiculos r2  ON r2.id = p.remolque_id AND r2.empresa_id=p.empresa_id
       WHERE p.id = $1 AND p.empresa_id = $2
     `, [req.params.id, empresaId]);
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
+    const cartaPorteAutorizada = req.user?.rol === "colaborador"
+      ? String(rows[0].colaborador_id || "") === String(req.user?.colaborador_id || "\u0000")
+      : await usuarioPuedeGestionarPedido(req, rows[0]);
+    if (!cartaPorteAutorizada) {
+      return res.status(403).json({ error: "No puedes acceder a este pedido" });
+    }
+    const cartaPorte = await ensurePedidoCartaPorteNumero(req.params.id, empresaId).catch((error) => {
+      logger.warn("No se pudo asegurar la numeracion de carta de porte:", error.message);
+      return null;
+    });
 
     const { rows: empresaRows } = await db.query(
       "SELECT nombre, cif, cfg_precios FROM empresas WHERE id = $1 LIMIT 1",
@@ -9839,219 +9964,95 @@ router.get("/:id/carta-porte", async (req, res) => {
       albaranes_adjuntos_count: documentosAnexos.length,
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
+}
+router.get("/:id/carta-porte", getCartaPorte);
+
+// GPS and tracking retain the existing company/driver authorization boundary.
+router.get('/:id/tracking',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({...await require('../services/vehicleTracking').snapshot(db,empresaId,order),can_configure:['gerente','trafico'].includes(req.user.rol)});
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.put('/:id/tracking/config',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {res.json(await require('../services/vehicleTracking').saveConfiguration(db,req.empresaId||req.user.empresa_id,req.params.id,req.body,req.user.id));}
+  catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.post('/:id/tracking/eta',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    const tracking=require('../services/vehicleTracking'),state=await tracking.snapshot(db,empresaId,order);
+    if(state.position&&state.next_stop?.coordinates){
+      const route=await require('./geocoding').trackingRoute(empresaId,[state.position,state.next_stop.coordinates]);
+      state.eta=tracking.roadEta(state,route);
+      if(state.eta.value)await db.query(`INSERT INTO tracking_eta_snapshot(empresa_id,pedido_id,position_recorded_at,eta) VALUES($1,$2,$3,$4)
+        ON CONFLICT(empresa_id,pedido_id) DO UPDATE SET position_recorded_at=EXCLUDED.position_recorded_at,eta=EXCLUDED.eta,created_at=now()`,[empresaId,order.id,state.last_recorded_at,JSON.stringify(state.eta)]);
+    }
+    res.setHeader('Cache-Control','private, no-store');res.json(state);
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.post('/:id/gps',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    await assertDriverWorkday(req);
+    const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if(!order)return res.status(404).json({error:'Pedido no encontrado'});
+    if(!order.vehiculo_id)return res.status(422).json({error:'Asigna la tractora antes de registrar su posición'});
+    if(['entregado','facturado','cancelado'].includes(order.estado))return res.status(409).json({error:'No se registra ubicación de un servicio cerrado'});
+    const tracking=require('../services/vehicleTracking'),p=tracking.position(req.body);
+    const result=await tracking.record(db,{empresaId,vehiculoId:order.vehiculo_id,provider:'app_chofer',input:req.body,raw:{source:'pedido_gps',pedido_id:order.id,chofer_user_id:req.user.id}});
+    await db.query('UPDATE pedidos SET ultima_posicion=$3,posicion_ts=$4 WHERE empresa_id=$1 AND id=$2 AND (posicion_ts IS NULL OR posicion_ts<=$4::timestamptz)',[empresaId,order.id,`${p.lat},${p.lng}`,p.recorded_at]);
+    res.json(result);
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
-// POST /pedidos/:id/gps - guardar ultima posicion enviada por chofer
-router.post("/:id/gps", async (req, res) => {
-  try {
-    const empresaId = req.empresaId || req.user.empresa_id;
-    const lat = Number(req.body.lat);
-    const lng = Number(req.body.lng);
-    const velocidad = Number.isFinite(Number(req.body.velocidad)) ? Number(req.body.velocidad) : null;
-    const odometro = Number.isFinite(Number(req.body.odometro_km ?? req.body.km_actuales)) ? Number(req.body.odometro_km ?? req.body.km_actuales) : null;
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return res.status(400).json({ error: "Coordenadas no validas" });
-    }
-
-    const { rows: pedidosRows } = await db.query(
-      "SELECT id, vehiculo_id, chofer_id, chofer2_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
-      [req.params.id, empresaId]
-    );
-    const pedido = pedidosRows[0];
-    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
-      return res.status(403).json({ error: "No puedes actualizar la posicion de este pedido" });
-    }
-
-    const posicion = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-    const { rows } = await db.query(
-      `UPDATE pedidos
-       SET ultima_posicion=$1, posicion_ts=NOW()
-       WHERE id=$2 AND empresa_id=$3
-       RETURNING id, ultima_posicion, posicion_ts`,
-      [posicion, req.params.id, empresaId]
-    );
-    if (pedido.vehiculo_id) {
-      await db.query(
-        `UPDATE vehiculos
-         SET ubicacion_actual=$1,
-             ubicacion_fuente='app_chofer',
-             ubicacion_ts=NOW(),
-             gps_lat=$2,
-             gps_lng=$3,
-             km_actuales=COALESCE($4, km_actuales)
-         WHERE id=$5 AND empresa_id=$6`,
-        [`GPS ${posicion}`, lat, lng, odometro, pedido.vehiculo_id, empresaId]
-      ).catch(e => logger.warn("No se pudo actualizar GPS del vehiculo:", e.message));
-      await db.query(
-        `INSERT INTO gps_position_log
-          (empresa_id,vehiculo_id,provider,external_id,lat,lng,ubicacion,velocidad_kmh,odometro_km,raw,recorded_at)
-         VALUES ($1,$2,'app_chofer',NULL,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
-        [
-          empresaId,
-          pedido.vehiculo_id,
-          lat,
-          lng,
-          `GPS ${posicion}`,
-          velocidad,
-          odometro,
-          JSON.stringify({
-            source: "pedido_gps",
-            pedido_id: pedido.id,
-            chofer_user_id: req.user?.id || null,
-          }),
-        ]
-      ).catch(e => logger.warn("No se pudo registrar posicion GPS del vehiculo:", e.message));
-    }
-    res.json({ ok: true, ...rows[0] });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+// SignatureProvider boundary: immutable operation receipt and local evidence.
+async function signatureAuthorization(req,res) {
+  const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return null;
+  await assertDriverWorkday(req);
+  const access=req.user.rol==='chofer'?await getChoferAccessForUser(req.user,empresaId):null;
+  const authorize=access?o=>access.choferIds.some(id=>id===String(o.chofer_id||'')||id===String(o.chofer2_id||''))||(!o.chofer_id&&!o.chofer2_id&&access.vehiculoIds.includes(String(o.vehiculo_id||''))):()=>true;
+  return {empresaId,authorize,actorId:req.user.id,pedidoId:req.params.id,allowCorrection:['gerente','trafico'].includes(req.user.rol)};
+}
+router.post('/:id/firma/preparar',async(req,res)=>{
+  try {const args=await signatureAuthorization(req,res);if(!args)return;
+    res.json(await require('../services/localEvidenceSignatureProvider').prepare(db,{...args,stopId:req.body.parada_id,reserva:req.body.reserva||{},correctionId:req.body.correccion_de}));
+  } catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
-
-// POST /pedidos/:id/firma - guardar firma digital por rol y actualizar DCD
-router.post("/:id/firma", async (req, res) => {
-  try {
-    const empresaId = req.user && req.user.empresa_id;
-    await ensureColaboradorWorkflowSchema();
-    const { firma_destinatario, firma_nombre } = req.body;
-    const firmaImagen = firma_destinatario || req.body?.firma || req.body?.firma_png || req.body?.firma_data_url;
-    const firmaRol = normalizeFirmaRol(req.body?.rol || req.body?.firma_rol || "destinatario");
-    if (!firmaImagen) return res.status(400).json({ error: "Firma requerida" });
-    const { rows: pedidoRows } = await db.query(
-      `SELECT id, numero, origen, destino, fecha_carga, fecha_descarga, fecha_entrega,
-              vehiculo_id, chofer_id, chofer2_id, estado::text AS estado,
-              firma_evidencia, puntos_carga, puntos_descarga, mercancia, bultos, peso_kg
-         FROM pedidos
-        WHERE id=$1 AND empresa_id=$2
-        LIMIT 1`,
-      [req.params.id, empresaId]
-    );
-    const pedido = pedidoRows[0];
-    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
-      return res.status(403).json({ error: "No puedes firmar este pedido" });
-    }
-
-    let signedStop=null;
-    if(req.body.parada_id){
-      await assertDriverWorkday(req);
-      const helpers=require('../services/driverStops');
-      signedStop=helpers.driverStops(pedido).find(s=>s.id===req.body.parada_id);
-      const steps=(await getPedidoChoferPasos(pedido.id,empresaId)).data;
-      if(!signedStop || (signedStop.tipo==='carga'?'cargador':'destinatario')!==firmaRol)return res.status(409).json({error:'La firma no corresponde a esta parada.'});
-      const data=helpers.stopData(signedStop,steps,helpers.driverStops(pedido));
-      if(helpers.activeDriverStop(pedido,steps)?.id!==signedStop.id)return res.status(409).json({error:'Esta parada ya está cerrada o aún no es la parada actual.'});
-      if(signedStop.tipo==='carga'?!(data.mercancia_confirmada&&data.albaran_carga):!(data.descarga_ok&&data.albaran_descarga))return res.status(409).json({error:'Completa los datos y el albarán de esta parada antes de firmar.'});
-      signedStop={...signedStop,mercancia:data.mercancia_cargada,bultos:data.mercancia_palets,peso_kg:data.mercancia_peso_kg};
-    }
-    const firmadoAt = new Date().toISOString();
-    const firmaHash = sha256Hex(firmaImagen);
-    const pedidoContext = buildFirmaPedidoContext(pedido);
-    const defaultNombre = firmaRol === "chofer" ? "Chofer" : firmaRol === "cargador" ? "Cargador" : "Destinatario";
-    const evidenciaBase = {
-      version: "transgest-firma-evidencia-2026.05",
-      estado: "evidencia_interna_pre_eidas",
-      provider: "transgest_internal",
-      required_level_target: "firma electronica avanzada eIDAS",
-      pedido_id: pedido.id,
-      pedido_numero: pedido.numero,
-      ruta: { origen: pedido.origen || "", destino: pedido.destino || "" },
-      fechas: {
-        carga: pedido.fecha_carga || null,
-        descarga: pedido.fecha_descarga || pedido.fecha_entrega || null,
-      },
-      parada: signedStop,
-      pedido_context: pedidoContext,
-      pedido_context_hash_sha256: sha256Hex(stableJson(pedidoContext)),
-      firmante: {
-        nombre: String(firma_nombre || defaultNombre).trim(),
-        rol: firmaRol,
-      },
-      firma: {
-        algoritmo_hash: "SHA-256",
-        hash: firmaHash,
-        formato: String(firmaImagen).startsWith("data:image/") ? "data_url_image" : "desconocido",
-        data_url: String(firmaImagen).startsWith("data:image/") ? firmaImagen : "",
-      },
-      captura: {
-        ip: req.ip || req.headers["x-forwarded-for"] || "",
-        user_agent: req.get("user-agent") || "",
-        actor_tipo: req.user?.rol || "usuario",
-        actor_id: req.user?.id || null,
-        source: req.body?.source || (req.user?.rol === "chofer" ? "app_chofer" : "pedidos"),
-      },
-      firmado_at: firmadoAt,
-    };
-    const evidencia = {
-      ...evidenciaBase,
-      integrity_hash_sha256: sha256Hex(stableJson(evidenciaBase)),
-    };
-    const evidenciaMulti = mergeFirmaEvidencia(pedido.firma_evidencia || null, firmaRol, evidencia);
-    if(signedStop) evidenciaMulti.paradas={...(pedido.firma_evidencia?.paradas||{}),[signedStop.id]:evidencia};
-
-    const roleSetSql = {
-      cargador: "firma_cargador = $1, firma_cargador_nombre = $2, firma_cargador_fecha = $5",
-      chofer: "firma_chofer = $1, firma_chofer_nombre = $2, firma_chofer_fecha = $5",
-      destinatario: "firma_destinatario = $1, firma_nombre = $2, firma_fecha = $5, firma_hash = $7",
-    }[firmaRol];
-
-    const firmaParams = [
-      firmaImagen,
-      evidencia.firmante.nombre || defaultNombre,
-      req.params.id,
-      empresaId,
-      firmadoAt,
-      JSON.stringify(evidenciaMulti),
-    ];
-    if (firmaRol === "destinatario") firmaParams.push(firmaHash);
-
-    const { rows } = await db.query(`
-      UPDATE pedidos
-      SET ${roleSetSql},
-          firma_evidencia = $6::jsonb,
-          updated_at = NOW()
-      WHERE id = $3 AND empresa_id = $4
-      RETURNING id, numero, firma_fecha, firma_nombre, firma_hash, firma_cargador_fecha, firma_cargador_nombre, firma_chofer_fecha, firma_chofer_nombre, firma_evidencia
-    `, firmaParams);
-
-    await logPedidoEvento(req.params.id, empresaId, `firma.${firmaRol}_registrada`, {
-      firma_rol: firmaRol,
-      firma_nombre: evidencia.firmante.nombre,
-      firma_hash: firmaHash,
-      integrity_hash_sha256: evidencia.integrity_hash_sha256,
-      pedido_context_hash_sha256: evidencia.pedido_context_hash_sha256,
-      estado: evidencia.estado,
-      source: evidencia.captura.source,
-    }, req.user?.rol || "usuario", req.user?.id || null);
-
-    const pedidoId = req.params.id;
-    const actorId = req.user?.id || null;
-    const appBaseUrl = publicBaseUrl(req);
-    setImmediate(() => {
-      getPedidoDocumentoControlContext(pedidoId, empresaId)
-        .then(ctx => ctx ? archivarDocumentoControlPedido({
-          pedidoId,
-          empresaId,
-          appBaseUrl,
-          userId: actorId,
-          motivo: `firma_${firmaRol}`,
-        }) : null)
-        .catch(repoErr => logger.warn("No se pudo actualizar el repositorio DCD tras firma:", repoErr.message));
+router.get('/:id/firma/operaciones/:operationId/pdf',async(req,res)=>{
+  try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
+    const row=(await db.query('SELECT pdf,pdf_hash FROM operacion_evidencias WHERE empresa_id=$1 AND pedido_id=$2 AND id=$3',[empresaId,req.params.id,req.params.operationId])).rows[0];
+    if(!row)return res.status(404).json({error:'Justificante no encontrado'});
+    const bytes=Buffer.from(row.pdf);if(transportDocuments.hash(bytes)!==row.pdf_hash)throw Error('Fallo de integridad');
+    sendTransportOriginal(res,bytes,'justificante-para-firma.pdf',row.pdf_hash);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
+});
+router.post('/:id/firma',async(req,res)=>{
+  try {const args=await signatureAuthorization(req,res);if(!args)return;
+    const capture={ip:req.ip||'',user_agent:String(req.get('user-agent')||'').slice(0,600),actor_id:req.user.id,actor_rol:req.user.rol,
+      session_id:req.user.jti||transportDocuments.hash(String(req.get('authorization')||'')).slice(0,32),platform:String(req.body.platform||'').slice(0,80),app_version:String(req.body.app_version||'').slice(0,80)};
+    res.json(await require('../services/localEvidenceSignatureProvider').sign(db,{...args,request:req.body,capture}));
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
+});
+router.post('/:id/firma/:evidenceId/anular',GERENTE_O_TRAFICO,async(req,res)=>{
+  try {const empresaId=req.empresaId||req.user.empresa_id,reason=String(req.body.motivo||'').trim();
+    if(!reason)return res.status(422).json({error:'Indica el motivo de anulación'});
+    const result=await db.transaction(async tx=>{
+      const order=(await tx.query('SELECT id,firma_evidencia FROM pedidos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,req.params.id])).rows[0];
+      if(!order)return null;
+      const row=(await tx.query('SELECT s.id,s.payload,o.parada_id FROM signature_evidence s JOIN operacion_evidencias o ON o.empresa_id=s.empresa_id AND o.id=s.operation_id WHERE s.empresa_id=$1 AND o.pedido_id=$2 AND s.id=$3',[empresaId,req.params.id,req.params.evidenceId])).rows[0];
+      if(!row)return null;
+      await tx.query('INSERT INTO signature_evidence_annulments(empresa_id,signature_id,reason,created_by) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING',[empresaId,row.id,reason,req.user.id]);
+      const ev=order.firma_evidencia||{};
+      if(ev.paradas?.[row.parada_id]?.id===row.id)delete ev.paradas[row.parada_id];
+      for(const key of Object.keys(ev.firmas||{}))if(ev.firmas[key]?.id===row.id)delete ev.firmas[key];
+      await tx.query('UPDATE pedidos SET firma_evidencia=$3,updated_at=NOW() WHERE empresa_id=$1 AND id=$2',[empresaId,order.id,JSON.stringify(ev)]);
+      return {ok:true};
     });
-
-    res.json({ ok: true, firma_rol: firmaRol, repositorio_pendiente: true, ...rows[0] });
-  } catch(e) {
-    logger.error("Error guardando firma de pedido:", {
-      message: e.message,
-      code: e.code,
-      pedido_id: req.params.id,
-      user_id: req.user?.id || null,
-      rol: req.user?.rol || null,
-    });
-    if (e.status) return res.status(e.status).json({ error: e.message, code: e.code || undefined });
-    if (e.code === "22001") return res.status(400).json({ error: "La firma o la evidencia generada supera el tamano permitido. Vuelve a firmar con un trazo mas simple.", code: e.code });
-    if (e.code === "22P02") return res.status(400).json({ error: "Alguno de los datos de firma no tiene formato valido. Refresca el viaje y vuelve a intentarlo.", code: e.code });
-    res.status(500).json({ error: e.message || "No se pudo guardar la firma del pedido" });
-  }
+    if(!result)return res.status(404).json({error:'Firma no encontrada'});res.json(result);
+  }catch(e){res.status(e.status||500).json({error:e.message});}
 });
 
 router.get("/:id/firma/evidencia", GERENTE_O_TRAFICO, async (req, res) => {
@@ -10161,6 +10162,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
+router.getCartaPorte = getCartaPorte;
 router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox };
 
 module.exports = router;

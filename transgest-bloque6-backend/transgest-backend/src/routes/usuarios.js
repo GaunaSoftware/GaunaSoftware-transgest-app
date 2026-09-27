@@ -11,6 +11,15 @@ const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHas
 const router = express.Router();
 
 router.use(authenticate, SOLO_GERENTE);
+// A tenant manager must not take over a shared identity by resetting its password.
+router.use('/:id',async(req,res,next)=>{try{
+ if(['PATCH','POST','PUT','DELETE'].includes(req.method)){
+ const shared=await db.query('SELECT 1 FROM usuario_empresas WHERE usuario_id=$1 GROUP BY usuario_id HAVING COUNT(*)>1',[req.params.id]);
+ if(shared.rows.length)return res.status(403).json({error:'Usuario multiempresa: los cambios de identidad y membresías se gestionan en SuperAdmin. El usuario puede cambiar su propia clave desde Mi cuenta.'});
+ }
+ next();
+}catch(e){next(e);}});
+
 
 const ROLES_PERMITIDOS = [
   "gerente",
@@ -19,6 +28,7 @@ const ROLES_PERMITIDOS = [
   "administrativo",
   "responsable_taller",
   "mecanico",
+  "carretillero",
   "colaborador",
   "visualizador",
   "chofer",
@@ -152,15 +162,16 @@ async function assertVehiculosEmpresa(vehiculoIds, eid) {
 router.get("/", async (req, res) => {
   await ensureUsuariosChoferSchema();
   const { rows } = await db.query(
-    `SELECT u.id,u.nombre,u.email,u.username,u.perfil,u.permisos,u.trafico_config,u.rol,u.cliente_id,u.chofer_id,u.activo,u.ultimo_acceso,u.created_at,
+    `SELECT u.id,u.nombre,u.email,u.username,m.perfil,m.permisos,m.trafico_config,m.rol,m.cliente_id,m.chofer_id,(u.activo AND m.activo) AS activo,u.ultimo_acceso,u.created_at,
+            (SELECT COUNT(*)>1 FROM usuario_empresas um WHERE um.usuario_id=u.id) AS multiempresa,
             u.debe_cambiar_password,u.password_changed_at,
             ch.nombre AS chofer_nombre, ch.apellidos AS chofer_apellidos, v.matricula AS vehiculo_matricula,
             c.nombre AS cliente_nombre, c.cif AS cliente_cif
-     FROM usuarios u
-     LEFT JOIN choferes ch ON ch.id=u.chofer_id AND ch.empresa_id=u.empresa_id
+     FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id
+     LEFT JOIN choferes ch ON ch.id=m.chofer_id AND ch.empresa_id=m.empresa_id
      LEFT JOIN vehiculos v ON v.id=ch.vehiculo_id AND v.empresa_id=ch.empresa_id
-     LEFT JOIN clientes c ON c.id=u.cliente_id AND c.empresa_id=u.empresa_id
-     WHERE u.empresa_id=$1
+     LEFT JOIN clientes c ON c.id=m.cliente_id AND c.empresa_id=m.empresa_id
+     WHERE m.empresa_id=$1
      ORDER BY nombre`,
     [empresaId(req)]
   );
@@ -180,7 +191,8 @@ router.post("/",
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { nombre, email, username, rol, perfil, permisos, cliente_id, chofer_id } = req.body;
-    if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
+    if (rol === "carretillero" && !req.user.productos?.includes("planner")) return res.status(403).json({error:"El rol carretillero requiere Planner."});
+  if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
       return res.status(403).json({ error: "La app del chófer está disponible desde TransGest Pro. Puedes dar de alta su ficha en Conductores sin crear acceso a la app.", code:"DRIVER_APP_NOT_INCLUDED" });
     }
     const eid = empresaId(req);
@@ -261,6 +273,7 @@ router.patch("/:id", async (req, res) => {
   if (rol !== undefined && !ROLES_PERMITIDOS.includes(rol)) {
     return res.status(400).json({ error: "Rol no valido" });
   }
+  if (rol === "carretillero" && !req.user.productos?.includes("planner")) return res.status(403).json({error:"El rol carretillero requiere Planner."});
   if (rol === "chofer" && !planHasFeature(req.user?.plan, "app_chofer")) {
     return res.status(403).json({ error: "La app del chófer está disponible desde TransGest Pro.", code:"DRIVER_APP_NOT_INCLUDED" });
   }

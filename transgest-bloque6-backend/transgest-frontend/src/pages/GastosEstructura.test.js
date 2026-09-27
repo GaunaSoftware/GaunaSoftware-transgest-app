@@ -1,0 +1,30 @@
+import React, {act} from 'react';
+import {createRoot} from 'react-dom/client';
+import GastosEstructura from './GastosEstructura';
+import * as api from '../services/api';
+import {confirmDialog} from '../services/notify';
+jest.mock('../services/api',()=>({getGastosEstructura:jest.fn(),getResumenGastosEstructura:jest.fn(),getMesesCerrados:jest.fn(),crearGastoEstructura:jest.fn(),editarGastoEstructura:jest.fn(),borrarGastoEstructura:jest.fn(),cerrarMes:jest.fn(),abrirMes:jest.fn()}));
+jest.mock('../services/notify',()=>({notify:jest.fn(),confirmDialog:jest.fn().mockResolvedValue(true)}));
+let root,host;
+beforeEach(()=>{jest.clearAllMocks();confirmDialog.mockResolvedValue(true);global.IS_REACT_ACT_ENVIRONMENT=true;host=document.createElement('div');root=createRoot(host);api.getGastosEstructura.mockResolvedValue([]);api.getMesesCerrados.mockResolvedValue([]);api.getResumenGastosEstructura.mockResolvedValue({gastos:[],total:null,reparto:[]});});
+afterEach(()=>act(()=>root.unmount()));
+const click=text=>act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent===text).click());
+const change=(selector,value)=>act(async()=>{const el=host.querySelector(selector);const proto=el.tagName==='SELECT'?HTMLSelectElement:HTMLInputElement;Object.getOwnPropertyDescriptor(proto.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('input',{bubbles:true}));});
+test('monthly and one-off creation use operational expenses; month closure sends YYYY-MM',async()=>{
+  await act(async()=>root.render(<GastosEstructura/>));
+  expect(api.getResumenGastosEstructura).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}$/));
+  await click('Cerrar mes');expect(api.cerrarMes).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}$/));
+  await click('+ Añadir gasto');
+  expect(host.textContent).toContain('Todos los meses');expect(host.textContent).toContain('Puntual (solo este mes)');
+  await change('input[placeholder^="Ej:"]','Alquiler');await change('input[type="number"]','125');
+  await click('Guardar');expect(api.crearGastoEstructura).toHaveBeenLastCalledWith(expect.objectContaining({nombre:'Alquiler',importe:125,periodo:'mensual'}));
+  await click('+ Añadir gasto');await change('input[placeholder^="Ej:"]','Puntual');await change('input[type="number"]','10');
+  await change('select:has(option[value="unico"])','unico');await click('Guardar');
+  expect(api.crearGastoEstructura).toHaveBeenLastCalledWith(expect.objectContaining({periodo:'unico',importe:10}));
+});
+test('failure is visible and does not masquerade as a month with no expenses',async()=>{
+  api.getResumenGastosEstructura.mockRejectedValue(new Error('No se pudo cargar el reparto'));
+  await act(async()=>root.render(<GastosEstructura/>));
+  expect(host.querySelector('[role="alert"]').textContent).toContain('No se pudo cargar');
+  expect(host.textContent).not.toContain('Sin gastos para');
+});

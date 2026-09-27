@@ -1,12 +1,12 @@
-import useBiAnalytics from "../services/useBiAnalytics";
 import { useState, useEffect, useCallback } from "react";
-import { getGastosEstructura, crearGastoEstructura, editarGastoEstructura, borrarGastoEstructura,
+import { getGastosEstructura, getResumenGastosEstructura, crearGastoEstructura, editarGastoEstructura, borrarGastoEstructura,
   getMesesCerrados, cerrarMes as cerrarMesApi, abrirMes as abrirMesApi } from "../services/api";
 import { confirmDialog, notify } from "../services/notify";
+import './GastosEstructura.css';
 
 const fmt2 = n => n == null ? "—" : Number(n).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 // Funciones migradas a BD — ver api.js
-function primerDiaMes(d){ const x=new Date(d); x.setDate(1); return x.toISOString().slice(0,10); }
+function primerDiaMes(d){ return String(d).slice(0,7); }
 
 const TIPOS_ESTR = ["Salario personal oficina","Alquiler/Arrendamiento","Suministros (luz, agua, internet)","Seguros empresa","Asesoría/Gestoría","Marketing/Publicidad","Viajes de negocio","Formación","Software/Licencias","Otros gastos generales"];
 
@@ -46,7 +46,7 @@ function ModalGastoEstr({editando,onClose}){
   const inp=S.inp;const lbl=S.lbl;
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)"}}>
+      <div style={{background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:12,padding:22,width:"min(480px,96vw)",maxHeight:"90dvh",overflowY:"auto"}}>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:700,fontSize:15,color:"var(--text)",marginBottom:14}}>{editando?"Editar gasto":"Nuevo gasto de estructura"}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre / descripción *</label><input style={inp} value={form.nombre} onChange={f("nombre")} placeholder="Ej: Salario María (recepción), Alquiler oficina..."/></div>
@@ -54,13 +54,13 @@ function ModalGastoEstr({editando,onClose}){
           <div><label style={lbl}>Importe (€)</label><input type="number" step="0.01" style={inp} value={form.importe} onChange={f("importe")} onFocus={e=>e.target.select()}/></div>
           <div><label style={lbl}>Período</label>
             <select style={inp} value={form.periodo} onChange={f("periodo")}>
-              <option value="mensual">Mensual</option>
+              <option value="mensual">Todos los meses</option>
               <option value="trimestral">Trimestral</option>
               <option value="anual">Anual</option>
-              <option value="unico">Pago único</option>
+              <option value="unico">Puntual (solo este mes)</option>
             </select>
           </div>
-          <div><label style={lbl}>Mes/Año</label><input type="month" style={inp} value={form.fecha} onChange={f("fecha")}/></div>
+          <div><label style={lbl}>Mes/Año</label><input type="month" style={inp} value={String(form.fecha || "").slice(0,7)} onChange={f("fecha")}/></div>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Notas</label><input style={inp} value={form.notas} onChange={f("notas")}/></div>
         </div>
         <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}}>
@@ -87,7 +87,7 @@ export default function GastosEstructura(){
     try {
       const [g, m] = await Promise.all([getGastosEstructura(), getMesesCerrados()]);
       setGastos(Array.isArray(g) ? g : []);
-      setMesesCerrados(Array.isArray(m) ? m : []);
+      setMesesCerrados(Array.isArray(m) ? m.map(x=>String(x).slice(0,7)) : []);
       setReload(n=>n+1);
     } catch(e) { notify("No se pudieron cargar los gastos: " + e.message, "error"); }
   }, []);
@@ -124,14 +124,25 @@ export default function GastosEstructura(){
       if(!gasto) return;
       const updated = { ...gasto, factura_nombre:file.name, factura_data:reader.result };
       setGastos(prev=>prev.map(g=>g.id===gastoId?updated:g));
-      try { await editarGastoEstructura(gastoId, updated); }
+      try { await editarGastoEstructura(gastoId, updated); await cargar(); }
       catch(e) { notify("No se pudo guardar la factura adjunta: " + (e.message||"Error desconocido"), "error"); await cargar(); }
     };
     reader.readAsDataURL(file);
   }
 
-  const last = new Date(Date.UTC(Number(periodo.slice(0,4)),Number(periodo.slice(5,7)),0)).toISOString().slice(0,10);
-  const analytics = useBiAnalytics({desde:periodo+'-01',hasta:last},reload);
+  const [summary, setSummary] = useState({periodo:null,data:null,error:'',loading:true});
+  useEffect(() => {
+    let active = true;
+    setSummary({periodo,data:null,error:'',loading:true});
+    getResumenGastosEstructura(periodo).then(data => {
+      if (active) setSummary({periodo,data,error:'',loading:false});
+    }).catch(error => {
+      if (active) setSummary({periodo,data:null,error:error.message || 'No se pudieron cargar los gastos.',loading:false});
+    });
+    return () => { active = false; };
+  }, [periodo,reload]);
+  const analytics = summary.periodo === periodo
+    ? {...summary, data:{estructura:summary.data}} : {data:null,error:'',loading:true};
   const gastosPeriodo = analytics.data?.estructura?.gastos || [];
   const totalEstructura = analytics.data?.estructura?.total;
   const allocation = analytics.data?.estructura?.reparto || [];
@@ -139,14 +150,14 @@ export default function GastosEstructura(){
   const repartoPorCamion = allocation.map(x=>({v:x.v,peso:reparto==='facturacion'?x.peso_ingresos:x.peso_igual,coste:reparto==='facturacion'?x.coste_ingresos:x.coste_igual}));
 
   return(
-    <div className="tg-responsive-page" style={S.page}>
+    <div className="tg-responsive-page structure-expenses" style={{...S.page,minWidth:0}}>
       {analytics.error && <p role="alert">{analytics.error}</p>}
       {analytics.loading && <p role="status">Calculando imputación mensual…</p>}
       <p>Imputación mensual estimada: gastos anuales / 12 y trimestrales / 3. El reparto por ingresos usa servicios realizados netos asignados a cada tractora; no modifica facturas.</p>
       <div style={S.title}>Gastos de Estructura</div>
 
       {/* Controls */}
-      <div style={{display:"grid",gridTemplateColumns:"auto auto auto 1fr",gap:10,marginBottom:18,alignItems:"center",flexWrap:"wrap"}}>
+      <div className="structure-expenses-controls">
         <div>
           <label style={S.lbl}>Período</label>
           <input type="month" style={S.inp} value={periodo} onChange={e=>setPeriodo(e.target.value)}/>
@@ -155,7 +166,7 @@ export default function GastosEstructura(){
           <label style={S.lbl}>Reparto por camión</label>
           <select style={S.inp} value={reparto} onChange={e=>setReparto(e.target.value)}>
             <option value="igual">A partes iguales</option>
-            <option value="facturacion">Ponderado por facturación</option>
+            <option value="facturacion">Según ingresos de los camiones</option>
           </select>
         </div>
         {mesCerrado ? (
@@ -195,9 +206,9 @@ export default function GastosEstructura(){
       {/* Gastos list */}
       <div style={S.card}>
         <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)",marginBottom:10}}>GASTOS DEL PERÍODO</div>
-        {gastosPeriodo.length===0
+        {analytics.loading || analytics.error ? null : gastosPeriodo.length===0
           ? <div style={{color:"var(--text5)",fontSize:12,padding:"12px 0",textAlign:"center"}}>Sin gastos para {periodo}. Añade gastos con el botón superior.</div>
-          : <table style={{width:"100%",borderCollapse:"collapse"}}>
+          : <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr>{["Concepto","Tipo","Período","Importe",""].map(h=><th key={h} style={S.th}>{h}</th>)}</tr></thead>
               <tbody>
                 {gastosPeriodo.map(g=>(
@@ -234,13 +245,14 @@ export default function GastosEstructura(){
                   <td style={S.td}/>
                 </tr>
               </tbody>
-            </table>
+            </table></div>
         }
       </div>
 
+      {totalEstructura > 0 && (reparto === 'facturacion' ? analytics.data?.estructura?.no_atribuido_ingresos : analytics.data?.estructura?.no_atribuido_igual) > 0 && <p role="status">Importe sin repartir: {fmt2(totalEstructura)} €. No hay camiones elegibles o ingresos válidos para el criterio elegido. Puedes usar el reparto a partes iguales.</p>}
       {/* Reparto por camión */}
       {vActivos.length > 0 && totalEstructura > 0 && (
-        <div style={{display:"grid",gridTemplateColumns:"260px 1fr",gap:16,alignItems:"start"}}>
+        <div className="structure-expenses-allocation">
           {/* Donut chart */}
           <div style={{...S.card,padding:20,textAlign:"center"}}>
             <div style={{fontSize:11,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",marginBottom:12}}>Reparto visual</div>
@@ -250,6 +262,8 @@ export default function GastosEstructura(){
                 let startAngle=-Math.PI/2;
                 const cx=100,cy=100,r=75,inner=45;
                 return repartoPorCamion.map(({v,peso},i)=>{
+                  if (peso == null || peso <= 0) return null;
+                  if (peso >= 1) return <circle key={v.id} cx={cx} cy={cy} r={(r+inner)/2} fill="none" stroke={COLORS[i%COLORS.length]} strokeWidth={r-inner} opacity={0.9}/>;
                   const angle=peso*2*Math.PI;
                   const x1=cx+r*Math.cos(startAngle),y1=cy+r*Math.sin(startAngle);
                   const x2=cx+r*Math.cos(startAngle+angle),y2=cy+r*Math.sin(startAngle+angle);
@@ -290,7 +304,7 @@ export default function GastosEstructura(){
                   const col=COLORS[i%COLORS.length];
                   return (
                     <div key={v.id} style={{marginBottom:14}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4,flexWrap:"wrap",gap:8}}>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
                           <span style={{width:8,height:8,borderRadius:2,background:col,display:"inline-block"}}/>
                           <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,fontSize:13,color:"var(--text)"}}>{v.matricula}</span>

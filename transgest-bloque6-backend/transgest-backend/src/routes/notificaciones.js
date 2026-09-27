@@ -329,7 +329,7 @@ async function listarAvisosColaboradores(req) {
             p.colaborador_workflow_enviado_at, p.colaborador_precio_confirmado_at,
             p.colaborador_carga_confirmada_at, p.colaborador_en_camino_confirmada_at, p.colaborador_descarga_confirmada_at,
             co.nombre AS colaborador_nombre, co.email AS colaborador_email,
-            pay.documentacion_recibida, pay.factura_nombre, pay.factura_data,
+            pay.documentacion_recibida, COALESCE(NULLIF(pay.factura_nombre,''),(SELECT f.nombre FROM colaborador_facturas cf JOIN facturas_proveedor f ON f.id=cf.factura_proveedor_id AND f.empresa_id=cf.empresa_id WHERE cf.pedido_id=p.id AND cf.empresa_id=p.empresa_id AND cf.colaborador_id=p.colaborador_id AND f.estado='revisada' ORDER BY f.created_at DESC LIMIT 1)) AS factura_nombre, pay.factura_data,
             COALESCE(docs.albaranes_count,0)::int AS albaranes_count
        FROM pedidos p
        JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id AND COALESCE(co.activo,true)=true

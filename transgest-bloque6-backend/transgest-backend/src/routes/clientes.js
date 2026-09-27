@@ -773,6 +773,11 @@ router.post("/:id/portal-user", GERENTE_O_CONTABLE, async (req, res) => {
     return res.json({ exists: true, usuario: existing.rows[0] });
   }
 
+  if (existing.rows[0]) {
+    const shared = await db.query('SELECT 1 FROM usuario_empresas WHERE usuario_id=$1 GROUP BY usuario_id HAVING COUNT(*)>1', [existing.rows[0].id]);
+    if (shared.rows.length) return res.status(403).json({error:'Usuario multiempresa: la clave se gestiona desde Mi cuenta o SuperAdmin.'});
+  }
+
   const password = tempPassword();
   const hash = await bcrypt.hash(password, 12);
   const permisos = { modulos: { portal_cliente: { ver: true, editar: true }, mi_cuenta: { ver: true, editar: true } } };

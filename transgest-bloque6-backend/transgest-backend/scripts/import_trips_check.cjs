@@ -23,7 +23,7 @@ async function main(){
         ('55555555-5555-4555-8555-555555555555','${b}','A12345678','Cliente B');
       INSERT INTO vehiculos VALUES('66666666-6666-4666-8666-666666666666','${a}','0009-LCZ');
       INSERT INTO choferes VALUES('77777777-7777-4777-8777-777777777777','${a}','12826758A');`);
-    for(const name of ['20260924_import_batches.sql','20260924_import_trips.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',name),'utf8'));
+    for(const name of ['20260924_import_batches.sql','20260924_import_trips.sql','20260925_pedido_planned_actual_dates.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',name),'utf8'));
     await pg.query("INSERT INTO import_batches(id,empresa_id,tipo,filename,source_system) VALUES($1,$2,'Pack_TransGest','synthetic.xlsx','old')",[batch,a]);
     const source={source_id:'t1',numero_origen:'OLD-99',cliente_nombre:'Cliente A',cliente_cif:'A12345678',origen:'Madrid',destino:'Valencia',fecha_carga:'2024-08-01',fecha_descarga:'2024-08-02',matricula_tractora:'0009LCZ',chofer_dni:'12826758A',importe:500,estado:'entregado'};
     const historical=await evaluateTrip(pg,a,'old','Viajes_Historicos',source,'t1');
@@ -41,6 +41,14 @@ async function main(){
     assert.equal(row.numero.length,20);
     assert.equal(row.estado,'pendiente');assert.equal(row.migration_source_id,'t2');
     assert.ok(row.vehiculo_id);assert.ok(row.chofer_id);
+    const plan=(await pg.query(`SELECT fecha_carga_planificada::text,fecha_descarga_planificada::text,
+      carga_real_at,descarga_real_at FROM pedidos WHERE id=$1`,[created.id])).rows[0];
+    assert.equal(plan.fecha_carga_planificada,'2026-10-01');
+    assert.equal(plan.fecha_descarga_planificada,'2026-10-02');
+    assert.equal(plan.carga_real_at,null,'Import must not invent an actual loading event');
+    assert.equal(plan.descarga_real_at,null,'Import must not invent an actual delivery event');
+    await pg.query(`UPDATE pedidos SET fecha_entrega='2026-10-03',descarga_real_at='2026-10-03T15:00:00Z' WHERE id=$1`,[created.id]);
+    assert.equal((await pg.query('SELECT fecha_descarga_planificada::text FROM pedidos WHERE id=$1',[created.id])).rows[0].fecha_descarga_planificada,'2026-10-02','Actual delivery preserves the imported agreed date');
     assert.equal((await evaluateTrip(pg,a,'old','Viajes_Pendientes',pending,'t2')).action,'skip');
     assert.equal((await evaluateTrip(pg,b,'old','Viajes_Pendientes',pending,'t2')).action,'review','Cannot borrow vehicle across companies');
     assert.equal((await evaluateTrip(pg,a,'old','Viajes_Pendientes',{...pending,peso_kg:24.2},'t3')).action,'review');

@@ -31,11 +31,11 @@ async function main() {
     INSERT INTO pedidos (empresa_id, estado, importe, fecha_descarga, facturacion_mes, km_ruta)
       VALUES ('qa','entregado',300,'2026-08-31','2026-09-01',100),
              ('otra-empresa','entregado',99999,'2026-09-01','2026-09-01',100);`);
-    db.query = sql => pg.query(sql, params);
+    db.query = async (sql, values) => {try{return await pg.query(sql, values || []);}catch(error){console.error(error.message,sql.slice(0,160));throw error;}};
     const handler = router.stack.find(layer=>layer.route?.path === '/bi/resumen').route.stack[0].handle;
     const read = async () => {
       let result;
-      await handler({empresaId:'qa',query:{periodo:'mes'}},{json(data){result=data;}});
+      await handler({empresaId:'qa',query:{periodo:'personalizado',desde:params[1],hasta:params[2]}},{status(code){throw new Error('Unexpected API status '+code);},json(data){result=data;}});
       return result;
     };
     let result = await read();

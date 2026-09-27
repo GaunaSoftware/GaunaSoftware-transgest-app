@@ -1,0 +1,6 @@
+.invoice-workflow { min-width: 0; }
+.invoice-workflow .tgui-table { min-width: 760px; width: 100%; }
+.invoice-workflow .tgui-table th, .invoice-workflow .tgui-table td { padding: 12px; text-align: left; vertical-align: top; }
+.invoice-workflow .tgui-table td:nth-child(2) button { white-space: nowrap; word-break: normal; }
+.invoice-workflow .tgui-table td:nth-child(3) { white-space: nowrap; }
+.invoice-workflow p { line-height: 1.55; }

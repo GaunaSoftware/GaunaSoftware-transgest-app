@@ -60,9 +60,9 @@ router.post('/pedidos/:id/hueco',plannerEnabled,wrap(async(req,res)=>{
 }));
 router.get('/pedidos/:id/albaran-salida',plannerEnabled,wrap(async(req,res)=>{
  if(!(await documentScope(req)).rows.length)return res.status(404).json({error:'Carga no encontrada'});
- const note=(await db.query('SELECT a.* FROM planner_albaranes a JOIN planner_preparaciones p ON p.id=a.preparacion_id AND p.empresa_id=a.empresa_id WHERE p.pedido_id=$1 AND p.empresa_id=$2',[req.params.id,req.empresaId])).rows[0];
+ const note=await require('../services/plannerDocumentation').latest(db,req.empresaId,req.params.id);
  if(!note)return res.status(404).json({error:'El almacén todavía no ha generado el albarán.'});
- const pdf=await require('../services/plannerDeliveryPdf').deliveryPdf(note);res.json({nombre:`${note.numero}.pdf`,file_mime:'application/pdf',file_base64:pdf.toString('base64')});
+ const pdf=note.pdf?Buffer.from(note.pdf):await require('../services/plannerDeliveryPdf').deliveryPdf(note);res.set('Cache-Control','private, no-store');res.json({nombre:`${note.numero}.pdf`,version:note.version||0,file_mime:'application/pdf',file_base64:pdf.toString('base64')});
 }));
 router.get('/vehiculos',wrap(async(req,res)=>res.json((await db.query('SELECT id,matricula,marca,modelo,tipo FROM colaborador_vehiculos WHERE empresa_id=$1 AND colaborador_id=$2 AND activo=true ORDER BY matricula',supplier(req))).rows)));
 router.post('/vehiculos',wrap(async(req,res)=>{

@@ -51,6 +51,10 @@ async function processRecipient(row, period, deps = {}) {
       WHERE id=$1 AND empresa_id=$3 AND user_id=$4 AND status='preparando' RETURNING id`,
       [id, run.id, row.empresa_id, row.user_id]);
     if (!ready.rows.length) throw new Error('La preparación del envío ya no está disponible');
+    const recipient=(await query(`SELECT u.email,m.rol,(u.activo AND m.activo) AS activo,m.permisos,e.plan,e.estado AS empresa_estado
+      FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id JOIN empresas e ON e.id=m.empresa_id
+      WHERE u.id=$1 AND m.empresa_id=$2`,[row.user_id,row.empresa_id])).rows[0];
+    if(!recipient||!managerCanReceive(recipient)||recipient.email!==row.email)throw new Error('El destinatario o su acceso cambiaron durante la generación');
     sending = true;
     const result = await send({
       trigger: 'bi_rentabilidad_semanal', plantilla: 'bi_rentabilidad_semanal', destinatario: row.email,
@@ -78,9 +82,10 @@ async function tick(now = new Date(), deps = {}) {
   const clock = madridClock(now);
   if (!clock.monday || clock.hour < MAIL_HOUR) return { skipped: 'fuera_de_horario' };
   const query = deps.query || db.query;
-  const rows = await query(`SELECT s.empresa_id,s.user_id,u.email,u.rol,u.activo,u.permisos,
+  const rows = await query(`SELECT s.empresa_id,s.user_id,u.email,m.rol,(u.activo AND m.activo) AS activo,m.permisos,
       e.nombre AS empresa_nombre,e.plan,e.estado AS empresa_estado
-    FROM bi_weekly_subscriptions s JOIN usuarios u ON u.id=s.user_id AND u.empresa_id=s.empresa_id
+    FROM bi_weekly_subscriptions s JOIN usuarios u ON u.id=s.user_id
+      JOIN usuario_empresas m ON m.usuario_id=u.id AND m.empresa_id=s.empresa_id
       JOIN empresas e ON e.id=s.empresa_id
     WHERE s.enabled=true ORDER BY s.empresa_id,s.user_id`);
   const period = weeklyPeriod(now);

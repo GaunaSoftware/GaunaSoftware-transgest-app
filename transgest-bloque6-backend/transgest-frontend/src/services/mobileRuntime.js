@@ -124,6 +124,7 @@ function normalizePosition(pos) {
     lng: Number(pos.coords.longitude),
     accuracy_m: Number.isFinite(pos.coords.accuracy) ? Number(pos.coords.accuracy) : null,
     speed_mps: Number.isFinite(pos.coords.speed) ? Number(pos.coords.speed) : null,
+    heading: Number.isFinite(pos.coords.heading) ? Number(pos.coords.heading) : null,
     captured_at: new Date(pos.timestamp || Date.now()).toISOString(),
   };
 }

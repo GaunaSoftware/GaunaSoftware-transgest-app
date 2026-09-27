@@ -87,6 +87,9 @@ async function executeTool(db, user, name, args) {
   }
   if (name === 'resumen_mes') {
     if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(args.mes)) throw fail('Mes no valido.');
+    const desde = args.mes + '-01';
+    const [year, month] = args.mes.split('-').map(Number);
+    const hasta = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
     const { rows } = await db.query(`WITH ${financialPedidosCte}
       SELECT COUNT(*)::int AS realizados, COALESCE(SUM(importe),0) AS ingresos_netos,
       COALESCE(SUM(coste_operativo),0) AS costes_registrados,
@@ -95,8 +98,9 @@ async function executeTool(db, user, name, args) {
       COALESCE(SUM(importe) FILTER (WHERE pendiente_factura),0) AS pendiente_facturar_neto,
       COALESCE(SUM(importe) FILTER (WHERE NOT pendiente_factura),0) AS viajes_facturados_neto
       FROM pedidos_bi WHERE estado::text IN ('entregado','facturado')
-      AND fecha_bi >= $2::date AND fecha_bi < $2::date + INTERVAL '1 month'`, [eid, args.mes + '-01']);
-    return { fuente: 'Informes / periodo economico del viaje', mes: args.mes, moneda: 'EUR', ...rows[0], nota: 'Borradores pendientes de facturar. No incluye gastos de estructura ni facturas ajenas a viajes.' };
+      AND fecha_bi >= $2::date AND fecha_bi < $2::date + INTERVAL '1 month'`, [eid, desde, hasta]);
+    return { fuente: 'Informes / periodo economico del viaje', mes: args.mes, desde, hasta, fecha_corte: hasta,
+      moneda: 'EUR', ...rows[0], nota: 'Pendiente de facturar al cierre del mes: no cuentan borradores ni facturas posteriores al corte. No incluye gastos de estructura ni facturas ajenas a viajes.' };
   }
   const fecha = date(args.fecha);
   const { rows } = await db.query(`SELECT v.id, v.matricula, v.estado,

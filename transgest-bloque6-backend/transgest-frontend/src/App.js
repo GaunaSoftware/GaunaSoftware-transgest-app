@@ -1,3 +1,4 @@
+import { TUTORIALS_ENABLED } from "./services/tutorialPolicy";
 import { createPortal } from "react-dom";
 import {transportExchange} from './services/api';
 import { isPlannerRoute, hasProduct } from './planner/access';
@@ -15,11 +16,13 @@ import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevisi
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan, planHasFeature } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
+import { isAutomaticIncident } from "./pages/workspace/agendaIncident";
 
 // Carga perezosa de todos los mÃƒÂ³dulos
 const Dashboard    = lazy(() => import("./pages/Dashboard"));
 const Intelligence = lazy(() => import('./pages/Intelligence'));
 const PlannerConnections=lazy(()=>import('./planner/PlannerConnections'));
+const PlannerLoading = lazy(() => import('./planner/PlannerLoading'));
 const PlannerApp = lazy(() => import('./planner/PlannerApp'));
 const ControlTower = lazy(() => import("./pages/ControlTower"));
 const Clientes     = lazy(() => import("./pages/Clientes"));
@@ -1182,7 +1185,7 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
                     </div>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
                       <button disabled={busyId === String(ev.id)} onClick={()=>onOpenAgenda(ev)} style={{height:30,padding:"0 9px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Abrir</button>
-                      <select disabled={busyId === String(ev.id)} aria-label={`Posponer ${ev.titulo || "tarea"}`} defaultValue="" onChange={e=>{ const value=e.target.value; e.target.value=""; if (value) runAction(ev.id, ()=>onSnooze(ev, value)); }} style={{height:30,padding:"0 8px",borderRadius:7,border:"1px solid rgba(245,158,11,.32)",background:"rgba(245,158,11,.08)",color:"var(--text)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
+                      {!isAutomaticIncident(ev) && <><select disabled={busyId === String(ev.id)} aria-label={`Posponer ${ev.titulo || "tarea"}`} defaultValue="" onChange={e=>{ const value=e.target.value; e.target.value=""; if (value) runAction(ev.id, ()=>onSnooze(ev, value)); }} style={{height:30,padding:"0 8px",borderRadius:7,border:"1px solid rgba(245,158,11,.32)",background:"rgba(245,158,11,.08)",color:"var(--text)",fontSize:11,fontWeight:800,cursor:"pointer"}}>
                         <option value="">Posponer...</option>
                         <option value="15">15 min</option>
                         <option value="60">1 hora</option>
@@ -1191,8 +1194,9 @@ function StartupTasksPanel({ data, onClose, onOpenAgenda, onComplete, onSnooze }
                       </select>
                       <button disabled={busyId === String(ev.id)} onClick={()=>runAction(ev.id, ()=>onComplete(ev))} style={{height:30,padding:"0 9px",borderRadius:7,border:"1px solid rgba(16,185,129,.28)",background:"rgba(16,185,129,.10)",color:"#059669",fontSize:11,fontWeight:900,cursor:"pointer"}}>
                         {busyId === String(ev.id) ? "Guardando..." : "Completar"}
-                      </button>
+                      </button></>}
                     </div>
+                    {isAutomaticIncident(ev) && <p style={{fontSize:12,color:"var(--text3)",margin:"8px 0 0"}}>{ev.explanation} {ev.resolution_condition}</p>}
                   </div>
                 ))}
                 {items.length > 6 && <div style={{padding:"8px 12px",fontSize:11,color:"var(--text5)"}}>Y {items.length - 6} más en Agenda.</div>}
@@ -1562,6 +1566,7 @@ function AppInner() {
 
   useEffect(() => {
     const handleGuidedStart = (e) => {
+      if (!TUTORIALS_ENABLED) return;
       const detail = e?.detail || {};
       if (detail.type !== "module_walkthrough" || !detail.route) return;
       setGuidedModule({ active:true, route:detail.route, source:detail.source || "onboarding", startedAt:detail.startedAt || new Date().toISOString() });
@@ -1782,7 +1787,7 @@ function AppInner() {
       return;
     }
     const key = onboardingStorageKey(user);
-    setShowOnboarding(!localStorage.getItem(key));
+    setShowOnboarding(TUTORIALS_ENABLED && !localStorage.getItem(key));
   }, [user]);
 
   if (loading) return (
@@ -1827,6 +1832,7 @@ function AppInner() {
   }
 
   function handleStartTutorial(payload = {}) {
+    if (!TUTORIALS_ENABLED) return;
     const route = payload.route;
     if (!route || !modulosVisibles.has(route)) return;
     setRuntimeFocus("tms_guided_tutorial", payload);
@@ -1975,7 +1981,7 @@ function AppInner() {
       }}
     />
     <GlobalGuidedModulePanel
-      mission={guidedModule}
+      mission={TUTORIALS_ENABLED ? guidedModule : null}
       onOpenModule={(route) => {
         if (modulosVisibles.has(route)) setVista(route);
       }}
@@ -1986,7 +1992,7 @@ function AppInner() {
     />
 
     {/* Onboarding wizard */}
-    {showOnboarding && user && (
+    {TUTORIALS_ENABLED && showOnboarding && user && (
       <OnboardingWizard
         user={user}
         visibleModules={Array.from(modulosVisibles)}
@@ -2058,6 +2064,10 @@ function ProductWorkspace({path}) {
     if(user.debe_cambiar_password)return <PasswordChangeRequired user={user} onChanged={refreshUser} onLogout={logout}/>;
     if(!['gerente','trafico','administrativo'].includes(user.rol))return <main><h1>Acceso reservado al equipo de tráfico</h1><a href="/">Volver al programa</a></main>;
     return <Suspense fallback={<Spinner/>}><PlannerConnections/></Suspense>;
+  }
+  if(user?.rol==='carretillero'){
+    if(user.debe_cambiar_password)return <PasswordChangeRequired user={user} onChanged={refreshUser} onLogout={logout}/>;
+    return <Suspense fallback={<Spinner/>}><PlannerLoading standalone/></Suspense>;
   }
   const internal=user && !['cliente','cliente_portal','colaborador','chofer'].includes(user.rol);
   const plannerOnly=internal && hasProduct(user,'planner') && !hasProduct(user,'transgest');

@@ -1,0 +1,65 @@
+const assert=require('node:assert/strict'),crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:path');
+const {PGlite}=require('@electric-sql/pglite');
+const service=require('../src/services/localEvidenceSignatureProvider'),synthetic=require('./synthetic_signature_fixture.cjs');
+async function main(){
+ const damaged=Buffer.from(synthetic().split(',')[1],'base64');damaged[damaged.length-20]^=255;
+ await assert.rejects(service.signatureBytes('data:image/png;base64,'+damaged.toString('base64')),{code:'SIGNATURE_INVALID'});
+ const oversized=Buffer.from(synthetic().split(',')[1],'base64');oversized.writeUInt32BE(100000,16);
+ await assert.rejects(service.signatureBytes('data:image/png;base64,'+oversized.toString('base64')),{code:'SIGNATURE_INVALID'});
+ await assert.rejects(service.signatureBytes('data:image/png;base64,'+oversized.subarray(0,20).toString('base64')),{code:'SIGNATURE_INVALID'});
+ const pg=new PGlite(),empresaId=crypto.randomUUID(),pedidoId=crypto.randomUUID(),driver=crypto.randomUUID(),actorId=crypto.randomUUID();
+ const db={query:(...a)=>pg.query(...a),transaction:f=>pg.transaction(tx=>f(tx))};
+ try{
+  await pg.exec(`CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,numero text,chofer_id uuid,vehiculo_id uuid,origen text,destino text,puntos_carga jsonb,puntos_descarga jsonb,firma_evidencia jsonb,updated_at timestamptz,mercancia text,peso_kg numeric,bultos numeric);
+   CREATE TABLE pedido_chofer_pasos(empresa_id uuid,pedido_id uuid,data jsonb);
+   CREATE TABLE pedido_docs(id uuid,empresa_id uuid,pedido_id uuid,nombre text,tipo text,created_at timestamptz,metadata jsonb);
+   CREATE TABLE empresas(id uuid,nombre text,cif text);
+   CREATE TABLE choferes(id uuid,empresa_id uuid,nombre text,apellidos text);`);
+  await pg.query("INSERT INTO empresas VALUES($1,'Empresa sintética','QA-NO-FISCAL')",[empresaId]);
+  await pg.query("INSERT INTO choferes VALUES($1,$2,'Conductor','Sintético')",[driver,empresaId]);
+  for(const f of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql','20260926_transport_signature_evidence.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',f),'utf8'));
+  await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_signature_evidence.sql'),'utf8'));
+  await pg.query("INSERT INTO pedidos(id,empresa_id,numero,chofer_id,origen,destino,puntos_carga,puntos_descarga) VALUES($1,$2,'QA-FIRMA-SINTETICA',$3,'Madrid','Valencia',$4,$5)",[pedidoId,empresaId,driver,JSON.stringify([{id:'load',direccion:'Almacén sintético'}]),JSON.stringify([{id:'unload',direccion:'Destino sintético'}])]);
+  const order=(await pg.query('SELECT * FROM pedidos')).rows[0],stop=require('../src/services/driverStops').driverStops(order)[0];
+  const progress={paradas:{[stop.id]:{tipo:'carga',carga_iniciada:true,carga_proceso:true,mercancia_confirmada:true,mercancia_cargada:'Cerámica sintética',mercancia_peso_kg:100,mercancia_palets:2,albaran_carga:true}}};
+  await pg.query('INSERT INTO pedido_chofer_pasos VALUES($1,$2,$3)',[empresaId,pedidoId,JSON.stringify(progress)]);
+  const args={empresaId,pedidoId,stopId:stop.id,authorize:o=>o.chofer_id===driver,actorId};
+  await assert.rejects(service.prepare(db,{...args,authorize:()=>false}),{code:'FORBIDDEN'});
+  await assert.rejects(service.prepare(db,{...args,empresaId:crypto.randomUUID()}),{code:'ORDER_NOT_FOUND'});
+  const op=await service.prepare(db,args);assert.equal((await service.prepare(db,args)).id,op.id);
+  const request={operation_id:op.id,client_operation_uuid:crypto.randomUUID(),document_hash:op.pdf_hash,identidad:{nombre:'Firmante',apellidos:'Sintético QA',empresa:'Empresa de ensayo'},revisado:true,conforme_version:true,firma_destinatario:synthetic(),gps_status:'denied',timezone:'Europe/Madrid'};
+  await assert.rejects(service.sign(db,{...args,request:{...request,revisado:false}}),{code:'CONSENT_REQUIRED'});
+  await assert.rejects(service.sign(db,{...args,request:{...request,firma_destinatario:synthetic(true)}}),{code:'SIGNATURE_EMPTY'});
+  await assert.rejects(service.sign(db,{...args,request:{...request,document_hash:'wrong'}}),{code:'DOCUMENT_CHANGED'});
+  const signed=await service.sign(db,{...args,request,capture:{ip:'127.0.0.1',session_id:'qa-synthetic'}});assert.ok(signed.evidence_id);
+  assert.equal((await service.sign(db,{...args,request})).idempotent,true);
+  await assert.rejects(service.sign(db,{...args,request:{...request,timezone:'UTC'}}),{code:'OPERATION_CONFLICT'});
+  await assert.rejects(service.sign(db,{...args,request:{...request,client_operation_uuid:crypto.randomUUID()}}),{code:'SIGNATURE_EXISTS'});
+  const ev=(await pg.query('SELECT * FROM signature_evidence')).rows[0];assert.equal(ev.payload.gps_status,'denied');assert.equal(ev.payload.documento.id,op.id);
+  await assert.rejects(pg.query("UPDATE signature_evidence SET package_hash='x'"),{code:'55000'});
+  await pg.query('INSERT INTO signature_evidence_annulments VALUES($1,$2,$3,$4,NOW())',[empresaId,ev.id,'Anulación sintética para probar reemplazo',actorId]);
+  const replacement=await service.sign(db,{...args,request:{...request,client_operation_uuid:crypto.randomUUID()}});
+  assert.equal((await pg.query('SELECT replaces_id FROM signature_evidence WHERE id=$1',[replacement.evidence_id])).rows[0].replaces_id,ev.id);
+  // A closed stop may be corrected only by an office-authorized new act of signature.
+  const closed={paradas:{[stop.id]:{...progress.paradas[stop.id],carga_ok:true,carga_ok_at:'2026-09-26T09:00:00Z',viaje_iniciado:true}}};
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$1',[JSON.stringify(closed)]);
+  await pg.query('INSERT INTO signature_evidence_annulments VALUES($1,$2,$3,$4,NOW())',[empresaId,replacement.evidence_id,'Identidad del receptor incorrecta',actorId]);
+  const correcting={...args,correctionId:replacement.evidence_id,allowCorrection:true};
+  await assert.rejects(service.prepare(db,{...correcting,allowCorrection:false}),{code:'CORRECTION_FORBIDDEN'});
+  await assert.rejects(service.prepare(db,{...correcting,correctionId:crypto.randomUUID()}),{code:'CORRECTION_NOT_FOUND'});
+  const correction=await service.prepare(db,correcting);
+  assert.equal(correction.payload.correccion_de,replacement.evidence_id);assert.equal(correction.payload.fin,op.payload.fin);
+  assert.equal(correction.payload.peso_kg,op.payload.peso_kg);assert.equal(correction.version,op.version+1);
+  const correctionRequest={...request,operation_id:correction.id,document_hash:correction.pdf_hash,client_operation_uuid:crypto.randomUUID(),identidad:{...request.identidad,nombre:'Receptor corregido'}};
+  await assert.rejects(service.sign(db,{...args,request:correctionRequest}),{code:'CORRECTION_FORBIDDEN'});
+  const corrected=await service.sign(db,{...correcting,request:correctionRequest});
+  assert.equal((await service.sign(db,{...correcting,request:correctionRequest})).idempotent,true);
+  assert.equal((await pg.query('SELECT replaces_id FROM signature_evidence WHERE id=$1',[corrected.evidence_id])).rows[0].replaces_id,replacement.evidence_id);
+  assert.deepEqual((await pg.query('SELECT data FROM pedido_chofer_pasos')).rows[0].data,closed);
+  assert.equal((await pg.query('SELECT receipt_hash FROM signature_evidence WHERE id=$1',[ev.id])).rows[0].receipt_hash,ev.receipt_hash);
+  await assert.rejects(service.prepare(db,correcting),{code:'CORRECTION_REPLACED'});
+  const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-receipt-synthetic.pdf'),Buffer.from(ev.receipt_pdf));
+  console.log('PASS local evidence: reviewed immutable document/version, PNG ink, identity/consent, denied GPS, hashes, replay/conflict, tenant/driver permissions, immutable originals, annulment and linked replacement of open/closed operations without rewriting physical history.');
+ }finally{await pg.close();}
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -2,6 +2,8 @@ const {fail}=require('./plannerInventory');
 async function saleLines(tx,company,prepId,customer){
  const prep=(await tx.query('SELECT * FROM planner_preparaciones WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[prepId,company])).rows[0];
  if(!prep)throw fail('Preparación de venta no encontrada.',404);
+ if(prep.billing_trigger==='delivery'&&!prep.entrega_confirmada_at)throw fail('Esta carga se factura tras la entrega. Confirma su POD en Carga en muelle.',409);
+ if(prep.incidencia)throw fail('Resuelve la incidencia antes de facturar.',409);
  if(prep.estado!=='expedida')throw fail('Confirma la expedición antes de facturar la mercancía.',409);
  const order=(await tx.query('SELECT cliente_id FROM pedidos WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company])).rows[0];
  if(String(order?.cliente_id)!==String(customer))throw fail('La preparación pertenece a otro cliente.',409);

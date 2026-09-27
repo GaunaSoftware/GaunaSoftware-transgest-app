@@ -1,3 +1,4 @@
+import BiGroupPanel from "./BiGroupPanel";
 import {lazy, Suspense, useEffect, useRef, useState} from 'react';
 import {Bar, CartesianGrid, Cell, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {Badge, Button, Card, Modal} from '../../ui';
@@ -28,19 +29,20 @@ const metricNumber = (metadata,key) => {
 const nav = view => window.dispatchEvent(new CustomEvent('tms:navegar',{detail:view}));
 const blank = {data:null,error:'',loading:true,key:''};
 
+function PlannerMetrics({info}) { return <Card className="bi-section"><h2>Planner / WMS · muelles</h2>{!info?<p>Restablece los filtros de transporte para consultar el almacén.</p>:<><p>{info.criterio}</p><p>{info.reservas} citas · carga efectiva: mediana {decimal(info.duracion_carga.mediana)} min, P90 {decimal(info.duracion_carga.p90)} min. Cobertura {info.duracion_carga.cobertura.evaluables}/{info.duracion_carga.cobertura.total}.</p><p>{info.ocupacion} {info.espera_y_permanencia}</p><div className="bi-scroll"><table className="bi-table"><thead><tr><th>Muelle</th><th>Almacén</th><th>Citas</th><th>Minutos reservados</th></tr></thead><tbody>{info.por_muelle.map(r=><tr key={r.id}><td>{r.nombre}</td><td>{r.almacen}</td><td>{r.reservas}</td><td>{decimal(r.minutos_reservados)}</td></tr>)}</tbody></table></div></>}</Card>; }
 function MetricCard({title,metric,period,extra,onClick}) {
   return <Card className="bi-kpi">
     <div className="bi-kpi-top"><span>{title}</span><Badge tone={metric?.estado === 'completo' ? 'success' : metric?.estado === 'error' ? 'danger' : 'warning'}>{quality[metric?.estado] || 'Sin datos'}</Badge></div>
     <strong className="bi-kpi-value">{metricNumber({value:metric},'value')}</strong>
     {extra && <span className="bi-kpi-extra">{extra}</span>}
     <details className="bi-definition"><summary>Cómo se calcula</summary><p>{metric?.definicion || 'Definición no disponible.'}</p>
-      <dl><dt>Unidad</dt><dd>{metric?.unidad || '—'}</dd><dt>Periodo</dt><dd>{period ? `${date(period.desde)} – ${date(period.hasta)}` : '—'}</dd>
+      <dl><dt>Fuente</dt><dd>{metric?.fuente || 'Contrato BI común'}</dd><dt>Actualización</dt><dd>{moment(metric?.updated_at)}</dd><dt>Tendencia</dt><dd>{metric?.tendencia==='no_calculable'?'Sin base comparable':metric?.tendencia||'No calculable'}</dd><dt>Objetivo</dt><dd>{metric?.objetivo==null?'Sin objetivo configurado':decimal(metric.objetivo)}</dd><dt>Unidad</dt><dd>{metric?.unidad || '—'}</dd><dt>Periodo</dt><dd>{period ? `${date(period.desde)} – ${date(period.hasta)}` : '—'}</dd>
         <dt>Impuestos</dt><dd>{metric?.impuestos || '—'}</dd><dt>Denominador</dt><dd>{metric?.denominador == null ? 'No aplica' : decimal(metric.denominador)}</dd>
         <dt>Numerador</dt><dd>{metric?.numerador == null ? 'No aplica' : decimal(metric.numerador)}</dd>
         <dt>Costes incluidos</dt><dd>{metric?.costes_incluidos || 'Ninguno'}</dd>
         <dt>Cobertura</dt><dd>{metric?.cobertura ? `${metric.cobertura.evaluables} de ${metric.cobertura.total}` : 'No disponible'}</dd></dl>
     </details>
-    {onClick && <Button onClick={onClick}>Ver registros</Button>}
+    {(onClick || metric?.drill_down) && <Button onClick={onClick || (()=>document.getElementById(metric.drill_down.tipo==='facturas'?'bi-facturas':'bi-servicios')?.scrollIntoView({behavior:'smooth'}))}>Ver registros</Button>}
   </Card>;
 }
 function ChartPanel({title,subtitle,legend=[],rows,columns,renderChart}) {
@@ -168,8 +170,8 @@ export default function BiWorkspace() {
   ];
   const visibleServiceDefinitions=serviceDefinitions.filter(d=>state.columnasServicios.includes(d.key));
   const mode=state.vista;
-  const phase4=['operaciones','flota','calidad'].includes(mode);
-  const viewNames={direccion:'Dirección',rentabilidad:'Rentabilidad',operaciones:'Operaciones y servicio',flota:'Flota y combustible',calidad:'Calidad y sostenibilidad',centro:'Centro de informes',anteriores:'Informes anteriores'};
+  const phase4=['operaciones','flota','calidad','planner'].includes(mode);
+  const viewNames={direccion:'Dirección',rentabilidad:'Rentabilidad',operaciones:'Operaciones y servicio',flota:'Flota y combustible',calidad:'Calidad y sostenibilidad',planner:'Planner / WMS',centro:'Centro de informes',anteriores:'Informes anteriores'};
   return <div className="bi-workspace">
     <div className="bi-head"><div><p className="bi-eyebrow">TRANS GEST · INTELIGENCIA DE NEGOCIO</p><h1>{viewNames[mode]||'Dirección'}</h1>
       <p>{phase4?'Eventos reales, población elegible y cobertura de cada indicador.':'Servicios realizados, costes registrados y cobro estimado con definiciones visibles.'}</p></div>
@@ -177,9 +179,9 @@ export default function BiWorkspace() {
         <small>Comparación: {data ? `${date(data.metadata.comparacion.desde)} – ${date(data.metadata.comparacion.hasta)}` : 'pendiente'}</small>
         <small>Actualizado: {moment(data?.metadata?.actualizado_en)}</small></div></div>
     <div className="bi-view-tabs" role="tablist" aria-label="Vistas de informes" ref={tabsRef}>
-      {[['direccion','Dirección'],['rentabilidad','Rentabilidad'],['operaciones','Operaciones'],['flota','Flota'],['calidad','Calidad y sostenibilidad'],['centro','Centro de informes'],['anteriores','Informes anteriores']].map(([id,label],index,tabs)=><button key={id} role="tab" aria-selected={mode===id} tabIndex={mode===id?0:-1}
+      {[['direccion','Dirección'],['rentabilidad','Rentabilidad'],['operaciones','Operaciones'],['flota','Flota'],['calidad','Calidad y sostenibilidad'],...(data?.metadata?.planner_autorizado?[['planner','Planner / WMS']]:[]),['centro','Centro de informes'],['anteriores','Informes anteriores']].map(([id,label],index,tabs)=><button key={id} role="tab" aria-selected={mode===id} tabIndex={mode===id?0:-1}
         onKeyDown={e=>{const next=e.key==='ArrowRight'?(index+1)%tabs.length:e.key==='ArrowLeft'?(index+tabs.length-1)%tabs.length:e.key==='Home'?0:e.key==='End'?tabs.length-1:null;if(next!==null){e.preventDefault();setState(old=>({...old,vista:tabs[next][0]}));e.currentTarget.parentElement.children[next]?.focus();}}}
-        onClick={()=>setState(old=>({...old,vista:id}))}>{label}</button>)}
+        onClick={()=>setState(old=>({...old,vista:id,...(id==='planner'?{cliente_id:'',ruta:'',vehiculo_id:'',ejecucion:'',page:1}:{})}))}>{label}</button>)}
     </div>
     {mode==='anteriores' ? <Suspense fallback={<p role="status">Cargando informes anteriores…</p>}><LegacyInformes/></Suspense> : mode==='centro' ? <ReportCenter key={storageKey} initialState={state} choices={choices} role={user?.rol} ownerId={user?.id}/> : <>
       <Card as="section" className="bi-filterbar"><div className="bi-filter-grid">
@@ -191,12 +193,14 @@ export default function BiWorkspace() {
           <select value={state[key]} onChange={e=>setFilter(key,e.target.value)}><option value="">Todos</option>{(choices[option]||[]).map(x=><option key={x.id} value={x.id}>{x.nombre}</option>)}</select></label>)}
       </div><div className="bi-filter-foot"><div className="bi-chips">{active.length ? active.map(key=><button key={key} onClick={()=>setFilter(key,'')} aria-label={`Quitar filtro ${selectedLabel(key,state[key])}`}>{selectedLabel(key,state[key])} ×</button>) : <span>Sin filtros de dimensión</span>}</div>
         <Button onClick={()=>{setState(old=>clearBiFilters(old));setLocalSearch('');}}>Restablecer filtros</Button></div></Card>
+      {user?.bi_consolidado && data?.metadata?.periodo && <BiGroupPanel periodo={data.metadata.periodo}/>}
       {drillStack.length>0 && <Button onClick={undrill}>← Volver al periodo anterior</Button>}
       {loading && <Card className="bi-feedback" role="status">Calculando indicadores y preparando gráficos…</Card>}
       {!loading && result.error && <Card className="bi-feedback bi-feedback--error" role="alert">{result.error} <Button onClick={()=>setRetry(n=>n+1)}>Reintentar</Button></Card>}
       {!loading && data && <>
         {!phase4 && <div className="bi-coverage" role="status"><strong>Cobertura:</strong> {economy.cobertura.ingresos}/{economy.cobertura.servicios} ingresos, {economy.cobertura.costes}/{economy.cobertura.servicios} costes y {economy.cobertura.km}/{economy.cobertura.servicios} distancias evaluables.
           {economy.cobertura.gastos_pendientes_valorar>0 && <span> {economy.cobertura.gastos_pendientes_valorar} registros pendientes de valorar.</span>}
+          {data.conciliacion_fisica?.costes_sin_conciliar>0 && <span> {money(data.conciliacion_fisica.costes_sin_conciliar)} de costes físicos pendientes de conciliación; excluidos del margen.</span>}
           {economy.fuentes_no_disponibles?.length>0 && <span> Fuentes no disponibles: {economy.fuentes_no_disponibles.join(', ')}.</span>}
         </div>}
         {!phase4 && economy.cobertura.servicios===0 && <Card className="bi-feedback">No hay servicios realizados para los filtros y el periodo seleccionados. Ajusta los filtros para consultar otra selección.</Card>}
@@ -246,7 +250,7 @@ export default function BiWorkspace() {
               <tbody>{matrixPageRows.length?matrixPageRows.map(r=><tr key={r.id}>{columns.map(key=><td key={key}>{key==='nombre'?r.nombre:rowNumber(r,key)}</td>)}</tr>):<tr><td colSpan={columns.length}>Sin filas evaluables.</td></tr>}</tbody></table></div>
             <div className="bi-pagination"><span>{matrixRows.length} grupos · página {state.matrizPage} de {Math.max(1,Math.ceil(matrixRows.length/20))}</span><Button disabled={state.matrizPage<=1} onClick={()=>setState(old=>({...old,matrizPage:old.matrizPage-1}))}>Anterior</Button><Button disabled={state.matrizPage*20>=matrixRows.length} onClick={()=>setState(old=>({...old,matrizPage:old.matrizPage+1}))}>Siguiente</Button></div>
           </Card>
-        </> : <BiPhase4 kind={mode} data={data} onOpen={row=>navigateService({...row,id:row.order_id||row.id})} onPage={page=>setState(old=>({...old,page}))}/>}
+        </> : mode==='planner' ? <PlannerMetrics info={data.operations?.planner}/> : <BiPhase4 kind={mode} data={data} onOpen={row=>navigateService({...row,id:row.order_id||row.id})} onPage={page=>setState(old=>({...old,page}))}/>}
         {!phase4 && <Card as="section" id="bi-servicios" className="bi-section"><div className="bi-section-head"><div><h2>Servicios que explican el agregado</h2><p>La búsqueda de esta tabla es local a la página; los filtros superiores recalculan todo el panel.</p></div>
           <label>Buscar en esta página<input value={localSearch} onChange={e=>setLocalSearch(e.target.value)} placeholder="Número, cliente o ruta"/></label></div>
           <details className="bi-columns"><summary>Configurar columnas del detalle</summary>{serviceDefinitions.map(d=><label key={d.key}><input type="checkbox" checked={state.columnasServicios.includes(d.key)} onChange={e=>setState(old=>({...old,columnasServicios:e.target.checked?[...old.columnasServicios,d.key]:old.columnasServicios.filter(k=>k!==d.key)}))}/>{d.label}</label>)}</details>

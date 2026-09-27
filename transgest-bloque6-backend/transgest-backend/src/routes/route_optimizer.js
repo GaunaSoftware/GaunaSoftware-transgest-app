@@ -524,13 +524,14 @@ async function routeHere(stops, preference, truck, apiKey) {
     return: "summary,polyline,actions",
   });
   coordinates.slice(1, -1).forEach(c => params.append("via", `${c[1]},${c[0]}`));
-  params.set("truck[height]", String(Math.round(Number(truck.height_m || DEFAULT_TRUCK.height_m) * 100)));
-  params.set("truck[width]", String(Math.round(Number(truck.width_m || DEFAULT_TRUCK.width_m) * 100)));
-  params.set("truck[length]", String(Math.round(Number(truck.length_m || DEFAULT_TRUCK.length_m) * 100)));
-  params.set("truck[grossWeight]", String(Math.round(Number(truck.weight_t || DEFAULT_TRUCK.weight_t) * 1000)));
-  params.set("truck[weightPerAxle]", String(Math.round(Number(truck.axleload_t || DEFAULT_TRUCK.axleload_t) * 1000)));
+  params.set("vehicle[height]", String(Math.round(Number(truck.height_m || DEFAULT_TRUCK.height_m) * 100)));
+  params.set("vehicle[width]", String(Math.round(Number(truck.width_m || DEFAULT_TRUCK.width_m) * 100)));
+  params.set("vehicle[length]", String(Math.round(Number(truck.length_m || DEFAULT_TRUCK.length_m) * 100)));
+  params.set("vehicle[grossWeight]", String(Math.round(Number(truck.weight_t || DEFAULT_TRUCK.weight_t) * 1000)));
+  params.set("vehicle[weightPerAxle]", String(Math.round(Number(truck.axleload_t || DEFAULT_TRUCK.axleload_t) * 1000)));
   const data = await fetchJson(`https://router.hereapi.com/v8/routes?${params.toString()}`);
   const sections = data?.routes?.[0]?.sections || [];
+  if (!sections.length || !sections.some(s => s.polyline)) throw new Error("HERE no devolvió un recorrido válido para estas paradas");
   const distance = sections.reduce((sum, s) => sum + Number(s.summary?.length || 0), 0);
   const duration = sections.reduce((sum, s) => sum + Number(s.summary?.duration || 0), 0);
   return {

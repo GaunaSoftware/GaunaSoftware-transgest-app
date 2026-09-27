@@ -25,17 +25,7 @@ function orderTotals(orders) {
     cobertura_km: knownKm, cobertura_coste: knownCost };
 }
 function group(rows, key) { const result = new Map(); for (const r of rows) { const k = key(r); if (!result.has(k)) result.set(k, []); result.get(k).push(r); } return [...result.entries()]; }
-function structureMonth(gastos, month) {
-  const [y, m] = month.split('-').map(Number);
-  const target = y * 12 + m;
-  return gastos.filter(g => g.activo !== false).map(g => {
-    const [gy, gm] = day(g.fecha).split('-').map(Number);
-    const elapsed = target - (gy * 12 + gm);
-    const frequency = { mensual: 1, trimestral: 3, anual: 12 }[g.periodo];
-    const matches = elapsed >= 0 && (frequency ? true : elapsed === 0);
-    return matches ? { ...g, importe_periodo: money(num(g.importe) / (frequency || 1)) } : null;
-  }).filter(Boolean);
-}
+const {structureMonth, buildStructure} = require('./structureExpenses');
 
 function buildAnalytics({ empresaId, range, orders = [], invoices = [], vehicles = [], drivers = [], repairs = [], emptyKm = [], structure = [], clients: clientRecords = [], fuel = [], driverExpenses = [], payroll = [], nights = [], page = 1, limit = 50, missingSources = [] }) {
   // Defense in depth for reuse outside HTTP. SQL readers also apply company predicates.
@@ -85,11 +75,9 @@ function buildAnalytics({ empresaId, range, orders = [], invoices = [], vehicles
   // The existing structure view is monthly. A multi-month report must not present
   // the first month's allocation as the total for the entire selected interval.
   const singleMonth = range.desde.slice(0,7) === range.hasta.slice(0,7);
-  const structureRows = singleMonth ? structureMonth(own(structure), range.desde.slice(0,7)) : [];
-  const structureTotal = singleMonth && structureRows.length ? sum(structureRows,'importe_periodo') : null;
-  const activeFleet = fleet.filter(v=>v.activo !== false && !['baja','inactivo'].includes(v.estado));
-  const activeIncome = sum(activeFleet,'ingresos');
-  const allocation = activeFleet.map(v=>({ v, peso_igual:ratio(1,activeFleet.length), peso_ingresos:ratio(v.ingresos,activeIncome), coste_igual:singleMonth ? ratio(structureTotal,activeFleet.length) : null, coste_ingresos:singleMonth && activeIncome > 0 ? money(structureTotal*v.ingresos/activeIncome) : null }));
+  const structureSummary = singleMonth ? buildStructure({empresaId, month:range.desde.slice(0,7), structure, vehicles:fleet})
+    : {gastos:[], total:null, coste_medio_camion:null, reparto:[]};
+  const structureTotal = structureSummary.total;
   const economia = buildEconomics({empresaId,range,orders,invoices,vehicles,drivers,repairs,emptyKm,structure,clients:clientRecords,fuel,driverExpenses,payroll,nights,page,limit,missingSources});
   return {
     metadata:reportMetadata(range, {
@@ -109,7 +97,7 @@ function buildAnalytics({ empresaId, range, orders = [], invoices = [], vehicles
     costesCat:group(repairs,r=>r.tipo || 'Otros').map(([name,rows])=>({name,value:sum(rows,'coste_total')})),
     costeMensualTaller:group(repairs,r=>day(r.fecha).slice(0,7)).map(([name,rows])=>({name,coste:sum(rows,'coste_total')})).sort((a,b)=>a.name.localeCompare(b.name)),
     explotacionTotales:{ ingresos:sum(fleet,'ingresos'),kmCargados:sum(fleet,'kmCargados'),kmVacioReg:sum(fleet,'kmVacioReg'),costosTaller:sum(fleet,'costosTaller'),margen:fleet.some(v=>v.margen!=null)?sum(fleet,'resultado_con_taller'):null },
-    estructura:{ gastos:structureRows, total:structureTotal, coste_medio_camion:ratio(structureTotal,activeFleet.length), reparto:allocation, base_reparto:'Ingresos netos de servicios realizados por tractora (no facturas sin asignación de vehículo)' },
+    estructura:structureSummary,
     economia
   };
 }
@@ -128,7 +116,7 @@ async function loadAnalyticsSources(empresaId, range, ordersFrom = range.desde, 
   };
   const [orders,invoices,vehicles,drivers,workshop,emptyKm,structure,clients,fuel,driverExpenses,payroll,nights] = await Promise.all([
     queryDb(`WITH ${financialPedidosCte} SELECT * FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3`,[empresaId,ordersFrom,range.hasta]),
-    queryDb(`SELECT f.*, c.nombre AS cliente_nombre FROM facturas f LEFT JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id WHERE f.empresa_id=$1 AND f.fecha <= $2`,[empresaId,range.hasta]),
+    queryDb(`SELECT f.*, c.nombre AS cliente_nombre FROM facturas f LEFT JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id WHERE f.empresa_id=$1 AND COALESCE(to_jsonb(f)->>'origen_producto','transgest')<>'planner' AND NULLIF(to_jsonb(f)->>'planner_preparacion_id','') IS NULL AND f.fecha <= $2`,[empresaId,range.hasta]),
     queryDb('SELECT * FROM vehiculos WHERE empresa_id=$1',[empresaId]),
     queryDb("SELECT id,empresa_id,nombre,to_jsonb(choferes)->>'apellidos' AS apellidos FROM choferes WHERE empresa_id=$1",[empresaId]),
     queryDb('SELECT data FROM taller_estado WHERE empresa_id=$1',[empresaId]),
@@ -140,8 +128,9 @@ async function loadAnalyticsSources(empresaId, range, ordersFrom = range.desde, 
     optional('nominas_emitidas','SELECT * FROM nominas_emitidas WHERE empresa_id=$1 AND LEFT(periodo::text,7) BETWEEN $2 AND $3',[empresaId,range.desde.slice(0,7),range.hasta.slice(0,7)]),
     optional('vehiculo_noches','SELECT * FROM vehiculo_noches WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3',[empresaId,range.desde,range.hasta])
   ]);
+  const physical=await require('./financialJourneys').loadJourneyReconciliation(empresaId,orders.rows,range.hasta,queryDb);
   const missingSources=[structure,fuel,driverExpenses,payroll,nights].map(r=>r.missingSource).filter(Boolean);
-  return {empresaId,range,orders:orders.rows,invoices:invoices.rows,vehicles:vehicles.rows,drivers:drivers.rows,
+  return {empresaId,range,orders:physical.orders,reconciliation:physical.reconciliation,invoices:invoices.rows,vehicles:vehicles.rows,drivers:drivers.rows,
     repairs:workshop.rows[0]?.data?.reparaciones || [],emptyKm:emptyKm.rows,structure:structure.rows,clients:clients.rows,
     fuel:fuel.rows,driverExpenses:driverExpenses.rows,payroll:payroll.rows,nights:nights.rows,missingSources};
 }

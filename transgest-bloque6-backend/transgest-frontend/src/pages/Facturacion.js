@@ -1,3 +1,5 @@
+import InvoiceWorkflow from "./finance/InvoiceWorkflow";
+import SupplierInvoiceCenter from "./colaboradores/SupplierInvoiceCenter";
 import { buildTransportInvoiceLines } from "../utils/invoiceLines";
 import { guardarControlCobrosConfig, getReclamacionesEnvios, getFacturaPlantilla } from '../services/api';
 import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar, SearchInput, DataTable, MobileDataCard, EmptyState, Modal, Icon, AlertCard } from "../ui";
@@ -9,8 +11,8 @@ import "./finance/summary.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
-import { registrarRevisionFactura } from '../services/api';
-import { getFacturas, getFactura, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
+import { supplierInvoiceReview, registrarRevisionFactura } from '../services/api';
+import { getPedido, getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl, facturasFiscalLoteXmlUrl, getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -568,7 +570,57 @@ function getFacturaFiscalRowMeta(factura) {
   };
 }
 
-export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
+function FacturaAnotaciones({ factura, onGuardar }) {
+  const actual = factura.anotaciones;
+  const data = actual?.datos || {};
+  const [values, setValues] = useState({
+    matricula:data.matricula || '', remolque:data.remolque || '',
+    referencias_internas:data.referencias_internas || '', referencia_cliente:data.referencia_cliente || '',
+    observaciones_informativas:data.observaciones_informativas || '',
+    etiquetas:(data.etiquetas || []).join(', '), motivo:'',
+  });
+  const [busy, setBusy] = useState(false);
+  const fields = [
+    ['matricula','Matrícula'], ['remolque','Remolque'],
+    ['referencias_internas','Referencias internas'], ['referencia_cliente','Referencia del cliente'],
+    ['observaciones_informativas','Observaciones informativas'], ['etiquetas','Etiquetas internas, separadas por comas'],
+  ];
+  const history = factura.anotaciones_historial || [];
+  return <section data-internal className="finance-review" aria-label="Datos informativos de factura" style={{margin:'12px 18px'}}>
+    <h3>Datos informativos {actual && <Badge>Datos informativos actualizados · v{actual.version}</Badge>}</h3>
+    <p>Estos datos se guardan en un historial separado. La factura fiscal y su PDF original no se modifican.</p>
+    <details><summary>{onGuardar ? 'Editar datos informativos' : 'Ver datos informativos'}</summary>
+      <form onSubmit={async event=>{
+        event.preventDefault(); if(!onGuardar) return;
+        setBusy(true);
+        try {
+          await onGuardar(factura.id, {
+            version:actual?.version || 0, motivo:values.motivo,
+            matricula:values.matricula, remolque:values.remolque,
+            referencias_internas:values.referencias_internas, referencia_cliente:values.referencia_cliente,
+            observaciones_informativas:values.observaciones_informativas,
+            etiquetas:values.etiquetas.split(',').map(item=>item.trim()).filter(Boolean),
+          });
+          setValues(previous=>({...previous,motivo:''}));
+          notify('Datos informativos guardados con historial.','success');
+        } catch(error) { notify(error.message || 'No se pudieron guardar los datos informativos.','error'); }
+        finally { setBusy(false); }
+      }}>
+        <div className="tgui-filter-fields" style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))',gap:10}}>
+          {fields.map(([key,label])=><label key={key}>{label}<input className="tgui-input" disabled={!onGuardar || busy} value={values[key]} onChange={event=>setValues(previous=>({...previous,[key]:event.target.value}))} maxLength={key==='observaciones_informativas'?2000:key==='referencias_internas'?500:key==='referencia_cliente'?255:key==='etiquetas'?1200:60}/></label>)}
+        </div>
+        {onGuardar && <><label>Motivo del cambio<input className="tgui-input" required minLength={5} maxLength={1000} value={values.motivo} onChange={event=>setValues(previous=>({...previous,motivo:event.target.value}))}/></label><Button type="submit" disabled={busy}>{busy?'Guardando…':'Guardar anotación'}</Button></>}
+      </form>
+    </details>
+    {history.length>0 && <details><summary>Historial de anotaciones ({history.length})</summary>
+      <ol>{history.map(entry=><li key={entry.version}><strong>Versión {entry.version}</strong> · {new Date(entry.created_at).toLocaleString('es-ES')} · {entry.motivo} · Usuario {entry.usuario_id || 'no disponible'}
+        <ul>{Object.entries(entry.cambios || {}).map(([key,change])=><li key={key}>{key}: {JSON.stringify(change.anterior)} → {JSON.stringify(change.nuevo)}</li>)}</ul>
+      </li>)}</ol>
+    </details>}
+  </section>;
+}
+
+export function VistaFactura({registerReview=registrarRevisionFactura, factura, onClose, onRectificar, onSyncFiscal, onExportFiscal, onCambiarEstado, onCorregirPedido, onAnalizarPedido, onGuardarAnotaciones, analizandoPedidoId, rectificadasIds=new Set(), aiDisponible=false}) {
   const empresa = useEmpresaPerfil();
   const [revisionConfirmada,setRevisionConfirmada]=useState(false);
   const [motivoSinReferencia,setMotivoSinReferencia]=useState('');
@@ -746,6 +798,7 @@ export function VistaFactura({registerReview=registrarRevisionFactura, factura, 
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--text4)",fontSize:14,cursor:"pointer",padding:"0 4px"}}>Cerrar</button>
         </div>
 
+        {factura.estado !== 'borrador' && <FacturaAnotaciones key={`${factura.id}:${factura.anotaciones?.version || 0}`} factura={factura} onGuardar={onGuardarAnotaciones}/>}
         {/* Contenido */}
         {factura.estado==='borrador'&&<section className="finance-review" aria-label="Revisión antes de emitir">
           <h3>Revisión antes de emitir</h3>
@@ -2350,7 +2403,7 @@ export default function Facturacion() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      notify("XML fiscal descargado.", "success");
+      notify("XML interno descargado. No es un fichero oficial para presentar a AEAT.", "success");
     } catch (e) {
       notify(e.message || "No se pudo descargar el XML fiscal.", "error");
     }
@@ -2376,7 +2429,7 @@ export default function Facturacion() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      notify("Lote XML fiscal descargado.", "success");
+      notify("Lote XML interno descargado. No es un fichero oficial para presentar a AEAT.", "success");
     } catch (e) {
       notify(e.message || "No se pudo descargar el lote XML fiscal.", "error");
     }
@@ -2507,6 +2560,10 @@ export default function Facturacion() {
     }
   }
 
+  async function descargarFacturaRevisada(id) {
+    try { const file=await supplierInvoiceReview('/'+id+'/original');const url=URL.createObjectURL(new Blob([Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0))],{type:file.mime}));const a=document.createElement('a');a.href=url;a.download=file.nombre;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000); }
+    catch(e){notify(e.message,'error');}
+  }
   function verFacturaProveedor(data) {
     if (!data) return;
     const win = window.open();
@@ -2805,6 +2862,7 @@ export default function Facturacion() {
         <AlertCard icon="shield" tone={!fiscalResumen ? "neutral" : fiscalAttention || fiscalNeedsSetup ? "warning" : "success"} title={!fiscalResumen ? "Fiscal: resumen no disponible" : fiscalNeedsSetup ? "Fiscal: revisar configuración" : fiscalAttention ? `Fiscal: ${fiscalAttention} incidencias` : "Fiscal sin incidencias"} description="Consultar estado y configuración AEAT" onClick={() => setActiveFacturacionTab("fiscal")} />
       </div>}
       <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
+      {activeFacturacionTab === "facturas" && <InvoiceWorkflow clients={clientes} canEdit={canEdit} manager={esGerenteFacturacion} onInvoice={abrirFacturaPorId} onOrder={async row=>{try{setPedidoCorreccion(await getPedido(row.id));}catch(e){notify(e.message,"error");}}} />}
       {isSummary && <FinanceSummary forecast={previsionTesoreria} money={fmt2} backlogCount={sinFacturar.length} backlogAmount={sinFacturarTotal} invoices={summaryInvoices} totalCount={totalCount} filters={invoiceFilters} renderInvoices={renderInvoiceList} canEdit={canEdit}
         onBacklog={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }} onInvoice={() => setModalMulti(true)} onAllInvoices={() => setActiveFacturacionTab("facturas")} onExport={() => setExportOpen(true)}
         documents={Number(bloqueoDocResumen.pedidos_sin_soporte || 0)} reviews={Number(controlResumen.revisar_hoy || 0)} pending={Number(controlResumen.importe_pendiente || 0)}
@@ -2837,7 +2895,7 @@ export default function Facturacion() {
             </button>
           )}
           <button onClick={descargarLoteXmlFiscal} style={{...S.btn,background:"rgba(59,130,246,.08)",color:"#2563eb",border:"1px solid rgba(59,130,246,.24)"}}>
-            Descargar lote XML
+            Descargar XML interno (no AEAT)
           </button>
           {[
             ["Aceptados", fiscalInfo.aceptados, "var(--green)"],
@@ -2876,7 +2934,7 @@ export default function Facturacion() {
                     Ver factura
                   </button>
                   <button onClick={()=>descargarXmlFiscal(item.factura_id)} style={{...S.btn,background:"rgba(148,163,184,.12)",color:"var(--text3)",border:"1px solid rgba(148,163,184,.25)",padding:"5px 8px"}}>
-                    XML
+                    XML interno
                   </button>
                   {canEdit && item.estado_envio !== "aceptado" && (
                     <button
@@ -2953,6 +3011,7 @@ export default function Facturacion() {
       </div>
       )}
 
+      {activeFacturacionTab === "pagos" && <SupplierInvoiceCenter onRegistered={cargar}/>}
       {activeFacturacionTab === "pagos" && pagosProveedor.length > 0 && (
         <div style={{...S.card,padding:14,marginBottom:16,borderColor:"var(--border)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}>
@@ -3003,6 +3062,7 @@ export default function Facturacion() {
                           <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
                             {canEdit && !p.documentacion_recibida && <button onClick={()=>accionRapidaPagoProveedor(p,"documentacion")} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Docs recibida</button>}
                             {canEdit && !p.factura_nombre && <button onClick={()=>accionRapidaPagoProveedor(p,"factura")} style={{...S.btn,padding:"5px 8px",background:"rgba(251,191,36,.12)",color:"#f59e0b",border:"1px solid rgba(251,191,36,.24)"}}>Factura recibida</button>}
+                            {p.factura_proveedor_id && <Button onClick={()=>descargarFacturaRevisada(p.factura_proveedor_id)}>Descargar factura revisada</Button>}
                             {p.factura_data && <button onClick={()=>verFacturaProveedor(p.factura_data)} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Ver factura</button>}
                             <button onClick={()=>abrirGestionPagoProveedor(p)} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border)"}}>Gestionar</button>
                             {canEdit && <button onClick={()=>accionRapidaPagoProveedor(p,"pagado")} style={{...S.btn,padding:"5px 8px",background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.24)"}}>Pagado</button>}
@@ -3270,6 +3330,7 @@ export default function Facturacion() {
           onCambiarEstado={canEdit ? cambiarEstado : null}
           onCorregirPedido={canEdit ? setPedidoCorreccion : null}
           onAnalizarPedido={canEdit && aiDisponible ? analizarSoportesPedidoFactura : null}
+          onGuardarAnotaciones={canEdit ? async (id, data) => { await guardarFacturaAnotaciones(id, data); const refreshed = await getFactura(id); setVistaFact(refreshed); return refreshed; } : null}
           analizandoPedidoId={analizandoPedidoId}
           aiDisponible={aiDisponible}
           rectificadasIds={rectificadasIds}

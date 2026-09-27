@@ -1,6 +1,7 @@
 import {AGENDA_TYPES,agendaType,agendaStyle} from "./workspace/agendaTypes";
 import "./orders/refinements.css";
 import AgendaTimeline from "./workspace/AgendaTimeline";
+import { incidentDetailParts, isAutomaticIncident } from "./workspace/agendaIncident";
 import "./workspace/workspace.css";
 import { useEffect, useMemo, useState } from "react";
 import { borrarAgendaEvento, completarAgendaEvento, crearAgendaEvento, editarAgendaEvento, getAgendaEventos, getAgendaUsuarios, getAvisosOperativosIgnorados, posponerAgendaEvento } from "../services/api";
@@ -296,6 +297,20 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
     await onSaved(payload);
   }
 
+  if (isAutomaticIncident(evento)) return (
+    <div className="modern-modal" role="dialog" aria-modal="true" aria-label={`Incidencia ${evento.titulo}`} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="agenda-form-panel" style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, width:"min(680px,96vw)", padding:24, maxHeight:"92vh", overflowY:"auto" }}>
+        <h2 style={{ margin:"0 0 16px", fontSize:20, color:"var(--text)" }}>{evento.titulo}</h2>
+        <dl style={{ display:"grid", gap:14, margin:0 }}>
+          {incidentDetailParts(evento).map(([label, value]) => <div key={label}>
+            <dt style={S.label}>{label}</dt><dd style={{ margin:0, fontSize:14, lineHeight:1.5, color:"var(--text)" }}>{value}</dd>
+          </div>)}
+        </dl>
+        <button style={{ ...S.btn, marginTop:20, background:"var(--accent)", color:"#fff" }} onClick={onClose}>Cerrar</button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="modern-modal" role="dialog" aria-modal="true" aria-label="Tarea de agenda" style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.76)", zIndex:250, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
       <div className="agenda-form-panel" style={{...agendaStyle(form.tipo), background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:12, width:"min(760px,96vw)", padding:24, maxHeight:"92vh", overflowY:"auto" }}>
@@ -380,6 +395,7 @@ export default function Agenda() {
   const [eventos, setEventos] = useState([]);
   const [soloMias, setSoloMias] = useState(true);
   const [estado, setEstado] = useState("todas");
+  const [mostrarResueltas, setMostrarResueltas] = useState(false);
   const [tipo, setTipo] = useState("todos");
   const [selectedDay, setSelectedDay] = useState(() => toDateInput(new Date()));
   const [modal, setModal] = useState(null);
@@ -408,6 +424,7 @@ export default function Agenda() {
           desde: monthStart.toISOString(),
           hasta: monthEnd.toISOString(),
           modo: soloMias ? "mias" : "todas",
+          ...(mostrarResueltas ? { mostrar_resueltas:"1" } : {}),
           ...(estado !== "todas" ? { estado } : {}),
           ...(tipo !== "todos" ? { tipo } : {}),
         }),
@@ -420,7 +437,7 @@ export default function Agenda() {
     }
   }
 
-  useEffect(() => { cargar(); }, [mes, soloMias, estado, tipo]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { cargar(); }, [mes, soloMias, estado, tipo, mostrarResueltas]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const eventosPorDia = useMemo(() => {
     const map = new Map();
@@ -533,6 +550,10 @@ export default function Agenda() {
           <input type="checkbox" checked={soloMias} onChange={e=>setSoloMias(e.target.checked)} style={{ width:16, height:16, accentColor:"var(--accent)" }} />
           Solo mis tareas
         </label>
+        <label style={{ display:"inline-flex", alignItems:"center", gap:8, fontSize:13, color:"var(--text3)" }}>
+          <input type="checkbox" checked={mostrarResueltas} onChange={e=>setMostrarResueltas(e.target.checked)} style={{ width:16, height:16, accentColor:"var(--accent)" }} />
+          Mostrar resueltas
+        </label>
         <button style={{ ...S.btn, background:"var(--accent)", color:"#fff", marginLeft:"auto" }} onClick={()=>setModal({ fecha_inicio: `${selectedDay}T09:00:00` })} disabled={!canEdit}>
           + Nueva tarea
         </button>
@@ -540,7 +561,7 @@ export default function Agenda() {
 
       <div className="agenda-type-legend" aria-label="Colores de los eventos">{Object.entries(AGENDA_TYPES).map(([value,t])=><span key={value} className="agenda-type-key" style={agendaStyle(value)}>{t.label}</span>)}</div>
       <div className="tg-agenda-shell" style={{ display:"grid", gridTemplateColumns:"minmax(0,1.4fr) minmax(320px,.9fr)", gap:16 }}>
-        {vista !== "mes" ? <AgendaTimeline day={selectedDay} view={vista} events={eventosPorDia} selectDay={setSelectedDay} openEvent={ev=>canEdit&&setModal(ev)}/> : <div style={S.card}>
+        {vista !== "mes" ? <AgendaTimeline day={selectedDay} view={vista} events={eventosPorDia} selectDay={setSelectedDay} openEvent={ev=>setModal(ev)}/> : <div style={S.card}>
           <div style={{ fontFamily:"'Syne',sans-serif", fontSize:17, fontWeight:800, color:"var(--text)", marginBottom:12 }}>
             {MONTH_NAMES[currentMonth.getMonth()]} {currentMonth.getFullYear()}
           </div>
@@ -616,6 +637,7 @@ export default function Agenda() {
                       </span>
                     </div>
                     {ev.descripcion && <div style={{ fontSize:12, color:"var(--text3)", marginTop:8, lineHeight:1.45 }}>{ev.descripcion}</div>}
+                    {isAutomaticIncident(ev) && <button style={{ ...S.btn, marginTop:8, padding:"5px 9px", background:"var(--accent-a12)", color:"var(--accent)" }} onClick={()=>setModal(ev)}>Ver motivo y acción</button>}
                     {postponedUntil(ev) && (
                       <div style={{ marginTop:8, fontSize:11, fontWeight:800, color:"#b45309", background:"rgba(245,158,11,.10)", border:"1px solid rgba(245,158,11,.24)", borderRadius:7, padding:"6px 8px" }}>
                         Recordatorio pospuesto hasta {postponedUntil(ev).toLocaleString("es-ES", { day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit" })}
@@ -626,7 +648,7 @@ export default function Agenda() {
                         {ev.asignado_a_nombre ? `Asignado a ${ev.asignado_a_nombre}` : "Sin asignación específica"}
                         {ev.visibilidad === "equipo" ? " · equipo" : " · personal"}
                       </div>
-                      {canEdit && (
+                      {canEdit && !isAutomaticIncident(ev) && (
                         <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
                           {ev.estado === "pendiente" && <button style={{ ...S.btn, padding:"5px 9px", background:"rgba(59,130,246,.10)", color:"#3b82f6", border:"1px solid rgba(59,130,246,.25)" }} onClick={()=>cambiarEstadoEvento(ev, "en_progreso")}>Iniciar</button>}
                           {["pendiente", "en_progreso"].includes(ev.estado) && (

@@ -1,0 +1,45 @@
+const assert=require('node:assert/strict'),crypto=require('node:crypto');
+module.exports=async function({base,fetch,db,managerToken,driverToken,company}){
+ assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);let checks=0;
+ async function call(path,token,status=200,body){const response=await fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
+ const ids=[crypto.randomUUID(),crypto.randomUUID()],operation=crypto.randomUUID();
+ for(let i=0;i<ids.length;i++)await db.query(`INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado,fecha_carga,origen,destino,importe,mercancia,peso_kg,bultos)
+   SELECT $1,$2,id,$3,'pendiente',CURRENT_DATE,'Valencia','Madrid',200,'Sacos sintéticos',1000,4 FROM clientes WHERE empresa_id=$2 ORDER BY id LIMIT 1`,[ids[i],company,`QA-GRUPAJE-${i+1}`]);
+ const body={pedido_ids:ids,borrador:false,client_operation_uuid:operation};
+ await call('/pedidos/grupaje/combinar',driverToken,403,body);
+ const group=await call('/pedidos/grupaje/combinar',managerToken,200,body);
+ assert.equal((await call('/pedidos/grupaje/combinar',managerToken,200,body)).viaje_id,group.viaje_id);
+ let model=await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken),trip=model.viajes[0];assert.equal(trip.pedidos.length,2);assert.equal(trip.paradas.length,4);
+ await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,driverToken,403);
+ const payload={version:trip.version,client_operation_uuid:crypto.randomUUID(),disposicion:ids.slice().reverse(),paradas:trip.paradas.map(s=>s.legacy_key)};
+ const saved=await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,200,payload);
+ assert.equal((await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,200,payload)).version,saved.version);
+ await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,409,{...payload,client_operation_uuid:crypto.randomUUID()});
+ const fleet=(await db.query('SELECT id FROM vehiculos WHERE empresa_id=$1 ORDER BY id LIMIT 1',[company])).rows[0];
+ const driver=(await db.query('SELECT id FROM choferes WHERE empresa_id=$1 ORDER BY id LIMIT 1',[company])).rows[0];
+ const assignment={client_operation_uuid:crypto.randomUUID(),asignacion:{vehiculo_id:fleet.id,chofer_id:driver.id,asignacion_revisada:true}};
+ await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,driverToken,403,assignment);
+ await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,409,{...assignment,asignacion:{...assignment.asignacion,chofer_id:crypto.randomUUID()}});
+ assert.equal((await db.query('SELECT count(*)::int n FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) AND vehiculo_id IS NOT NULL',[company,ids])).rows[0].n,0,'A failing resource assignment rolls back every child');
+ const assigned=await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,200,assignment);
+ assert.equal((await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,200,assignment)).version,assigned.version);
+ assert.equal((await db.query('SELECT count(*)::int n FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) AND vehiculo_id=$3',[company,ids,fleet.id])).rows[0].n,2);
+ const deniedIndividual=await fetch(base+`/pedidos/${ids[0]}`,{method:'PUT',headers:{Authorization:`Bearer ${managerToken}`,'Content-Type':'application/json'},body:JSON.stringify({vehiculo_id:null,chofer_id:null})});
+ assert.equal(deniedIndividual.status,409,await deniedIndividual.text());checks++;
+ const listing=await call('/pedidos/resumen-lista?q=QA-GRUPAJE',managerToken);
+ assert.equal(listing.data.length,2);assert.equal(new Set(listing.data.map(p=>p.viaje_operativo.id)).size,1);assert.ok(listing.data.every(p=>p.viaje_operativo.pedidos_count===2));
+ const cost={client_operation_uuid:crypto.randomUUID(),concepto:'Peaje sintético sin otro registro',referencia:'QA-PEAJE-UNICO',fecha:'2026-09-26',importe_neto:12.50};
+ await call(`/pedidos/grupaje/${group.grupaje_id}/costes`,driverToken,403,cost);
+ const recorded=await call(`/pedidos/grupaje/${group.grupaje_id}/costes`,managerToken,200,cost);
+ assert.equal((await call(`/pedidos/grupaje/${group.grupaje_id}/costes`,managerToken,200,cost)).id,recorded.id);
+ await call(`/pedidos/grupaje/${group.grupaje_id}/costes`,managerToken,409,{...cost,client_operation_uuid:crypto.randomUUID()});
+ const costs=await call(`/pedidos/grupaje/${group.grupaje_id}/costes`,managerToken);assert.equal(costs.data.length,1);assert.equal(Number(costs.data[0].importe_neto),12.50);
+ await call(`/pedidos/grupaje/${crypto.randomUUID()}/asignacion?empresa_id=${company}`,managerToken,404,assignment);
+ await call('/pedidos/grupaje/separar',managerToken,409,{pedido_ids:[ids[0]]});
+ await call('/pedidos/grupaje/separar',managerToken,200,{pedido_ids:ids});
+ assert.equal((await db.query('SELECT estado FROM viajes_operativos WHERE id=$1',[group.viaje_id])).rows[0].estado,'cancelado');
+ assert.equal((await db.query('SELECT count(*)::int n FROM viaje_plan_versiones WHERE viaje_id=$1',[group.viaje_id])).rows[0].n,4);
+ assert.equal(Number((await db.query('SELECT sum(importe)::numeric total FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[company,ids])).rows[0].total),400);
+ assert.equal((await call(`/pedidos/${ids[0]}/operativa`,managerToken)).origen,'legacy','Cancelled plan does not replace live operation');
+ return {checks,status:'passed',mode:'synthetic HTTP; group confirmation, retry, version guard, whole-group undo preserving history'};
+};

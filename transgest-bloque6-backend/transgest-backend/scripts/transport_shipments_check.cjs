@@ -1,0 +1,48 @@
+const assert=require('node:assert/strict'),crypto=require('node:crypto'),fs=require('node:fs'),path=require('node:path');
+const {PGlite}=require('@electric-sql/pglite');
+const shipments=require('../src/services/transportShipments'),documents=require('../src/services/transportDocumentVersions');
+async function main(){
+ const pg=new PGlite(),company=crypto.randomUUID(),id=crypto.randomUUID(),db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
+ try{
+  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,estado text,numero text,origen text,destino text,peso_kg numeric,puntos_carga jsonb,puntos_descarga jsonb); CREATE TABLE pedido_eventos(id uuid DEFAULT gen_random_uuid(),pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,actor_id uuid,detalle jsonb);');
+  for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql','20260926_transport_shipment_declarations.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
+  await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_shipment_declarations.sql'),'utf8'));
+  await pg.query("INSERT INTO pedidos VALUES($1,$2,'confirmado','QA-ENVIOS','Madrid','Valencia',1000,$3,$4)",[id,company,JSON.stringify([{id:'load',direccion:'Madrid'}]),JSON.stringify([{id:'a',direccion:'Valencia'},{id:'b',direccion:'Alicante'}])]);
+  const order=(await pg.query('SELECT * FROM pedidos')).rows[0],stops=require('../src/services/driverStops').driverStops(order);
+  const rows=[0,1].map(i=>({origen_id:stops[0].id,destino_id:stops[i+1].id,referencia:'REF-'+i,destinatario:'Cliente sintético '+i,mercancia:'Cerámica '+i,peso_kg:i?600:400,bultos:i?6:4,embalaje:'Cajas'}));
+  const args={empresaId:company,pedidoId:id,operationId:crypto.randomUUID(),rows};
+  await assert.rejects(shipments.declare(db,{...args,empresaId:crypto.randomUUID()}),{code:'ORDER_NOT_FOUND'});
+  await assert.rejects(shipments.declare(db,{...args,rows:[{...rows[0],peso_kg:300}]}),{code:'SHIPMENT_WEIGHT_TOTAL'});
+  await assert.rejects(shipments.declare(db,{...args,rows:[{...rows[0],origen_id:stops[1].id}]}),{code:'SHIPMENT_STOPS'});
+  const result=await shipments.declare(db,args);assert.equal(result.envio_ids.length,2);assert.deepEqual(await shipments.declare(db,args),result);
+  await assert.rejects(shipments.declare(db,{...args,rows:rows.slice(0,1)}),{code:'OPERATION_CONFLICT'});
+  await assert.rejects(shipments.declare(db,{...args,operationId:crypto.randomUUID()}),{code:'SHIPMENTS_EXIST'});
+  const payload={documento:{referencia_pedido:order.numero,fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético',nif:'QA',domicilio:'Madrid'},transportista_efectivo:{nombre:'Transportista sintético',nif:'QA'},vehiculo:{tractora:'QA-0000'}}};
+  const issue={empresaId:company,pedidoId:id,payload,baseUrl:'https://example.invalid',reason:'Prueba de envíos explícitos'};
+  await assert.rejects(documents.issue(db,issue),{code:'SHIPMENT_REQUIRED'});
+  await assert.rejects(documents.issue(db,{...issue,envioId:crypto.randomUUID()}),{code:'SHIPMENT_NOT_FOUND'});
+  for(const envioId of result.envio_ids)await documents.issue(db,{...issue,envioId});
+  const versions=await documents.list(db,company,id);assert.equal(versions.filter(v=>v.estado==='activa').length,2);
+  assert.deepEqual(versions.map(v=>Number(v.payload.documento.mercancia.peso_kg)).sort((a,b)=>a-b),[400,600]);
+  assert.deepEqual(versions.map(v=>v.payload.documento.destino.direccion).sort(),['Alicante','Valencia']);
+  await documents.assertDeparture(db,company,order,{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:versions.map(v=>v.id)});
+  await assert.rejects(documents.issue(db,{...issue,consolidated:true,consolidationAllowed:true}),{code:'DOCUMENT_SCOPE_CONFLICT'});
+  const otherId=crypto.randomUUID();
+  await pg.query("INSERT INTO pedidos SELECT $1,empresa_id,estado,'QA-CONSOLIDADO',origen,destino,peso_kg,puntos_carga,puntos_descarga FROM pedidos WHERE id=$2",[otherId,id]);
+  const other=await shipments.declare(db,{...args,pedidoId:otherId,operationId:crypto.randomUUID()});
+  const combined={...issue,pedidoId:otherId,consolidated:true};
+  await assert.rejects(documents.issue(db,combined),{code:'CONSOLIDATION_NOT_ALLOWED'});
+  await pg.query("UPDATE pedidos_envios SET snapshot=jsonb_set(snapshot,'{transportista_efectivo}',$1::jsonb) WHERE id=$2",[JSON.stringify({nombre:'Otra empresa',nif:'OTRO'}),other.envio_ids[0]]);
+  await assert.rejects(documents.issue(db,{...combined,consolidationAllowed:true}),{code:'CONSOLIDATION_PARTIES'});
+  await pg.query("UPDATE pedidos_envios SET snapshot=snapshot-'transportista_efectivo' WHERE id=$1",[other.envio_ids[0]]);
+  const issued=await documents.issue(db,{...combined,consolidationAllowed:true});
+  const combinedRows=await documents.list(db,company,otherId);assert.equal(combinedRows.length,1);
+  assert.equal(combinedRows[0].payload.documento.envios.length,2);assert.equal(combinedRows[0].payload.documento.mercancia.peso_kg,1000);
+  await documents.assertDeparture(db,company,{...order,id:otherId},{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[issued.id]});
+  await assert.rejects(documents.issue(db,{...issue,pedidoId:otherId,envioId:other.envio_ids[0]}),{code:'DOCUMENT_SCOPE_CONFLICT'});
+  const pdf=await documents.read(db,company,otherId,issued.id),out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-consolidated-synthetic.pdf'),Buffer.from(pdf.pdf));
+  assert.equal((await pg.query('SELECT count(*)::int n FROM pedido_eventos')).rows[0].n,2);
+  console.log('PASS explicit shipments: user mapping, totals, wrong-point rejection, idempotency/conflict, tenant, migration repeat, individual DeCA/PDFs and complete departure coverage.');
+ }finally{await pg.close();}
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

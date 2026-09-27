@@ -1,6 +1,8 @@
 import { OrderSection, OrderDisclosure } from "./OrderEditorShell";
 
 import EndpointAutocomplete from "../../../components/EndpointAutocomplete";
+import { confirmDialog } from "../../../services/notify";
+import { hasCustomerDependentValues, switchCustomerDraft } from "../clientTariffDraft";
 
 function pointDraft(form,side) {
  let stops=form[side==="carga"?"puntos_carga":"puntos_descarga"];
@@ -9,6 +11,32 @@ function pointDraft(form,side) {
  return {...point,nombre:point.cliente_nombre||form[side==="carga"?"origen":"destino"],direccion:point.direccion||"",tipo:side,cliente_id:form.cliente_id||"",ventana:point.ventana||form[side==="carga"?"ventana_carga":"ventana_descarga"]||"",pais:point.pais||"España"};
 }
 export default function OrderRouteFields({ S, nombreBusqueda, form, clientes, setNombreBusqueda, setForm, setShowSuggestions, showSuggestions, setModalNuevoCliente, ivaOptionValue, editando, bloqueoClienteModal, clienteRiesgoLoading, clienteRiesgo, clienteRiesgoPedido, formatRiskPct, rutas, cmrInternacionalModal, tarifasCoincidentes, syncPrecioClienteCol, aplicarTarifaRutaADraft, rutaTarifaSugerida, applyRouteEndpointsFromSavedPoints, setShowCostes, calcularCosteGasoil, groupRutasByOrigen, rutaCompatibleConConjunto, rutasCompatibles, rutaIncompatible, rutaSeleccionada, tipoRemolqueActual, remolquesCompatiblesRuta, f, aplicarEndpointText, resolverEndpointEnFormulario, puntosCargaSugeridosModal, direccionCompletaPunto, applyPuntoCargaToDraft, puntosCargaClienteModal, PuntoInteresPicker, puntosCargaClienteLoading, setPoiDraft, setManagePointsMode, setManagePointsOpen, puntosDescargaSugeridosModal, applyPuntoDescargaToDraft }) {
+ async function changeCustomer(customer = null) {
+   if (String(form.cliente_id || "") === String(customer?.id || "")) {
+     setNombreBusqueda("");
+     setShowSuggestions(false);
+     return;
+   }
+   if (hasCustomerDependentValues(form)) {
+     const accepted = await confirmDialog({
+       title: customer ? "Cambiar cliente del pedido" : "Quitar cliente del pedido",
+       message: "Se limpiarán la tarifa, el precio, los mínimos, el recargo, las ventanas y la referencia asociados al cliente anterior. Los datos maestros del cliente y sus tarifas no se modificarán.",
+       confirmText: customer ? "Cambiar cliente" : "Quitar cliente",
+     });
+     if (!accepted) {
+       setNombreBusqueda("");
+       setShowSuggestions(false);
+       return;
+     }
+   }
+   setForm(previous => {
+     const next = switchCustomerDraft(previous, customer);
+     if (customer) next.iva_regimen = customer.iva_regimen || ivaOptionValue({ tipo_iva: customer.tipo_iva });
+     return next;
+   });
+   setNombreBusqueda("");
+   setShowSuggestions(false);
+ }
  return <OrderSection title="Cliente, referencia y puntos" icon="clients">
 
             <div className="tg-pedido-form-grid-3"><div >
@@ -19,10 +47,10 @@ export default function OrderRouteFields({ S, nombreBusqueda, form, clientes, se
                     placeholder="Escribe el nombre del cliente..."
                     style={{...S.input,width:"100%"}}
                     value={nombreBusqueda || (form.cliente_id ? clientes.find(c=>c.id===form.cliente_id)?.nombre||"" : "")}
-                    onChange={e=>{
+                    onChange={async e=>{
                       const val = e.target.value;
-                      setNombreBusqueda(val);
-                      if(!val) { setForm(p=>({...p,cliente_id:""})); }
+                      if (!val) await changeCustomer(null);
+                      else setNombreBusqueda(val);
                       setShowSuggestions(true);
                     }}
                     onFocus={()=>setShowSuggestions(true)}
@@ -60,20 +88,7 @@ export default function OrderRouteFields({ S, nombreBusqueda, form, clientes, se
                       <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:8,zIndex:50,overflow:"hidden"}}>
                         {sugs.map(c=>(
                           <div key={c.id}
-                            onMouseDown={()=>{
-                              setForm(p=>({
-                                ...p,
-                                cliente_id: c.id,
-                                tipo_iva: c.tipo_iva ?? p.tipo_iva ?? 21,
-                                iva_regimen: c.iva_regimen || ivaOptionValue({ tipo_iva: c.tipo_iva ?? p.tipo_iva }),
-                                ventana_carga: p.ventana_carga || c.horario_carga || "",
-                                ventana_descarga: p.ventana_descarga || c.horario_descarga || "",
-                                // Mercancia habitual del cliente (si no hay una escrita ya)
-                                mercancia: p.mercancia || c.mercancia_habitual || "",
-                              }));
-                              setNombreBusqueda("");
-                              setShowSuggestions(false);
-                            }}
+                            onMouseDown={()=>changeCustomer(c)}
                             style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid var(--border2)",display:"flex",justifyContent:"space-between",alignItems:"center"}}
                             onMouseEnter={e=>e.currentTarget.style.background="var(--bg3)"}
                             onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -85,7 +100,7 @@ export default function OrderRouteFields({ S, nombreBusqueda, form, clientes, se
                     );
                   })()}
                 </div>
-                {form.cliente_id && <button type="button" className="order-editor-clear-client" data-pedido-mutation="true" onClick={()=>{setForm(p=>({...p,cliente_id:""}));setNombreBusqueda("");}}>Quitar cliente</button>}
+                {form.cliente_id && <button type="button" className="order-editor-clear-client" data-pedido-mutation="true" onClick={()=>changeCustomer(null)}>Quitar cliente</button>}
 
               </div><div><label style={S.label}>Referencia cliente</label><input style={S.input} value={form.referencia_cliente||""} onChange={f("referencia_cliente")} placeholder="Ref. pedido del cliente"/></div><div><label style={S.label}>Cargar tarifa / ruta guardada</label>
                 <select value={form.ruta_id||""} onChange={e=>{

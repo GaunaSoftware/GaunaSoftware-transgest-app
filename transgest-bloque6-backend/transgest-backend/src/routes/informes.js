@@ -1,4 +1,5 @@
 const { cacheMiddleware } = require("../services/cache");
+const { readFlowPopulation, summarizeFlow, readFlowPage } = require('../services/controlTowerFlow');
 const express = require("express");
 const db      = require("../services/db");
 const { financialPedidosCte, periodRange, reportRange, ratio, metric, reportMetadata, validInvoiceSql } = require("../services/financialKpis");
@@ -10,7 +11,7 @@ const { ensureRegulatoryCoreSchema } = require("../services/regulatoryCore");
 
 const router = express.Router();
 router.use((req, res, next) => {
-  if (req.path === "/control-tower") return next();
+  if (req.path === "/control-tower" || req.path === "/control-tower/flujo") return next();
   if (req.path === "/copiloto-operativo") return next();
   if (req.path === "/cargas-retorno") return next();
   if (req.path === "/cumplimiento-europeo") return next();
@@ -23,6 +24,9 @@ router.use((req, res, next) => {
 // Inherits authenticate + informes module + plan gate from server.js and
 // GERENTE_O_CONTABLE from the router middleware above.
 router.use('/bi/reportes', require('./biReportCenter'));
+router.get('/bi/grupos',async(req,res,next)=>{try{res.json({groups:await require('../services/companyGroupBi').list(req.user.id)});}catch(e){next(e);}});
+router.get('/bi/consolidado',async(req,res,next)=>{try{res.json(await require('../services/companyGroupBi').read(req.user.id,req.query));}catch(e){next(e);}});
+
 
 const rangoPeriodo = periodRange;
 
@@ -108,7 +112,7 @@ router.get("/bi/resumen", async (req, res) => {
         COALESCE(SUM(total) FILTER (WHERE estado::text IN ('emitida','enviada','vencida','reclamada','sin_cobrar')),0)::numeric AS pendiente_cobro,
         COALESCE(SUM(total) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas
-      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('borrador','cancelada','anulada')
+      WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('borrador','cancelada','anulada')
     `, params),
     db.query(`
       WITH ${financialPedidosCte}, pedidos_cliente AS (
@@ -130,7 +134,7 @@ router.get("/bi/resumen", async (req, res) => {
                COALESCE(SUM(base_imponible) FILTER (WHERE estado::text <> 'borrador'),0)::numeric AS facturado,
                COALESCE(SUM(total) FILTER (WHERE estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS deuda_vencida
           FROM facturas
-         WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('cancelada','anulada')
+         WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND estado::text NOT IN ('cancelada','anulada')
          GROUP BY cliente_id
       )
       SELECT c.id, c.nombre,
@@ -245,13 +249,23 @@ router.get("/bi/resumen", async (req, res) => {
              COALESCE(SUM(f.total) FILTER (WHERE f.estado::text IN ('vencida','reclamada','sin_cobrar')),0)::numeric AS vencido
       FROM facturas f
       JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id
-      WHERE f.empresa_id=$1 AND f.fecha BETWEEN $2 AND $3 AND f.estado::text NOT IN ('borrador','cancelada','anulada')
+      WHERE f.empresa_id=$1 AND NULLIF(to_jsonb(f)->>'planner_preparacion_id','') IS NULL AND f.fecha BETWEEN $2 AND $3 AND f.estado::text NOT IN ('borrador','cancelada','anulada')
       GROUP BY c.id, c.nombre
       ORDER BY facturado DESC NULLS LAST, cobrado DESC NULLS LAST
       LIMIT 12
     `, params),
   ]);
   const p = pedidos.rows[0] || {};
+  const rawPhysical=await db.query(`WITH ${financialPedidosCte} SELECT * FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3`,params);
+  const physical=await require('../services/financialJourneys').loadJourneyReconciliation(empresaId,rawPhysical.rows,hasta,db.query);
+  const {buildEconomics,physicalKm}=require('../services/financialEconomics');
+  const economy=buildEconomics({empresaId,range:{desde,hasta},orders:physical.orders,limit:Number.MAX_SAFE_INTEGER});
+  const allKm=physicalKm(physical.orders.filter(row=>row.estado!=='cancelado'));
+  Object.assign(p,{coste_operativo_realizado:economy.costes_directos.directo_registrado,con_coste:economy.costes_directos.cobertura.evaluables,
+    con_km:economy.kilometros.cobertura.evaluables,km:allKm.total,km_vacio:allKm.vacios,km_realizados:economy.kilometros.total,km_vacio_realizado:economy.kilometros.vacios});
+  for(const row of clientes.rows){const actual=economy.por_cliente.find(c=>c.id===String(row.id));if(actual)Object.assign(row,{coste:actual.coste_directo_registrado,margen:actual.margen_directo_registrado});}
+  for(const row of rutas.rows){const actual=economy.por_ruta.find(r=>r.id===`${row.origen} → ${row.destino}`);if(actual)Object.assign(row,{margen:actual.margen_directo_registrado,km_medio:ratio(actual.km_total,actual.servicios)});}
+
   const venta = Number(p.venta || 0);
   const ventaRealizada = Number(p.venta_realizada || 0);
   const pendienteFacturarRealizado = Number(p.pendiente_facturar_realizado || 0);
@@ -268,12 +282,12 @@ router.get("/bi/resumen", async (req, res) => {
   const totalPedidos = Number(p.total || 0);
   const realizados = Number(p.completados || 0);
   const saldo = await db.query(`SELECT COALESCE(SUM(total) FILTER (WHERE estado::text <> 'cobrada'),0)::numeric AS saldo
-    FROM facturas WHERE empresa_id=$1 AND fecha <= $3 AND $2::date <= $3::date AND ${validInvoiceSql('')}`, params);
+    FROM facturas WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha <= $3 AND $2::date <= $3::date AND ${validInvoiceSql('')}`, params);
   const serie = await db.query(`WITH ${financialPedidosCte}, valores AS (
     SELECT to_char(fecha_bi,'YYYY-MM') AS mes, 0::numeric AS facturado, importe AS pendiente
       FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3 AND estado::text IN ('entregado','facturado') AND pendiente_factura
     UNION ALL SELECT to_char(fecha,'YYYY-MM'),base_imponible,0 FROM facturas
-      WHERE empresa_id=$1 AND fecha BETWEEN $2 AND $3 AND ${validInvoiceSql('')}
+      WHERE empresa_id=$1 AND NULLIF(to_jsonb(facturas)->>'planner_preparacion_id','') IS NULL AND fecha BETWEEN $2 AND $3 AND ${validInvoiceSql('')}
   ) SELECT mes AS name, SUM(facturado)::numeric AS facturado, SUM(pendiente)::numeric AS pendiente
     FROM valores GROUP BY mes ORDER BY mes`,params);
   const clientIncome = clientes.rows.reduce((sum,c)=>sum+Number(c.ingreso_gestionado || 0),0);
@@ -497,7 +511,7 @@ function estadoPedidoLabel(estado) {
   const labels = {
     pendiente: "Pendiente",
     confirmado: "Confirmado",
-    en_curso: "En ruta",
+    en_curso: "En curso",
     descarga: "En descarga",
     entregado: "Entregado",
     facturado: "Facturado",
@@ -3076,6 +3090,16 @@ router.get("/cobros", async (req, res) => {
   res.json({ pendientes: pendientes.rows, ratioMensual: ratioMensual.rows });
 });
 
+router.get('/control-tower/flujo', authenticate, GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    res.json(await readFlowPage(db, req.user?.empresa_id, {
+      estado: req.query.estado, page: req.query.page, pageSize: req.query.page_size,
+    }));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'No se pudo cargar el flujo operativo' });
+  }
+});
+
 router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20), async (req, res) => {
   try {
     const empresaId = req.user?.empresa_id;
@@ -3330,19 +3354,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       )
     `;
 
-    const [flujo, viajesFlujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
-      safeRows(db.query(`
-        SELECT
-          COALESCE(NULLIF(p.estado::text,''),'pendiente') AS estado,
-          COUNT(*)::int AS total
-        FROM pedidos p
-        WHERE p.empresa_id=$1
-          AND p.factura_id IS NULL
-          AND p.estado::text NOT IN ('cancelado','facturado')
-          AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
-              BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
-        GROUP BY COALESCE(NULLIF(p.estado::text,''),'pendiente')
-      `, [empresaId])),
+    const [flowPopulation, viajesFlujo, recursos, eventosRecientes, esperas, vacacionesPendientes, gpsResumen] = await Promise.all([
+      readFlowPopulation(db, empresaId),
       safeRows(db.query(`
         SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga,
                p.origen_pais, p.origen_provincia, p.destino_pais, p.destino_provincia,
@@ -3368,7 +3381,7 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
           AND p.factura_id IS NULL
           AND p.estado::text NOT IN ('cancelado','facturado')
           AND COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date)
-              BETWEEN CURRENT_DATE - INTERVAL '2 days' AND CURRENT_DATE + INTERVAL '10 days'
+              BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date - 2 AND (CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Madrid')::date + 10
         ORDER BY COALESCE(p.fecha_carga::date,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
         LIMIT 160
       `, [empresaId])),
@@ -3606,11 +3619,12 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
     }, { todas: items.length, hoy: 0, riesgos: 0, rentabilidad: 0, recursos: 0, documentos: 0, incidencias: incidenciaItems.length });
 
     const k = kpiRows[0] || {};
-    const flujoMap = new Map((flujo || []).map(r => [String(r.estado || "pendiente"), Number(r.total || 0)]));
+    const flowSummary = summarizeFlow(flowPopulation);
+    const flujoMap = new Map(flowSummary.legacy.map(r => [r.estado, r.total]));
     const flujoOperativo = [
       ["pendiente", "Pendientes"],
       ["confirmado", "Confirmados"],
-      ["en_curso", "En ruta"],
+      ["en_curso", "En curso"],
       ["descarga", "Descarga"],
       ["entregado", "Entregados"],
       ["incidencia", "Incidencias"],
@@ -3713,6 +3727,8 @@ router.get("/control-tower", authenticate, GERENTE_O_TRAFICO, cacheMiddleware(20
       resumen,
       vistas,
       flujo_operativo: flujoOperativo,
+      flujo_operativo_v2: flowSummary.estados,
+      flujo_alcance: flowSummary.alcance,
       viajes_por_estado: viajesPorEstado,
       recursos: recursosResumen,
       visibilidad: visibilidadResumen,

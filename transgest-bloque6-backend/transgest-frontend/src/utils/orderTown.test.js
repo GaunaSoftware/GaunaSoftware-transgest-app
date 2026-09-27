@@ -1,4 +1,4 @@
-import { orderTown } from './orderTown';
+import { displayLocation, displayOrderLocation, missingLocationFields, orderTown } from './orderTown';
 import { getBrandDisplayName } from '../branding';
 test('lists towns, never street addresses or company names', () => {
   expect(orderTown({ciudad:'San Vicente del Raspeig',direccion:'Calle Malaga 1'})).toBe('SAN VICENTE DEL RASPEIG');
@@ -20,4 +20,25 @@ test('reordered unloading towns remain visible without guessing from a company',
   expect(orderTown({direccion:'Calle Castellón 5'})).toBe('POBLACION PENDIENTE');
   expect(orderTown({direccion:'CEMENTOS CASTELLÓN'})).toBe('POBLACION PENDIENTE');
   expect(orderTown({direccion:'constructor'})).toBe('POBLACION PENDIENTE');
+});
+
+test('location display uses explicit population, normalized address, point name and incomplete fallback', () => {
+  expect(displayLocation({ poblacion: 'Tortosa', ciudad: 'Barcelona', nombre: 'Plataforma' })).toBe('TORTOSA');
+  expect(displayLocation({ direccion_normalizada: 'Calle Mayor 1, Abanilla' })).toBe('ABANILLA');
+  expect(displayLocation({ nombre: 'Kerahome Tiles, S.A.', direccion: 'Polígono 4, nave 3' })).toBe('Kerahome Tiles, S.A.');
+  expect(displayLocation({ direccion: 'Calle Mayor 1' })).toBe('Ubicación incompleta');
+  expect(missingLocationFields({ nombre: 'Almacén', direccion: 'Calle Mayor 1' })).toEqual(['población', 'código postal']);
+});
+
+test('order location ignores legacy missing labels when structured stops contain a town', () => {
+  const order = {
+    origen: 'POBLACIÓN PENDIENTE',
+    destino: 'POBLACIÓN DESCONOCIDA',
+    puntos_carga: JSON.stringify([{ nombre: 'Capa', poblacion: 'Tortosa', codigo_postal: '43500' }]),
+    puntos_descarga: [{ nombre: 'Plataforma', ciudad: 'Alboraya' }],
+  };
+  expect(displayOrderLocation(order, 'carga')).toBe('TORTOSA');
+  expect(displayOrderLocation(order, 'descarga')).toBe('ALBORAYA');
+  expect(displayOrderLocation({ origen: 'POBLACIÓN PENDIENTE' }, 'carga')).toBe('Ubicación incompleta');
+  expect(missingLocationFields({ poblacion: 'POBLACIÓN DESCONOCIDA', direccion: 'Calle Mayor 1' })).toContain('población');
 });

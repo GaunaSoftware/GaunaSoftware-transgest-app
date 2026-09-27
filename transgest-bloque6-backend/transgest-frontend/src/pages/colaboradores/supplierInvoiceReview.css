@@ -1,0 +1,8 @@
+.supplier-review{padding:16px;display:grid;gap:14px;min-width:0;color:var(--text)}
+.supplier-review-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:14px;align-items:end}
+.supplier-review label{display:flex;flex-direction:column;gap:6px;min-width:0}
+.supplier-review label:has(input[type=checkbox]){flex-direction:row;align-items:flex-start}
+.supplier-review input:not([type=checkbox]),.supplier-review textarea,.supplier-review select{width:100%;min-width:0;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text)}
+.supplier-review fieldset{min-width:0;border:1px solid var(--border);border-radius:10px;padding:14px;display:grid;gap:12px}
+.supplier-review-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.supplier-review p{overflow-wrap:anywhere}
+.supplier-review input:disabled,.supplier-review select:disabled,.supplier-review textarea:disabled{opacity:1;color:var(--text);-webkit-text-fill-color:var(--text)}

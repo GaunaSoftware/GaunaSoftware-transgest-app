@@ -11,6 +11,7 @@ const ROLES = [
   "administrativo",
   "responsable_taller",
   "mecanico",
+  "carretillero",
   "colaborador",
   "chofer",
   "cliente",
@@ -24,6 +25,7 @@ const LABEL = {
   administrativo: "Administrativo",
   responsable_taller: "Resp. Taller",
   mecanico: "Mecanico",
+  carretillero: "Carretillero (Planner)",
   colaborador: "Colaborador",
   visualizador: "Visualizador",
   chofer: "Chófer",
@@ -43,7 +45,7 @@ const RC = {
   cliente:"var(--accent-l)",
 };
 
-const MODULOS_PERM = [
+export const MODULOS_PERM = [
   ["agenda", "Agenda"],
   ["dashboard", "Dashboard"],
   ["control_tower", "Control Tower"],
@@ -85,6 +87,7 @@ const ALL_MODULE_IDS = MODULOS_PERM.map(m => m.id);
 const IA_ALLOWED_ROLES = new Set(["gerente", "trafico", "administrativo", "contable"]);
 
 const ROLE_PRESETS = {
+  carretillero: {ver:["mi_cuenta"],editar:["mi_cuenta"]},
   gerente: { ver: ALL_MODULE_IDS, editar: ALL_MODULE_IDS },
   contable: {
     ver: ["agenda","dashboard","pedidos","clientes","rutas","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","control_horario","informes","avisos","empresa","mi_cuenta"],
@@ -242,6 +245,7 @@ export default function Usuarios() {
   }
 
   function abrirEditar(u) {
+    if(u.multiempresa){notify("Usuario multiempresa: gestiona sus accesos e identidad desde SuperAdmin.", "info");return;}
     setEditando(u);
     setForm({...u, permisos: normalizarPermisosUI(u.permisos, u.rol), trafico_config: normalizarTraficoConfigUI(u.trafico_config)});
     setErrors({});

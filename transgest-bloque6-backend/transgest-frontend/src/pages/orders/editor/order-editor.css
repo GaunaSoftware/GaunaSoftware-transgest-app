@@ -47,7 +47,7 @@
 .order-editor-route-summary span { font-size:12px; color:var(--text4); }
 .order-editor-money { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; padding:10px 14px; margin-top:10px; background:var(--accent-a10); border-radius:8px; }
 .order-editor-money span { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; font-size:12px; }
-.order-editor-money strong { color:var(--accent); font-variant-numeric:tabular-nums; }
+.order-editor-money strong { color:var(--accent-xl); font-variant-numeric:tabular-nums; }
 .order-editor-help { color:var(--text4); font-size:12px; margin:0 0 10px; }
 .order-editor-document-summary { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; font-size:12px; padding:6px 0; }
 .order-editor-document-summary small { display:block; color:var(--text4); }

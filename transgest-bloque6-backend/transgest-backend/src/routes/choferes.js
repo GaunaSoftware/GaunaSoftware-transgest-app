@@ -288,7 +288,7 @@ async function notificarGerenciaTraficoJornada(empresaId, tipo, titulo, mensaje,
   ).catch(() => ({ rows: [] }));
   if (existing.rows[0]) return;
   const { rows } = await db.query(
-    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    "SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND u.activo=true AND m.activo=true AND m.rol IN ('gerente','trafico')",
     [empresaId]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(u => crearNotificacion({
@@ -460,7 +460,7 @@ async function notifyVacacionesGerenciaTrafico(empresaId, solicitud, chofer, act
   const title = action === "solicitada" ? "Nueva solicitud de vacaciones" : action === "aprobada" ? "Vacaciones aprobadas" : "Solicitud de vacaciones actualizada";
   const msg = `${nombre}: ${solicitud.fecha_inicio} a ${solicitud.fecha_fin} (${Number(solicitud.dias || 0)} dias).`;
   const { rows } = await db.query(
-    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    "SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND u.activo=true AND m.activo=true AND m.rol IN ('gerente','trafico')",
     [empresaId]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(u => crearNotificacion({
@@ -477,7 +477,7 @@ async function notifyVacacionesGerenciaTrafico(empresaId, solicitud, chofer, act
 async function notifyAsignacionConjunto(empresaId, tipo, titulo, mensaje, data = {}, actorId = null) {
   if (!empresaId) return;
   const { rows } = await db.query(
-    "SELECT id FROM usuarios WHERE empresa_id=$1 AND activo=true AND rol::text IN ('gerente','trafico')",
+    "SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id WHERE m.empresa_id=$1 AND u.activo=true AND m.activo=true AND m.rol IN ('gerente','trafico')",
     [empresaId]
   ).catch(() => ({ rows: [] }));
   await Promise.all(rows.map(u => crearNotificacion({
@@ -816,6 +816,24 @@ router.post("/app/conjunto", requireChoferApp, async (req, res) => {
   }
 });
 
+router.get('/app/tracking-context',requireChoferApp,async(req,res)=>{
+  try {
+    const chofer=await resolveChoferApp(req);
+    const context=await require('../services/driverTrackingContext').driverTrackingContext(db,{empresaId:req.empresaId||req.user.empresa_id,chofer});
+    res.setHeader('Cache-Control','private, no-store');res.json(context);
+  }catch(e){res.status(500).json({error:'No se pudo verificar el contexto de seguimiento'});}
+});
+
+router.get('/app/push-status',requireChoferApp,(req,res)=>res.json({configured:require('../services/mobilePush').configured()}));
+router.post('/app/push-devices',requireChoferApp,async(req,res)=>{
+  try { const push=require('../services/mobilePush');if(!push.configured())return res.status(503).json({error:'Push no configurado. Los avisos siguen disponibles dentro de la app.'});res.json(await push.register(db,req.empresaId||req.user.empresa_id,req.user.id,req.body?.token)); }
+  catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo registrar el dispositivo'});}
+});
+router.delete('/app/push-devices/:id',requireChoferApp,async(req,res)=>{
+  try {res.json(await require('../services/mobilePush').unregister(db,req.empresaId||req.user.empresa_id,req.user.id,req.params.id));}
+  catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo desactivar el dispositivo'});}
+});
+
 router.post("/app/gps", requireChoferApp, async (req, res) => {
   await ensureChoferJornadaSchema();
   const empresaId = req.empresaId || req.user?.empresa_id;
@@ -827,16 +845,6 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
   }
   if (vehiculoTieneGpsExterno(chofer) && freshGps(await externalGpsTimestamp(empresaId,chofer.vehiculo_id))) return res.json({ ok:true, skipped:"gps_externo_reciente" });
 
-  const lat = Number(req.body?.lat);
-  const lng = Number(req.body?.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return res.status(400).json({ error: "Ubicacion GPS no valida" });
-  }
-  const velocidadKmh = req.body?.velocidad_kmh == null ? null : Number(req.body.velocidad_kmh);
-  const accuracyM = req.body?.accuracy_m == null ? null : Number(req.body.accuracy_m);
-  const recordedAt = req.body?.recorded_at ? new Date(req.body.recorded_at) : new Date();
-  const recordedIso = Number.isFinite(recordedAt.getTime()) ? recordedAt.toISOString() : new Date().toISOString();
-
   const open = await db.query(
     `SELECT * FROM chofer_jornadas
       WHERE empresa_id=$1 AND chofer_id=$2 AND estado='abierta'
@@ -846,62 +854,20 @@ router.post("/app/gps", requireChoferApp, async (req, res) => {
   );
   const jornada = open.rows[0];
   if (!jornada) return res.json({ ok: true, skipped: "jornada_cerrada" });
+  if(req.body?.jornada_id&&req.body.jornada_id!==jornada.id)return res.status(409).json({error:'La ubicación pertenece a otra jornada'});
   if (["pausa", "descanso", "fin"].includes(String(jornada.actividad_actual || "").toLowerCase())) {
     return res.json({ ok: true, skipped: "jornada_pausada" });
   }
 
-  const ubicacion = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  const { rows } = await db.query(
-    `UPDATE vehiculos
-        SET ubicacion_actual=$1,
-            ubicacion_fuente='app_chofer',
-            ubicacion_ts=$2::timestamptz,
-            gps_lat=$3,
-            gps_lng=$4,
-            gps_provider=CASE
-              WHEN gps_provider IS NULL OR gps_provider='' OR gps_provider='manual' THEN 'app_chofer'
-              ELSE gps_provider
-            END,
-            updated_at=NOW()
-      WHERE id=$5
-        AND empresa_id=$6
-        AND (
-          gps_provider IS NULL
-          OR gps_provider=''
-          OR gps_provider IN ('manual','app_chofer')
-          OR NULLIF(TRIM(COALESCE(gps_external_id,'')), '') IS NULL
-          OR NOT EXISTS (SELECT 1 FROM gps_position_log g WHERE g.vehiculo_id=vehiculos.id AND g.empresa_id=vehiculos.empresa_id AND g.provider NOT IN ('app_chofer','manual') AND g.recorded_at BETWEEN NOW()-INTERVAL '5 minutes' AND NOW()+INTERVAL '1 minute')
-        )
-      RETURNING id, matricula, ubicacion_actual, ubicacion_ts, gps_lat, gps_lng, gps_provider`,
-    [ubicacion, recordedIso, lat, lng, chofer.vehiculo_id, empresaId]
-  );
-  const vehiculo = rows[0];
-  if (!vehiculo) return res.json({ ok: true, skipped: "gps_externo_configurado" });
-
-  await db.query(
-    `INSERT INTO gps_position_log
-      (empresa_id, vehiculo_id, provider, external_id, lat, lng, ubicacion, velocidad_kmh, odometro_km, raw, recorded_at)
-     VALUES ($1,$2,'app_chofer',$3,$4,$5,$6,$7,NULL,$8::jsonb,$9::timestamptz)`,
-    [
-      empresaId,
-      chofer.vehiculo_id,
-      `chofer:${chofer.id}`,
-      lat,
-      lng,
-      ubicacion,
-      Number.isFinite(velocidadKmh) ? velocidadKmh : null,
-      JSON.stringify({
-        source: "app_chofer",
-        usuario_id: req.user?.id || null,
-        chofer_id: chofer.id,
-        jornada_id: jornada.id,
-        accuracy_m: Number.isFinite(accuracyM) ? accuracyM : null,
-      }),
-      recordedIso,
-    ]
-  ).catch(() => {});
-
-  res.json({ ok: true, vehiculo });
+  try {
+    const result=await require('../services/vehicleTracking').record(db,{empresaId,vehiculoId:chofer.vehiculo_id,provider:'app_chofer',input:req.body,externalId:`chofer:${chofer.id}`,raw:{source:'app_chofer',usuario_id:req.user.id,chofer_id:chofer.id,jornada_id:jornada.id},authorize:async tx=>{
+      const driver=(await tx.query('SELECT vehiculo_id FROM choferes WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,chofer.id])).rows[0];
+      if(driver?.vehiculo_id!==chofer.vehiculo_id)throw Object.assign(Error('El conjunto del conductor ha cambiado'),{status:409});
+      const current=(await tx.query('SELECT estado,actividad_actual FROM chofer_jornadas WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,jornada.id])).rows[0];
+      if(current?.estado!=='abierta'||['pausa','descanso','fin'].includes(current.actividad_actual))throw Object.assign(Error('La jornada ya no permite registrar ubicación'),{status:409});
+    }});
+    res.json(result);
+  }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
 router.get("/vacaciones", GERENTE_O_TRAFICO, async (req, res) => {

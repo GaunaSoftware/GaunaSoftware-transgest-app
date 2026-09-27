@@ -41,12 +41,21 @@ async function main() {
     const aspe = await resolvePlace({empresaId:'qa',q:'Aspe, Alicante',country:'Espana',region:'Alicante',raw:{city:'Aspe',lat:0,lng:0}});
     assert.equal(aspe.municipio,'Aspe');
     assert.ok(aspe.lat>38 && aspe.lat<39);
-    const { normalizeLocationFields, normalizeMetadata } = require('../src/routes/puntos_interes')._test;
+    const { normalizeLocationFields, normalizePointLocation, normalizeMetadata } = require('../src/routes/puntos_interes')._test;
     const point = await normalizeLocationFields({cleanDireccion:'CRTA DE LA ESTACION S/N',cleanCiudad:'Cojobar',cleanProvincia:'Burgos',pais:'Espana',lat:40.4168,lng:-3.7038});
     assert.equal(point.lat,null);
     assert.equal(point.lng,null);
     assert.equal(point.ciudad,'Cojobar');
     assert.equal(normalizeMetadata({lat:40.4168,lng:-3.7038},null,point).lat,null);
+    await assert.rejects(normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'',pais:'España'},null),/poblacion|incompleto/i);
+    const incomplete=await normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'',pais:'España',allow_incomplete_location:true},null);
+    assert.equal(incomplete.locationIncomplete,true);
+    assert.equal(incomplete.location.normalized_query,'España','the name is never silently used as the address');
+    const complete=await normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'Polígono Norte 4',ciudad:'Castellón',provincia:'Castellón',codigo_postal:'12006',pais:'España'},null);
+    assert.equal(complete.locationIncomplete,false);
+    assert.equal(complete.location.normalized_query.includes('Polígono Norte 4'),true);
+    await assert.rejects(normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'Polígono Norte 4',ciudad:'Castellón',provincia:'Castellón',pais:'España'},null),/Confirma expresamente/);
+    await assert.rejects(normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'',google_maps_url:'https://invalid.example',allow_incomplete_location:true},null),/Google Maps/);
     assert.equal(calls.filter(u=>u.hostname==='nominatim.openstreetmap.org').every(u=>u.searchParams.get('countrycodes')==='es'),true);
     console.log('OK: Skretting/Burgos, Aspe, coordenadas vacias, pin frente a encuadre y enlaces cortos sin pin');
   } finally {

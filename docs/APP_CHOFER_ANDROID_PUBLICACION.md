@@ -1,3 +1,5 @@
+> Actualización 26/09/2026 — evolución fase 7: el documento original queda como referencia de publicación. Ya se han localizado JDK 21 y SDK 36, compilado código Android y añadido servicio foreground, push condicionado a Firebase y documentos privados offline. Consulte `TMS_EVOLUTION_PHASE7_ANDROID.md` para resultados, configuración y límites actuales. Sigue sin haber una clave autorizada ni prueba física. Los valores locales pasan a 3 / 1.2.0 y deben contrastarse con Play Console.
+
 # App del chófer: Android y publicación
 
 ## Estado de esta entrega

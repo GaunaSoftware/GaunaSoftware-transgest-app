@@ -59,6 +59,7 @@ router.delete('/reservas/:id',write,wrap(async(req,res)=>{
 }));
 router.use('/proveedores',require('./planner_providers'));
 router.use('/vehiculos-autorizados',require('./planner_vehicles'));
+router.use('/wms',require('./planner_wms'));
 router.use('/inventario',require('./planner_inventory'));
 // Reuse reviewed invoice operations, never the unrestricted TMS finance dashboard.
 router.use('/facturas',requireRole('gerente','contable','administrativo'),wrap(async(req,res,next)=>{

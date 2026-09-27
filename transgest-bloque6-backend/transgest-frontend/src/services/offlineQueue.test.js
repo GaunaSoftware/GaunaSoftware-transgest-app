@@ -22,3 +22,11 @@ test('deduplicated retry is retained and delayed; logout cannot enqueue an anony
  expect(readOfflineQueue()).toHaveLength(1);writeOfflineQueue(readOfflineQueue().map(x=>markOfflineAttempt(x,'offline')));expect(readyOfflineItems()).toEqual([]);
  localStorage.removeItem('tms_user');expect(enqueueOfflineItem({tipo:'pedido_estado'})).toEqual([]);
 });
+
+test('a stop confirmation keeps the same operation UUID after persistence and retry',()=>{
+ user('one');const patch={parada_id:'carga-1',carga_ok:true,client_operation_uuid:'11111111-1111-4111-8111-111111111111'};
+ enqueueOfflineItem({tipo:'pedido_chofer_pasos',pedido_id:'order-a',patch});
+ writeOfflineQueue(readOfflineQueue().map(item=>markOfflineAttempt(item,'Sin cobertura')));
+ expect(readOfflineQueue()[0].patch).toEqual(patch);
+ user('two');expect(readOfflineQueue()).toEqual([]);
+});

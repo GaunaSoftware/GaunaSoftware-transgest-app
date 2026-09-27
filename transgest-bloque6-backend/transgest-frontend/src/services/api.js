@@ -160,6 +160,7 @@ function applyAuthSession(data = {}) {
 }
 
 // ── Fetch base ────────────────────────────────────────
+export const supplierInvoiceReview = (path = '', options = {}) => apiFetch('/supplier-invoice-review' + path, options);
 async function apiFetch(path, options = {}) {
   const { silentSuccess = false, silentError = false, timeoutMs, ...fetchOptions } = options;
   const token = getToken();
@@ -319,6 +320,16 @@ export async function descargarArchivoProtegido(path, fallbackName = "documento"
 
   const blob = await res.blob();
   const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el documento.');
+  if(blob.type.includes('pdf')){
+    const native=await import('./nativeDocuments');
+    if(getToken()!==token)throw new Error('La sesión ha cambiado.');
+    if(native.hasNativeDocuments()){
+      const saved=await native.saveNativePdf(blob,filename);
+      await native.openNativePdf(saved.id);
+      return {filename,size:blob.size,savedOffline:true};
+    }
+  }
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;
@@ -371,6 +382,16 @@ export async function verArchivoProtegido(path, fallbackName = "documento") {
 
   const blob = await res.blob();
   const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el documento.');
+  if(blob.type.includes('pdf')){
+    const native=await import('./nativeDocuments');
+    if(getToken()!==token)throw new Error('La sesión ha cambiado.');
+    if(native.hasNativeDocuments()){
+      const saved=await native.saveNativePdf(blob,filename);
+      await native.openNativePdf(saved.id);
+      return {filename,size:blob.size,savedOffline:true};
+    }
+  }
   const objectUrl = URL.createObjectURL(blob);
   const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
   if (!opened) {
@@ -486,6 +507,7 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
 export const verificarOrdenColaborador = id => apiFetch(`/pedidos/${id}/orden-colaborador`);
 export const getProduct = () => apiFetch('/producto');
+export const plannerLoadingApi = (path="",options={}) => apiFetch(`/planner-loading${path}`,options);
 export const plannerApi = (path, options={}) => apiFetch(`/planner${path}`, {silentSuccess:true,...options});
 export const enviarPlanDiario = data => apiFetch('/plan-diario/enviar', {method:'POST',body:data});
 export const getPedidoIdaRetorno = (id)   => apiFetch(`/pedidos/${id}/ida-retorno`);
@@ -502,14 +524,19 @@ export const getDisponibilidadRecursos = (fecha = "", excluirPedidoId = "") =>
 export const getChoferUltimoViaje = (choferId, excluirPedidoId = "", antesDe = "", vehiculoId = "") =>
   apiFetch(`/pedidos/chofer-ultimo-viaje?chofer_id=${encodeURIComponent(choferId)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}${antesDe ? `&antes_de=${encodeURIComponent(antesDe)}` : ""}${vehiculoId ? `&vehiculo_id=${encodeURIComponent(vehiculoId)}` : ""}`, { silentError: true });
 // borrador=true guarda el grupaje como provisional (agrupado pero sin confirmar).
-export const combinarGrupaje = (pedidoIds = [], borrador = false) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds, borrador } });
-export const confirmarGrupaje = (grupajeId) => apiFetch("/pedidos/grupaje/confirmar", { method: "POST", body: { grupaje_id: grupajeId } });
+export const combinarGrupaje = (pedidoIds = [], borrador = false) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds, borrador, client_operation_uuid: crypto.randomUUID() } });
+export const confirmarGrupaje = (grupajeId) => apiFetch("/pedidos/grupaje/confirmar", { method: "POST", body: { grupaje_id: grupajeId, client_operation_uuid: crypto.randomUUID() } });
 export const separarGrupaje  = (pedidoIds = []) => apiFetch("/pedidos/grupaje/separar", { method: "POST", body: { pedido_ids: pedidoIds } });
 export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"POST", body:data });
 export const desvincularPedidoRetorno = (id) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"DELETE" });
 export const getPedidoRentabilidadPredictiva = (id) => apiFetch(`/pedidos/${id}/rentabilidad-predictiva`);
 export const getPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital`);
-export const generarPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/generar`, { method:"POST", body:{}, silentSuccess:true });
+export const generarPedidoDocumentoControl = (id, data={}) => apiFetch(`/pedidos/${id}/documento-control-digital/generar`, { method:"POST", body:data, silentSuccess:true });
+export const adjuntarDecaExterno = (id,data) => apiFetch(`/pedidos/${id}/documento-control-digital/externo`, {method:"POST",body:data,silentSuccess:true});
+export const declararEnviosPedido = (id,data) => apiFetch(`/pedidos/${id}/envios`, {method:"POST",body:data,silentSuccess:true});
+export const prepararFirmaOperacion = (id,data) => apiFetch(`/pedidos/${id}/firma/preparar`, {method:"POST",body:data,silentSuccess:true});
+export const getFirmasOperacion = id => apiFetch(`/pedidos/${id}/firma/historial`);
+export const anularFirmaOperacion = (id,evidenceId,motivo) => apiFetch(`/pedidos/${id}/firma/${evidenceId}/anular`,{method:'POST',body:{motivo},silentSuccess:true});
 export const getPedidoDocumentoControlExport = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/export`);
 export const getPedidoDocumentoControlFirmaPaquete = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/firma-paquete`);
 export const getPedidoRegulatoryCoreExport = (id, params = {}) =>
@@ -548,6 +575,8 @@ export const interpretarPedidoIA = (data) =>
   apiFetch("/pedidos/ai-inbox/parse", { method:"POST", body:data, silentSuccess:true });
 export const getAiInboxRuns = (limit = 30) =>
   apiFetch(`/pedidos/ai-inbox/runs?limit=${encodeURIComponent(limit)}`, { silentSuccess:true });
+export const getOrderInbox = ({page=1,state='',summary=false}={}) => apiFetch(`/pedidos/ai-inbox/entries?page=${page}&state=${encodeURIComponent(state)}${summary?'&summary=true':''}`,{silentSuccess:true});
+export const changeOrderInboxState = (id,body) => apiFetch(`/pedidos/ai-inbox/entries/${id}`,{method:'PATCH',body,silentSuccess:true});
 export const getAiInboxStatus = () =>
   apiFetch("/pedidos/ai-inbox/status", { silentSuccess:true });
 export const getPlanificacionCargaIA = (id) =>
@@ -615,6 +644,7 @@ export async function getFacturasTodas(params = {}, options = {}) {
   return rest.reduce((acc, arr) => acc.concat(arr), data);
 }
 export const getFactura     = (id)        => apiFetch(`/facturas/${id}`);
+export const guardarFacturaAnotaciones = (id, data) => apiFetch(`/facturas/${id}/anotaciones`, { method:"PATCH", body:data });
 export const getFacturaFiscal = (id)      => apiFetch(`/facturas/${id}/fiscal`);
 export const reencolarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/requeue`, { method:"POST", body:{} });
 export const sincronizarFacturaFiscal = (id) => apiFetch(`/facturas/${id}/fiscal/sincronizar`, { method:"POST", body:{} });
@@ -737,6 +767,10 @@ export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POS
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
 export const borrarChofer   = (id)        => apiFetch(`/choferes/${id}`, { method:"DELETE" });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
+export const getDriverTrackingContext = () => apiFetch('/choferes/app/tracking-context');
+export const getMobilePushStatus = () => apiFetch('/choferes/app/push-status');
+export const registerMobilePushDevice = token => apiFetch('/choferes/app/push-devices',{method:'POST',body:{token},silentSuccess:true});
+export const unregisterMobilePushDevice = (id,token) => apiFetch(`/choferes/app/push-devices/${id}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`},silentSuccess:true,silentError:true,timeoutMs:5000});
 export const getChoferConjuntoApp = () => apiFetch("/choferes/app/conjunto");
 export const cambiarChoferConjuntoApp = (data) => apiFetch("/choferes/app/conjunto", { method:"POST", body:data, silentSuccess:true });
 export const guardarChoferFirmaBaseApp = (data) => apiFetch("/choferes/app/firma-base", { method:"POST", body:data, silentSuccess:true });
@@ -820,6 +854,7 @@ export const getEmisionesOperativas = (period="90d") => apiFetch(`/informes/emis
 export const getDatosMaestrosReadiness = () => apiFetch("/informes/datos-maestros-readiness", { silentSuccess:true, silentError:true });
 export const getCumplimientoEuropeo = (days=45) => apiFetch(`/informes/cumplimiento-europeo?days=${encodeURIComponent(days)}`, { silentSuccess:true, silentError:true });
 export const getControlTower = (period="7d") => apiFetch(`/informes/control-tower?period=${encodeURIComponent(period)}`, { silentSuccess:true, silentError:true });
+export const getControlTowerFlow = (estado, page=1) => apiFetch(`/informes/control-tower/flujo?estado=${encodeURIComponent(estado)}&page=${encodeURIComponent(page)}`, { silentSuccess:true, silentError:true });
 export const getExcepcionesOperativas = () => apiFetch("/informes/excepciones", { silentSuccess:true, silentError:true });
 export const actualizarExcepcionOperativa = (key, data) => apiFetch(`/informes/excepciones/${encodeURIComponent(key)}`, { method:"PATCH", body:data });
 export const getNotificaciones = (limit=50) => apiFetch(`/notificaciones?limit=${encodeURIComponent(limit)}`, { silentSuccess:true, silentError:true });
@@ -997,6 +1032,7 @@ export const getPagosColaboradorPendientes = () => apiFetch("/pedidos/colaborado
 
 // ── Datos empresa (localStorage → BD) ────────────────────────────────────
 // Gastos estructura
+export const getResumenGastosEstructura = periodo => apiFetch(`/empresa/gastos-estructura/resumen?periodo=${encodeURIComponent(periodo)}`);
 export const getGastosEstructura   = ()        => apiFetch("/empresa/gastos-estructura");
 export const crearGastoEstructura  = (data)    => apiFetch("/empresa/gastos-estructura", {method:"POST",body:data});
 export const editarGastoEstructura = (id,data) => apiFetch(`/empresa/gastos-estructura/${id}`, {method:"PUT",body:data});
@@ -1170,6 +1206,10 @@ export async function descargarFirmaEntregaEvidenciaInforme(id) {
 }
 export const actualizarGpsPedido = (id, data) =>
   apiFetch(`/pedidos/${id}/gps`, { method: "POST", body: data });
+export const getPedidoTracking = id => apiFetch(`/pedidos/${id}/tracking`,{silentError:true});
+export const getPortalPedidoTracking = id => apiFetch(`/portal-cliente/pedidos/${id}/tracking`,{silentError:true});
+export const calcularPedidoEta = id => apiFetch(`/pedidos/${id}/tracking/eta`,{method:'POST',body:{},timeoutMs:35000});
+export const guardarPedidoTrackingConfig = (id,data) => apiFetch(`/pedidos/${id}/tracking/config`,{method:'PUT',body:data});
 export const registrarGpsChoferApp = (data) =>
   apiFetch("/choferes/app/gps", { method: "POST", body: data, timeoutMs: 15000, silentSuccess: true, silentError: true });
 
@@ -1334,3 +1374,27 @@ export async function uploadDocumentPackage(files){
   if(!response.ok)throw new Error(data.error||'No se pudieron revisar los documentos');
   return data;
 }
+
+export const getGroupagePlan = groupId => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/plan`);
+export const saveGroupagePlan = (groupId,data) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/plan`,{method:'POST',body:{...data,client_operation_uuid:crypto.randomUUID()}});
+
+export const assignGroupage = (groupId,asignacion) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/asignacion`,{method:"POST",body:{asignacion,client_operation_uuid:crypto.randomUUID()}});
+
+export const getGroupageCosts = groupId => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/costes`);
+export const recordGroupageCost = (groupId,data) => apiFetch(`/pedidos/grupaje/${encodeURIComponent(groupId)}/costes`,{method:"POST",body:{...data,client_operation_uuid:crypto.randomUUID()}});
+
+export const invoiceWorkflow=(path="",options={})=>apiFetch("/facturas/operativa"+path,options);
+
+export const getCompanyMemberships = () => apiFetch('/auth/companies');
+export async function switchActiveCompany(empresa_id) {
+  const data=await apiFetch('/auth/company',{method:'POST',body:{empresa_id},silentSuccess:true});
+  // Stop old-company tracking and clear transient session values before installing the new context.
+  removeToken();
+  applyAuthSession(data);
+  localStorage.removeItem('tms_api_errors');
+  for(const key of Object.keys(sessionStorage))if(key.startsWith('tms_')&&!key.startsWith('tms_bi_workspace_'))sessionStorage.removeItem(key);
+  if(data.suscripcion)localStorage.setItem('tms_suscripcion',JSON.stringify(data.suscripcion));
+  return data;
+}
+export const getBiGroups = () => apiFetch('/informes/bi/grupos');
+export const getGroupBi = params => apiFetch('/informes/bi/consolidado?'+new URLSearchParams(params),{timeoutMs:120000});

@@ -44,7 +44,12 @@ async function snapshot(client,id,empresaId) {
   if(invoice.rows[0].planner_preparacion_id){
     mercancia=(await client.query(`SELECT r.id,r.estado,p.cliente_id,p.referencia_cliente,a.id AS albaran_id,a.datos AS albaran FROM planner_preparaciones r JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id LEFT JOIN planner_albaranes a ON a.preparacion_id=r.id AND a.empresa_id=r.empresa_id WHERE r.id=$1 AND r.empresa_id=$2 FOR UPDATE OF r`,[invoice.rows[0].planner_preparacion_id,empresaId])).rows[0]||{estado:'no_disponible'};
   }
-  const value={mercancia,factura:invoice.rows[0],original,pedidos:orders.rows,lineas:lines.rows,extracostes:extras.rows};
+  if(mercancia?.id){
+    const latest=(await client.query('SELECT id,datos,pdf_hash,version FROM planner_albaran_versiones WHERE empresa_id=$1 AND preparacion_id=$2 ORDER BY version DESC LIMIT 1',[empresaId,mercancia.id])).rows[0];
+    if(latest)Object.assign(mercancia,{albaran_id:latest.id,albaran:latest.datos,pdf_hash:latest.pdf_hash,version:latest.version});
+  }
+  const operativa=await require('./invoiceOperationalWorkflow').facts(client,empresaId,orders.rows.map(p=>p.id));
+  const value={operativa,mercancia,factura:invoice.rows[0],original,pedidos:orders.rows,lineas:lines.rows,extracostes:extras.rows};
   return {...value,huella:crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')};
 }
 function problems(value,waiver='') {
@@ -58,8 +63,10 @@ function problems(value,waiver='') {
   }
   for(const p of value.pedidos) {
     if(String(p.cliente_id)!==String(value.factura.cliente_id))result.push(`${p.numero}: pertenece a otro cliente`);
-    if(!['entregado','facturado'].includes(p.estado))result.push(`${p.numero}: pendiente de entrega`);
-    if(!p.soportes.length)result.push(`${p.numero}: falta albarán, POD o CMR con archivo`);
+    const operating=value.operativa?.find(r=>r.id===p.id);
+    if(operating)result.push(...operating.errores.map(e=>`${p.numero}: ${e}`));
+    if(!operating&&!['entregado','facturado'].includes(p.estado))result.push(`${p.numero}: pendiente de entrega`);
+    if(!operating&&!p.soportes.length)result.push(`${p.numero}: falta albarán, POD o CMR con archivo`);
     if(!String(p.referencia_cliente || value.factura.referencia_cliente || '').trim() && !String(waiver).trim())result.push(`${p.numero}: revisa la referencia o justifica que no procede`);
   }
   return result;

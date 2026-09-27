@@ -1,4 +1,5 @@
 import PortalArrival from '../components/PortalArrival';
+import VehicleTrackingPanel from '../components/VehicleTrackingPanel';
 import { useCallback, useEffect, useState } from "react";
 import {
   actualizarPortalClienteSolicitud,
@@ -29,6 +30,8 @@ import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { notify } from "../services/notify";
 import PortalPointPicker from "../components/PortalPointPicker";
+import { TRANSPORT_STATES, transportStateMeta, transportStateKey } from "../utils/transportStateCatalog";
+import { displayOrderLocation } from "../utils/orderTown";
 
 import { PortalHeader, PortalOverview, PortalTracking, PortalHelp } from "./portal/PortalWorkspace";
 
@@ -58,6 +61,7 @@ const ESTADOS = {
   cancelada: { l: "Cancelada", c: "#ef4444" },
   revisada: { l: "En revisión", c: "#3b82f6" },
 };
+const PEDIDO_ESTADOS = Object.fromEntries(Object.entries(TRANSPORT_STATES).map(([key, meta]) => [key, { l: meta.label, c: meta.textColor, bg: meta.bg, border: meta.border }]));
 
 const ESTADOS_PEDIDO_NO_ANULABLE_CLIENTE = new Set([
   "en_curso",
@@ -104,7 +108,11 @@ function precioSolicitudLabel(item = {}) {
   ].filter(Boolean).join(" - ");
 }
 
-function estadoClienteSurface(estado) {
+function estadoClienteSurface(estado, isPedido = false) {
+  if (isPedido) {
+    const meta = transportStateMeta(estado);
+    return { background: meta.bg, border: `1px solid ${meta.border}`, boxShadow: `inset 3px 0 0 ${meta.color}` };
+  }
   const key = String(estado || "").toLowerCase();
   const styles = {
     pendiente: { bg: "rgba(245,158,11,.07)", border: "rgba(245,158,11,.22)", bar: "rgba(245,158,11,.70)" },
@@ -133,7 +141,11 @@ function estadoClienteSurface(estado) {
 const TIMELINE = [
   ["pendiente", "Pendiente"],
   ["confirmado", "Confirmado"],
-  ["en_curso", "En camino"],
+  ["espera_carga", "Espera de carga"],
+  ["cargando", "Cargando"],
+  ["cargado", "Cargado"],
+  ["en_transito", "En tránsito"],
+  ["espera_descarga", "Espera de descarga"],
   ["descarga", "Descarga"],
   ["entregado", "Entregado"],
 ];
@@ -572,7 +584,7 @@ export default function PortalClientes() {
   const reprogramacionesPendientes = solicitudes.filter(s => s.fecha_propuesta && (!s.decision_cliente || s.decision_cliente === "pendiente"));
   const movimientosSolicitudes = solicitudes.reduce((sum, s) => sum + Number(s.eventos_count || 0), 0);
   const pedidosFiltrados = pedidos.filter(p => matchesSearch(p, q, ["numero", "referencia_cliente", "origen", "destino", "mercancia", "vehiculo_matricula", "estado", "chofer_nombre", "chofer_dni", "chofer_telefono"]));
-  const trackingPedidos = pedidosFiltrados.filter(p => !trackingEstado || p.estado === trackingEstado);
+  const trackingPedidos = pedidosFiltrados.filter(p => !trackingEstado || transportStateKey(p) === trackingEstado);
   const trackingPedido = trackingPedidos.find(p => p.id === trackingId) || trackingPedidos[0] || null;
   const facturasFiltradas = facturas.filter(f => matchesSearch(f, q, ["numero", "estado", "forma_pago"]));
   const solicitudesFiltradas = solicitudes.filter(s => matchesSearch(s, q, [
@@ -933,25 +945,26 @@ export default function PortalClientes() {
         {loading && <div style={{ ...S.card, textAlign: "center", color: "var(--text4)", padding: 28 }}>Cargando portal...</div>}
 
         {!loading && ["inicio", "seguimiento"].includes(tab) && (
-          <PortalTracking pedidos={trackingPedidos} selected={trackingPedido} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
-            {!trackingPedido ? <Empty text={q ? "No hay viajes que coincidan con la búsqueda." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
-              const estado = ESTADOS[p.estado] || ESTADOS.pendiente;
-              const surface = estadoClienteSurface(p.estado);
-              const stIdx = p.estado === "facturado" ? TIMELINE.length - 1 : TIMELINE.findIndex(([k]) => k === p.estado);
+          <PortalTracking pedidos={trackingPedidos.map(p => ({ ...p, origen: displayOrderLocation(p, "carga"), destino: displayOrderLocation(p, "descarga") }))} selected={trackingPedido ? { ...trackingPedido, origen: displayOrderLocation(trackingPedido, "carga"), destino: displayOrderLocation(trackingPedido, "descarga") } : null} onSelect={setTrackingId} estado={trackingEstado} onEstado={setTrackingEstado} estados={PEDIDO_ESTADOS} docs={docs} loadingDocs={loadingDocs} onDocuments={verAlbaranes} onDownload={downloadDoc}>
+            {trackingPedido&&!isProviderPortal&&<VehicleTrackingPanel pedidoId={trackingPedido.id} customer/>}
+            {!trackingPedido ? <Empty text={q || trackingEstado ? "No hay viajes que coincidan con estos filtros." : "Todavía no hay viajes registrados."} /> : [trackingPedido].map(p => {
+              const estado = PEDIDO_ESTADOS[transportStateKey(p)] || PEDIDO_ESTADOS.pendiente;
+              const surface = estadoClienteSurface(p, true);
+              const stIdx = p.estado === "facturado" ? TIMELINE.length - 1 : TIMELINE.findIndex(([k]) => k === transportStateKey(p));
               const dcd = docControl[p.id];
               return (
                 <div className="portal-card" key={p.id} style={{ ...S.card, ...surface }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                     <div>
                       <div style={{ fontFamily: "'JetBrains Mono',monospace", fontWeight: 900, color: "var(--accent)", fontSize: 13 }}>{p.numero}</div>
-                      <div style={{ fontWeight: 800, color: "var(--text)", marginTop: 4 }}>{p.origen || "-"} -> {p.destino || "-"}</div>
+                      <div style={{ fontWeight: 800, color: "var(--text)", marginTop: 4 }}>{displayOrderLocation(p, "carga")} -> {displayOrderLocation(p, "descarga")}</div>
                       {p.referencia_cliente && <div style={{ fontSize: 12, color: "var(--text4)", marginTop: 3 }}>Ref. cliente: {p.referencia_cliente}</div>}
                     </div>
-                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: estado.c, background: `${estado.c}18`, border: `1px solid ${estado.c}30` }}>{estado.l}</span>
+                    <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 13, fontWeight: 800, color: estado.c, background: estado.bg, border: `1px solid ${estado.border}` }}>{estado.l}</span>
                   </div>
 
                   <PortalArrival orderId={p.id}/>
-                  <div className="portal-timeline" style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
+                  <div className="portal-timeline" role="group" aria-label="Progreso del envío" tabIndex={0} style={{ display: "flex", gap: 4, alignItems: "center", marginTop: 16 }}>
                     {TIMELINE.map(([k, label], i) => {
                       const done = i <= stIdx;
                       const curr = i === stIdx;
@@ -975,7 +988,7 @@ export default function PortalClientes() {
                     <Mini label="Tractora" value={p.vehiculo_matricula || p.matricula_colaborador || "Pendiente"} />
                     <Mini label="Remolque" value={p.remolque_matricula || p.remolque_matricula_colaborador || "Pendiente"} />
                     <Mini label="Chofer" value={[p.chofer_nombre, p.chofer_dni ? `DNI ${p.chofer_dni}` : "", p.chofer_telefono ? `Tel. ${p.chofer_telefono}` : ""].filter(Boolean).join(" - ") || "Pendiente"} />
-                    <Mini label="Ubicacion" value={p.ubicacion_actual || p.ultima_posicion || "Pendiente de GPS"} />
+                    <Mini label="Última ubicación registrada" value={p.ubicacion_actual || p.ultima_posicion || "Pendiente de GPS"} />
                   </div>
                   <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap", alignItems:"center" }}>
                     <button style={S.btn} onClick={() => verPedidoEventos(p.id)} disabled={loadingPedidoEventos === p.id}>
@@ -1057,7 +1070,7 @@ export default function PortalClientes() {
                 <div key={p.id} style={{ borderBottom: "1px solid var(--border2)", padding: "11px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                     <div>
-                      <div style={{ fontWeight: 900, color: "var(--text)" }}>{p.numero} - {p.origen || "-"} -> {p.destino || "-"}</div>
+                      <div style={{ fontWeight: 900, color: "var(--text)" }}>{p.numero} - {displayOrderLocation(p, "carga")} -> {displayOrderLocation(p, "descarga")}</div>
                       <div style={{ fontSize: 12, color: "var(--text4)" }}>{dateEs(p.fecha_carga)}</div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:5 }}>
                         <span style={{ padding:"2px 8px", borderRadius:20, fontSize:13, fontWeight:800, color:Number(resumen.albaranes_count || 0) > 0 ? "#10b981" : "#f97316", background:Number(resumen.albaranes_count || 0) > 0 ? "rgba(16,185,129,.12)" : "rgba(249,115,22,.12)" }}>
@@ -1206,8 +1219,8 @@ export default function PortalClientes() {
             )}
             {solicitudesFiltradas.length === 0 ? <Empty text={q ? "No hay solicitudes que coincidan con la búsqueda." : "No has enviado solicitudes."} /> : solicitudesFiltradas.map(s => {
               const e = ESTADOS[s.estado] || ESTADOS.pendiente;
-              const pedidoEstado = s.pedido_estado ? (ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
-              const surface = estadoClienteSurface(s.pedido_estado || s.estado);
+              const pedidoEstado = s.pedido_estado ? (PEDIDO_ESTADOS[s.pedido_estado] || { l:s.pedido_estado, c:"#64748b" }) : null;
+              const surface = estadoClienteSurface(s.pedido_estado || s.estado, !!s.pedido_estado);
               return (
                 <div key={s.id} style={{
                   ...surface,
@@ -1229,7 +1242,7 @@ export default function PortalClientes() {
                     <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
                       <span style={{ alignSelf: "flex-start", padding: "3px 10px", borderRadius: 20, color: e.c, background: `${e.c}18`, fontSize: 13, fontWeight: 800 }}>{e.l}</span>
                       {pedidoEstado && (
-                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:`${pedidoEstado.c}18`, border:`1px solid ${pedidoEstado.c}30`, fontSize:13, fontWeight:800 }}>
+                        <span style={{ alignSelf:"flex-start", padding:"3px 10px", borderRadius:20, color:pedidoEstado.c, background:pedidoEstado.bg, border:`1px solid ${pedidoEstado.border}`, fontSize:13, fontWeight:800 }}>
                           Viaje: {pedidoEstado.l}
                         </span>
                       )}

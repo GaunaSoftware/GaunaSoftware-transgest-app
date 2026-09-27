@@ -1,3 +1,4 @@
+import { guardarPedidoChoferPasos } from "../../services/api";
 import DocumentScanner from "./DocumentScanner";
 import { leerArchivoComoDataUrl, cargarImagen, detectarRectanguloPapel, recortarCanvas, limpiarCanvasComoEscaner, prepararArchivoEscaner } from "./documentScan";
 import { useState, useRef } from "react";
@@ -7,21 +8,12 @@ import { cambiarEstadoPedido, subirPedidoDocChofer } from "../../services/api";
 import { notify } from "../../services/notify";
 import { getCurrentLocation } from "../../services/mobileRuntime";
 import { enqueueOfflineItem, getOfflineOwner, queueSummary, readOfflineQueue, writeOfflineQueue } from "../../services/offlineQueue";
+import { TRANSPORT_STATES } from "../../utils/transportStateCatalog";
 
 
 
-const EC = {
-  pendiente:  { l:"Pendiente",   c:"#9ca3af", bg:"rgba(156,163,175,.15)" },
-  confirmado: { l:"Confirmado",  c:"#3b82f6", bg:"rgba(59,130,246,.15)" },
-  espera_carga: { l:"Espera carga", c:"#eab308", bg:"rgba(234,179,8,.15)" },
-  cargando: { l:"Cargando", c:"var(--accent-l)", bg:"var(--accent-a15)" },
-  en_curso:   { l:"En ruta",     c:"#f97316", bg:"rgba(249,115,22,.15)" },
-  espera_descarga: { l:"Espera descarga", c:"#d946ef", bg:"rgba(217,70,239,.15)" },
-  descarga:   { l:"Descargando", c:"#a78bfa", bg:"rgba(167,139,250,.15)" },
-  entregado:  { l:"Entregado",   c:"#10b981", bg:"rgba(16,185,129,.15)" },
-  cancelado:  { l:"Cancelado",   c:"#ef4444", bg:"rgba(239,68,68,.15)" },
-  incidencia: { l:"Incidencia",  c:"#fbbf24", bg:"rgba(251,191,36,.15)" },
-};
+const EC = Object.fromEntries(Object.entries(TRANSPORT_STATES)
+  .map(([key, state]) => [key, { l:state.label, c:state.textColor, bg:state.bg }]));
 
 const PASOS_KEY = id => `tms_chofer_pasos_${id}`;
 const LEGACY_SOLICITUDES_KEY = "tms_solicitudes_mecanico";
@@ -47,6 +39,7 @@ export function restoreDriverSteps(id, previous) {
 function normalizeChoferPasos(value = {}) {
   const source = value && typeof value === "object" ? value : {};
   const next = {};
+  if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(v=>typeof v==='string').slice(0,100);
   [
     "carga_iniciada",
     "carga_proceso",
@@ -427,7 +420,7 @@ function FirmaLaboralCanvas({ title = "Firma", detail = "", defaultName = "", on
 }
 
 // Modal de incidencia
-function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
+function ModalIncidencia({ pedido, fase="ruta", parada, onClose, onGuardado }){
   const [{encolarOffline, queueOfflineCriticalAction}] = useState(createDriverOfflineActions);
   const [texto,setTexto]=useState("");
   const [archivo,setArchivo]=useState(null);
@@ -463,6 +456,7 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
     setGuardando(true);
     setError("");
     const incidenciaPayload = { incidencia: `[${faseLabel(fase)}] ${texto}` };
+    const stopPayload=parada?{parada_id:parada.id,incidencia_parada:incidenciaPayload.incidencia,client_operation_uuid:crypto.randomUUID(),observed_at:new Date().toISOString()}:null;
     let uploadPayload = null;
     try {
       if (doc) {
@@ -475,10 +469,11 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
           file_mime: doc.mime,
           file_size_kb: doc.sizeKb,
           notas: `${texto}\n\n${uploadEvidence.note}`,
-          metadata: uploadEvidence.evidence,
+          metadata: {...uploadEvidence.evidence,...(parada?{parada_id:parada.id}:{})},
         };
       }
-      await cambiarEstadoPedido(pedido.id, "incidencia", incidenciaPayload);
+      if(stopPayload)await guardarPedidoChoferPasos(pedido.id,stopPayload);
+      else await cambiarEstadoPedido(pedido.id, "incidencia", incidenciaPayload);
       if (doc) {
         await subirPedidoDocChofer(pedido.id, uploadPayload);
       }
@@ -487,7 +482,8 @@ function ModalIncidencia({ pedido, fase="ruta", onClose, onGuardado }){
       if (esErrorOffline(err)) {
         try {
           queueOfflineCriticalAction({
-            tipo: "pedido_estado",
+            tipo: stopPayload?"pedido_chofer_pasos":"pedido_estado",
+            ...(stopPayload?{patch:stopPayload}:{}),
             pedido_id: pedido.id,
             estado: "incidencia",
             body: incidenciaPayload,

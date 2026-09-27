@@ -4,27 +4,18 @@ import { dailyDeliveries } from '../utils/dailyPlan';
 import { useAuth } from '../context/AuthContext';
 import { notify } from "../services/notify";
 import { setRuntimeFocus } from "../services/runtimeFocus";
+import { TransportStateBadge } from "../ui";
 
 const S = {
-  page: { flex:1, padding:"24px 30px", fontFamily:"'DM Sans',sans-serif", background:"linear-gradient(180deg, rgba(248,250,252,.92), rgba(255,255,255,.98))" },
+  page: { flex:1, padding:"24px 30px", fontFamily:"'DM Sans',sans-serif", background:"var(--bg)" },
   title: { fontFamily:"'DM Sans',sans-serif", fontSize:30, fontWeight:900, color:"var(--text)", marginBottom:4 },
   sub: { fontSize:12, color:"var(--text4)", marginBottom:16 },
   bar: { display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:22 },
   btn: { padding:"10px 14px", borderRadius:8, border:"1px solid var(--border2)", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", background:"var(--bg3)", color:"var(--text3)" },
   input: { background:"var(--bg4)", border:"1px solid var(--border2)", color:"var(--text)", padding:"10px 12px", borderRadius:8, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", boxSizing:"border-box" },
   panel: { background:"var(--card-bg)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden", boxShadow:"0 12px 34px rgba(15,23,42,.06)" },
-  th: { textAlign:"left", padding:"13px 14px", fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".06em", color:"var(--text4)", background:"rgba(248,250,252,.86)", borderBottom:"1px solid var(--border)", whiteSpace:"nowrap" },
+  th: { textAlign:"left", padding:"13px 14px", fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:".06em", color:"var(--text4)", background:"var(--bg3)", borderBottom:"1px solid var(--border)", whiteSpace:"nowrap" },
   td: { padding:"13px 14px", borderBottom:"1px solid var(--border)", fontSize:12, color:"var(--text2)", verticalAlign:"top" },
-};
-
-const STATE = {
-  pendiente:  { label:"Pendiente", color:"#9ca3af", bg:"rgba(156,163,175,.14)" },
-  confirmado: { label:"Confirmado", color:"#3b82f6", bg:"rgba(59,130,246,.14)" },
-  en_curso:   { label:"En curso", color:"#f97316", bg:"rgba(249,115,22,.15)" },
-  descarga:   { label:"Descarga", color:"#a78bfa", bg:"rgba(167,139,250,.15)" },
-  entregado:  { label:"Entregado", color:"#10b981", bg:"rgba(16,185,129,.14)" },
-  facturado:  { label:"Facturado", color:"#8b5cf6", bg:"rgba(139,92,246,.14)" },
-  cancelado:  { label:"Cancelado", color:"#ef4444", bg:"rgba(239,68,68,.14)" },
 };
 
 const ALERT = {
@@ -97,8 +88,7 @@ function normalizePlanData(res) {
 }
 
 function StatusBadge({ estado }) {
-  const s = STATE[estado] || STATE.pendiente;
-  return <span style={{ display:"inline-flex", padding:"2px 8px", borderRadius:999, fontSize:10, fontWeight:900, color:s.color, background:s.bg }}>{s.label}</span>;
+  return <TransportStateBadge state={estado}/>;
 }
 
 function AlertBadge({ aviso }) {
@@ -203,7 +193,7 @@ function PedidoMini({ pedido, onOpen, draggable = false, onDragStart, onDragOver
           <div style={{ fontFamily:"'JetBrains Mono',monospace", color:"var(--accent-xl)", fontSize:11, fontWeight:900, whiteSpace:"nowrap" }}>{pedido.numero || "Pedido"}</div>
           <div style={{ marginTop:2, fontSize:12, fontWeight:850, color:"var(--text)", lineHeight:1.25, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>{pedido.ruta}</div>
         </div>
-        <StatusBadge estado={pedido.estado} />
+        <StatusBadge estado={pedido} />
       </div>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:6, fontSize:10, color:"var(--text4)" }}>
         <span>{pedido.momento === "descarga" ? "Descarga" : "Carga"} {hora}</span>

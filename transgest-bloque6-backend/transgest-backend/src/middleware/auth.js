@@ -160,6 +160,7 @@ const ROLE_PERMISSION_PRESETS = {
     ver: ["agenda","dashboard","pedidos","plan_diario","gestion_trafico","clientes","rutas","vehiculos","choferes","hojas_ruta","informes","documentos","avisos","mi_cuenta"],
     editar: ["mi_cuenta"],
   },
+  carretillero: { ver: ["mi_cuenta"], editar: ["mi_cuenta"] },
   api: { ver: [], editar: [] },
   chofer: { ver: ["app_chofer","rutas_recomendadas_chofer","avisos","mi_cuenta"], editar: ["app_chofer","avisos","mi_cuenta"] },
   cliente: { ver: ["portal_cliente","portal-cliente","mi_cuenta"], editar: ["portal_cliente","portal-cliente","mi_cuenta"] },
@@ -177,6 +178,8 @@ function isChoferPedidosOperationalPath(req) {
   if (method === "GET" && /^\/chofer\/[^/]+\/historial-vehiculos$/.test(path)) return true;
   if (method === "GET" && /^\/[^/]+$/.test(path)) return true;
   if (["GET", "POST", "PATCH"].includes(method) && /^\/[^/]+\/(documento-control-digital|chofer-pasos|chofer-docs|estado|gps|firma)(\/|$)/.test(path)) return true;
+  if(method==='GET'&&/^\/[^/]+\/tracking$/.test(path))return true;
+  if(method==='POST'&&/^\/[^/]+\/tracking\/eta$/.test(path))return true;
   if (method === "GET" && /^\/[^/]+\/(eventos|carta-porte)$/.test(path)) return true;
   return false;
 }
@@ -245,7 +248,7 @@ function normalizePermissionsForRole(permisos, rol) {
   const base = presetPermisosRol(rol);
   const raw = permisos && typeof permisos === "object" && !Array.isArray(permisos) ? permisos : {};
   const modulos = raw.modulos && typeof raw.modulos === "object" ? raw.modulos : raw;
-  if (["chofer", "cliente", "cliente_portal"].includes(normalizedRole)) {
+  if (["chofer", "cliente", "cliente_portal", "carretillero"].includes(normalizedRole)) {
     // Restricted roles can lose a preset permission, never gain office access.
     for (const id of MODULE_IDS) {
       if (modulos[id]?.ver === false) base.modulos[id] = { ver: false, editar: false };
@@ -515,16 +518,8 @@ async function authenticate(req, res, next) {
       req.suscripcion = { plan: "enterprise", estado: "activo" };
       return next();
     }
-    const { rows } = await db.query(
-      `SELECT u.id, u.nombre, u.email, u.username, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
-              u.perfil, u.permisos, u.trafico_config, u.password_changed_at,
-              e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
-              e.bloqueo_manual, e.bloqueo_motivo
-       FROM usuarios u
-       LEFT JOIN empresas e ON e.id = u.empresa_id
-       WHERE u.id = $1`,
-      [payload.sub]
-    );
+    const member = await require('../services/companyMembership').userForCompany(payload.sub,payload.empresa_id);
+    const rows = member ? [member] : [];
 
     if (!rows[0] || (!rows[0].activo && !payload.superadmin_impersonation)) {
       return res.status(401).json({ error: "Usuario no valido o desactivado" });
@@ -549,6 +544,7 @@ async function authenticate(req, res, next) {
       ? rows[0].trafico_config
       : {};
     req.empresaId = rows[0].empresa_id || null;
+    if (req.user.rol === 'carretillero' && !/^\/api\/v1\/(planner-loading|auth)(\/|$)/.test(String(req.originalUrl || '').split('?')[0])) return res.status(403).json({error:'Tu acceso está limitado a las cargas asignadas de almacén.'});
     if (req.user.rol === 'colaborador' || (req.user.rol === 'chofer' && req.user.colaborador_id)) {
       const path = String(req.originalUrl || '').split('?')[0];
       if (!/^\/api\/v1\/(supplier-app|soporte|auth)(\/|$)/.test(path)) return res.status(403).json({error:'Tu acceso de proveedor está limitado a tus viajes, albaranes, vehículos y cuenta.'});
@@ -597,7 +593,7 @@ function requireRole(...roles) {
 function requireModulePermission(modulo) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "No autenticado" });
-    if (modulo === "empresa" && /^\/gastos-estructura(?:\/|$)/.test(String(req.path || ""))) {
+    if (modulo === "empresa" && /^\/(?:gastos-estructura|meses-cerrados)(?:\/|$)/.test(String(req.path || ""))) {
       return requireModulePermission("gastos_estructura")(req, res, next);
     }
     if (!companyProducts.moduleAvailable(req.user.productos, modulo)) {

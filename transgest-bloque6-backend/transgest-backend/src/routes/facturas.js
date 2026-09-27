@@ -1,3 +1,4 @@
+const { requeueFiscalRecord } = require("../services/fiscalRequeue");
 const express = require("express");
 const { body, param, query, validationResult } = require("express-validator");
 const db      = require("../services/db");
@@ -14,9 +15,11 @@ const fiscalScheduler = require("../services/fiscalScheduler");
 const contabilidadExport = require("../services/contabilidadExport");
 const { ensureAccountingIntegrationSettingsTable } = require("../services/accountingIntegrationsCatalog");
 const { unbilledOptions, readUnbilledTrips } = require("../services/unbilledTrips");
+const invoiceAnnotations = require("../services/invoiceAnnotations");
 
 const router = express.Router();
 router.use(authenticate);
+router.use("/operativa",require("./invoice_workflow"));
 const collections = require('../services/collectionScheduler');
 
 // Redondeo a 2 decimales para importes de factura. Elimina restos de coma
@@ -529,7 +532,7 @@ router.get("/fiscal/resumen", GERENTE_O_CONTABLE, async (req, res) => {
          SELECT DISTINCT ON (factura_id, sistema)
                 q.id, q.factura_id, q.sistema, q.entorno, q.estado, q.intento, q.error, q.next_retry_at, q.created_at,
                 CASE
-                  WHEN q.estado = 'error' AND (q.next_retry_at IS NULL OR q.next_retry_at <= NOW()) THEN true
+                  WHEN q.estado = 'error' AND q.retryable AND (q.next_retry_at IS NULL OR q.next_retry_at <= NOW()) THEN true
                   WHEN q.estado IN ('pendiente','procesando') AND q.created_at <= NOW() - INTERVAL '30 minutes' THEN true
                   ELSE false
                 END AS atascado,
@@ -585,15 +588,12 @@ router.post("/fiscal/procesar-cola", GERENTE_O_CONTABLE, async (req, res) => {
   const empresaId = req.empresaId || req.user.empresa_id;
   const limit = Math.max(1, Math.min(Number(req.body?.limit) || 10, 50));
   const facturaId = req.body?.factura_id || null;
-  const result = await db.transaction((client) =>
-    processPendingFiscalQueue({
+  const result = await processPendingFiscalQueue({
       empresaId,
       actorUserId: req.user.id,
       limit,
       facturaId,
-      client,
-    })
-  );
+    });
   res.json(result);
 });
 
@@ -870,7 +870,7 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
 
   if (!rows[0]) return res.status(404).json({ error: "Factura no encontrada" });
 
-  const [lineas, extras, pedidos, docs, fiscal, fiscalEventos, fiscalEnvios, auditRows, emailRows] = await Promise.all([
+  const [lineas, extras, pedidos, docs, fiscal, fiscalEventos, fiscalEnvios, auditRows, emailRows, anotaciones] = await Promise.all([
     db.query(`SELECT fl.*
                 FROM factura_lineas fl
                 JOIN facturas f ON f.id=fl.factura_id
@@ -923,6 +923,7 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
                  AND (meta->>'factura_id'=$1 OR meta->>'factura_numero'=(SELECT numero FROM facturas WHERE id=$1 AND empresa_id=$2))
                ORDER BY sent_at DESC
                LIMIT 20`, [req.params.id, empresaId]).catch(() => ({ rows: [] })),
+    invoiceAnnotations.read(db, { facturaId: req.params.id, empresaId }),
   ]);
 
   res.json({
@@ -936,7 +937,26 @@ router.get("/:id", GERENTE_O_CONTABLE, async (req, res) => {
     fiscal_envios: fiscalEnvios.rows,
     audit_log: auditRows.rows,
     email_log: emailRows.rows,
+    anotaciones: anotaciones.actual,
+    anotaciones_historial: anotaciones.historial,
   });
+});
+
+router.patch("/:id/anotaciones", GERENTE_O_CONTABLE, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const saved = await invoiceAnnotations.save(db, {
+      facturaId: req.params.id,
+      empresaId,
+      actorId: req.user?.id || null,
+      body: req.body,
+    });
+    res.json(saved);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    logger.error("No se pudieron guardar anotaciones de factura:", error);
+    res.status(500).json({ error: "No se pudieron guardar las anotaciones." });
+  }
 });
 
 router.get("/:id/fiscal", GERENTE_O_CONTABLE, async (req, res) => {
@@ -997,27 +1017,12 @@ router.post("/:id/fiscal/requeue", SOLO_GERENTE, async (req, res) => {
       return fiscalResult;
     }
     const record = fiscalResult.record;
-    const { rows: pendingRows } = await client.query(
-      `SELECT id
-         FROM factura_envios_fiscales
-        WHERE factura_id=$1 AND empresa_id=$2 AND estado IN ('pendiente','procesando')
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [req.params.id, empresaId]
-    );
-    if (!pendingRows[0]) {
-      await client.query(
-        `INSERT INTO factura_envios_fiscales
-          (registro_id, factura_id, empresa_id, sistema, entorno, estado, payload, next_retry_at)
-         VALUES ($1,$2,$3,$4,$5,'pendiente',$6::jsonb,NOW())`,
-        [record.id, req.params.id, empresaId, record.modo, record.entorno, JSON.stringify(record.payload || {})]
-      );
-    }
+    const requeued = await requeueFiscalRecord(client, record);
     await client.query(
       `INSERT INTO factura_eventos_fiscales
         (registro_id, factura_id, empresa_id, evento_tipo, detalle)
        VALUES ($1,$2,$3,'queue.manual_requeue',$4::jsonb)`,
-      [record.id, req.params.id, empresaId, JSON.stringify({ usuario_id: req.user.id, reused_pending: !!pendingRows[0] })]
+      [record.id, req.params.id, empresaId, JSON.stringify({ usuario_id: req.user.id, reused_pending: requeued.reused_pending })]
     );
     return { ok: true, record };
   });
@@ -1093,6 +1098,15 @@ router.post("/:id/fiscal/sincronizar", GERENTE_O_CONTABLE, async (req, res) => {
 });
 
 router.post("/", GERENTE_O_CONTABLE,
+  async(req,res,next)=>{try{
+    if(req.body.workflow_pedidos_ids!==undefined){
+      const ids=req.body.workflow_pedidos_ids;
+      if(!Array.isArray(ids)||!ids.length||ids.length>200||ids.some(id=>typeof id!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)))return res.status(400).json({error:'Selecciona entre 1 y 200 pedidos válidos'});
+      const rows=(await db.query('SELECT id,cliente_id FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[req.empresaId||req.user.empresa_id,ids])).rows;
+      if(rows.length!==new Set(ids).size||new Set(rows.map(r=>r.cliente_id)).size!==1)return res.status(400).json({error:'El lote debe contener pedidos autorizados de un solo cliente'});
+      req.body={workflow_pedidos_ids:ids,cliente_id:rows[0].cliente_id,pedidos_ids:ids,serie:'A',estado:'borrador',lineas:[{concepto:'Preparando lote',cantidad:1,precio_unit:0}]};
+    }next();
+  }catch(e){next(e);}},
   body("cliente_id").isUUID(),
   body("serie").isIn(["A","B","R","G"]),
   body("lineas").isArray({ min: 1 }),
@@ -1148,7 +1162,8 @@ router.post("/", GERENTE_O_CONTABLE,
           }
           borradoresPrevios.add(String(pedido.factura_id));
         }
-        if (pedido.estado !== "entregado") {
+        const eligibility=(await require('../services/invoiceOperationalWorkflow').facts(db,empresaId,[pedido.id]))[0];
+        if (!eligibility?.eligible) {
           return res.status(400).json({
             error: `El pedido ${pedido.numero || pid} debe estar terminado/entregado antes de crear la factura`,
           });
@@ -1157,11 +1172,29 @@ router.post("/", GERENTE_O_CONTABLE,
     }
 
     const created = await db.transaction(async (client) => {
+      let workflowHash=null;
       if (pedidosIdsUnicos.length) {
         const { rows: fuelOrders } = await client.query(
-          "SELECT id, numero, importe, importe_revision_combustible FROM pedidos WHERE id=ANY($1::uuid[]) AND empresa_id=$2 FOR UPDATE",
+          "SELECT * FROM pedidos WHERE id=ANY($1::uuid[]) AND empresa_id=$2 ORDER BY id FOR UPDATE",
           [pedidosIdsUnicos, empresaId]
         );
+        // Revalidate under the same locks that protect the association and numbering.
+        if(fuelOrders.length!==pedidosIdsUnicos.length)throw Object.assign(new Error('El lote ha cambiado'),{status:409});
+        borradoresPrevios.clear();
+        const readiness=await require('../services/invoiceOperationalWorkflow').facts(client,empresaId,pedidosIdsUnicos);
+        for(const p of fuelOrders){
+          if(String(p.cliente_id)!==String(cliente_id)||!readiness.find(r=>r.id===p.id)?.eligible)throw Object.assign(new Error('El pedido ha cambiado de cliente o de estado facturable'),{status:409});
+          const linked=(await client.query(`SELECT DISTINCT f.id,f.estado,f.cliente_id,f.empresa_id FROM facturas f WHERE f.id=$1 OR EXISTS(SELECT 1 FROM factura_pedidos fp WHERE fp.factura_id=f.id AND fp.pedido_id=$2) ORDER BY f.id`,[p.factura_id,p.id])).rows;
+          if(linked.some(f=>String(f.empresa_id)!==String(empresaId)||f.estado!=='borrador'||String(f.cliente_id)!==String(cliente_id)))throw Object.assign(new Error('El pedido ya tiene una factura no editable'),{status:409});
+          linked.forEach(f=>borradoresPrevios.add(f.id));
+        }
+        if(req.body.workflow_pedidos_ids){
+          if(readiness.some(r=>r.estado!=='listo'))throw Object.assign(new Error('Revisa los pedidos actuales antes de preparar el lote'),{status:409});
+          workflowHash=require('crypto').createHash('sha256').update(JSON.stringify(readiness.map(r=>[r.id,r.huella]))).digest('hex');
+          const previous=(await client.query('SELECT f.* FROM invoice_workflow_operations o JOIN facturas f ON f.id=o.factura_id AND f.empresa_id=o.empresa_id WHERE o.empresa_id=$1 AND o.request_hash=$2',[empresaId,workflowHash])).rows[0];
+          if(previous)return previous;
+          lineas=fuelOrders.flatMap(p=>require('../services/invoiceFuelLines').fuelInvoiceLines(p));
+        }
         require('../services/invoiceFuelLines').validateFuelInvoiceLines(fuelOrders, lineas);
       }
       if(plannerPreparation) lineas=await require('../services/plannerInvoice').saleLines(client,empresaId,plannerPreparation,cliente_id);
@@ -1255,19 +1288,8 @@ router.post("/", GERENTE_O_CONTABLE,
         );
       }
 
-      // Vincular pedidos — solo si están en estado válido para facturar
-      const ESTADOS_FACTURABLES = ["entregado"];
+      // Every order was validated and locked above; never silently skip a requested service.
       for (const pid of pedidosIdsUnicos) {
-        const { rows: pedCheck } = await client.query(
-          "SELECT id, estado FROM pedidos WHERE id=$1 AND empresa_id=$2",
-          [pid, empresaId]
-        );
-        if (!pedCheck[0]) continue; // skip if not found
-        if (!ESTADOS_FACTURABLES.includes(pedCheck[0].estado)) {
-          // Skip pedidos that are not in a billable state (pendiente, cancelado)
-          logger.warn(`Pedido ${pid} en estado ${pedCheck[0].estado} — no se vincula a la factura`);
-          continue;
-        }
         await client.query(
           `INSERT INTO factura_pedidos (factura_id, pedido_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
           [fac.id, pid]
@@ -1306,6 +1328,7 @@ router.post("/", GERENTE_O_CONTABLE,
         );
       }
 
+      if(workflowHash)await client.query('INSERT INTO invoice_workflow_operations(empresa_id,request_hash,factura_id) VALUES($1,$2,$3) ON CONFLICT(empresa_id,request_hash) DO UPDATE SET factura_id=$3',[empresaId,workflowHash,fac.id]);
       return fac;
     });
     res.status(201).json(created);

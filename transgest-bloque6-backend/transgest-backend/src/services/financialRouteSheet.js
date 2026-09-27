@@ -47,7 +47,9 @@ async function readRouteSheet(empresaId,query) {
   const found=await db.query('SELECT * FROM vehiculos WHERE empresa_id=$1 AND id=$2',[empresaId,vehicle]);
   if(!found.rows[0])throw Object.assign(new Error('Vehículo no encontrado'),{status:404});
   const params=[empresaId,vehicle,range.desde,range.hasta];
-  const orders=await db.query(`WITH ${financialPedidosCte} SELECT * FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3 AND vehiculo_id=$4 AND estado::text IN ('entregado','facturado')`,[empresaId,range.desde,range.hasta,vehicle]);
+  const population=await db.query(`WITH ${financialPedidosCte} SELECT * FROM pedidos_bi WHERE fecha_bi BETWEEN $2 AND $3 AND estado::text IN ('entregado','facturado')`,[empresaId,range.desde,range.hasta]);
+  const physical=await require('./financialJourneys').loadJourneyReconciliation(empresaId,population.rows,range.hasta,db.query);
+  const orders={rows:physical.orders.filter(p=>String(p.vehiculo_id)===String(vehicle))};
   // The order records the assignment at execution time. Current vehicle/driver
   // relations may have changed and must not rewrite historical labour costs.
   const historicalDrivers=[...new Set(orders.rows.map(p=>p.chofer_id).filter(Boolean))];

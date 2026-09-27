@@ -825,9 +825,10 @@ async function buildJornadaDiaria(req) {
     safeOne(`
       SELECT
         COUNT(*) FILTER (
-          WHERE pay.id IS NULL
+          WHERE (pay.id IS NULL
              OR (NULLIF(TRIM(COALESCE(pay.factura_nombre,'')),'') IS NULL
-                 AND NULLIF(TRIM(COALESCE(pay.factura_data,'')),'') IS NULL)
+                 AND NULLIF(TRIM(COALESCE(pay.factura_data,'')),'') IS NULL))
+            AND NOT EXISTS(SELECT 1 FROM colaborador_facturas cf JOIN facturas_proveedor fp ON fp.id=cf.factura_proveedor_id AND fp.empresa_id=cf.empresa_id WHERE cf.pedido_id=p.id AND cf.empresa_id=p.empresa_id AND cf.colaborador_id=p.colaborador_id AND fp.estado='revisada')
         )::int AS facturas_pendientes,
         COUNT(*) FILTER (WHERE pay.id IS NULL OR COALESCE(pay.documentacion_recibida,false)=false)::int AS documentacion_pendiente,
         COUNT(*) FILTER (
@@ -1157,6 +1158,11 @@ async function applyGlobalFiscalSoftwareMeta(configInput = {}) {
 // ════════════════════════════════════════════════════════════
 // GASTOS DE ESTRUCTURA
 // ════════════════════════════════════════════════════════════
+router.get("/gastos-estructura/resumen", async (req, res, next) => {
+  try { res.json(await require('../services/structureExpenses').readStructure(EID(req), req.query.periodo)); }
+  catch (error) { next(error); }
+});
+
 router.get("/gastos-estructura", async (req,res) => {
   try {
     const { rows } = await db.query(
@@ -1167,49 +1173,76 @@ router.get("/gastos-estructura", async (req,res) => {
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-router.post("/gastos-estructura", GERENTE_O_CONTABLE, async (req,res) => {
+function expenseInput(body, previous = {}) {
+  const data = {...previous, ...body};
+  if (!String(data.nombre || '').trim() || String(data.nombre).length > 200) throw Object.assign(new Error('Indica un nombre de hasta 200 caracteres.'), {status:400});
+  if (!Number.isFinite(Number(data.importe)) || Number(data.importe) <= 0) throw Object.assign(new Error('El importe debe ser mayor que cero.'), {status:400});
+  if (!['mensual','trimestral','anual','unico'].includes(data.periodo)) throw Object.assign(new Error('Periodicidad no válida.'), {status:400});
+  data.fecha = require('../services/structureExpenses').expenseMonth(data.fecha);
+  if (data.factura_data) {
+    const file = validateBase64Upload({data:data.factura_data, filename:data.factura_nombre});
+    data.factura_data = `data:${file.mime};base64,${file.base64}`;
+    data.factura_nombre = String(data.factura_nombre || 'Justificante').slice(0,200);
+  }
+  return data;
+}
+async function assertExpenseMonthOpen(tx, empresaId, expense) {
+  const month = require('../services/structureExpenses').expenseMonth(expense.fecha);
+  const closed = await tx.query("SELECT mes FROM meses_cerrados WHERE empresa_id=$1 AND (mes=$2 OR ($3<>'unico' AND mes>$2)) LIMIT 1", [empresaId,month,expense.periodo]);
+  if (closed.rows.length) throw Object.assign(new Error('Este gasto afecta a un mes cerrado. Reabre el mes antes de modificarlo.'), {status:409});
+}
+router.post("/gastos-estructura", GERENTE_O_CONTABLE, async (req,res,next) => {
   try {
-    const {nombre,tipo,importe,periodo,fecha,notas} = req.body;
-    if (!nombre) return res.status(400).json({error:"Nombre obligatorio"});
-    const {rows} = await db.query(
-      "INSERT INTO gastos_estructura (empresa_id,nombre,tipo,importe,periodo,fecha,notas) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *",
-      [EID(req),nombre,tipo||"Otros",importe||0,periodo||"mensual",fecha||new Date().toISOString().slice(0,7),notas||null]
-    );
-    res.status(201).json(rows[0]);
-  } catch(e) { res.status(500).json({error:e.message}); }
+    const data = expenseInput({periodo:'mensual',fecha:new Date().toISOString().slice(0,7),...req.body});
+    const row = await db.transaction(async tx => {
+      await assertExpenseMonthOpen(tx,EID(req),data);
+      return (await tx.query("INSERT INTO gastos_estructura (empresa_id,nombre,tipo,importe,periodo,fecha,notas,factura_nombre,factura_data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *", [EID(req),data.nombre,data.tipo||'Otros',data.importe,data.periodo,data.fecha,data.notas||null,data.factura_nombre||null,data.factura_data||null])).rows[0];
+    });
+    res.status(201).json(row);
+  } catch(error) { next(error); }
 });
-
-router.put("/gastos-estructura/:id", GERENTE_O_CONTABLE, async (req,res) => {
+router.put("/gastos-estructura/:id", GERENTE_O_CONTABLE, async (req,res,next) => {
   try {
-    const {nombre,tipo,importe,periodo,fecha,notas} = req.body;
-    const {rows} = await db.query(
-      "UPDATE gastos_estructura SET nombre=$1,tipo=$2,importe=$3,periodo=$4,fecha=$5,notas=$6 WHERE id=$7 AND empresa_id=$8 RETURNING *",
-      [nombre,tipo,importe,periodo,fecha,notas||null,req.params.id,EID(req)]
-    );
-    if (!rows[0]) return res.status(404).json({error:"No encontrado"});
-    res.json(rows[0]);
-  } catch(e) { res.status(500).json({error:e.message}); }
+    const row = await db.transaction(async tx => {
+      const previous = (await tx.query('SELECT * FROM gastos_estructura WHERE id=$1 AND empresa_id=$2 AND activo=true FOR UPDATE',[req.params.id,EID(req)])).rows[0];
+      if (!previous) throw Object.assign(new Error('Gasto no encontrado'),{status:404});
+      const data = expenseInput(req.body,previous);
+      await assertExpenseMonthOpen(tx,EID(req),previous);await assertExpenseMonthOpen(tx,EID(req),data);
+      return (await tx.query("UPDATE gastos_estructura SET nombre=$1,tipo=$2,importe=$3,periodo=$4,fecha=$5,notas=$6,factura_nombre=$7,factura_data=$8 WHERE id=$9 AND empresa_id=$10 RETURNING *", [data.nombre,data.tipo,data.importe,data.periodo,data.fecha,data.notas||null,data.factura_nombre||null,data.factura_data||null,req.params.id,EID(req)])).rows[0];
+    });
+    res.json(row);
+  } catch(error) { next(error); }
 });
-
-router.delete("/gastos-estructura/:id", GERENTE_O_CONTABLE, async (req,res) => {
+router.delete("/gastos-estructura/:id", GERENTE_O_CONTABLE, async (req,res,next) => {
   try {
-    await db.query("UPDATE gastos_estructura SET activo=false WHERE id=$1 AND empresa_id=$2", [req.params.id,EID(req)]);
+    await db.transaction(async tx => {
+      const previous = (await tx.query('SELECT * FROM gastos_estructura WHERE id=$1 AND empresa_id=$2 AND activo=true FOR UPDATE',[req.params.id,EID(req)])).rows[0];
+      if (!previous) throw Object.assign(new Error('Gasto no encontrado'),{status:404});
+      await assertExpenseMonthOpen(tx,EID(req),previous);
+      await tx.query('UPDATE gastos_estructura SET activo=false WHERE id=$1 AND empresa_id=$2',[req.params.id,EID(req)]);
+    });
     res.json({ok:true});
-  } catch(e) { res.status(500).json({error:e.message}); }
+  } catch(error) { next(error); }
 });
 
 // Meses cerrados
-router.get("/meses-cerrados", async (req,res) => {
-  const {rows} = await db.query("SELECT mes FROM meses_cerrados WHERE empresa_id=$1",[EID(req)]);
-  res.json(rows.map(r=>r.mes));
+router.get("/meses-cerrados", async (req,res,next) => {
+  try {
+    const {rows} = await db.query("SELECT mes FROM meses_cerrados WHERE empresa_id=$1",[EID(req)]);
+    res.json(rows.map(r=>r.mes));
+  } catch(error) { next(error); }
 });
-router.post("/meses-cerrados/:mes", GERENTE_O_CONTABLE, async (req,res) => {
-  await db.query("INSERT INTO meses_cerrados (empresa_id,mes) VALUES ($1,$2) ON CONFLICT DO NOTHING",[EID(req),req.params.mes]);
-  res.json({ok:true});
+router.post("/meses-cerrados/:mes", GERENTE_O_CONTABLE, async (req,res,next) => {
+  try {
+    await db.query("INSERT INTO meses_cerrados (empresa_id,mes) VALUES ($1,$2) ON CONFLICT DO NOTHING",[EID(req),require('../services/structureExpenses').expenseMonth(req.params.mes)]);
+    res.json({ok:true});
+  } catch(error) { next(error); }
 });
-router.delete("/meses-cerrados/:mes", GERENTE_O_CONTABLE, async (req,res) => {
-  await db.query("DELETE FROM meses_cerrados WHERE empresa_id=$1 AND mes=$2",[EID(req),req.params.mes]);
-  res.json({ok:true});
+router.delete("/meses-cerrados/:mes", GERENTE_O_CONTABLE, async (req,res,next) => {
+  try {
+    await db.query("DELETE FROM meses_cerrados WHERE empresa_id=$1 AND mes=$2",[EID(req),require('../services/structureExpenses').expenseMonth(req.params.mes)]);
+    res.json({ok:true});
+  } catch(error) { next(error); }
 });
 
 // ════════════════════════════════════════════════════════════

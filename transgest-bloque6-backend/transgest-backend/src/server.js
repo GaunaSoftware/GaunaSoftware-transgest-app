@@ -107,6 +107,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use("/api/v1/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookRoutes);
+app.use("/api/v1/inbound/orders", require("./routes/orderInboxInbound"));
 app.use(express.json({
   limit: process.env.REQUEST_BODY_LIMIT || "12mb",
   verify: (req, _res, buf) => {
@@ -356,7 +357,9 @@ safeUse(`${api}/actividad`,      authenticate, requireModulePermission("activida
 safeUse(`${api}/portal-cliente`, authenticate, portalClientePermission, clientePortalRoutes);
 safeUse(`${api}/transport-exchange`, authenticate, require("./routes/planner_exchange"));
 safeUse(`${api}/supplier-app`, authenticate, require("./routes/supplier_app"));
-safeUse(`${api}/planner`, authenticate, (req,res,next)=>requireModulePermission(req.path.startsWith("/inventario")?"palets":"pedidos")(req,res,next), require("./routes/planner"));
+safeUse(`${api}/supplier-invoice-review`, authenticate, require("./routes/supplier_invoice_review"));
+safeUse(`${api}/planner-loading`, authenticate, require("./routes/planner_loading"));
+safeUse(`${api}/planner`, authenticate, (req,res,next)=>requireModulePermission((req.path.startsWith("/inventario")||req.path.startsWith("/wms"))?"palets":"pedidos")(req,res,next), require("./routes/planner"));
 safeUse(`${api}/soporte`, authenticate, require("./routes/soporte").createSupportRouter());
  safeUse(`${api}/agenda`,         authenticate, requireModulePermission("agenda"), agendaRoutes);
 safeUse(`${api}/plan-diario`,    authenticate, requireModulePermission("plan_diario"), planDiarioRoutes);
@@ -1479,6 +1482,7 @@ async function startServer() {
     try { require("./services/collectionScheduler").startScheduler(); } catch(e) {logger.error("Cobros: " + e.message);}
     try { billingReminders.startScheduler(); } catch (e) { logger.warn("Billing: " + e.message); }
     try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
+    try { require('./services/mobilePush').startScheduler(); } catch { logger.warn('Notificaciones móviles sin iniciar'); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
     require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
     require('./services/importDocuments').createImportDocuments().resume().catch(e => logger.warn('Documentos pendientes: ' + e.message));

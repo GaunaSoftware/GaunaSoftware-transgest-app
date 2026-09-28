@@ -24,7 +24,7 @@ function reconcileJourneys({empresaId, orders, journeys=[], members=[], costs=[]
       if(!p)return;
       const share=shares[index], loaded=number(journey.km_cargados), empty=number(journey.km_vacios);
       p.bi_legs ||= [];
-      p.bi_legs.push({id:journey.id,fraccion:share,criterio:basis,cargados:share==null||loaded==null?null:loaded*share,vacios:share==null||empty==null?null:empty*share,asignacion:journey.asignacion_snapshot||{},asignaciones_anteriores:(journey.relevos||[]).map(r=>r.anterior)});
+      p.bi_legs.push({id:journey.id,fraccion:share,criterio:basis,cargados:share==null||loaded==null?null:loaded*share,vacios:share==null||empty==null?null:empty*share,asignacion:journey.asignacion_snapshot||{},relevos:journey.relevos||[]});
       p.bi_journey_cost=(p.bi_journey_cost||0)+cents/100;
       p.bi_cost_recorded ||= includeCosts&&records.length>0;
       p.bi_unreconciled_cost=(p.bi_unreconciled_cost||0)+(includeCosts?0:(share==null?costCents/100:costCents/100*share));
@@ -40,11 +40,16 @@ function reconcileJourneys({empresaId, orders, journeys=[], members=[], costs=[]
     p.km_ruta=p.bi_legs.every(l=>l.cargados!=null)?p.bi_legs.reduce((n,l)=>n+l.cargados,0):null;
     p.km_vacio=p.bi_legs.every(l=>l.vacios!=null)?p.bi_legs.reduce((n,l)=>n+l.vacios,0):null;
     for(const key of ['vehiculo_id','chofer_id','remolque_id']){
-      const ids=[...new Set(p.bi_legs.flatMap(l=>[l.asignacion,...(l.asignaciones_anteriores||[])]
+      const ids=[...new Set(p.bi_legs.flatMap(l=>[l.asignacion,...l.relevos.map(r=>r.anterior)]
         .map(a=>a?.[key]||null).filter(Boolean)))];
+      const completedBeforeUnrecordedRelief=p.bi_legs.some(l=>l.relevos.some(r=>
+        !r.anterior?.[key] && Array.isArray(r.paradas_completadas) && r.paradas_completadas.length>0));
       // A legacy physical leg may have no assignment snapshot. That absence is
       // not evidence that the order's recorded vehicle/driver was removed.
-      if(ids.length===1) p[key]=ids[0];
+      if(completedBeforeUnrecordedRelief){
+        p[key]=null;
+        p.bi_assignment_warning='Relevo tras una parada completada sin asignación anterior verificable.';
+      } else if(ids.length===1) p[key]=ids[0];
       else if(ids.length>1) {
         p[key]=null;
         p.bi_assignment_warning='Varios recursos históricos; no atribuible a uno solo.';

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-general-order-documents",
+    "date": "2026-09-28",
+    "title": "La Bandeja IA entiende más formatos de órdenes",
+    "intro": "Puedes revisar propuestas de pedido procedentes de documentos con diseños distintos.",
+    "items": [
+      { "title": "Cliente y transportista separados", "text": "La IA distingue quién encarga el viaje de quien lo realiza y puede corregir una primera lectura del documento. Si no puede comprobar el cliente, te pedirá que lo elijas.", "module": "pedidos" },
+      { "title": "Varias paradas en un viaje", "text": "Las recogidas y entregas detectadas aparecen en orden en la propuesta. Los documentos visuales o ambiguos indican lo que debes comprobar antes de guardar.", "module": "pedidos" }
+    ]
+  },
+  {
     "id": "2026-09-ai-order-pdf-roles",
     "date": "2026-09-28",
     "title": "Órdenes de carga más fáciles de revisar",

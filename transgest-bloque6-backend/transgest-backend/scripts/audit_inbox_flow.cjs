@@ -18,6 +18,43 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company,cl
  assert.equal(fromPdf.pedido.puntos_carga[0].ventana,'08:00-17:00');
  assert.equal(fromPdf.pedido.puntos_descarga[0].fecha,'2026-09-29');
  assert.equal(fromPdf.pedido.importe,600);
+ const genericText=`Orden de transporte\nCliente: TRANSPORTES ASENSI TEST, S.L.\nContratante: CAR VOLUM TEST, S.L. B98328891\nTransportista efectivo: TRANSPORTES ASENSI TEST, S.L. B03168853\nRecogida NATUYSER TEST, CALLE CARGA 4, ALMENDRALEJO, 28/09/2026\nRecogida ALMACEN SUR, AVENIDA SUR 9, MERIDA, 28/09/2026\nEntrega PALECO TEST, CAMINO ENTREGA 2, FORTUNA, 29/09/2026\nEntrega ALMACEN LEVANTE, CALLE ESTE 3, ELCHE, 29/09/2026`;
+ const genericAi={tipo_documento:'orden_transporte',numero_pedidos_detectados:1,
+  cliente_nombre:'CAR VOLUM TEST, S.L.',cliente_cif:'B98328891',
+  transportista_nombre:'TRANSPORTES ASENSI TEST, S.L.',transportista_cif:'B03168853',
+  puntos_carga:[
+   {cliente_nombre:'NATUYSER TEST',direccion:'CALLE CARGA 4',ciudad:'ALMENDRALEJO',fecha:'2026-09-28'},
+   {cliente_nombre:'ALMACEN SUR',direccion:'AVENIDA SUR 9',ciudad:'MERIDA',fecha:'2026-09-28'}],
+  puntos_descarga:[
+   {cliente_nombre:'PALECO TEST',direccion:'CAMINO ENTREGA 2',ciudad:'FORTUNA',fecha:'2026-09-29'},
+   {cliente_nombre:'ALMACEN LEVANTE',direccion:'CALLE ESTE 3',ciudad:'ELCHE',fecha:'2026-09-29'}]};
+ const originalFetch=global.fetch, originalKey=process.env.OPENAI_API_KEY, originalProvider=process.env.AI_PROVIDER;
+ let providerCalls=0, providerDraft=genericAi;
+ try{
+  process.env.OPENAI_API_KEY='synthetic-openai-key';process.env.AI_PROVIDER='openai';
+  global.fetch=async(url,options)=>{
+   if(String(url).startsWith('https://api.openai.com/v1/responses')){
+    providerCalls++;
+    assert.match(JSON.stringify(options.body),/Contratante: CAR VOLUM TEST/);
+    return new Response(JSON.stringify({output_text:JSON.stringify(providerDraft)}),{status:200,headers:{'Content-Type':'application/json'}});
+   }
+   return originalFetch(url,options);
+  };
+  const generic=await request('POST','/pedidos/ai-inbox/parse',{texto:genericText});
+  assert.equal(providerCalls,1,'readable text is also analyzed when AI is configured');
+  assert.equal(generic.pedido.cliente_id,customer.id,'AI can correct a heuristic that picked the carrier');
+  assert.equal(generic.pedido.transportista_detectado,'TRANSPORTES ASENSI TEST, S.L.');
+  assert.equal(generic.pedido.origen,'ALMENDRALEJO');assert.equal(generic.pedido.destino,'FORTUNA');
+  assert.equal(generic.pedido.puntos_carga.length,2);assert.equal(generic.pedido.puntos_descarga.length,2);
+  providerDraft={...genericAi,cliente_cif:'B03168853'};
+  const mismatched=await request('POST','/pedidos/ai-inbox/parse',{texto:genericText+'\nReferencia: NIF-SWAP-TEST'});
+  assert.equal(mismatched.pedido.cliente_id,null,'a valid but mismatched carrier tax ID cannot identify the customer');
+  assert.ok(mismatched.issues.some(issue=>issue.key==='cliente_id'));
+ }finally{
+  global.fetch=originalFetch;
+  if(originalKey===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=originalKey;
+  if(originalProvider===undefined)delete process.env.AI_PROVIDER;else process.env.AI_PROVIDER=originalProvider;
+ }
  const unknownCustomer=await request('POST','/pedidos/ai-inbox/parse',{
   texto:'Cliente: CLIENTE CONTRACTUAL NO REGISTRADO\nTransportista: TRANSPORTES ASENSI TEST, S.L.\nOrigen: Madrid\nDestino: Valencia\nFecha carga: 30/09/2026'
  });

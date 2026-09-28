@@ -64,6 +64,13 @@ function mergeStop(order,all,patch,orderedStopIds) {
    next.peso_variacion_confirmada_at=next.peso_variacion_confirmacion?new Date().toISOString():null;
   }
   if(patch.carga_ok&&!(next.carga_proceso&&next.mercancia_confirmada&&next.albaran_carga&&next.firma_cargador))reject('Confirma mercancía, albarán y firma de esta carga antes de finalizar.');
+  if(patch.carga_ok) {
+   const arrived=Date.parse(next.carga_iniciada_at),finished=Date.parse(next.carga_ok_at);
+   if(Number.isFinite(arrived)&&Number.isFinite(finished)&&finished-arrived>60*60*1000) {
+    next.aviso_espera_carga=true;
+    next.aviso_espera_carga_at ||= next.carga_ok_at;
+   }
+  }
  } else {
   if(patch.mercancia_confirmada&&!previous.descarga_iniciada)reject('Inicia primero esta descarga.');
   if(patch.descarga_iniciada&&!previous.posicionado_descarga)reject('Marca primero posicionado para descarga.');

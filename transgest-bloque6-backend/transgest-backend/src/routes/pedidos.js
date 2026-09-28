@@ -1763,6 +1763,14 @@ async function savePedidoChoferPasos({
     updated_at: new Date().toISOString(),
   };
   if(!stopResult){
+  // The driver's timer may be closed before its 60-minute notification fires.
+  // Record the same episode when completion itself proves the threshold was
+  // exceeded, so traffic can acknowledge it and review detention afterwards.
+  if (patch.carga_ok && nextData.carga_iniciada_at && nextData.carga_ok_at
+    && minutosEntreIso(nextData.carga_iniciada_at,nextData.carga_ok_at)>60) {
+    nextData.aviso_espera_carga=true;
+    nextData.aviso_espera_carga_at ||= nextData.carga_ok_at;
+  }
   await db.query(
     `INSERT INTO pedido_chofer_pasos (pedido_id, empresa_id, chofer_id, data, updated_at)
      VALUES ($1,$2,$3,$4,NOW())

@@ -53,21 +53,30 @@ async function processRecipient(row, period, deps = {}) {
     if (!ready.rows.length) throw new Error('La preparación del envío ya no está disponible');
     const recipient=(await query(`SELECT u.email,m.rol,(u.activo AND m.activo) AS activo,m.permisos,e.plan,e.estado AS empresa_estado
       FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id JOIN empresas e ON e.id=m.empresa_id
+        JOIN bi_weekly_subscriptions s ON s.user_id=u.id AND s.empresa_id=m.empresa_id AND s.enabled=true
       WHERE u.id=$1 AND m.empresa_id=$2`,[row.user_id,row.empresa_id])).rows[0];
     if(!recipient||!managerCanReceive(recipient)||recipient.email!==row.email)throw new Error('El destinatario o su acceso cambiaron durante la generación');
+    const current=(await query(`SELECT u.email,m.rol,(u.activo AND m.activo) AS activo,m.permisos,e.plan,e.estado AS empresa_estado
+      FROM bi_weekly_subscriptions s JOIN usuarios u ON u.id=s.user_id
+        JOIN usuario_empresas m ON m.usuario_id=u.id AND m.empresa_id=s.empresa_id
+        JOIN empresas e ON e.id=s.empresa_id
+      WHERE s.empresa_id=$1 AND s.enabled=true`,[row.empresa_id])).rows;
+    const stillAuthorized=new Set(current.filter(managerCanReceive).map(item=>item.email.trim().toLowerCase()));
+    const bcc=(row.bcc||[]).filter(email=>stillAuthorized.has(email.trim().toLowerCase()));
     sending = true;
     const result = await send({
       trigger: 'bi_rentabilidad_semanal', plantilla: 'bi_rentabilidad_semanal', destinatario: row.email,
+      bcc,
       empresa_id: row.empresa_id,
       datos: { empresa: row.empresa_nombre, desde: period.desde, hasta: period.hasta },
       attachments: [{ filename: `transgest-rentabilidad-${period.desde}.pdf`, content: pdf, contentType: 'application/pdf' }],
-      meta: { week_start: period.desde, run_id: run.id },
+      meta: { week_start: period.desde, run_id: run.id, recipient_count: 1 + bcc.length },
     });
     const status = result?.simulado ? 'sin_smtp' : 'enviado';
     await query(`UPDATE bi_weekly_deliveries SET status=$2,message_id=$3,
       error=$4,updated_at=now() WHERE id=$1`,
       [id, status, result?.messageId || null, result?.simulado ? 'SMTP no configurado; no se envió el PDF' : null]);
-    return { status, runId: run.id };
+    return { status, runId: run.id, messageId: result?.messageId || null };
   } catch (error) {
     // Once handed to SMTP a timeout may mean that the mail was delivered.
     // Never retry an ambiguous attempt automatically.
@@ -89,12 +98,27 @@ async function tick(now = new Date(), deps = {}) {
       JOIN empresas e ON e.id=s.empresa_id
     WHERE s.enabled=true ORDER BY s.empresa_id,s.user_id`);
   const period = weeklyPeriod(now);
+  const byCompany = new Map();
+  for (const row of rows.rows) if (managerCanReceive(row)) {
+    if (!byCompany.has(row.empresa_id)) byCompany.set(row.empresa_id, []);
+    byCompany.get(row.empresa_id).push(row);
+  }
   const results = [];
-  for (const row of rows.rows) {
-    if (!managerCanReceive(row)) continue;
-    const products = await (deps.products || companyProducts.get)(row.empresa_id);
+  for (const [empresaId, subscribers] of byCompany) {
+    const products = await (deps.products || companyProducts.get)(empresaId);
     if (!products.productos.includes('transgest')) continue;
-    results.push(await processRecipient(row, period, deps));
+    const owner = subscribers[0];
+    const emails = [...new Map(subscribers.map(row => [row.email.trim().toLowerCase(), row.email.trim()])).values()];
+    const claimed = await query(`INSERT INTO bi_weekly_company_deliveries(empresa_id,week_start,owner_id,status)
+      VALUES($1,$2,$3,'preparando') ON CONFLICT(empresa_id,week_start) DO NOTHING RETURNING empresa_id`,
+      [empresaId,period.desde,owner.user_id]);
+    if (!claimed.rows.length) { results.push({status:'ya_registrado'}); continue; }
+    const result = await processRecipient({...owner,email:emails[0],bcc:emails.slice(1)}, period, deps);
+    await query(`UPDATE bi_weekly_company_deliveries SET status=$3,error=$4,message_id=$5,updated_at=now()
+      WHERE empresa_id=$1 AND week_start=$2`,[empresaId,period.desde,
+      result.status==='ya_registrado'?'por_verificar':result.status,
+      result.status==='ya_registrado'?'Existía una entrega anterior; comprobar antes de reenviar.':null,result.messageId||null]);
+    results.push(result);
   }
   return { checked: rows.rows.length, results };
 }

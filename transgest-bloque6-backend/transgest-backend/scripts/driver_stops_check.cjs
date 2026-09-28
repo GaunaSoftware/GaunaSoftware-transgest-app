@@ -33,6 +33,15 @@ async function main(){
  assert.deepEqual(driverStops({...order,puntos_carga:[...order.puntos_carga].reverse()}).slice(0,2).map(s=>s.id),[stops[1].id,stops[0].id]);
  const single={origen:'A',destino:'B'},legacy={carga_ok:true,mercancia_confirmada:true,mercancia_peso_kg:100};
  assert.equal(stopData(driverStops(single)[1],legacy,driverStops(single)).mercancia_confirmada,undefined);
+ const delayOrder={id:'synthetic-delay',estado:'en_curso',origen:'A',destino:'B'};
+ const loadId=driverStops(delayOrder)[0].id;
+ const beforeLoad={carga_iniciada:true,carga_proceso:true,mercancia_confirmada:true,albaran_carga:true,firma_cargador:true,
+  carga_iniciada_at:'2026-09-17T08:00:00Z'};
+ const finishedAt=minute=>new Date(Date.parse(beforeLoad.carga_iniciada_at)+minute*60000).toISOString();
+ const completedAt=minute=>mergeStop(delayOrder,{paradas:{[loadId]:beforeLoad}},
+  {parada_id:loadId,carga_ok:true,carga_ok_at:finishedAt(minute)}).data.paradas[loadId];
+ assert.equal(completedAt(30).aviso_espera_carga,undefined,'ordinary load must not enable detention shortcut');
+ assert.equal(completedAt(90).aviso_espera_carga,true,'completed late load records the alert even if the app timer did not fire');
  const pg=new PGlite();let fail=false;
  const db={transaction:fn=>pg.transaction(tx=>fn({query:(sql,args)=>{if(fail&&sql.startsWith('UPDATE pedidos SET mercancia'))throw Error('injected write failure');return tx.query(sql,args);}}))};
  try{

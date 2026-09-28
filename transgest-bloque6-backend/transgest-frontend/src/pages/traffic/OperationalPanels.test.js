@@ -40,4 +40,27 @@ test('unrecorded detention payment is shown as unknown, never zero or paid',asyn
  api.pedidoParalizaciones.mockResolvedValue({reclamaciones:[],documentos:[],facturas:[],resumen:{documentado:200,aceptado:150,facturado:0,cobrado:null}});
  await act(async()=>root.render(<DetentionPanel pedido={{id:'p',numero:'SINTÉTICO'}} canEdit/>));await click('Paralización / prefactura');
  expect(document.body.textContent).toContain('Cobro acreditadoNo calculable');
+ expect(document.body.textContent).not.toContain('Valorar paralización · preparar prefactura');
+ expect(document.body.textContent).toContain('emite una factura separada');
+});
+
+test('a recorded loading delay offers the linked prefactura with observed times',async()=>{
+ api.pedidoParalizaciones.mockResolvedValue({demora_chofer:{carga:true,inicio:'2026-09-17T08:00:00Z',fin:'2026-09-17T10:00:00Z'},
+  reclamaciones:[],documentos:[],facturas:[],resumen:{documentado:0,aceptado:0,facturado:0,cobrado:null}});
+ await act(async()=>root.render(<DetentionPanel pedido={{id:'p',numero:'SINTÉTICO',_focus_detention:true}} canEdit/>));
+ expect(document.querySelector('[aria-label="Prefactura rápida de paralización"]')).toBeTruthy();
+ const times=[...document.querySelectorAll('input[type="datetime-local"]')].map(input=>input.value);
+ expect(times).toHaveLength(2);
+ expect((new Date(times[1])-new Date(times[0]))/60000).toBe(120);
+});
+
+test('an alert for the second loading point selects that stop in the quick prefactura',async()=>{
+ const first={carga:true,parada_id:'carga-a',parada_label:'Primera carga',inicio:'2026-09-17T08:00:00Z',fin:'2026-09-17T09:05:00Z'};
+ const second={carga:true,parada_id:'carga-b',parada_label:'Capa Abanilla',inicio:'2026-09-17T10:00:00Z',fin:'2026-09-17T12:00:00Z'};
+ api.pedidoParalizaciones.mockResolvedValue({demora_chofer:first,demoras_chofer:[first,second],
+  reclamaciones:[],documentos:[],facturas:[],resumen:{documentado:0,aceptado:0,facturado:0,cobrado:null}});
+ await act(async()=>root.render(<DetentionPanel pedido={{id:'p',numero:'SINTÉTICO',_focus_detention:true,_focus_detention_stop:'carga-b'}} canEdit/>));
+ expect(document.querySelector('[aria-label="Prefactura rápida de paralización"]').textContent).toContain('Capa Abanilla');
+ const times=[...document.querySelectorAll('input[type="datetime-local"]')].map(input=>input.value);
+ expect((new Date(times[1])-new Date(times[0]))/60000).toBe(120);
 });

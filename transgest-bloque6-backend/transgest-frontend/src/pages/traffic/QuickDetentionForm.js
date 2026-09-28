@@ -3,8 +3,9 @@ import { calculateDetention, prepareDetentionPrefactura } from '../../services/a
 import { Button } from '../../ui';
 const eur = n => new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format(n);
 
-export default function QuickDetentionForm({ pedidoId, onCreated, onCancel }) {
-  const [form,setForm]=useState({inicio:'',fin:'',tipo:'carga',motivo:'',importe_pactado:'',acuerdo:'',no_imputable:false});
+const localTime = value => { if(!value)return ''; const date=new Date(value); return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16); };
+export default function QuickDetentionForm({ pedidoId, initial, onCreated, onCancel }) {
+  const [form,setForm]=useState({inicio:localTime(initial?.inicio),fin:localTime(initial?.fin),tipo:'carga',motivo:'',importe_pactado:'',acuerdo:'',no_imputable:false});
   const [quote,setQuote]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const operation=useRef(null);
   const update=(key,value)=>{setForm(f=>({...f,[key]:value}));setQuote(null);operation.current=null;};
@@ -13,6 +14,7 @@ export default function QuickDetentionForm({ pedidoId, onCreated, onCancel }) {
   async function prepare(){setBusy(true);setError('');try{operation.current||=crypto.randomUUID();const row=await prepareDetentionPrefactura(pedidoId,{...payload(),operacion:operation.current});onCreated(row);}catch(e){setError(e.message);}finally{setBusy(false);}}
   return <form onSubmit={calculate} className="journey-replanning-fields" aria-label="Prefactura rápida de paralización">
     <p className="journey-full">Indica cuándo se puso el vehículo a disposición según lo pactado y cuándo terminó la carga o descarga. Las horas usan la zona de este dispositivo. El cálculo se conserva con la prefactura.</p>
+    {initial?.parada_label&&<p className="journey-full"><strong>Punto de carga:</strong> {initial.parada_label}</p>}
     {error&&<p className="journey-full" role="alert">{error}</p>}
     <label>Operación<select disabled={busy} value={form.tipo} onChange={e=>update('tipo',e.target.value)}><option value="carga">Carga</option><option value="descarga">Descarga</option></select></label>
     <label>Motivo de la paralización<input required maxLength={1000} disabled={busy} value={form.motivo} onChange={e=>update('motivo',e.target.value)}/></label>

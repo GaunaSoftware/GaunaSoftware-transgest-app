@@ -862,6 +862,7 @@ export const marcarNotificacionLeida = (id) => apiFetch(`/notificaciones/${encod
 export const marcarTodasNotificacionesLeidas = () => apiFetch("/notificaciones/leer-todas", { method:"POST", body:{} });
 export const getAvisosOperativosColaboradores = () => apiFetch("/notificaciones/operativas/colaboradores", { silentSuccess:true, silentError:true });
 export const leerTodosAvisosOperativos = () => apiFetch('/notificaciones/operativas/leer-todas', { method:'POST', body:{}, silentSuccess:true });
+export const leerAvisoOperativo = key => apiFetch('/notificaciones/operativas/colaboradores/leer', { method:'POST', body:{ key }, silentSuccess:true });
 export const getCentroAvisos = () => apiFetch('/notificaciones/centro', { silentSuccess:true, silentError:true });
 export const guardarConfiguracionAvisos = data => apiFetch('/notificaciones/configuracion', { method:'PUT', body:data, silentSuccess:true });
 export const getPolizasEmpresa = () => apiFetch('/notificaciones/seguros', { silentSuccess:true });

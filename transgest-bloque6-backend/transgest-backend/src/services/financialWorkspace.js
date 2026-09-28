@@ -78,10 +78,11 @@ function detail(services, clients, vehicles, invoices, sort, direction, page, li
     const cost = costBreakdown([p]).directo_registrado;
     return { id:p.id, numero:p.numero || String(p.id), fecha:dateOf(p), cliente_id:p.cliente_id,
       cliente:clientNames.get(String(p.cliente_id)) || 'Sin cliente', ruta:`${p.origen || '?'} → ${p.destino || '?'}`,
-      vehiculo_id:p.vehiculo_id || null, vehiculo:p.bi_assignment_warning?'Varios recursos históricos':plates.get(String(p.vehiculo_id)) || p.matricula || 'Sin vehículo',
+      vehiculo_id:p.vehiculo_id || null, vehiculo:(!p.vehiculo_id && p.bi_assignment_warning)?'Varios recursos históricos':plates.get(String(p.vehiculo_id)) || p.matricula || 'Sin vehículo',
       ejecucion:execution(p), ingreso:serviceIncome(p), coste:cost, margen:cost == null || serviceIncome(p) == null ? null : euro(Number(serviceIncome(p)) - cost),
       km_pedido:p.km_ruta == null ? null : Number(p.km_ruta), km_vacio_pedido:p.km_vacio == null ? null : Number(p.km_vacio),
-      viajes_operativos:(p.bi_legs||[]).map(l=>l.id), coste_viaje_atribuido:p.bi_journey_cost||0, advertencia:p.bi_cost_warning||p.bi_assignment_warning||null,
+      viajes_operativos:(p.bi_legs||[]).map(l=>l.id), coste_viaje_atribuido:p.bi_journey_cost||0,
+      advertencia:p.bi_cost_warning||p.bi_assignment_warning||(p.bi_assignment_source==='pedido_sin_instantanea'?'Matrícula tomada del pedido: falta instantánea del tramo físico.':null),
       pendiente_factura:p.pendiente_factura === true,
       factura_id:p.factura_id && validInvoices.has(String(p.factura_id)) ? p.factura_id : null };
   });
@@ -147,6 +148,17 @@ async function readWorkspace(empresaId, query = {}, access = {}) {
   const source = await loadAnalyticsSources(empresaId,range,previousRange.desde,queryDb);
   const currentAll = source.orders.filter(p => done(p) && dateOf(p) >= range.desde && dateOf(p) <= range.hasta);
   const filtered = currentAll.filter(p => matches(p,filters));
+  const otherVehicleOrders = source.orders.filter(p => !done(p) && dateOf(p) >= range.desde && dateOf(p) <= range.hasta
+    && (p.vehiculo_id || p.matricula) && matches(p,filters));
+  const vehicleScope = {
+    servicios_realizados: filtered.length,
+    sin_vehiculo: filtered.filter(p => !p.vehiculo_id && !p.matricula && !p.bi_assignment_warning).length,
+    asignacion_historica_ambigua: filtered.filter(p => !p.vehiculo_id && p.bi_assignment_warning).length,
+    asignacion_sin_instantanea: filtered.filter(p => p.bi_assignment_source==='pedido_sin_instantanea').length,
+    pedidos_fuera_del_criterio: otherVehicleOrders.length,
+    matriculas_fuera_del_criterio: [...new Set(otherVehicleOrders.map(p => source.vehicles.find(v => String(v.id) === String(p.vehiculo_id))?.matricula || p.matricula).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es')),
+    criterio: 'Solo pedidos entregados o facturados por fecha económica del periodo; los demás estados no son ingreso realizado.'
+  };
   const operationalView = ['operaciones','flota','calidad','planner'].includes(String(query.vista||''));
   const operationalOrders = operationalView ? source.orders.filter(p => String(p.origen_producto||'transgest')!=='planner' && dateOf(p) >= range.desde && dateOf(p) <= range.hasta && matches(p,filters)) : [];
   const evidence = operationalView ? await loadOperationalEvidence(empresaId,operationalOrders.map(p=>p.id),queryDb) : null;
@@ -240,7 +252,7 @@ async function readWorkspace(empresaId, query = {}, access = {}) {
     economia:economy, comparacion:comparison(economy,previous), evolucion:evolution(filtered,granularity),granularidad:granularity,
     objetivo:objective, cascada:waterfall(economy),
     rankings:{cliente:sortMargin(breakdowns.cliente),ruta:sortMargin(breakdowns.ruta),vehiculo:sortMargin(breakdowns.vehiculo),ejecucion:sortMargin(breakdowns.ejecucion)},
-    matriz:breakdowns, servicios:detail(filtered,source.clients,source.vehicles,invoices,sort,direction,page,limit),
+    matriz:breakdowns, vehiculos_alcance:vehicleScope, servicios:detail(filtered,source.clients,source.vehicles,invoices,sort,direction,page,limit),
     revision:reviewItems(filtered,invoices,range,invoiceScope), operations,
     facturas_vencidas:{total:invoicesDue.length,page:invoicePage,limit:invoiceLimit,rows:access.exportAll?invoicesDue:invoicesDue.slice((invoicePage-1)*invoiceLimit,invoicePage*invoiceLimit)}};
 }

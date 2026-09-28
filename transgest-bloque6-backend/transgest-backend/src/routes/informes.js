@@ -4042,6 +4042,7 @@ router.get("/excepciones", async (req, res) => {
       JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id
       WHERE p.empresa_id=$1
         AND p.estado NOT IN ('cancelado','entregado')
+        AND NULLIF(BTRIM(co.email),'') IS NOT NULL
         AND (
           p.colaborador_precio_confirmado IS DISTINCT FROM true
           OR p.colaborador_carga_confirmada_at IS NULL

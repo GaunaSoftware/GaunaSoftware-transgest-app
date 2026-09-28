@@ -90,6 +90,24 @@ async function run(){
   await get('/operativas/colaboradores/leer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:stopAlert.key})});
   assert.equal((await get('/operativas/colaboradores',{headers:{'x-test-user':'traffic'}})).items.some(item=>item.pedido_id===multi.id),false,
     'management acknowledgement is shared with traffic for a specific stop');
+  await get('/operativas/leer-todas',{method:'POST'});
+  const supplierWithoutEmail='66666666-6666-4666-8666-666666666666';
+  await pg.query(`INSERT INTO colaboradores(id,empresa_id,nombre,email,activo) VALUES($1,$2,'Proveedor sin correo',NULL,true)`,[supplierWithoutEmail,A]);
+  const {rows:[withoutEmail]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,precio_colaborador)
+    VALUES($1,'NO-EMAIL-QA','confirmado',CURRENT_DATE,CURRENT_DATE,$2,440) RETURNING id`,[A,supplierWithoutEmail]);
+  const trafficAlerts=()=>get('/operativas/colaboradores',{headers:{'x-test-user':'traffic'}});
+  assert.equal((await trafficAlerts()).items.some(item=>item.pedido_id===withoutEmail.id),false,
+    'a supplier without email cannot receive confirmation links and must not trigger confirmation alerts');
+  await pg.query(`UPDATE colaboradores SET email='proveedor@example.invalid' WHERE id=$1`,[supplierWithoutEmail]);
+  const withEmail=(await trafficAlerts()).items.filter(item=>item.pedido_id===withoutEmail.id);
+  assert.ok(withEmail.some(item=>item.kind==='workflow_no_enviado'));
+  assert.ok(withEmail.some(item=>item.kind==='precio_sin_confirmar'));
+  await pg.query(`UPDATE colaboradores SET email='   ' WHERE id=$1`,[supplierWithoutEmail]);
+  assert.equal((await trafficAlerts()).items.some(item=>item.pedido_id===withoutEmail.id),false,
+    'removing the email resolves link-only alerts without recording a false price acceptance');
+  await pg.query(`UPDATE pedidos SET estado='entregado' WHERE id=$1`,[withoutEmail.id]);
+  assert.ok((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===withoutEmail.id && item.kind==='albaran_pendiente'),
+    'missing delivery documents remain actionable even when the supplier has no email');
   console.log('PASS HTTP AvImp: 301 notices, tenant isolation, company-wide traffic/management delay acknowledgement, multi-stop persistence, read ALL and agenda deduplication.');
  }finally{db.query=original;db.transaction=originalTransaction;if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}await pg.close();}
 }

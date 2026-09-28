@@ -767,6 +767,7 @@ export const crearChofer    = (data)      => apiFetch("/choferes", { method:"POS
 export const editarChofer   = (id,data)   => apiFetch(`/choferes/${id}`, { method:"PUT", body:data });
 export const borrarChofer   = (id)        => apiFetch(`/choferes/${id}`, { method:"DELETE" });
 export const getChoferJornadaApp = () => apiFetch("/choferes/app/jornada");
+export const getChoferResumenMensualApp = (mes) => apiFetch(`/choferes/app/resumen-mensual?${new URLSearchParams({mes})}`);
 export const getDriverTrackingContext = () => apiFetch('/choferes/app/tracking-context');
 export const getMobilePushStatus = () => apiFetch('/choferes/app/push-status');
 export const registerMobilePushDevice = token => apiFetch('/choferes/app/push-devices',{method:'POST',body:{token},silentSuccess:true});
@@ -1094,7 +1095,7 @@ export const actualizarCapitalTesoreria = (data) => apiFetch("/empresa/config/te
 export const setConfigAlertas      = (data)    => apiFetch("/empresa/config/alertas", {method:"PUT",body:data});
 export const getCalendarioLaboral  = (params={}) => apiFetch(`/empresa/calendario-laboral?${new URLSearchParams(params)}`);
 export const getCalendarioLaboralCcaa = ()     => apiFetch("/empresa/calendario-laboral/ccaa");
-export const actualizarKmVehiculo  = (id, km)  => apiFetch(`/vehiculos/${id}/km`, { method:"PATCH", body:{ km_actuales: km } });
+export const actualizarKmVehiculo  = (id, km, evidence={}) => apiFetch(`/vehiculos/${id}/km`, { method:"PATCH", body:{ km_actuales: km, ...evidence } });
 export const getAlertasDocVehiculos = ()       => apiFetch("/vehiculos/alertas-doc", { silentSuccess:true, silentError:true });
 
 // ── Taller ────────────────────────────────────────────
@@ -1118,7 +1119,7 @@ export const getTallerIntervenciones = (params={}) => apiFetch(`/taller/interven
 export const crearTallerIntervencion = (data)  => apiFetch("/taller/intervenciones", { method:"POST", body:data });
 export const editarTallerIntervencion = (id,data) => apiFetch(`/taller/intervenciones/${id}`, { method:"PUT", body:data });
 export const addPiezaIntervencion  = (id,data) => apiFetch(`/taller/intervenciones/${id}/piezas`, { method:"POST", body:data });
-export const cerrarTallerIntervencion = (id)   => apiFetch(`/taller/intervenciones/${id}/cerrar`, { method:"POST" });
+export const cerrarTallerIntervencion = (id,data) => apiFetch(`/taller/intervenciones/${id}/cerrar`, { method:"POST", body:data });
 export const borrarTallerIntervencion = (id)   => apiFetch(`/taller/intervenciones/${id}`, { method:"DELETE" });
 export const getTallerNeumaticos   = (params={}) => apiFetch(`/taller/neumaticos?${new URLSearchParams(params)}`);
 export const crearTallerNeumatico  = (data)    => apiFetch("/taller/neumaticos", { method:"POST", body:data });

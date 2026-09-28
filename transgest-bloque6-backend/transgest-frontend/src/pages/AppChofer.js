@@ -2,6 +2,7 @@ import {planHasFeature} from "../utils/planFeatures";
 import {listenDriverDeepLinks} from '../services/driverDeepLinks';
 import {enableMobilePush,disableMobilePush} from '../services/mobilePush';
 import DriverExpenses from "./driver/DriverExpenses";
+import DriverMonthlySummary from "./driver/DriverMonthlySummary";
 import DriverDownloadedDocuments from './driver/DriverDownloadedDocuments';
 import {hasNativeDocuments} from '../services/nativeDocuments';
 import NativeTrackingControls from './driver/NativeTrackingControls';
@@ -266,6 +267,12 @@ export default function AppChofer(){
     if(tab==="historial") return !activo;
     return true;
   }).sort((a,b)=>(ORDEN_ESTADO[a.estado]??99)-(ORDEN_ESTADO[b.estado]??99));
+  useEffect(()=>{
+    if(tab==="activos" && expandedPedidoId &&
+       !pedidos.some(p=>String(p.id)===String(expandedPedidoId) && !["entregado","cancelado","facturado"].includes(p.estado))) {
+      setExpandedPedidoId(null);
+    }
+  },[tab,expandedPedidoId,pedidos]);
 
   // Mark the next confirmed trip after any en_curso
   const enCursoIds = new Set(pedidos.filter(p=>["en_curso","descarga"].includes(p.estado)).map(p=>p.vehiculo_id));
@@ -310,7 +317,7 @@ export default function AppChofer(){
     ? [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["historial","Historial"]]
     : [["activos","Activos"],["nuevo","Nuevo"],["jornada","Jornada"],["datos","Datos"],["vacaciones","Vacaciones"],["historial","Historial"],["solicitud","Taller"]];
 
-  const tabsChofer = [...(hasNativeDocuments()?[["documentos","Documentos descargados"]]:[]),...baseTabsChofer.filter(([key])=> (key!=="solicitud"||workshopEnabled)&&(key!=="vacaciones"||leaveEnabled)),["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"]]:[])];
+  const tabsChofer = [...(hasNativeDocuments()?[["documentos","Documentos descargados"]]:[]),...baseTabsChofer.filter(([key])=> (key!=="solicitud"||workshopEnabled)&&(key!=="vacaciones"||leaveEnabled)),["conjunto","Conjunto"],...(!user?.colaborador_id?[["repostajes","Repostajes y dietas"],["resumen","Mi mes y nóminas"]]:[])];
 
   useEffect(() => {
     const app = document.querySelector(".tg-app-chofer-page");
@@ -553,7 +560,7 @@ export default function AppChofer(){
                   onExpandedChange={(open)=>{setExpandedPedidoId(open ? p.id : null);window.scrollTo({top:0,behavior:"auto"});}}
                   onFoto={()=>setCameraModal(p.id)}
                 />);
-                if (bloque.pedidos[0]?.viaje_operativo?.id && bloque.pedidos[0]?.grupaje_id) return <DriverJourney key={bloque.key} pedidos={pedidos.filter(p=>p.viaje_operativo?.id===bloque.pedidos[0].viaje_operativo.id)} fallback={tarjetas} onActualizar={cargar} jornadaInfo={jornadaInfo} onAbrirJornada={()=>setTab("jornada")} onFoto={setCameraModal}/>;
+                if (bloque.pedidos[0]?.viaje_operativo?.id && bloque.pedidos[0]?.grupaje_id) return <DriverJourney key={bloque.key} pedidos={filtradosConProxima.filter(p=>p.viaje_operativo?.id===bloque.pedidos[0].viaje_operativo.id)} fallback={tarjetas} onActualizar={cargar} jornadaInfo={jornadaInfo} onAbrirJornada={()=>setTab("jornada")} onFoto={setCameraModal}/>;
                 if (!bloque.grupaje) return tarjetas;
                 const hechas = bloque.pedidos.filter(p => ["entregado","facturado"].includes(String(p.estado||"").toLowerCase())).length;
                 return (
@@ -598,6 +605,7 @@ export default function AppChofer(){
       )}
 
       {tab==="documentos" && hasNativeDocuments() && <DriverDownloadedDocuments/>}
+      {tab==="resumen" && !externalDriver && <DriverMonthlySummary/>}
       {tab==="conjunto" && <ConjuntoChofer jornadaInfo={jornadaInfo} onRefresh={cargar}/>}
       {tab==="repostajes" && !user?.colaborador_id && <DriverExpenses jornadaInfo={jornadaInfo}/>}
       {tab==="jornada" && (

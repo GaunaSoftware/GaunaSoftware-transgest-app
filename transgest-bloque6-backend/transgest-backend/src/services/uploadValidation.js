@@ -47,7 +47,8 @@ function contentMatchesMime(bytes, mime) {
 
 function validateBase64Upload({ data, mime, filename, maxBytes = 3 * 1024 * 1024, allowedMimes = DOCUMENT_MIMES }) {
   const parsed = splitDataUrl(data);
-  const effectiveMime = String(mime || parsed.mime || "application/octet-stream").trim().toLowerCase();
+  const declaredMime = String(mime || parsed.mime || "application/octet-stream").trim().toLowerCase().split(";")[0];
+  const effectiveMime = ["image/jpg", "image/pjpeg"].includes(declaredMime) ? "image/jpeg" : declaredMime;
   if (!parsed.base64 || !/^[a-z0-9+/]+={0,2}$/i.test(parsed.base64)) {
     throw Object.assign(new Error("El archivo no contiene base64 valido."), { status: 400 });
   }

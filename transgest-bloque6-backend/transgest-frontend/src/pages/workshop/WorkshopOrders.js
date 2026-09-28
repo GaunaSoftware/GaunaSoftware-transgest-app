@@ -6,7 +6,7 @@ import VehiclePortrait from './VehiclePortrait';
 const money=n=>Number(n||0).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
 const date=v=>String(v||'').slice(0,10).split('-').reverse().join('/')||'—';
 export default function WorkshopOrders({orders,vehicles,onEdit,onClose,onNew,onVehicles,onDelete,showTyres,showHistory}){
- const {user}=useAuth();const canEdit=['gerente','contable','responsable_taller'].includes(user?.rol),canPhoto=['gerente','trafico'].includes(user?.rol);
+ const {user}=useAuth();const canEdit=['gerente','contable','responsable_taller'].includes(user?.rol),canClose=['gerente','responsable_taller'].includes(user?.rol),canPhoto=['gerente','trafico'].includes(user?.rol);
  const [q,setQ]=useState(''),[state,setState]=useState('todas'),[vehicle,setVehicle]=useState(''),[page,setPage]=useState(1),[selected,setSelected]=useState(null),[detail,setDetail]=useState('detalle'),[error,setError]=useState(''),[saving,setSaving]=useState(false);
  useEffect(()=>setPage(1),[q,state,vehicle]);
  const rows=orders.filter(r=>(state==='todas'||(state==='cerrada'?r.estado==='cerrada':r.estado!=='cerrada'))&&(!vehicle||r.vehiculo_id===vehicle)&&`${r.numero||r.id} ${r.vehiculo_matricula} ${r.tipo} ${r.descripcion}`.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>String(b.fecha).localeCompare(String(a.fecha)));
@@ -26,6 +26,6 @@ export default function WorkshopOrders({orders,vehicles,onEdit,onClose,onNew,onV
  {detail==='trabajos'&&<><h3>Trabajo registrado</h3><p>{active.descripcion||'Sin descripción'}</p><p>Mano de obra: {money(active.coste_mano_obra)}</p><p>{active.notas||'Sin notas adicionales.'}</p></>}
  {detail==='recambios'&&<><h3>Recambios utilizados</h3>{active.piezas_usadas?.length?active.piezas_usadas.map((p,i)=><p key={i}>{p.nombre||p.referencia||p.pieza_id} · {p.cantidad_usada||p.cantidad||0} unidades · {money(p.precio_unitario)}</p>):<p>No hay recambios registrados.</p>}</>}
  {detail==='historial'&&<><h3>Intervenciones del vehículo</h3>{orders.filter(r=>r.vehiculo_id===active.vehiculo_id).map(r=><Button key={r.id} onClick={()=>{setSelected(r.id);setDetail('detalle');}}>{date(r.fecha)} · {r.tipo}</Button>)}<Button onClick={showHistory}>Trazabilidad de piezas</Button></>}
- <div className="workshop-detail-actions">{canEdit&&<Button onClick={()=>onEdit(active)}>Editar orden</Button>}{canEdit&&active.estado!=='cerrada'&&<Button onClick={()=>onClose(active)}>Finalizar orden</Button>}{canEdit&&<Button onClick={()=>onDelete(active)}>Eliminar orden</Button>}<Button onClick={showTyres}>Ver neumáticos</Button></div></Card>}
+ <div className="workshop-detail-actions">{canEdit&&<Button onClick={()=>onEdit(active)}>Editar orden</Button>}{canClose&&active.estado!=='cerrada'&&<Button onClick={()=>onClose(active)}>Finalizar orden</Button>}{canEdit&&<Button onClick={()=>onDelete(active)}>Eliminar orden</Button>}<Button onClick={showTyres}>Ver neumáticos</Button></div></Card>}
  </div>;
 }

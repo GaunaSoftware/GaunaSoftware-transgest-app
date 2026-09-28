@@ -6,7 +6,7 @@ const { resolveApiKey, recordApiUsage } = require("../services/apiKeys");
 
 const r1 = express.Router();
 r1.use(authenticate);
-const GERENTE_TRAFICO_O_CHOFER = requireRole("gerente", "trafico", "chofer");
+const GERENTE_O_TALLER = requireRole("gerente", "responsable_taller");
 
 r1.put('/:id/imagen', GERENTE_O_TRAFICO, async (req,res) => {
   try {
@@ -1318,7 +1318,7 @@ r1.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
 
     const { rows } = await db.query(
       `UPDATE vehiculos SET matricula=$1,marca=$2,modelo=$3,"a\u00f1o"=$4,tipo=$5,tara_kg=$6,
-       carga_max_kg=$7,estado=$8,km_actuales=$9,activo=$10,notas=$11,chofer_id=$12,clase=$13,notas_operacion=$14,
+       carga_max_kg=$7,estado=$8,activo=$10,notas=$11,chofer_id=$12,clase=$13,notas_operacion=$14,
        fecha_matriculacion=$15,fecha_itv=$16,fecha_seguro=$17,ubicacion_actual=COALESCE($18::varchar,ubicacion_actual),
        ubicacion_fuente=COALESCE(NULLIF($19::text,''),ubicacion_fuente),
        ubicacion_ts=CASE WHEN NULLIF($18::text,'') IS NULL THEN ubicacion_ts ELSE NOW() END,
@@ -1647,41 +1647,28 @@ r1.patch("/:id/reactivar", GERENTE_O_TRAFICO, async (req, res) => {
   res.json({ ok: true });
 });
 
-r1.patch("/:id/km", GERENTE_TRAFICO_O_CHOFER, async (req, res) => {
+r1.patch("/:id/km", GERENTE_O_TALLER, async (req, res) => {
   const { km_actuales } = req.body;
-  if (!km_actuales || isNaN(km_actuales)) {
-    return res.status(400).json({ error: "km_actuales requerido" });
+  const km = Number(km_actuales);
+  if (!Number.isFinite(km) || km < 0 || !String(req.body?.motivo || "").trim()) {
+    return res.status(400).json({ error: "Indica una lectura válida y el motivo de la verificación en taller." });
   }
   const empresaId = req.empresaId || req.user?.empresa_id;
   try {
-    if (req.user?.rol === "chofer") {
-      const choferId = req.user?.chofer_id;
-      if (!choferId) return res.status(403).json({ error: "Chofer no vinculado al usuario." });
-      const permitido = await db.query(
-        `SELECT 1
-           FROM vehiculos v
-          WHERE v.id=$1 AND v.empresa_id=$2
-            AND (
-              v.chofer_id=$3 OR EXISTS (
-                SELECT 1 FROM pedidos p
-                 WHERE p.empresa_id=$2
-                   AND p.vehiculo_id=$1
-                   AND p.chofer_id=$3
-                   AND COALESCE(p.estado,'') NOT IN ('entregado','finalizado','cancelado')
-              )
-            )
-          LIMIT 1`,
-        [req.params.id, empresaId, choferId]
-      );
-      if (!permitido.rows[0]) return res.status(403).json({ error: "No puedes actualizar los kilometros de este vehiculo." });
-    }
-    const { rows } = await db.query(
-      `UPDATE vehiculos SET km_actuales=$1, updated_at=NOW()
-       WHERE id=$2 AND empresa_id=$3 RETURNING id, matricula, km_actuales`,
-      [Math.round(Number(km_actuales)), req.params.id, empresaId]
-    );
-    if (!rows[0]) return res.status(404).json({ error: "Vehiculo no encontrado" });
-    res.json({ ok: true, vehiculo: rows[0] });
+    const result = await db.transaction(async client => {
+      const current = (await client.query("SELECT id,matricula,km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2 FOR UPDATE",[req.params.id,empresaId])).rows[0];
+      if (!current) return { status:404, error:"Vehículo no encontrado" };
+      const previous = current.km_actuales == null ? null : Number(current.km_actuales);
+      if (previous != null && km < previous) return { status:409, error:"La lectura no puede ser inferior al último cuentakilómetros registrado." };
+      if (previous != null && km - previous > 2000 && req.body?.confirmar_salto !== true) {
+        return { status:409, error:"La diferencia supera 2.000 km. Verifica el cuentakilómetros y confirma expresamente la lectura." };
+      }
+      const vehicle = (await client.query("UPDATE vehiculos SET km_actuales=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3 RETURNING id,matricula,km_actuales",[Math.round(km),req.params.id,empresaId])).rows[0];
+      return { vehicle, previous };
+    });
+    if (result.status) return res.status(result.status).json({error:result.error});
+    await logVehiculoEvento({empresaId,vehiculoId:req.params.id,tipo:"vehiculo.odometro_verificado",actorId:req.user?.id||null,detalle:{km_anterior:result.previous,km_nuevo:Math.round(km),motivo:String(req.body.motivo).trim().slice(0,240)}});
+    res.json({ ok:true, vehiculo:result.vehicle });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

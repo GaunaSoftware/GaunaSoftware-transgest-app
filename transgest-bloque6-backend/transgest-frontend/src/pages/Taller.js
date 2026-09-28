@@ -1,5 +1,5 @@
 import "./workspace/unified-tools.css";
-import {PageHeader,Button,KpiCard} from "../ui";
+import {PageHeader,KpiCard} from "../ui";
 import WorkshopOrders from "./workshop/WorkshopOrders";
 import "./workshop/workshop.css";
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -910,9 +910,6 @@ function ModalIntervencion({vehiculos, editando, onClose, onSaved}) {
         km: form.km_en_intervencion,
         descripcion: form.descripcion,
       });
-      if (form.km_en_intervencion && form.vehiculo_id) {
-        actualizarKmVehiculo(form.vehiculo_id, Number(form.km_en_intervencion)).catch(()=>{});
-      }
     }
 
     if (editando) {
@@ -1748,9 +1745,9 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
       }
     }
 
-    // Auto-update vehicle km when registering tyre change
+    // A tyre change is a verified workshop reading, not a route-distance estimate.
     if (form.km && Number(form.km) > 0) {
-      actualizarKmVehiculo(vSel, Number(form.km)).catch(()=>{});
+      actualizarKmVehiculo(vSel, Number(form.km), {motivo:"Lectura al registrar cambio de neumáticos"}).catch(e=>notify(e.message,"error"));
     }
 
     // Decrease stock
@@ -1936,7 +1933,6 @@ function NeumaticosTab({ vehiculos, reparaciones, neumaticosStock = [], neumatic
                 <input type="number" style={{...inp,width:"100%",boxSizing:"border-box"}}
                   value={form.km} onChange={e=>setForm(p=>({...p,km:e.target.value}))}
                   onFocus={e=>e.target.select()}
-                  onBlur={e=>{ if(vSel&&e.target.value) import("../services/api").then(m=>m.actualizarKmVehiculo(vSel,Number(e.target.value)).catch(()=>{})); }}
                   placeholder={tractoras.find(v=>v.id===vSel)?.km_actuales ? `Actuales: ${Number(tractoras.find(v=>v.id===vSel)?.km_actuales).toLocaleString("es-ES")} km`:"0"}/>
                 {form.km && <div style={{fontSize:10,color:"var(--text5)",marginTop:2}}>Próximo cambio: <strong style={{color:"var(--accent-xl)"}}>{(Number(form.km)+120000).toLocaleString("es-ES")} km</strong></div>}
               </div>
@@ -2555,23 +2551,39 @@ export default function Taller() {
   function recargarAvisos() { setModalAviso(false); setEditAviso(null); }
 
   async function cerrarIntervencion(r) {
+    if (r.origen_taller === "externo" && (!r.factura_proveedor_num || !r.factura_proveedor_file_base64)) {
+      notify("Adjunta la factura del taller externo, su número e importe antes de cerrar.", "warning");
+      setEditRep(r);setModalRep(true);
+      return;
+    }
+    const vehicle = vehiculos.find(v=>v.id===r.vehiculo_id);
+    const reading = await promptDialog({title:"Kilómetros al regresar del taller",message:"Indica la lectura real del cuentakilómetros. Se guardará en el historial del vehículo.",inputType:"number",defaultValue:String(vehicle?.km_actuales ?? r.km_en_intervencion ?? ""),confirmText:"Continuar"});
+    if (reading === null) return;
+    const kmRetorno = Number(reading);
+    if (!String(reading).trim() || !Number.isFinite(kmRetorno) || kmRetorno < 0 || (vehicle?.km_actuales != null && kmRetorno < Number(vehicle.km_actuales))) {
+      notify("Introduce una lectura válida, igual o mayor que la última registrada.","warning");return;
+    }
+    const confirmarSalto = vehicle?.km_actuales != null && kmRetorno-Number(vehicle.km_actuales)>2000;
+    if (confirmarSalto && !(await confirmDialog({title:"Verificar lectura del cuentakilómetros",message:`La nueva lectura supera en más de 2.000 km la anterior (${Number(vehicle.km_actuales).toLocaleString("es-ES")} km). ¿Has comprobado el cuadro del vehículo?`,confirmText:"Sí, lectura comprobada"}))) return;
     const ok = await confirmDialog({
       title: "Cerrar intervencion",
-      message: "Cerrar esta intervencion de forma definitiva?",
+      message: `Cerrar la intervención con ${kmRetorno.toLocaleString("es-ES")} km y los costes registrados?`,
       confirmText: "Cerrar",
     });
     if (!ok) return;
-    const d = tallerLoad();
-    d.reparaciones = (d.reparaciones || []).map(x => x.id === r.id ? {...x, estado:"cerrada", cierre_definitivo_at:new Date().toISOString()} : x);
-    tallerSave(d);
-    setTaller(d);
-    if (!String(r.id).startsWith("r_")) {
-      try {
-        await cerrarTallerIntervencion(r.id);
+    try {
+      if (!String(r.id).startsWith("r_")) {
+        await cerrarTallerIntervencion(r.id,{km_retorno:kmRetorno,confirmar_salto:confirmarSalto});
         await cargarNormalizadoTaller();
-      } catch (e) {
-        notify(e.message, "error");
+      } else {
+        await actualizarKmVehiculo(r.vehiculo_id,kmRetorno,{motivo:"Lectura al cerrar intervención de taller",confirmar_salto:confirmarSalto});
+        const d=tallerLoad();
+        d.reparaciones=(d.reparaciones||[]).map(x=>x.id===r.id?{...x,estado:"cerrada",km_en_intervencion:kmRetorno,cierre_definitivo_at:new Date().toISOString()}:x);
+        tallerSave(d);setTaller(d);
       }
+      notify("Intervención cerrada y kilómetros actualizados.","success");
+    } catch (e) {
+      notify(e.message || "No se pudo cerrar la intervención.","error");
     }
   }
 
@@ -2658,7 +2670,7 @@ export default function Taller() {
 
       {/* Tabs */}
       <div style={{display:"flex",gap:20,borderBottom:"1px solid var(--border)",marginBottom:16,overflowX:"auto"}}>
-        {[["reparaciones","Órdenes de taller"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo mínimo)`:""}`],["trazabilidad","Trazabilidad de piezas"],["neumaticos","Neumáticos"],["proveedores","Talleres y proveedores"],["avisos_mant","Mantenimiento preventivo"],["solicitudes","Solicitudes de conductores"],["tareas","Tareas de mecánicos"]].map(([id,l])=>(
+        {[["reparaciones","Órdenes de taller"],[`stock`,`Stock${stockBajo.length>0?` (${stockBajo.length} bajo mínimo)`:""}`],["trazabilidad","Trazabilidad de piezas"],["neumaticos","Neumáticos"],["proveedores","Talleres y proveedores"],["solicitudes","Solicitudes de conductores"],["tareas","Tareas de mecánicos"]].map(([id,l])=>(
           <button key={id} onClick={()=>setTab(id)} style={{...S.tab,borderBottomColor:tab===id?"var(--accent)":"transparent",color:tab===id?"var(--accent)":"var(--text3)",padding:"12px 0",fontSize:14,fontWeight:900,whiteSpace:"nowrap"}}>{l}</button>
         ))}
       </div>

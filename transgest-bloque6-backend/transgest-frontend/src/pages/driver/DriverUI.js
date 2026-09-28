@@ -30,7 +30,7 @@ export function DriverIcon({ name, size = 22 }) {
 export function DriverHeading({ icon, title, children }) {
   return <div className="driver-section-heading"><span className="driver-icon-tile"><DriverIcon name={icon}/></span><div><h2>{title}</h2>{children && <p>{children}</p>}</div></div>;
 }
-const titles = { conjunto:"Mi conjunto", repostajes:"Repostajes y dietas", inicio:"Tu día, en un vistazo", activos:"Mis viajes", nuevo:"Nuevo viaje", jornada:"Mi jornada", datos:"Mis datos", vacaciones:"Mis vacaciones", historial:"Historial de viajes", solicitud:"Solicitudes de taller", avisos:"Avisos y rutas", mas:"Más opciones" };
+const titles = { conjunto:"Mi conjunto", repostajes:"Repostajes y dietas", resumen:"Mi mes y nóminas", inicio:"Tu día, en un vistazo", activos:"Mis viajes", nuevo:"Nuevo viaje", jornada:"Mi jornada", datos:"Mis datos", vacaciones:"Mis vacaciones", historial:"Historial de viajes", solicitud:"Solicitudes de taller", avisos:"Avisos y rutas", mas:"Más opciones" };
 export function DriverHeader({ user, tab, onNavigate, unread }) {
   const { isDark } = useTheme() || {};
   const initials = (user?.nombre || "Chófer").trim().split(/\s+/).slice(0,2).map(s=>s[0]).join("").toUpperCase();
@@ -40,14 +40,14 @@ export function DriverHeader({ user, tab, onNavigate, unread }) {
   </>;
 }
 export function DriverNavigation({ tab, onNavigate }) {
-  const active = ["activos","nuevo","historial"].includes(tab) ? "activos" : ["datos","vacaciones","solicitud"].includes(tab) ? "mas" : tab;
+  const active = ["activos","nuevo","historial"].includes(tab) ? "activos" : ["datos","vacaciones","solicitud","repostajes","resumen","conjunto"].includes(tab) ? "mas" : tab;
   return <nav className="driver-bottom-nav" aria-label="Navegación principal del chófer">{[["inicio","Inicio"],["activos","Mis viajes"],["jornada","Jornada"],["avisos","Avisos"],["mas","Más"]].map(([id,label])=><button key={id} aria-current={active===id ? "page" : undefined} onClick={()=>onNavigate(id)}><DriverIcon name={id}/><span>{label}</span></button>)}</nav>;
 }
 export function DriverHome({ pedidos, jornada, onNavigate, loading, offline, pending, externalDriver }) {
   const active=pedidos.filter(p=>!["entregado","facturado","cancelado"].includes(p.estado));
   return <div className="driver-section-shell">
     <div className="driver-summary-grid"><button onClick={()=>onNavigate("activos")}><DriverIcon name="activos"/><span>Viajes activos<strong>{loading ? "—" : active.length}</strong></span></button><button onClick={()=>onNavigate("jornada")}><DriverIcon name="jornada"/><span>Mi jornada<strong>{loading ? "—" : jornada ? "En curso" : "Sin iniciar"}</strong></span></button></div>
-    <section className="driver-card"><DriverHeading icon="nuevo" title="Accesos rápidos">Lo que necesitas durante tu jornada.</DriverHeading><div className="driver-action-grid">{[["nuevo","Crear viaje"],["jornada","Ver jornada"],["conjunto","Cambiar conjunto"],...(!externalDriver?[["repostajes","Repostajes y dietas"]]:[]),["datos","Datos y firma"],["historial","Consultar historial"]].map(([id,label])=><button key={id} onClick={()=>onNavigate(id)}><DriverIcon name={id}/>{label}</button>)}</div></section>
+    <section className="driver-card"><DriverHeading icon="nuevo" title="Accesos rápidos">Lo que necesitas durante tu jornada.</DriverHeading><div className="driver-action-grid">{[["nuevo","Crear viaje"],["jornada","Ver jornada"],["conjunto","Cambiar conjunto"],...(!externalDriver?[["repostajes","Repostajes y dietas"],["resumen","Mi mes y nóminas"]]:[]),["datos","Datos y firma"],["historial","Consultar historial"]].map(([id,label])=><button key={id} onClick={()=>onNavigate(id)}><DriverIcon name={id}/>{label}</button>)}</div></section>
     <section className="driver-card"><DriverHeading icon="activos" title="Viajes asignados">Consulta las paradas y actualiza el estado de cada viaje.</DriverHeading>{loading ? <p>Cargando viajes…</p> : active.length ? active.slice(0,3).map(p=><button className="driver-trip-link" key={p.id} onClick={()=>onNavigate("activos")}><span><strong>{p.numero || "Viaje"}</strong><span>{p.cliente_nombre || ""}</span></span><span>{p.origen || "Origen pendiente"} → {p.destino || "Destino pendiente"}</span><span>Ver viaje →</span></button>) : <p className="driver-empty">No tienes viajes activos asignados.</p>}</section>
     <p className="driver-sync" role="status">{offline ? "Sin conexión" : "Conexión disponible"} · {pending ? `${pending} acciones pendientes de sincronizar` : "Sin acciones pendientes de sincronizar"}</p>
   </div>;

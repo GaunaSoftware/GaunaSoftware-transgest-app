@@ -6,14 +6,20 @@ export function nextStopDirections(order, steps, selectedStop) {
   const stops = driverStops(order);
   const stop = selectedStop || stops.find(s => !stopDone(s, stopData(s, steps, stops)));
   if (!stop) return null;
-  const lat = stop.lat ?? stop.latitude ?? stop.latitud;
-  const lng = stop.lng ?? stop.lon ?? stop.longitude ?? stop.longitud;
+  const lat = stop.lat ?? stop.latitude ?? stop.latitud ?? stop.metadata?.lat;
+  const lng = stop.lng ?? stop.lon ?? stop.longitude ?? stop.longitud ?? stop.metadata?.lng;
   const coordinates = lat != null && lat !== '' && lng != null && lng !== '' &&
     Number.isFinite(Number(lat)) && Math.abs(Number(lat)) <= 90 &&
-    Number.isFinite(Number(lng)) && Math.abs(Number(lng)) <= 180;
-  const address = [stop.direccion, stop.ciudad || stop.poblacion || stop.localidad,
+    Number.isFinite(Number(lng)) && Math.abs(Number(lng)) <= 180 &&
+    !(Number(lat) === 0 && Number(lng) === 0);
+  const address = [stop.direccion || stop.direccion_normalizada, stop.codigo_postal || stop.cp,
+    stop.ciudad || stop.municipio || stop.poblacion || stop.localidad || stop.metadata?.municipio,
     stop.provincia, stop.pais].filter(Boolean).join(', ');
-  const destination = coordinates ? `${Number(lat)},${Number(lng)}` : address || stop.label;
+  // Do not navigate to a province or business name alone: it may point to
+  // another city when the actual loading point has no verified address.
+  const hasPlace = Boolean(stop.direccion || stop.direccion_normalizada || stop.codigo_postal || stop.cp ||
+    stop.ciudad || stop.municipio || stop.poblacion || stop.localidad || stop.metadata?.municipio);
+  const destination = coordinates ? `${Number(lat)},${Number(lng)}` : hasPlace ? address : '';
   if (!destination || /^https?:/i.test(destination)) return null;
   return `https://www.google.com/maps/dir/?${new URLSearchParams({api:'1', destination, travelmode:'driving', dir_action:'navigate'})}`;
 }

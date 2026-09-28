@@ -680,21 +680,18 @@ router.patch("/movimientos/:id/confirmar-salida", PUEDE_EDITAR, async (req, res)
     [facturaId, req.params.id, empresa]
   );
   const movimiento = rows[0];
-  const facturaProgramada = Boolean(
+  const generarFactura = Boolean(
     generar_factura_async &&
     !movimiento.factura_id &&
     Number(movimiento.precio_unitario || 0) > 0
   );
-  res.json({ ...movimiento, factura_programada: facturaProgramada });
-
-  if (facturaProgramada) {
-    setImmediate(() => {
-      generarFacturaBorradorDevolucion({
-        empresa,
-        movimientoId: movimiento.id,
-        usuarioId: req.user?.id || null,
-      }).catch(error => logger.error(`No se pudo generar la factura de palets ${movimiento.id}: ${error.message}`));
-    });
+  if (!generarFactura) return res.json({ ...movimiento, factura_programada:false });
+  try {
+    const generatedId = await generarFacturaBorradorDevolucion({empresa,movimientoId:movimiento.id,usuarioId:req.user?.id||null});
+    return res.json({...movimiento,factura_id:generatedId,factura_programada:false});
+  } catch (error) {
+    logger.error(`No se pudo generar la factura de palets ${movimiento.id}: ${error.message}`);
+    return res.json({...movimiento,factura_programada:false,factura_error:"La salida está confirmada, pero no se pudo generar el borrador. Revisa este movimiento antes de facturar."});
   }
 });
 

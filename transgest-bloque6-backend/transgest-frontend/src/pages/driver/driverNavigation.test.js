@@ -9,6 +9,10 @@ test('navigation uses the next stop, never the current location as destination',
  expect(new URL(nextStopDirections(order,{paradas:{[load.id]:{carga_ok:true}}})).searchParams.get('destination')).toBe('Valencia');
  expect(nextStopDirections(order,{paradas:{[load.id]:{carga_ok:true},[unload.id]:{firma_entrega:true}}})).toBeNull();
  expect(new URL(nextStopDirections(order,{}, {...load,lat:40,lng:-3})).searchParams.get('destination')).toBe('40,-3');
+ const capa={...order,origen:'CEMENTOS CAPA',puntos_carga:[{nombre:'Cementos Capa',direccion:'Av. Murcia 12',ciudad:'Abanilla',provincia:'Murcia'}]};
+ expect(new URL(nextStopDirections(capa,{})).searchParams.get('destination')).toContain('Abanilla');
+ expect(new URL(nextStopDirections(capa,{}, {nombre:'Cementos Capa',municipio:'Abanilla',provincia:'Murcia'})).searchParams.get('destination')).toBe('Abanilla, Murcia');
+ expect(nextStopDirections(capa,{}, {nombre:'Cementos Capa',provincia:'Murcia'})).toBeNull();
 });
 test('cargo photo requires an actual completed loading and weight keeps the planned baseline',()=>{
  const [load]=driverStops(order);

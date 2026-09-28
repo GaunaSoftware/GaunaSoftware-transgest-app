@@ -14,6 +14,7 @@ import {
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { GeoFields } from "../components/GeoFields";
+import { setRuntimeFocus } from "../services/runtimeFocus";
 
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
@@ -787,14 +788,11 @@ export default function Palets(){
           salida_confirmada_at:confirmado?.salida_confirmada_at || new Date().toISOString(),
           factura_programada:Boolean(confirmado?.factura_programada),
         } : m));
-        notify(
-          confirmado?.factura_programada
-            ? "Salida confirmada. La factura borrador se esta generando en segundo plano."
-            : "Salida de palets confirmada. Ya se ha actualizado el stock.",
-          "success"
-        );
-        window.setTimeout(()=>cargarMovimientos(), 1800);
-        window.setTimeout(()=>cargarMovimientos(), 6000);
+        notify(confirmado?.factura_error || (confirmado?.factura_id
+          ? "Salida confirmada. El borrador está disponible en Facturación."
+          : "Salida de palets confirmada. Ya se ha actualizado el stock."),
+          confirmado?.factura_error ? "warning" : "success");
+        await cargarMovimientos();
         return;
       } else {
         try {
@@ -1089,7 +1087,8 @@ export default function Palets(){
   return(
     <div className="warehouse-root">
       <WarehouseWorkspace movements={movimientos} loading={warehouseLoading} error={warehouseError} reload={cargarMovimientos} stock={stockEmpresa} alerts={alertasNoLeidas} empresa={empresa} sign={signoPaletsMovimiento}
-        create={tipo=>{setMovimientoEditando(tipo ? {tipo,estado_salida:"pendiente"}:null);setModal(true)}} edit={m=>{setMovimientoEditando(m);setModal(true)}} confirm={confirmarSalida} rectify={rectificarDevolucion}
+        create={tipo=>{setMovimientoEditando(tipo ? {tipo,estado_salida:"pendiente"}:null);setModal(true)}} edit={m=>{setMovimientoEditando(m);setModal(true)}} confirm={confirmarSalida} generateInvoice={confirmarSalida} rectify={rectificarDevolucion}
+        openInvoice={id=>{setRuntimeFocus("tms_facturacion_focus",{factura_id:id,source:"almacen_palets"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"facturacion"}));}}
         albaran={m=>{try{openWarehouseDocument(generarHtmlAlbaran(m,clientes.find(c=>c.id===(m.propietario_cliente_id||m.cliente_id)),empresa,clientes.find(c=>c.id===m.cliente_movimiento_id)));}catch(e){notify(e.message,"warning")}}}
         onSection={setTab} details={<div className="unified-tools warehouse-detail">      {tab==="stock"&&(
         <div style={S.card}>

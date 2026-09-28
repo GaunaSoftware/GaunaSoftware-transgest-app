@@ -710,6 +710,50 @@ router.get("/app/jornada", requireChoferApp, async (req, res) => {
   res.json({ chofer, jornada: serializeJornada(rows[0]) });
 });
 
+router.get("/app/resumen-mensual", requireChoferApp, async (req, res) => {
+  try {
+    await ensureChoferJornadaSchema();
+    const empresaId = req.empresaId || req.user?.empresa_id;
+    const chofer = await resolveChoferApp(req);
+    if (!chofer) return res.status(404).json({ error: "Tu usuario no está vinculado a una ficha de chófer" });
+    const mes = String(req.query.mes || "");
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return res.status(400).json({ error: "Indica un mes válido (AAAA-MM)" });
+    const { rows } = await db.query(
+      `SELECT COUNT(*)::int AS jornadas,
+              COUNT(*) FILTER (WHERE estado='cerrada')::int AS jornadas_cerradas,
+              COUNT(*) FILTER (WHERE estado='cerrada' AND km_inicio IS NOT NULL AND km_fin IS NOT NULL)::int AS jornadas_con_km,
+              COUNT(*) FILTER (WHERE estado='cerrada' AND hace_noche=true)::int AS noches_fuera,
+              SUM(CASE WHEN estado='cerrada' AND km_inicio IS NOT NULL AND km_fin IS NOT NULL
+                  THEN GREATEST(0, COALESCE(km_acumulados,0) + km_fin - COALESCE(km_tramo_inicio,km_inicio)) END) AS km_recorridos
+         FROM chofer_jornadas
+        WHERE empresa_id=$1 AND chofer_id=$2
+          AND inicio_at >= ($3::date AT TIME ZONE 'Europe/Madrid')
+          AND inicio_at < (($3::date + INTERVAL '1 month') AT TIME ZONE 'Europe/Madrid')`,
+      [empresaId, chofer.id, `${mes}-01`]
+    );
+    const payroll = await db.query(
+      `SELECT id, periodo, estado, created_at, liquido
+         FROM nominas_emitidas
+        WHERE empresa_id=$1 AND chofer_id=$2 AND periodo=$3
+        ORDER BY created_at DESC LIMIT 1`,
+      [empresaId, chofer.id, mes]
+    );
+    const summary = rows[0] || {};
+    res.json({
+      mes,
+      jornadas: summary.jornadas || 0,
+      jornadas_cerradas: summary.jornadas_cerradas || 0,
+      jornadas_con_km: summary.jornadas_con_km || 0,
+      noches_fuera: summary.noches_fuera || 0,
+      km_recorridos: summary.jornadas_con_km ? Number(summary.km_recorridos) : null,
+      cobertura_km: summary.jornadas_cerradas ? Number(summary.jornadas_con_km) / Number(summary.jornadas_cerradas) : null,
+      nomina: payroll.rows[0] || null,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post("/app/firma-base", requireChoferApp, async (req, res) => {
   try {
     await ensureChoferesTransparencySchema();

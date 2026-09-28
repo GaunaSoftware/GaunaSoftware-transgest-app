@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { getVehiculos, getDocsVehiculo, editarVehiculo, getChoferes , actualizarKmVehiculo} from "../services/api";
+import { getVehiculos, getDocsVehiculo, editarVehiculo, getChoferes } from "../services/api";
 import { formatMatricula } from "../utils/formatos";
 import { notify } from "../services/notify";
 
@@ -134,7 +134,7 @@ function FichaVehiculo({ vehiculo, onClose, onSaved }) {
             </div>
             <div>
               <label style={S.lbl}>Km actuales</label>
-              <input type="number" style={S.inp} value={form.km_actuales||""} onChange={f("km_actuales")} onBlur={e=>{ if(vehiculo?.id&&e.target.value) actualizarKmVehiculo(vehiculo.id, Number(e.target.value)).catch(()=>{}); }}/>
+              <input type="number" style={S.inp} value={vehiculo?.km_actuales ?? ""} readOnly/>
             </div>
             <div>
               <label style={S.lbl}>Próxima revisión (km)</label>

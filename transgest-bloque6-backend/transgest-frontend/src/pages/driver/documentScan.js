@@ -120,16 +120,35 @@ function limpiarCanvasComoEscaner(canvas) {
 
 async function prepararArchivoEscaner(file) {
   const dataUrl = await leerArchivoComoDataUrl(file);
-  if (!file.type?.startsWith("image/")) {
+  const rawBase64 = String(dataUrl).split(",")[1] || "";
+  const signatureMime = rawBase64.startsWith("/9j/") ? "image/jpeg" :
+    rawBase64.startsWith("iVBOR") ? "image/png" :
+    rawBase64.startsWith("UklGR") ? "image/webp" :
+    rawBase64.startsWith("JVBER") ? "application/pdf" : "";
+  const declaredMime = String(file.type || "").toLowerCase().split(";")[0];
+  const extension = String(file.name || "").toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || "";
+  if (signatureMime === "application/pdf" && extension !== "pdf") {
+    throw new Error("El contenido es PDF pero el archivo figura como imagen. Selecciona el documento correcto.");
+  }
+  const isImage = signatureMime.startsWith("image/") || declaredMime.startsWith("image/") || ["jpg", "jpeg", "png", "webp"].includes(extension);
+  if (!isImage) {
+    if (signatureMime !== "application/pdf" && declaredMime !== "application/pdf" && extension !== "pdf") {
+      throw new Error("Formato no admitido. Elige una foto JPG, PNG o WebP, o un PDF.");
+    }
     return {
       preview: "",
-      base64: String(dataUrl).split(",")[1] || "",
-      mime: file.type || "application/pdf",
+      base64: rawBase64,
+      mime: "application/pdf",
       sizeKb: Math.max(1, Math.round(file.size / 1024)),
     };
   }
 
-  const img = await cargarImagen(dataUrl);
+  // Android/Capacitor may omit the MIME or use image/jpg for a camera JPEG.
+  // The canvas re-encodes it as image/jpeg; the server still checks its bytes.
+  const imageMime = signatureMime.startsWith("image/") ? signatureMime :
+    (extension === "png" ? "image/png" : extension === "webp" ? "image/webp" : "image/jpeg");
+  const imageUrl = `data:${imageMime};base64,${rawBase64}`;
+  const img = await cargarImagen(imageUrl);
   const maxSide = 1350;
   const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
   const canvas = document.createElement("canvas");

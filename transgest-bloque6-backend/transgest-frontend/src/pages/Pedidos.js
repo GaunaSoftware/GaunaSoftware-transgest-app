@@ -9478,6 +9478,7 @@ export default function Pedidos() {
       delete payloadExtra.__facturacionResuelta;
       await cambiarEstadoPedido(id, estado, payloadExtra);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
+      if (confirmaCargaReal) await ofrecerKmVacioTrasCarga(id);
       return true;
     } catch(e) {
       // Revert on error
@@ -10032,19 +10033,20 @@ export default function Pedidos() {
     return [p];
   }
 
-  // Al asignar un chofer a un pedido desde Pedidos: calcula los km EN VACIO de
-  // posicionamiento hasta el origen de este viaje. El punto de partida se decide
-  // por cascada en el backend (robusta al orden de grabacion): GPS del camion si
-  // es reciente y el viaje sale pronto -> destino del viaje anterior por fecha ->
-  // base de la empresa. Los km se muestran editables antes de anadirlos.
-  async function ofrecerKmVacioPorChoferAsignado(pedido, patch, choferId) {
+  // La asignación es provisional hasta cerrar la carga. Solo entonces se ofrece
+  // el posicionamiento en vacío para el conductor y vehículo vigentes.
+  async function ofrecerKmVacioTrasCarga(pedidoId) {
     try {
-      if (!choferId || !pedido?.id) return;
-      if (Number(pedido.km_vacio) > 0) return;                 // ya tiene km en vacio: no molestar
+      const pedido = await getPedido(pedidoId);
+      const choferId = pedido?.chofer_id;
+      const vehiculoId = pedido?.vehiculo_id;
+      if (!choferId || !vehiculoId || pedido?.colaborador_id || !["en_curso", "espera_descarga", "descarga", "entregado"].includes(String(pedido?.estado || "").toLowerCase())) return;
+      if (Number(pedido.km_vacio) > 0) return;
       const origen = String(pedido.origen || "").trim();
       if (!origen) return;
-      const cargaFecha = String(pedido.fecha_carga || parseStops(pedido.puntos_carga)[0]?.fecha || "").slice(0, 10);
-      const info = await getChoferUltimoViaje(choferId, pedido.id, cargaFecha, patch?.vehiculo_id || "");
+      const cargaFecha = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" })
+        .format(new Date(pedido.carga_real_at || Date.now()));
+      const info = await getChoferUltimoViaje(choferId, pedido.id, cargaFecha, vehiculoId, true);
       const desde = String(info?.desde || "").trim();
       if (!info?.hay || !desde) return;
       if (desde.toUpperCase() === origen.toUpperCase()) return; // mismo sitio
@@ -10064,10 +10066,15 @@ export default function Pedidos() {
       if (kmStr === null || kmStr === undefined) return;       // cancelado
       const kmFinal = Math.max(0, Math.round(Number(String(kmStr).replace(",", ".")) || 0));
       if (kmFinal <= 0) return;
-      await editarPedido(pedido.id, buildPedidoUpdatePayload(pedido, { ...patch, km_vacio: kmFinal }));
+      const vigente = await getPedido(pedidoId);
+      if (String(vigente?.chofer_id || "") !== String(choferId) || String(vigente?.vehiculo_id || "") !== String(vehiculoId) || vigente?.colaborador_id || Number(vigente?.km_vacio) > 0 || !["en_curso", "espera_descarga", "descarga", "entregado"].includes(String(vigente?.estado || "").toLowerCase())) {
+        notify("La asignación o los km del pedido han cambiado. Revisa el viaje antes de añadir km en vacío.", "warning");
+        return;
+      }
+      await editarPedido(pedidoId, buildPedidoUpdatePayload(vigente, { km_vacio: kmFinal }));
       notify(`Añadidos ${kmFinal.toLocaleString("es-ES")} km en vacío.`, "success");
       cargar({ silent: true });
-    } catch { /* no bloquea la asignacion */ }
+    } catch { /* No revierte la carga si la sugerencia de km no está disponible. */ }
   }
 
   async function aplicarQuickAssign(patch) {
@@ -10100,13 +10107,12 @@ export default function Pedidos() {
         await editarPedido(p.id, buildPedidoUpdatePayload(p, patch));
         notify("Asignacion guardada.", "success");
       }
-      const choferAsignado = !enLote ? (patch.chofer_id || "") : "";
       setQuickAssignPedido(null);
       cargar({ silent: true });
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: p.id, source: "pedidos-quick-assign" } }));
-      // Si se asigno un chofer que viene de un viaje en curso/finalizado, ofrecer
-      // anadir los km en vacio de posicionamiento (destino anterior -> este origen).
-      if (choferAsignado) ofrecerKmVacioPorChoferAsignado(p, patch, choferAsignado);
+      // Si se asigna un viaje que ya estaba cargado, pedir los km ahora.
+      // En viajes aún por cargar, la asignación sigue siendo provisional.
+      if (!enLote && patch.chofer_id) await ofrecerKmVacioTrasCarga(p.id);
     } catch (e) {
       notify(e.message || "No se pudo asignar.", "error");
     }

@@ -521,8 +521,8 @@ export const crearPortalProveedor = (pedidoId) =>
 export const getDisponibilidadRecursos = (fecha = "", excluirPedidoId = "") =>
   apiFetch(`/pedidos/disponibilidad?fecha=${encodeURIComponent(fecha)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}`, { silentError: true });
 
-export const getChoferUltimoViaje = (choferId, excluirPedidoId = "", antesDe = "", vehiculoId = "") =>
-  apiFetch(`/pedidos/chofer-ultimo-viaje?chofer_id=${encodeURIComponent(choferId)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}${antesDe ? `&antes_de=${encodeURIComponent(antesDe)}` : ""}${vehiculoId ? `&vehiculo_id=${encodeURIComponent(vehiculoId)}` : ""}`, { silentError: true });
+export const getChoferUltimoViaje = (choferId, excluirPedidoId = "", antesDe = "", vehiculoId = "", trasCarga = false) =>
+  apiFetch(`/pedidos/chofer-ultimo-viaje?chofer_id=${encodeURIComponent(choferId)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}${antesDe ? `&antes_de=${encodeURIComponent(antesDe)}` : ""}${vehiculoId ? `&vehiculo_id=${encodeURIComponent(vehiculoId)}` : ""}${trasCarga ? "&tras_carga=1" : ""}`, { silentError: true });
 // borrador=true guarda el grupaje como provisional (agrupado pero sin confirmar).
 export const combinarGrupaje = (pedidoIds = [], borrador = false) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds, borrador, client_operation_uuid: crypto.randomUUID() } });
 export const confirmarGrupaje = (grupajeId) => apiFetch("/pedidos/grupaje/confirmar", { method: "POST", body: { grupaje_id: grupajeId, client_operation_uuid: crypto.randomUUID() } });

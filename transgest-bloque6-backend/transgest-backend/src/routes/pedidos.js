@@ -1634,18 +1634,17 @@ async function updateVehiculoKmFromOdometer(empresaId, vehiculoId, km) {
   ).catch(e => logger.warn("No se pudo actualizar km del vehiculo desde app chofer:", e.message));
 }
 
-async function aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch = {}, actorId = null }) {
+async function aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch = {}, choferId = null, actorId = null }) {
   const kmCarga = Number(patch.km_carga);
-  if (!Number.isFinite(kmCarga) || kmCarga < 0) return null;
   const { rows: pedidoRows } = await db.query(
-    `SELECT id, vehiculo_id, origen, destino, fecha_carga, fecha_pedido, km_vacio
+    `SELECT id, vehiculo_id, chofer_id, chofer2_id, colaborador_id, carga_real_at, origen, destino, fecha_carga, fecha_pedido, km_vacio
        FROM pedidos
       WHERE id=$1 AND empresa_id=$2
       LIMIT 1`,
     [pedidoId, empresaId]
   );
   const pedido = pedidoRows[0];
-  if (!pedido?.vehiculo_id) return null;
+  if (!require('../services/emptyKmTiming').shouldCalculateEmptyKmAfterLoad({ step: patch, order: pedido, driverId: choferId })) return null;
 
   const { rows: prevRows } = await db.query(
     `SELECT p.id, p.numero, p.destino, p.fecha_descarga, p.fecha_entrega, p.fecha_carga,
@@ -1669,13 +1668,17 @@ async function aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch = {}, actor
   const kmVacio = Math.round((kmCarga - kmDescarga) * 100) / 100;
   if (kmVacio <= 0 || kmVacio > 2000) return null;
 
-  await db.query(
+  const { rows: updatedRows } = await db.query(
     `UPDATE pedidos
         SET km_vacio=$1,
             updated_at=NOW()
-      WHERE id=$2 AND empresa_id=$3 AND COALESCE(km_vacio,0)=0`,
-    [kmVacio, pedidoId, empresaId]
+      WHERE id=$2 AND empresa_id=$3 AND COALESCE(km_vacio,0)=0
+        AND carga_real_at IS NOT NULL AND vehiculo_id=$4
+        AND (chofer_id=$5 OR chofer2_id=$5)
+      RETURNING id`,
+    [kmVacio, pedidoId, empresaId, pedido.vehiculo_id, choferId]
   );
+  if (!updatedRows.length) return null;
   const nota = `app_chofer:pedido:${pedidoId}`;
   await db.query(
     "DELETE FROM vehiculo_km_vacio WHERE empresa_id=$1 AND vehiculo_id=$2 AND notas=$3",
@@ -1937,8 +1940,8 @@ async function savePedidoChoferPasos({
   ).catch(() => ({ rows: [] }));
   const vehiculoId = pedidoRows[0]?.vehiculo_id || null;
   await updateVehiculoKmFromOdometer(empresaId, vehiculoId, patch.km_descarga ?? patch.km_carga);
-  if (patch.km_carga !== undefined) {
-    await aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch: nextData, actorId }).catch(e => logger.warn("No se pudo calcular km en vacio desde pasos:", e.message));
+  if (patch.carga_ok === true && patch.km_carga !== undefined) {
+    await aplicarKmVacioDesdePasos({ pedidoId, empresaId, patch: nextData, choferId, actorId }).catch(e => logger.warn("No se pudo calcular km en vacio desde pasos:", e.message));
   }
   if (patch.carga_iniciada && patch.carga_ubicacion) {
     await guardarUbicacionCargaDesdeChofer({ pedidoId, empresaId, location: patch.carga_ubicacion, actorId, paradaId:patch.parada_id })
@@ -5978,11 +5981,14 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
     const vehiculoId = normalizePedidoUuid(req.query?.vehiculo_id);
     const excluir = normalizePedidoUuid(req.query?.excluir);
     const antesDe = normalizePedidoDate(req.query?.antes_de);
+    const trasCarga = req.query?.tras_carga === "1";
     if (!empresaId || !choferId) return res.json({ hay: false });
 
     // Cascada para el punto de partida del posicionamiento en vacio, robusta al
     // orden en que se graban los viajes: 1) GPS del camion si es reciente y el
     // viaje sale pronto, 2) destino del viaje anterior por fecha, 3) base empresa.
+    // Tras la carga el GPS puede estar ya en el origen: no sirve para estimar
+    // el posicionamiento previo en vacío.
 
     // -- Fecha de carga cercana a hoy? (para decidir si el GPS actual es relevante)
     let cargaCercana = true;
@@ -5994,7 +6000,7 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
     }
 
     // 1) GPS del vehiculo asignado (ubicacion reciente <= 2 dias)
-    if (vehiculoId && cargaCercana) {
+    if (vehiculoId && cargaCercana && !trasCarga) {
       const gps = await db.query(
         "SELECT ubicacion_actual, ubicacion_ts FROM vehiculos WHERE id=$1 AND empresa_id=$2",
         [vehiculoId, empresaId]
@@ -6007,19 +6013,20 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
       }
     }
 
-    // 2) Viaje anterior por fecha (predecesor cronologico real)
+    // 2) Viaje anterior por fecha. Tras cargar, los km en vacío pertenecen al
+    // camión que hizo el posicionamiento, aunque haya cambiado de conductor.
     const { rows } = await db.query(
       `SELECT id, numero, destino, destino_provincia, destino_pais, estado::text AS estado
          FROM pedidos
         WHERE empresa_id=$1
-          AND (chofer_id=$2 OR chofer2_id=$2)
+          AND (($6::boolean AND vehiculo_id=$5) OR (NOT $6::boolean AND (chofer_id=$2 OR chofer2_id=$2)))
           AND ($3::uuid IS NULL OR id<>$3)
           AND estado::text IN ('en_curso','descarga','entregado','facturado')
           AND NULLIF(TRIM(COALESCE(destino,'')),'') IS NOT NULL
           AND ($4::date IS NULL OR COALESCE(fecha_entrega, fecha_descarga, fecha_carga) <= $4::date)
         ORDER BY COALESCE(fecha_entrega, fecha_descarga, fecha_carga) DESC NULLS LAST, updated_at DESC NULLS LAST
         LIMIT 1`,
-      [empresaId, choferId, excluir || null, antesDe || null]
+      [empresaId, choferId, excluir || null, antesDe || null, vehiculoId || null, trasCarga]
     );
     const p = rows[0];
     if (p) {
@@ -7852,7 +7859,8 @@ router.patch("/:id/chofer-pasos", async (req, res) => {
     const saved = await savePedidoChoferPasos({
       pedidoId: req.params.id,
       empresaId,
-      choferId: pedido.chofer_id || pedido.chofer2_id || null,
+      choferId: driverAccess?.choferIds.find(id => [pedido.chofer_id, pedido.chofer2_id].some(assigned => String(assigned || '') === String(id)))
+        || pedido.chofer_id || pedido.chofer2_id || null,
       patch,
       actorTipo: req.user?.rol === "chofer" ? "chofer" : "usuario",
       actorId: req.user?.id || null,

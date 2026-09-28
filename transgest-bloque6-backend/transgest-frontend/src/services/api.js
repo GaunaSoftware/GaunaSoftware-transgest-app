@@ -864,6 +864,8 @@ export const getAvisosOperativosColaboradores = () => apiFetch("/notificaciones/
 export const leerTodosAvisosOperativos = () => apiFetch('/notificaciones/operativas/leer-todas', { method:'POST', body:{}, silentSuccess:true });
 export const getCentroAvisos = () => apiFetch('/notificaciones/centro', { silentSuccess:true, silentError:true });
 export const guardarConfiguracionAvisos = data => apiFetch('/notificaciones/configuracion', { method:'PUT', body:data, silentSuccess:true });
+export const getPolizasEmpresa = () => apiFetch('/notificaciones/seguros', { silentSuccess:true });
+export const guardarPolizaEmpresa = (data,id) => apiFetch(`/notificaciones/seguros${id ? `/${encodeURIComponent(id)}` : ''}`, { method:id?'PUT':'POST', body:data });
 export const getAvisosOperativosIgnorados = (params={}) => apiFetch(`/notificaciones/operativas/ignorados?${new URLSearchParams(params)}`, { silentSuccess:true });
 export const crearAgendaAvisoOperativoColaborador = (alert, data = {}) =>
   apiFetch("/notificaciones/operativas/colaboradores/agenda", { method:"POST", body:{ alert, ...data } });

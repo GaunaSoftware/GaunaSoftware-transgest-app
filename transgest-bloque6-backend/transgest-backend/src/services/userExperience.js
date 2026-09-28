@@ -33,7 +33,7 @@ async function agendaPreferences(db, user) {
 }
 async function saveAgendaPreferences(db, user, types) {
   const config = await agendaPreferences(db, user);
-  if (!Array.isArray(types) || types.length > 5 || new Set(types).size !== types.length || types.some(t => !config.allowed.some(a => a.key === t)))
+  if (!Array.isArray(types) || types.length > config.allowed.length || new Set(types).size !== types.length || types.some(t => !config.allowed.some(a => a.key === t)))
     throw Object.assign(new Error('Selecciona solo tipos de aviso autorizados para tu perfil.'), { status: 400 });
   await db.query(`INSERT INTO agenda_preferences(usuario_id,empresa_id,notice_types) VALUES($1,$2,$3::jsonb)
     ON CONFLICT(usuario_id,empresa_id) DO UPDATE SET notice_types=EXCLUDED.notice_types,updated_at=NOW()`, [user.id,user.empresa_id,JSON.stringify(types)]);

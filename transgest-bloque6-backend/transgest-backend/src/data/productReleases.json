@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-insurance-expiries",
+    "date": "2026-09-28",
+    "title": "Seguros y vencimientos más claros",
+    "intro": "Estas mejoras te ayudan a preparar las renovaciones con tiempo.",
+    "items": [
+      { "title": "Pólizas de empresa en Avisos", "text": "Gerencia puede registrar seguros generales y su vencimiento. Las personas autorizadas verán los próximos avisos y podrán abrir la póliza desde ellos.", "module": "empresa" },
+      { "title": "Cada seguro en su lugar", "text": "Los seguros de vehículos siguen en la ficha de la matrícula. Los importes de referencia de una póliza son informativos y no crean gastos automáticamente.", "module": "vehiculos" }
+    ]
+  },
+  {
     "id": "2026-09-agenda-updates",
     "date": "2026-09-27",
     "title": "Tu día, mejor organizado",

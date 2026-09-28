@@ -7,6 +7,7 @@ const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = requ
 const { assertSupplierOrder } = require("../services/supplierOrder");
 const transportDocuments = require("../services/transportDocumentVersions");
 const orderInbox = require("../services/orderInbox");
+const { extractTabularLoadOrderPdf, applyTabularLoadOrder, taxId: normalizeOrderTaxId } = require('../services/orderPdfRoles');
 const express = require("express");
 const { syncOrderIncidents } = require('../services/agendaIncidents');
 const { body, validationResult } = require("express-validator");
@@ -3844,6 +3845,10 @@ function normalizeAiText(value = "") {
     .replace(/\r/g, "\n");
 }
 
+function normalizeAiParty(value = '') {
+  return normalizeAiText(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 function pickAiMatch(text, patterns = []) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -4068,6 +4073,7 @@ Extrae los datos de una orden de transporte, email, PDF o imagen. Devuelve SOLO 
 Campos esperados:
 {
   "cliente_nombre": string|null,
+  "cliente_cif": string|null,
   "origen": string|null,
   "destino": string|null,
   "fecha_carga": "YYYY-MM-DD"|null,
@@ -4085,6 +4091,8 @@ Campos esperados:
   "importe": number|null,
   "referencia_cliente": string|null,
   "matricula_detectada": string|null,
+  "puntos_carga": [{"cliente_nombre": string|null, "direccion": string|null, "ciudad": string|null, "provincia": string|null, "codigo_postal": string|null, "fecha": "YYYY-MM-DD"|null, "hora": "HH:MM"|null, "ventana": string|null}],
+  "puntos_descarga": [{"cliente_nombre": string|null, "direccion": string|null, "ciudad": string|null, "provincia": string|null, "codigo_postal": string|null, "fecha": "YYYY-MM-DD"|null, "hora": "HH:MM"|null, "ventana": string|null}],
   "notas_detectadas": string|null
 }
 
@@ -4093,6 +4101,9 @@ Reglas:
 - Si ves precio por tonelada, usa tipo_precio="tonelada" y precio_unitario como EUR/tonelada.
 - Si hay minimo facturable por toneladas, pon minimo_unidades en toneladas.
 - En un "Pedido a proveedor" de transporte, cliente_nombre es la empresa que emite/solicita el pedido, no la empresa transportista que lo recibe como proveedor.
+- En una orden con "Carg. Cont." y "Tta. Efectivo", el cliente es el cargador contractual; el transportista efectivo no es el cliente. Los nombres de recogida y entrega son puntos operativos, no clientes de facturacion.
+- Conserva por separado cada recogida y entrega con su nombre, direccion, poblacion, fecha y ventana. No conviertas la localidad del domicilio fiscal del emisor o transportista en origen o destino.
+- Un precio del encargo al transportista solo es precio del servicio de ese transportista; no lo atribuyas a otro papel comercial. Si su significado no esta claro, usa null.
 - Una expresion de ruta como "SAN MIGUEL DE SALINAS A MADRID" significa origen SAN MIGUEL DE SALINAS y destino MADRID.
 - Para el precio del viaje usa la base/importe del servicio de transporte sin IVA, no el total con impuestos.
 - No inventes datos. Usa null si no esta claro.
@@ -4290,6 +4301,7 @@ function mergeAiDraftFields(draft = {}, ai = {}) {
     if (next[key] === null || next[key] === undefined || next[key] === "") next[key] = transform(value);
   };
   setIf("cliente_nombre", ai.cliente_nombre);
+  setIf("cliente_cif", ai.cliente_cif);
   setIf("origen", ai.origen, v => String(v).toUpperCase());
   setIf("destino", ai.destino, v => String(v).toUpperCase());
   setIf("fecha_carga", normalizeAiDate(ai.fecha_carga));
@@ -8258,6 +8270,14 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     name: a.name,
     text: await extractAiAttachmentText(a),
   })))).filter(a => a.text && a.text.length >= 12);
+  const tabularCandidates = attachments.filter(a =>
+    a.mediaType === 'application/pdf' && attachmentTexts.some(t => t.name === a.name &&
+      /Carg\.?\s*Cont/i.test(t.text) && /Tta\.?\s*Efectivo/i.test(t.text)));
+  const tabularOrders = (await Promise.all(tabularCandidates.map(async a => {
+    try { return await extractTabularLoadOrderPdf(decodeAiAttachmentBase64(a.base64)); }
+    catch (error) { logger.warn(`Bandeja IA: tabla de orden PDF no legible (${a.name}): ${error.message}`); return null; }
+  }))).filter(Boolean);
+  const tabularOrder = tabularOrders.length === 1 ? tabularOrders[0] : null;
   const texto = [textoOriginal, ...attachmentTexts.map(a => `Documento ${a.name}:\n${a.text}`)]
     .filter(Boolean)
     .join("\n\n---\n\n")
@@ -8277,7 +8297,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     const warnings = [];
     const suggestions = [];
     let visualAi = { used: false };
-    if (hasAiAttachment) {
+    if (hasAiAttachment && !tabularOrder) {
       try {
         visualAi = await callPedidoDocumentAi({ empresaId, texto, attachments });
         if (visualAi.used && visualAi.parsed) {
@@ -8309,25 +8329,45 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       }
     }
 
-    const { rows: clientesRows } = await db.query(
+    if (tabularOrder) {
+      // The PDF's positioned table is more reliable than the flattened text or
+      // a model response for contractual party and stop roles.
+      draft = applyTabularLoadOrder(draft, tabularOrder);
+      suggestions.push({ type:'orden_estructurada', label:'Roles y puntos identificados',
+        detail:`Cliente: ${tabularOrder.customer}; transportista: ${tabularOrder.carrier}; ${tabularOrder.loads.length} carga(s) y ${tabularOrder.unloads.length} descarga(s).`, confidence:0.98 });
+    } else if (tabularOrders.length > 1) {
+      issues.push({ key:'varias_ordenes', severity:'alta', message:'Hay varias órdenes de carga en los adjuntos. Revisa cada pedido por separado.' });
+    } else if (tabularCandidates.length) {
+      warnings.push({ key:'orden_tabular', severity:'media', message:'La tabla de la orden no pudo verificarse. Revisa cliente, transportista y puntos antes de guardar.' });
+    }
+
+    const nameKey = normalizeAiParty(draft.cliente_nombre);
+    const cifKey = normalizeOrderTaxId(draft.cliente_cif);
+    const { rows: clientesRows } = nameKey || cifKey ? await db.query(
       `SELECT id,nombre,cif,email,email_facturacion
          FROM clientes
         WHERE empresa_id=$1 AND activo IS DISTINCT FROM false
-        ORDER BY nombre
-        LIMIT 500`,
-      [empresaId]
-    );
-    const cleanNeedle = normalizeAiText(draft.cliente_nombre || "").toLowerCase();
-    const clienteMatch = clientesRows.find(c => {
-      const n = normalizeAiText(c.nombre || "").toLowerCase();
-      return cleanNeedle && (n.includes(cleanNeedle) || cleanNeedle.includes(n));
-    }) || clientesRows.find(c => normalizeAiText(texto).toLowerCase().includes(normalizeAiText(c.nombre || "").toLowerCase()));
+          AND (($2<>'' AND REGEXP_REPLACE(UPPER(COALESCE(cif,'')),'[^A-Z0-9]','','g')=$2)
+            OR ($3<>'' AND REGEXP_REPLACE(TRANSLATE(UPPER(nombre),'ÁÉÍÓÚÜÑ','AEIOUUN'),'[^A-Z0-9]','','g')=$3))
+        LIMIT 10`,
+      [empresaId,cifKey,nameKey]
+    ) : { rows:[] };
+    const byTax = cifKey ? clientesRows.filter(c => normalizeOrderTaxId(c.cif) === cifKey) : [];
+    const byName = nameKey ? clientesRows.filter(c => normalizeAiParty(c.nombre) === nameKey) : [];
+    const conflictingIdentity = byTax.length === 1 && byName.length === 1 && byTax[0].id !== byName[0].id;
+    const candidates = byTax.length ? byTax : byName;
+    const clienteMatch = !conflictingIdentity && candidates.length === 1 &&
+      normalizeAiParty(candidates[0].nombre) !== normalizeAiParty(draft.transportista_detectado)
+      ? candidates[0] : null;
     if (clienteMatch) {
       draft.cliente_id = clienteMatch.id;
       draft.cliente_nombre = clienteMatch.nombre;
-      suggestions.push({ type: "cliente", label: "Cliente encontrado", detail: clienteMatch.nombre, confidence: cleanNeedle ? 0.92 : 0.78 });
+      suggestions.push({ type: "cliente", label: "Cliente encontrado", detail: clienteMatch.nombre, confidence: byTax.length ? 0.98 : 0.92 });
     } else {
-      issues.push({ key: "cliente_id", severity: "alta", message: "No se ha podido asociar el cliente. Seleccionalo o crealo antes de guardar." });
+      draft.cliente_id = null;
+      issues.push({ key: "cliente_id", severity: "alta", message: conflictingIdentity
+        ? 'El NIF y el nombre señalan clientes distintos. Verifica el cargador contractual antes de guardar.'
+        : `No se ha podido asociar de forma unívoca el cliente${draft.cliente_nombre ? ` ${draft.cliente_nombre}` : ''}. Selecciónalo o créalo antes de guardar.` });
     }
 
     const vehText = draft.matricula_detectada;

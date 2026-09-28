@@ -6,6 +6,7 @@ const TYPES = {
   vehiculos: { label: 'Vehículos y remolques', module: 'vehiculos', days: 30 },
   choferes: { label: 'Conductores', module: 'choferes', days: 30 },
   plataformas: { label: 'Plataformas', module: null, days: 30 },
+  seguros: { label: 'Seguros de empresa', module: 'empresa', days: 90 },
 };
 const OFFICE_ROLES = new Set(['gerente','contable','administrativo','trafico','responsable_taller','mecanico']);
 const can = (user, module, action = 'ver') => normalizePermissionsForRole(user?.permisos, user?.rol)?.modulos?.[module]?.[action] === true;
@@ -25,15 +26,16 @@ async function settings(db, user) {
 }
 async function saveSettings(db, user, input) {
   if (user.rol !== 'gerente' || !can(user, 'avisos', 'editar')) throw Object.assign(new Error('Solo gerencia con permiso de edición puede configurar avisos.'), { status: 403 });
-  if (!Array.isArray(input) || input.length !== Object.keys(TYPES).length || new Set(input.map(r => r.key)).size !== input.length || input.some(r => !TYPES[r.key] || typeof r.enabled !== 'boolean' || !Number.isInteger(r.days) || r.days < 0 || r.days > 365))
+  if (!Array.isArray(input) || !input.length || input.length > Object.keys(TYPES).length || new Set(input.map(r => r.key)).size !== input.length || input.some(r => !TYPES[r.key] || typeof r.enabled !== 'boolean' || !Number.isInteger(r.days) || r.days < 0 || r.days > 365))
     throw Object.assign(new Error('Configura cada tipo con una antelación de 0 a 365 días.'), { status: 400 });
   const records = input.map(r => ({ tipo_aviso: r.key, activo: r.enabled, dias_aviso: r.days }));
   // Preserve maintenance rules and concurrent changes to unrelated configuration.
-  await db.query(`UPDATE empresas SET cfg_alertas=COALESCE((SELECT jsonb_agg(r) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(cfg_alertas)='array' THEN cfg_alertas ELSE '[]'::jsonb END) r WHERE NOT (r ? 'tipo_aviso')),'[]'::jsonb) || $2::jsonb WHERE id=$1`, [user.empresa_id, JSON.stringify(records)]);
+  await db.query(`UPDATE empresas SET cfg_alertas=COALESCE((SELECT jsonb_agg(r) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(cfg_alertas)='array' THEN cfg_alertas ELSE '[]'::jsonb END) r WHERE NOT (r ? 'tipo_aviso') OR NOT ((r->>'tipo_aviso')=ANY($3::text[]))),'[]'::jsonb) || $2::jsonb WHERE id=$1`, [user.empresa_id, JSON.stringify(records), input.map(r=>r.key)]);
   return settings(db, user);
 }
 function difference(date, today) { return Math.round((Date.parse(`${day(date)}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86400000); }
 function target(type, id, extra = {}) {
+  if (type === 'seguros') return { view: 'avisos', focusKey: 'tms_seguros_focus', focus: { poliza_id: id, source: 'avisos', ...extra } };
   const entity = type === 'facturas' ? 'factura' : type === 'choferes' ? 'chofer' : 'vehiculo';
   const view = type === 'facturas' ? 'facturacion' : type === 'choferes' ? 'choferes' : 'vehiculos';
   return { view, focusKey: `tms_${view}_focus`, focus: { [`${entity}_id`]: id, source: 'avisos', section: 'documentacion', open: true, ...extra } };
@@ -82,6 +84,11 @@ async function readNotices(db, user, { now = new Date(), category = '', text = '
       }
     });
   }
+  if (can(user, 'empresa')) await read('seguros', async () => {
+    const { rows } = await db.query(`SELECT id,aseguradora,cobertura,matricula_referencia,fecha_vencimiento FROM empresa_polizas_seguro
+      WHERE empresa_id=$1 AND activo=TRUE AND fecha_vencimiento <= $2::date + 365`, [user.empresa_id,today]);
+    for (const p of rows) add('seguros', p.id, `${p.cobertura}${p.matricula_referencia ? ` · ${p.matricula_referencia}` : ''} · ${p.aseguradora}`, p.fecha_vencimiento, target('seguros',p.id), { entity: p.aseguradora });
+  });
   await read('operativa', async () => { items.push(...await require('./agendaNotices').readOperationalNotices(db,user)); });
   const filtered = items.filter(i => (!category || i.category === category) && (!text || `${i.title} ${i.entity || ''}`.toLocaleLowerCase('es').includes(text.toLocaleLowerCase('es')))).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   return { items: filtered, total: filtered.length, categories: cfg, errors, coverage: errors.length ? 'parcial' : 'completo', date: today, updated_at: new Date().toISOString() };

@@ -1,5 +1,7 @@
 import { useAuth } from "../context/AuthContext";
 import { NoticeList, NoticeSettings, useNoticeCenter } from "../components/NoticeCenter";
+import CompanyInsurance from "../components/CompanyInsurance";
+import useRuntimeFocus from "../hooks/useRuntimeFocus";
 import { openNotice } from "../services/noticeNavigation";
 import { PageHeader, Button } from "../ui";
 import "./workspace/workspace.css";
@@ -131,7 +133,9 @@ function dedupeNotificaciones(rows = []) {
 export default function Avisos() {
   const { user, puedeVer, puedeEditar } = useAuth();
   const notices = useNoticeCenter();
+  const insuranceFocus = useRuntimeFocus('tms_seguros_focus');
   const canConfigure = user?.rol === "gerente" && puedeEditar("avisos");
+  const canEditInsurance = user?.rol === 'gerente' && puedeEditar('empresa');
   const [docs,      setDocs]      = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [filtro,    setFiltro]    = useState("todos");
@@ -147,6 +151,8 @@ export default function Avisos() {
   const [noLeidas, setNoLeidas] = useState(0);
   const [loadErrors,setLoadErrors] = useState([]);
   const [notificationError,setNotificationError] = useState('');
+
+  useEffect(()=>{ if (insuranceFocus?.poliza_id && puedeVer('empresa')) setTab('polizas'); },[insuranceFocus,puedeVer]);
 
   const TIPOS_MANT = ["Cambio aceite","Cambio filtros","Cambio neumáticos","Revisión frenos","Cambio correa distribución","Revisión tacógrafo","Mantenimiento preventivo","Revisión ITV","Otro"];
 
@@ -413,7 +419,7 @@ export default function Avisos() {
       </div>
       {/* Main tabs */}
       <div className="notices-tabs" role="tablist" aria-label="Secciones de avisos">
-        {[["vencimientos","Todos los avisos"],...(puedeVer("pedidos") ? [["operativa","Tráfico y pedidos"]] : []),...(notices.data?.categories || []).map(c=>[c.key,c.label]),["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configuración"]].map(([id,l])=>(
+        {[["vencimientos","Todos los avisos"],...(puedeVer("pedidos") ? [["operativa","Tráfico y pedidos"]] : []),...(notices.data?.categories || []).map(c=>[c.key,c.label]),...(puedeVer('empresa') ? [['polizas','Pólizas de empresa']] : []),["internos",`Internos${noLeidas>0?` (${noLeidas})`:""}`],["documentos","Documentación"],["mantenimiento",`Mantenimiento${avisosMant.length>0?` (${avisosMant.length})`:""}`],["config","Configuración"]].map(([id,l])=>(
           <button key={id} role="tab" aria-selected={tab===id} onClick={()=>setTab(id)}
             style={{padding:"7px 16px",border:"none",borderBottom:`2px solid ${tab===id?"var(--accent-l)":"transparent"}`,
                     background:"none",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer",
@@ -422,7 +428,9 @@ export default function Avisos() {
           </button>
         ))}
       </div>
-      {['vencimientos','operativa','facturas','vehiculos','choferes','plataformas'].includes(tab) && <NoticeList data={notices.data} category={tab==='vencimientos'?'':tab} error={notices.error} reload={notices.reload}/>}
+      {tab==='seguros' && puedeVer('empresa') && <div className="insurance-toolbar"><Button onClick={()=>setTab('polizas')}>Ver todas las pólizas</Button></div>}
+      {['vencimientos','operativa','facturas','vehiculos','choferes','plataformas','seguros'].includes(tab) && <NoticeList data={notices.data} category={tab==='vencimientos'?'':tab} error={notices.error} reload={notices.reload}/>}
+      {tab==='polizas' && puedeVer('empresa') && <CompanyInsurance canEdit={canEditInsurance} onSaved={notices.reload}/>}
       {!!loadErrors.length && <div className="notices-error" role="alert">No se pudieron consultar: {loadErrors.join(', ')}. Los resultados pueden estar incompletos.</div>}
       {tab === 'internos' && notificationError && <div className="notices-error" role="alert">{notificationError} Pulsa Actualizar para reintentar.</div>}
 

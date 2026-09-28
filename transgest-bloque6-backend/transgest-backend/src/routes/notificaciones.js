@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../services/db");
 const noticeCenter = require('../services/noticeCenter');
+const companyInsurance = require('../services/companyInsurance');
 const operativeRead = require('../services/operativeReadState');
 const {
   crearNotificacion,
@@ -424,6 +425,15 @@ router.get('/configuracion', async (req, res, next) => {
 });
 router.put('/configuracion', async (req, res, next) => {
   try { res.json(await noticeCenter.saveSettings(db, req.user, req.body)); } catch (e) { next(e); }
+});
+router.get('/seguros', async (req, res, next) => {
+  try { res.json(await companyInsurance.list(db, req.user)); } catch (e) { next(e); }
+});
+router.post('/seguros', async (req, res, next) => {
+  try { res.status(201).json(await companyInsurance.save(db, req.user, req.body)); } catch (e) { next(e); }
+});
+router.put('/seguros/:id', async (req, res, next) => {
+  try { res.json(await companyInsurance.save(db, req.user, req.body, req.params.id)); } catch (e) { next(e); }
 });
 router.post('/operativas/leer-todas', async (req, res, next) => {
   try {

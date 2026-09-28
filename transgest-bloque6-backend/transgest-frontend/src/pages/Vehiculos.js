@@ -5,7 +5,7 @@ import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
 import StoredDocumentButton from "../components/StoredDocumentButton";
 import "./fleet/fleet.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, actualizarKmVehiculo, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
+import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { confirmDialog, notify } from "../services/notify";
@@ -1317,7 +1317,8 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                 </div>
                 <div>
                   <label style={S.lbl}>KM actuales</label>
-                  <input type="number" min="0" style={S.inp} value={form.km_actuales||""} onChange={f("km_actuales")} onBlur={e=>{ const id=editando?.id||form?.id; if(id&&e.target.value) actualizarKmVehiculo(id, Number(e.target.value)).catch(()=>{}); }} onFocus={e=>e.target.select()}/>
+                  <input type="number" style={S.inp} value={editando?.km_actuales ?? form.km_actuales ?? ""} readOnly aria-describedby="vehiculo-km-source"/>
+                  <small id="vehiculo-km-source">Se actualiza con la jornada del chófer o una lectura verificada en taller.</small>
                 </div>
                 <div>
                   <label style={S.lbl}>Ubicación actual</label>

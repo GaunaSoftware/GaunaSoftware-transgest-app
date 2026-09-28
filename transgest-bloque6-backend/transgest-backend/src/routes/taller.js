@@ -1032,6 +1032,7 @@ router.post("/intervenciones", PUEDE_EDITAR_TALLER, async (req, res) => {
     factura_proveedor_file_mime, factura_proveedor_file_base64,
   } = req.body || {};
   if (!tipo) return res.status(400).json({ error: "Tipo obligatorio" });
+  if (estado === "cerrada") return res.status(400).json({ error: "Cierra la orden desde la acción de cierre, con lectura de kilómetros y costes verificados." });
   const origen = String(origen_taller || (taller_externo ? "externo" : "propio")).trim().toLowerCase() === "externo" ? "externo" : "propio";
   const manoObra = origen === "externo" ? 0 : num(coste_mano_obra);
   const facturaImporte = num(factura_proveedor_importe);
@@ -1083,6 +1084,7 @@ router.put("/intervenciones/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
     factura_proveedor_file_mime, factura_proveedor_file_base64,
   } = req.body || {};
   if (!tipo) return res.status(400).json({ error: "Tipo obligatorio" });
+  if (estado === "cerrada") return res.status(400).json({ error: "Cierra la orden desde la acción de cierre, con lectura de kilómetros y costes verificados." });
   const origen = String(origen_taller || (taller_externo ? "externo" : "propio")).trim().toLowerCase() === "externo" ? "externo" : "propio";
   const manoObra = origen === "externo" ? 0 : num(coste_mano_obra);
   const facturaImporte = num(factura_proveedor_importe);
@@ -1114,7 +1116,7 @@ router.put("/intervenciones/:id", PUEDE_EDITAR_TALLER, async (req, res) => {
             factura_proveedor_file_mime=COALESCE($20, factura_proveedor_file_mime),
             factura_proveedor_file_base64=COALESCE($21, factura_proveedor_file_base64),
             updated_at=NOW()
-      WHERE id=$8 AND empresa_id=$11
+      WHERE id=$8 AND empresa_id=$11 AND estado<>'cerrada'
       RETURNING *`,
     [
       emptyToNull(vehiculo_id),
@@ -1231,31 +1233,40 @@ router.post("/intervenciones/:id/piezas", PUEDE_EDITAR_TALLER, async (req, res) 
   res.status(201).json(result);
 });
 
-router.post("/intervenciones/:id/cerrar", PUEDE_EDITAR_TALLER, async (req, res) => {
+router.post("/intervenciones/:id/cerrar", requireRole("gerente", "responsable_taller"), async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const empresa = empresaId(req);
-  const pending = await db.query(
-    `SELECT COUNT(*)::int AS n
-       FROM taller_intervencion_piezas
-      WHERE intervencion_id=$1 AND empresa_id=$2
-        AND (pendiente_asignar=true OR escaneado=false)`,
-    [req.params.id, empresa]
-  );
-  if (pending.rows[0].n > 0) {
-    return res.status(409).json({
-      error: "No se puede cerrar definitivo: hay piezas pendientes de asignar o sin escanear",
-    });
+  const kmRetorno = Number(req.body?.km_retorno);
+  if (!Number.isFinite(kmRetorno) || kmRetorno < 0 || req.body?.km_retorno === "" || req.body?.km_retorno == null) {
+    return res.status(400).json({error:"Indica el cuentakilómetros verificado al regresar del taller."});
   }
-
-  const { rows } = await db.query(
-    `UPDATE taller_intervenciones
-        SET estado='cerrada', cierre_definitivo_at=NOW(), updated_at=NOW()
-      WHERE id=$1 AND empresa_id=$2
-      RETURNING *`,
-    [req.params.id, empresa]
-  );
-  if (!rows[0]) return res.status(404).json({ error: "Intervencion no encontrada" });
-  res.json(rows[0]);
+  const result = await db.transaction(async client => {
+    const order = (await client.query("SELECT * FROM taller_intervenciones WHERE id=$1 AND empresa_id=$2 FOR UPDATE",[req.params.id,empresa])).rows[0];
+    if (!order) return {status:404,error:"Intervención no encontrada"};
+    if (order.estado === "cerrada") return {order};
+    const pending = (await client.query(
+      `SELECT COUNT(*)::int AS n FROM taller_intervencion_piezas
+        WHERE intervencion_id=$1 AND empresa_id=$2 AND (pendiente_asignar=true OR escaneado=false)`,
+      [order.id,empresa]
+    )).rows[0]?.n || 0;
+    if (pending) return {status:409,error:"Hay piezas pendientes de asignar o sin escanear."};
+    if (order.origen_taller === "externo" && (!order.factura_proveedor_num || !order.factura_proveedor_file_base64 || order.factura_proveedor_importe == null)) {
+      return {status:409,error:"Adjunta la factura del taller externo, su número e importe antes de cerrar."};
+    }
+    const vehicle = (await client.query("SELECT id,km_actuales FROM vehiculos WHERE id=$1 AND empresa_id=$2 FOR UPDATE",[order.vehiculo_id,empresa])).rows[0];
+    if (!vehicle) return {status:404,error:"Vehículo de la intervención no encontrado"};
+    const previousKm = vehicle.km_actuales == null ? null : Number(vehicle.km_actuales);
+    if (previousKm != null && kmRetorno < previousKm) return {status:409,error:"Los kilómetros de retorno son inferiores a la última lectura registrada."};
+    if (previousKm != null && kmRetorno - previousKm > 2000 && req.body?.confirmar_salto !== true) {
+      return {status:409,error:"La diferencia supera 2.000 km. Verifica y confirma expresamente la lectura."};
+    }
+    const saved = (await client.query("UPDATE taller_intervenciones SET estado='cerrada',km_en_intervencion=$1,cierre_definitivo_at=NOW(),updated_at=NOW() WHERE id=$2 AND empresa_id=$3 RETURNING *",[kmRetorno,order.id,empresa])).rows[0];
+    await client.query("UPDATE vehiculos SET km_actuales=$1,updated_at=NOW() WHERE id=$2 AND empresa_id=$3",[Math.round(kmRetorno),vehicle.id,empresa]);
+    await client.query("INSERT INTO vehiculo_eventos (empresa_id,vehiculo_id,tipo,actor_id,detalle) VALUES ($1,$2,'vehiculo.odometro_taller',$3,$4::jsonb)",[empresa,vehicle.id,req.user?.id||null,JSON.stringify({intervencion_id:order.id,km_anterior:previousKm,km_retorno:kmRetorno})]);
+    return {order:saved};
+  });
+  if (result.status) return res.status(result.status).json({error:result.error});
+  res.json(result.order);
 });
 
 router.delete("/intervenciones/:id", PUEDE_EDITAR_TALLER, async (req, res) => {

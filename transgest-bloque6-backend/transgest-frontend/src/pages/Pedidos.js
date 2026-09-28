@@ -9128,9 +9128,6 @@ export default function Pedidos() {
       observaciones: pedido.notas || "",
     });
     if (cambiaEstado) await cambiarEstadoPedido(pedido.id, "entregado");
-    if (pedido.vehiculo_id && pedido.km_ruta) {
-      import("../services/api").then(m=>m.actualizarKmVehiculo(pedido.vehiculo_id, Number(pedido.km_ruta)).catch(()=>{}));
-    }
     await cargar();
   }
   // Reset to page 1 when filters change

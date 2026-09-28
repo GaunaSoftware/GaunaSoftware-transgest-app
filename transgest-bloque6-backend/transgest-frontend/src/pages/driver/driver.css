@@ -44,6 +44,7 @@
 .driver-summary-grid,.driver-action-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .driver-summary-grid { margin-bottom:18px; }
 .driver-summary-grid button { display:flex; align-items:center; gap:14px; padding:20px; background:var(--bg2); color:var(--driver-accent); border:1px solid var(--border); border-radius:16px; text-align:left; }
+.driver-summary-grid>div { padding:18px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; overflow-wrap:anywhere; }
 .driver-summary-grid span { color:var(--text3); font-size:13px; }
 .driver-summary-grid strong { display:block; color:var(--text); font-size:24px; margin-top:6px; }
 .driver-action-grid button { display:flex; align-items:center; gap:10px; padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--bg2); color:var(--text); text-align:left; }
@@ -98,6 +99,7 @@
   .driver-header>img { width:120px; }
   .driver-header-tools button { width:40px; }
   .tg-chofer-datos-grid,.driver-jornada-summary { grid-template-columns:1fr!important; }
+  .driver-monthly-summary .driver-summary-grid { grid-template-columns:1fr; }
 }
 
 [data-theme=dark] .tg-app-chofer-page :is(input,select,textarea) { color-scheme:dark; }

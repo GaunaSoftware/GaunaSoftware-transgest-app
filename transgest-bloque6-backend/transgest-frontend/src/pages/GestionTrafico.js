@@ -12,7 +12,7 @@ import TrafficMobileBoard from "./traffic/TrafficMobileBoard";
 import { PageHeader } from "../ui";
 import "./operations/operations.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarKmVehiculo, actualizarPosicionVehiculo, getRouteProviders, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
+import { getVehiculos, getPedidosResumenLista, getPedido, getPedidoEventos, getPedidoIdaRetorno, enlazarPedidoRetorno, desvincularPedidoRetorno, getChoferes, getRutas, editarPedido, cambiarEstadoPedido, desvincularFacturaPedido, actualizarPosicionVehiculo, getRouteProviders, getRutaEnviosPedido, enviarRutaOptimizada, avisarClientePedido, crearPedido, getEmpresaConfig, getNotificaciones, marcarNotificacionLeida, guardarPlanDiarioOrden, calcularDistanciaGeo, combinarGrupaje, confirmarGrupaje, separarGrupaje, getColaboradores, crearColaborador } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
@@ -1448,15 +1448,6 @@ function ModalViaje({ pedido, pedidos = [], vehiculos, choferes, rutas = [], onC
     setSaving(true);
     try {
       await editarPedido(pedido.id, form);
-      // Auto-update vehicle km when marking as delivered with km_ruta
-      if (form.estado === "entregado" && form.vehiculo_id && form.km_ruta) {
-        const veh = vehiculos?.find(v => v.id === form.vehiculo_id);
-        if (veh && veh.km_actuales) {
-          const newKm = Number(veh.km_actuales) + Number(form.km_ruta);
-          actualizarKmVehiculo(form.vehiculo_id, newKm).catch(() => {}); // silently update
-        }
-      }
-
       // AUTO-POSITION: When estado = entregado, update vehicle's last known position
       // to the descarga city, and trigger "disponible" notification
       if (form.estado === "entregado" && form.vehiculo_id) {

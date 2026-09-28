@@ -1463,12 +1463,12 @@ router.post("/nominas-emitidas", GERENTE_O_CONTABLE, async (req,res) => {
     }
     const {rows} = await db.query(
       `INSERT INTO nominas_emitidas (empresa_id,chofer_id,periodo,salario_base,plus_actividad,horas_extra,
-        noches,importe_noches,ss_empresa,ss_trabajador,irpf,liquido,total_empresa,notas)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        noches,importe_noches,ss_empresa,ss_trabajador,irpf,liquido,total_empresa,notas,estado)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'emitida')
        ON CONFLICT (empresa_id,chofer_id,periodo) DO UPDATE SET
          salario_base=$4,plus_actividad=$5,horas_extra=$6,noches=$7,importe_noches=$8,
          ss_empresa=$9,ss_trabajador=$10,irpf=$11,liquido=$12,total_empresa=$13,notas=$14,
-         emitida_at=NOW()
+         emitida_at=NOW(),estado='emitida'
        RETURNING *`,
       [EID(req),chofer_id,periodo,salario_base||0,plus_actividad||0,horas_extra||0,
        noches||0,importe_noches||0,ss_empresa||0,ss_trabajador||0,irpf||0,liquido||0,total_empresa||0,notas||null]

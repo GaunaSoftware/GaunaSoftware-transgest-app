@@ -840,8 +840,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                             <div style={{fontWeight:800,color:"var(--text)"}}>{stop.orden}. {stop.nombre || stop.direccion || "-"}</div>
                             <div style={{color:"var(--text4)"}}>{stop.direccion || "-"}</div>
                             <div style={{color:"var(--text5)"}}>{stop.fecha || "-"} · {stop.hora || stop.ventana || "-"}</div>
-                            {stop.google_maps_url && (
-                              <button type="button" onClick={()=>window.open(stop.google_maps_url,"_blank","noopener,noreferrer")}
+                            {nextStopDirections(pedido, allSteps, stop) && (
+                              <button type="button" onClick={()=>window.open(nextStopDirections(pedido, allSteps, stop),"_blank","noopener,noreferrer")}
                                 style={{marginTop:4,padding:"4px 7px",borderRadius:7,border:"1px solid rgba(59,130,246,.28)",background:"rgba(59,130,246,.08)",color:"#60a5fa",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}}>
                                 Abrir Maps
                               </button>
@@ -964,13 +964,6 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
                     }
                     setFirmando(true);
                     return;
-                  }
-                  // Si entrega, guardar km si los indico
-                  if(a.estado==="entregado"&&kmActuales){
-                    try{
-                      const {actualizarKmVehiculo}=await import("../../services/api");
-                      if(pedido.vehiculo_id) await actualizarKmVehiculo(pedido.vehiculo_id,Number(kmActuales));
-                    }catch(e){}
                   }
                   cambiarEstado(a.estado);
                 }}

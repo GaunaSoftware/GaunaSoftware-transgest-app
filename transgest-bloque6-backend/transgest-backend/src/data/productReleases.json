@@ -10,6 +10,17 @@
     ]
   },
   {
+    "id": "2026-09-driver-workshop-warehouse",
+    "date": "2026-09-28",
+    "title": "Viajes y taller, más claros",
+    "intro": "Hemos mejorado varias tareas diarias de los conductores y del equipo de oficina.",
+    "items": [
+      { "title": "Documentos y rutas en Android", "text": "La app acepta fotos JPG de la cámara y abre la siguiente parada con su dirección. Si una parada no tiene ubicación suficiente, te pedirá revisarla antes de navegar.", "roles": ["chofer"] },
+      { "title": "Tu mes en la app", "text": "Los conductores de plantilla pueden consultar kilómetros, noches registradas y el estado de su nómina. Si faltan lecturas o el documento de nómina, se indica expresamente.", "roles": ["chofer"] },
+      { "title": "Cierre de órdenes de taller", "text": "El cierre comprueba piezas, factura del taller externo y lectura real de kilómetros. El stock y los movimientos de almacén reúnen ahora su detalle y enlazan las facturas de devoluciones." }
+    ]
+  },
+  {
     "id": "2026-09-loading-alerts-profit-report",
     "date": "2026-09-28",
     "title": "Esperas de carga e informes más claros",

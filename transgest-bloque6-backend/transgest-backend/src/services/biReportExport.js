@@ -67,8 +67,8 @@ function buildPdf(report) {
     const chunks=[];doc.on('data',chunk=>chunks.push(chunk));doc.on('error',reject);doc.on('end',()=>resolve(Buffer.concat(chunks)));
     const pageWidth=landscape?842:595, pageHeight=landscape?595:842, left=42,right=pageWidth-42,bottom=pageHeight-75,usable=right-left;
     let tableHeader=null;
-    const addPage=()=>{doc.addPage();doc.font('ReportBold').fontSize(9).fillColor('#0b5250').text('TransGest  /  Centro de informes',left,20,{width:usable});
-      doc.moveTo(left,36).lineTo(right,36).strokeColor('#cbd5e1').stroke();doc.y=49;
+    const addPage=()=>{doc.addPage();doc.rect(0,0,pageWidth,40).fill('#104b45');doc.font('ReportBold').fontSize(9).fillColor('#ffffff').text('TransGest  /  Centro de informes',left,19,{width:usable});
+      doc.y=53;
       if(tableHeader)tableHeader();};
     const ensure=h=>{if(doc.y+h>bottom)addPage();};
     const heading=(label,size=13)=>{ensure(32);doc.moveDown(.35).font('ReportBold').fontSize(size).fillColor('#17253b').text(label,left,doc.y,{width:usable});doc.moveDown(.25);};
@@ -83,12 +83,25 @@ function buildPdf(report) {
       const filters=Object.entries(report.config.filtros).map(([key,value])=>`${key}: ${value}`).join('  ·  ')||'Ninguno';
       doc.text(`Filtros: ${filters}`,left,doc.y+4,{width:usable});
       heading('Indicadores');
-      for(const m of report.metrics){
+      const metricWidth=report.config.template==='vehiculo'?(usable-10)/2:usable;
+      const cards=report.metrics.map(m=>{
         const label=`${m.label}: ${display(m.valor,m.unidad==='%'?'number':m.unidad==='registros'?'number':m.unidad==='km'?'number':m.unidad?.includes('EUR/km')?'number':'money')}${m.valor==null?'':m.unidad==='%'?' %':m.unidad?.includes('EUR/km')?' €/km':''}  [${m.estado||'sin datos'}]`;
         const definition=`${m.definicion||''}${m.costes_incluidos?` Costes incluidos: ${m.costes_incluidos}.`:''}`;
-        const h=doc.heightOfString(label,{width:usable})+doc.heightOfString(definition,{width:usable})+11;
-        ensure(h);doc.font('ReportBold').fontSize(10).fillColor('#0c6663').text(label,left,doc.y,{width:usable});
-        doc.font('Report').fontSize(8).fillColor('#475569').text(definition,left,doc.y+2,{width:usable});doc.moveDown(.5);
+        doc.font('ReportBold').fontSize(10);const titleHeight=doc.heightOfString(label,{width:metricWidth-20});
+        doc.font('Report').fontSize(8);const definitionHeight=doc.heightOfString(definition,{width:metricWidth-20});
+        return {m,label,definition,titleHeight,height:titleHeight+definitionHeight+23};
+      });
+      const perRow=report.config.template==='vehiculo'?2:1;
+      for(let start=0;start<cards.length;start+=perRow){
+        const row=cards.slice(start,start+perRow),h=Math.max(...row.map(c=>c.height));ensure(h+5);const y=doc.y;
+        row.forEach((card,index)=>{
+          const x=left+index*(metricWidth+10);
+          doc.roundedRect(x,y,metricWidth,h,6).fill(card.m.estado==='completo'?'#eef8f5':'#fff7ed');
+          doc.rect(x,y,3,h).fill(card.m.estado==='completo'?'#0f766e':'#b45309');
+          doc.font('ReportBold').fontSize(10).fillColor('#123e3b').text(card.label,x+10,y+7,{width:metricWidth-20});
+          doc.font('Report').fontSize(8).fillColor('#475569').text(card.definition,x+10,y+11+card.titleHeight,{width:metricWidth-20});
+        });
+        doc.y=y+h+5;
       }
       if(report.chart.length){
         const points=report.chart.slice(-12),max=Math.max(1,...points.flatMap(p=>[Math.abs(Number(p.ingreso||0)),Math.abs(Number(p.margen||0))]));
@@ -102,15 +115,32 @@ function buildPdf(report) {
         });doc.y=y+h;
         doc.fontSize(8).fillColor('#475569').text('Verde: ingreso realizado  ·  Azul: margen directo registrado. Importes negativos se consultan en la tabla.',left,doc.y,{width:usable});
       }
-      if(report.bars?.length){ensure(report.bars.length*20+72);heading('Comparación');
+      if(report.bars?.length){ensure(report.bars.length*20+72);heading(report.config.template==='vehiculo'?'Margen directo por vehículo (€)':'Comparación');
         const max=Math.max(1,...report.bars.map(b=>Math.abs(Number(b.value||0))));
         const y=doc.y;
         report.bars.forEach((bar,i)=>{const yy=y+i*20;doc.font('Report').fontSize(8).fillColor('#17253b').text(bar.label,left,yy,{width:Math.min(155,usable*.31)});
           const x=left+Math.min(160,usable*.32);doc.rect(x,yy+3,(usable-270)*Math.abs(Number(bar.value||0))/max,9).fill(Number(bar.value)<0?'#b45309':'#0f766e');
           doc.fontSize(8).fillColor('#334155').text(`${number(bar.value)} ${bar.unit==='%'?'%':'€'}`,right-104,yy,{width:104,align:'right'});
-        });doc.y=y+report.bars.length*20+4;doc.fontSize(7).fillColor('#64748b').text(report.bars_label||'',left,doc.y,{width:usable});
+        });doc.y=y+report.bars.length*20+4;doc.fontSize(8).fillColor('#475569').text(report.bars_label||'',left,doc.y,{width:usable});
       }
-      if(report.warnings.length){heading('Cobertura y advertencias');for(const warning of report.warnings){const h=doc.heightOfString(warning,{width:usable})+8;ensure(h);
+      if(report.vehicle_scope){
+        heading('Cobertura de vehículos',11);
+        const scope=report.vehicle_scope;
+        const lines=[scope.criterio,`${scope.servicios_realizados} servicios realizados; ${scope.sin_vehiculo} sin matrícula atribuida; ${scope.asignacion_historica_ambigua} con asignación histórica ambigua; ${scope.asignacion_sin_instantanea||0} atribuidos desde el pedido sin instantánea histórica.`,
+          `${scope.pedidos_fuera_del_criterio} pedidos con vehículo quedan fuera del ingreso realizado por su estado o fecha.`,
+          scope.matriculas_fuera_del_criterio?.length?`Matrículas de esos pedidos: ${scope.matriculas_fuera_del_criterio.join(', ')}.`:''];
+        for(const line of lines.filter(Boolean)){doc.font('Report').fontSize(8);const h=doc.heightOfString(line,{width:usable})+6;ensure(h);doc.fillColor('#334155').text(line,left,doc.y,{width:usable});doc.y+=5;}
+      }
+      if(report.vehicle_explanations?.length){
+        heading('Por qué hay márgenes negativos',11);
+        for(const row of report.vehicle_explanations){
+          const refs=row.servicios?.map(s=>s.numero).join(', ')||'sin referencia de pedido';
+          const line=`${row.vehiculo}: ingreso realizado ${number(row.ingreso)} € − coste directo registrado ${number(row.coste)} € = margen ${number(row.margen)} €. Servicios: ${refs}.`;
+          doc.font('Report').fontSize(8);const h=doc.heightOfString(line,{width:usable-20})+18;ensure(h+5);const y=doc.y;
+          doc.roundedRect(left,y,usable,h,6).fill('#fff7ed');doc.fillColor('#78350f').text(line,left+10,y+8,{width:usable-20});doc.y=y+h+5;
+        }
+      }
+      if(report.warnings.length){doc.font('Report').fontSize(8);ensure(32+doc.heightOfString(report.warnings[0],{width:usable})+8);heading('Cobertura y advertencias');for(const warning of report.warnings){const h=doc.heightOfString(warning,{width:usable})+8;ensure(h);
         doc.font('Report').fontSize(8).fillColor('#92400e').text(`• ${warning}`,left,doc.y,{width:usable});doc.moveDown(.35);}}
       ensure(92);heading(`Detalle completo (${report.rows.length} registros)`);
       const columns=report.columns,weights=columns.map(c=>c.type==='text'?(c.id==='ruta'?1.8:c.id==='cliente'?1.5:1.1):1);
@@ -130,6 +160,21 @@ function buildPdf(report) {
         doc.y=y+height;doc.moveTo(left,doc.y).lineTo(right,doc.y).strokeColor('#e2e8f0').stroke();
       }
       tableHeader=null;
+      if(report.vehicle_services?.length){
+        heading(`Servicios que forman el desglose (${report.vehicle_services.length})`,11);
+        const fields=[['numero','Pedido',95],['vehiculo','Matrícula',95],['ingreso','Ingreso',80],['coste','Coste',80],['margen','Margen',80],['advertencia','Observación',usable-430]];
+        const starts=fields.map((_,i)=>left+fields.slice(0,i).reduce((n,f)=>n+f[2],0));
+        tableHeader=()=>{const y=doc.y;doc.rect(left,y,usable,22).fill('#e8f4f2');fields.forEach(([key,label,width],i)=>doc.font('ReportBold').fontSize(7).fillColor('#17413f').text(label,starts[i]+3,y+5,{width:width-6}));doc.y=y+23;};
+        ensure(45);tableHeader();
+        report.vehicle_services.forEach((service,index)=>{
+          const values=fields.map(([key])=>key==='advertencia'?(service[key]||'—'):display(service[key],['ingreso','coste','margen'].includes(key)?'money':'text'));
+          doc.font('Report').fontSize(7);const h=Math.max(20,...values.map((value,i)=>doc.heightOfString(value,{width:fields[i][2]-6})+7));ensure(h+1);const y=doc.y;
+          if(index%2===0)doc.rect(left,y,usable,h).fill('#f8fafc');
+          values.forEach((value,i)=>doc.font('Report').fontSize(7).fillColor('#24364b').text(value,starts[i]+3,y+3,{width:fields[i][2]-6}));
+          doc.y=y+h;doc.moveTo(left,doc.y).lineTo(right,doc.y).strokeColor('#e2e8f0').stroke();
+        });
+        tableHeader=null;
+      }
       const pages=doc.bufferedPageRange();for(let i=0;i<pages.count;i++){doc.switchToPage(i);
         doc.font('Report').fontSize(8).fillColor('#64748b').text(`${report.company.name}  ·  ${report.title}`,left,pageHeight-61,{width:usable-65});
         doc.text(`${i+1} / ${pages.count}`,right-65,pageHeight-61,{width:65,align:'right'});}

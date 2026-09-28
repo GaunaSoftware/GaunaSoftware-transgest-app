@@ -4,7 +4,8 @@ const path = require('node:path');
 const express = require('express');
 const { PGlite } = require('@electric-sql/pglite');
 const db = require('../src/services/db');
-const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',U='33333333-3333-4333-8333-333333333333',V='44444444-4444-4444-8444-444444444444';
+const operativeRead = require('../src/services/operativeReadState');
+const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',U='33333333-3333-4333-8333-333333333333',V='44444444-4444-4444-8444-444444444444',T='55555555-5555-4555-8555-555555555555';
 async function run(){
  const pg=new PGlite();let server;const original=db.query,originalTransaction=db.transaction;
  try{
@@ -17,14 +18,14 @@ async function run(){
    CREATE TABLE colaborador_facturas(pedido_id uuid,empresa_id uuid,colaborador_id uuid,factura_proveedor_id uuid,created_at timestamptz);
    CREATE TABLE facturas_proveedor(id uuid,empresa_id uuid,nombre text,estado text,created_at timestamptz);
    CREATE TABLE agenda_eventos(id uuid DEFAULT gen_random_uuid(),empresa_id uuid,asignado_a uuid,creado_por uuid,estado text,metadata jsonb,source_type text,source_id text,cause_code text,visibilidad text,created_at timestamptz DEFAULT NOW(),titulo text,descripcion text,fecha_inicio timestamptz,todo_dia boolean,tipo text,prioridad text,pedido_id uuid);
-   INSERT INTO empresas VALUES('${A}'),('${B}');INSERT INTO usuarios(id,empresa_id) VALUES('${U}','${A}'),('${V}','${B}');
+   INSERT INTO empresas VALUES('${A}'),('${B}');INSERT INTO usuarios(id,empresa_id) VALUES('${U}','${A}'),('${V}','${B}'),('${T}','${A}');
    INSERT INTO colaboradores VALUES('${A}','${A}','Transportista QA A','qa-a@example.invalid',true),('${B}','${B}','Transportista QA B','qa-b@example.invalid',true);
    INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id) SELECT '${A}','QA-'||n,'entregado',CURRENT_DATE,'${A}' FROM generate_series(1,301)n;
    INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id) VALUES('${B}','SECRET-B','entregado',CURRENT_DATE,'${B}');`);
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260928_operational_alert_reads.sql'),'utf8'));
   db.query=pg.query.bind(pg);
   db.transaction=fn=>pg.transaction(fn);
-  const app=express();app.use(express.json());app.use((req,res,next)=>{req.user=req.headers['x-test-user']==='b'?{empresa_id:B,id:V,rol:'gerente'}:{empresa_id:A,id:U,rol:'gerente'};next();});
+  const app=express();app.use(express.json());app.use((req,res,next)=>{req.user=req.headers['x-test-user']==='b'?{empresa_id:B,id:V,rol:'gerente'}:req.headers['x-test-user']==='traffic'?{empresa_id:A,id:T,rol:'trafico'}:req.headers['x-test-user']==='office'?{empresa_id:A,id:U,rol:'administrativo'}:{empresa_id:A,id:U,rol:'gerente'};next();});
   app.use('/notifications',require('../src/routes/notificaciones'));
   app.use((e,req,res,next)=>res.status(e.status||500).json({error:e.message}));
   server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
@@ -54,7 +55,42 @@ async function run(){
   const retry=await promote(payload);assert.equal(retry.status,201);assert.equal(retry.body.id,first.body.id);
   const {rows:[count]}=await pg.query(`SELECT COUNT(*)::int AS total FROM agenda_eventos WHERE metadata->>'alert_key'=$1`,[payload.alert.key]);assert.equal(count.total,1);
   assert.equal((await get('/operativas/colaboradores')).resumen.total,301);
-  console.log('PASS HTTP AvImp: 301 notices, page 80, read ALL, tenant isolation, active/closed automatic task deduplication, canonical agenda promotion, retry idempotency and foreign-assignee rejection.');
+  const {rows:[late]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,chofer_id)
+    VALUES($1,'LATE-SYNTHETIC','en_curso',CURRENT_DATE,CURRENT_DATE,$2) RETURNING id`,[A,T]);
+  await pg.query(`INSERT INTO pedido_chofer_pasos(empresa_id,pedido_id,chofer_id,data) VALUES($1,$2,$3,$4)`,
+    [A,late.id,T,JSON.stringify({carga_iniciada:true,carga_iniciada_at:new Date(Date.now()-90*60000).toISOString()})]);
+  const managerDelay=(await get('/operativas/colaboradores')).items.find(item=>item.pedido_id===late.id);
+  assert.equal(managerDelay?.demora_paralizacion,true);
+  assert.equal((await get('/operativas/colaboradores',{headers:{'x-test-user':'traffic'}})).items.some(item=>item.key===managerDelay.key),true);
+  const forbidden=await fetch(base+'/operativas/colaboradores/leer',{method:'POST',headers:{'Content-Type':'application/json','x-test-user':'office'},body:JSON.stringify({key:managerDelay.key})});
+  assert.equal(forbidden.status,403,'office staff cannot acknowledge a loading delay');
+  const acknowledged=await get('/operativas/colaboradores/leer',{method:'POST',headers:{'Content-Type':'application/json','x-test-user':'traffic'},body:JSON.stringify({key:managerDelay.key})});
+  assert.equal(acknowledged.compartido,true);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.key===managerDelay.key),false,'traffic acknowledgement hides delay for management');
+  await pg.query(`UPDATE pedidos SET estado='entregado' WHERE id=$1`,[late.id]);
+  await pg.query(`UPDATE pedido_chofer_pasos SET data=data||$2::jsonb WHERE pedido_id=$1`,[late.id,JSON.stringify({carga_ok:true,aviso_espera_carga:true,aviso_espera_carga_at:new Date().toISOString()})]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===late.id),false,'acknowledged loading episode stays silent after completion');
+  const {rows:[multi]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,chofer_id)
+    VALUES($1,'MULTI-STOP-SYNTHETIC','entregado',CURRENT_DATE-30,CURRENT_DATE-30,$2) RETURNING id`,[A,T]);
+  await pg.query(`INSERT INTO pedido_chofer_pasos(empresa_id,pedido_id,chofer_id,data) VALUES($1,$2,$3,$4)`,[A,multi.id,T,
+    JSON.stringify({paradas:{'carga-capa':{tipo:'carga',label:'Capa Abanilla',carga_iniciada:true,
+      carga_iniciada_at:new Date(Date.now()-95*60000).toISOString(),carga_ok:true,carga_ok_at:new Date().toISOString(),aviso_espera_carga:true}}})]);
+  const stopAlert=(await get('/operativas/colaboradores',{headers:{'x-test-user':'traffic'}})).items.find(item=>item.pedido_id===multi.id);
+  assert.equal(stopAlert?.parada_id,'carga-capa','unacknowledged completed stop remains visible after 30 days');
+  assert.equal(stopAlert?.prefactura_disponible,true);
+  await pg.query('INSERT INTO avisos_operativos_leidos(empresa_id,usuario_id,alert_key,fingerprint) VALUES($1,$2,$3,$4)',
+    [A,U,stopAlert.key,operativeRead.fingerprint(stopAlert)]);
+  await pg.query('INSERT INTO avisos_operativos_ignorados(empresa_id,usuario_id,alert_key) VALUES($1,$2,$3)',[A,T,stopAlert.key]);
+  await pg.query(`INSERT INTO agenda_eventos(empresa_id,asignado_a,creado_por,estado,metadata)
+    VALUES($1,$2,$2,'pendiente',$3)`,[A,U,JSON.stringify({source:'avisos_operativos_colaborador',alert_key:stopAlert.key})]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.key===stopAlert.key),true,
+    'per-user read or agenda state cannot silence a delay for management');
+  assert.equal((await get('/operativas/colaboradores',{headers:{'x-test-user':'traffic'}})).items.some(item=>item.key===stopAlert.key),true,
+    'per-user ignore cannot replace company acknowledgement');
+  await get('/operativas/colaboradores/leer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:stopAlert.key})});
+  assert.equal((await get('/operativas/colaboradores',{headers:{'x-test-user':'traffic'}})).items.some(item=>item.pedido_id===multi.id),false,
+    'management acknowledgement is shared with traffic for a specific stop');
+  console.log('PASS HTTP AvImp: 301 notices, tenant isolation, company-wide traffic/management delay acknowledgement, multi-stop persistence, read ALL and agenda deduplication.');
  }finally{db.query=original;db.transaction=originalTransaction;if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}await pg.close();}
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

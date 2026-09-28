@@ -1,11 +1,11 @@
-// Apply only the two additive BI migrations before the report routes are served.
+// Apply additive BI migrations before the report routes are served.
 // Render's runtime does not execute scripts/migrate.js as part of npm start.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
 
-const files = ['20260923_bi_report_center.sql', '20260923_bi_weekly_delivery.sql'];
+const files = ['20260923_bi_report_center.sql', '20260923_bi_weekly_delivery.sql', '20260928_bi_weekly_company_delivery.sql'];
 const directory = path.join(__dirname, '../../scripts/migrations');
 
 async function ensureSchema({ query = db.query, transaction = db.transaction } = {}) {

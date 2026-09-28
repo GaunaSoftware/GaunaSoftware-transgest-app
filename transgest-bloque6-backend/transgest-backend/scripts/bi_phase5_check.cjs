@@ -99,6 +99,29 @@ async function main(){
     }
   }
   fs.mkdirSync(out,{recursive:true});fs.mkdirSync(dataOut,{recursive:true});
+  const vehicleFixture=fixture(1);
+  vehicleFixture.economia.metricas.ingreso_realizado=metric(0);
+  vehicleFixture.economia.metricas.coste_directo=metric(59.30);
+  vehicleFixture.economia.metricas.margen_directo=metric(-59.30);
+  vehicleFixture.economia.metricas.ingreso_km_total=metric(0,'EUR/km total');
+  vehicleFixture.economia.metricas.km_vacios_pct=metric(null,'%','sin_datos');
+  vehicleFixture.economia.metricas.gastos_pendientes_valorar=metric(0);
+  vehicleFixture.matriz.vehiculo=[{id:'truck-1',nombre:'2418-LPH',servicios:1,ingreso:0,coste_directo_registrado:59.30,margen_directo_registrado:-59.30,km_total:144,km_vacios:null}];
+  vehicleFixture.servicios.rows=[{...vehicleFixture.servicios.rows[0],vehiculo_id:'truck-1',vehiculo:'2418-LPH',
+    numero:'PED-SINTETICO-1',ingreso:0,coste:59.30,margen:-59.30,km_pedido:144}];
+  vehicleFixture.vehiculos_alcance={servicios_realizados:1,sin_vehiculo:0,asignacion_historica_ambigua:0,pedidos_fuera_del_criterio:1,
+    matriculas_fuera_del_criterio:['0000-TEST'],criterio:'Solo servicios entregados o facturados en el periodo.'};
+  const vehicleReport=center.projectReport(vehicleFixture,config('vehiculo'),{name:'Empresa sintética'});
+  assert.equal(vehicleReport.vehicle_explanations[0].margen,-59.30);
+  assert.equal(vehicleReport.vehicle_explanations[0].servicios[0].numero,'PED-SINTETICO-1');
+  assert.equal(vehicleReport.vehicle_services[0].vehiculo,vehicleReport.rows[0].nombre);
+  assert.equal(vehicleReport.vehicle_services[0].margen,vehicleReport.rows[0].margen_directo_registrado);
+  assert.equal(vehicleReport.vehicle_scope.matriculas_fuera_del_criterio[0],'0000-TEST');
+  const vehiclePdf=await reportExport.buildPdf(vehicleReport);
+  fs.writeFileSync(path.join(out,'bi-vehiculos-margen-negativo-sintetico.pdf'),vehiclePdf);
+  const vehicleText=(await pdfParse(vehiclePdf)).text;
+  assert(vehicleText.includes('Por qué hay márgenes negativos')&&vehicleText.includes('59,30')&&vehicleText.includes('PED-SINTETICO-1'));
+  assert(vehicleText.includes('0000-TEST'),'The weekly PDF explains plate coverage outside realized revenue');
   for(const [name,count,partial] of [['corto',2,false],['largo',85,false],['sin_datos',0,false],['parcial',2,true]]){
     const report=center.projectReport(fixture(count,partial),config('ejecutivo'),{name:'Empresa sintética Ñáñez'});
     const snapshot=JSON.parse(JSON.stringify(report));

@@ -11,6 +11,16 @@
     ]
   },
   {
+    "id": "2026-09-loading-alerts-profit-report",
+    "date": "2026-09-28",
+    "title": "Esperas de carga e informes más claros",
+    "intro": "Tráfico y gerencia pueden actuar antes sobre las esperas y entender mejor los resultados de cada camión.",
+    "items": [
+      { "title": "Avisos de espera compartidos", "text": "Una espera prolongada en carga aparece destacada para tráfico y gerencia. Cuando cualquiera de ellos la marca como vista, desaparece para ambos. Desde el aviso se puede abrir el pedido y preparar una solicitud de paralización si la carga ya terminó.", "module": "avisos" },
+      { "title": "Informe semanal más explicativo", "text": "El informe de rentabilidad indica qué costes incluye, explica los resultados negativos y avisa cuando faltan datos para atribuir un viaje a una matrícula.", "module": "informes" }
+    ]
+  },
+  {
     "id": "2026-09-insurance-expiries",
     "date": "2026-09-28",
     "title": "Seguros y vencimientos más claros",

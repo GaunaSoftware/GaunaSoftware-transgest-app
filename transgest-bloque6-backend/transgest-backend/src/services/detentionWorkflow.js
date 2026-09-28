@@ -5,10 +5,18 @@ const uuid=v=>/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(v||'');
 function amount(v){if(v===null||v===''||v===undefined||!Number.isFinite(Number(v))||Number(v)<0||Number(v)>1e8)throw fail('Indica un importe neto válido.');return Math.round(Number(v)*100)/100;}
 async function list(db,c,id){
  const p=(await db.query('SELECT id,numero,importe_paralizacion,paralizacion_minutos FROM pedidos WHERE empresa_id=$1 AND id::text=$2',[c,String(id)])).rows[0];if(!p)throw fail('Pedido no encontrado.',404);
+ const steps=(await db.query('SELECT data FROM pedido_chofer_pasos WHERE empresa_id=$1 AND pedido_id=$2',[c,id])).rows[0]?.data||{};
+ const perStop=steps.paradas && typeof steps.paradas==='object' && !Array.isArray(steps.paradas)
+  ?Object.entries(steps.paradas).filter(([,value])=>value && typeof value==='object' && !Array.isArray(value)):[];
+ const episodes=perStop.length?perStop:[['viaje',steps]];
+ const delays=episodes.filter(([,value])=>value.aviso_espera_carga===true && value.carga_ok===true)
+  .map(([stopId,value])=>({carga:true,parada_id:stopId==='viaje'?null:stopId,parada_label:value.label||null,
+   inicio:value.carga_iniciada_at||null,fin:value.carga_ok_at||null,avisado_at:value.aviso_espera_carga_at||null}));
+ const delay=delays[0]||null;
  const claims=(await db.query('SELECT * FROM pedido_paralizaciones WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at',[c,id])).rows;
  const documents=(await db.query("SELECT id,nombre,tipo,created_at FROM pedido_docs WHERE empresa_id=$1 AND pedido_id=$2 AND (NULLIF(file_base64,'') IS NOT NULL OR NULLIF(to_jsonb(pedido_docs)->>'file_url','') IS NOT NULL) ORDER BY created_at DESC",[c,id])).rows;
  const invoices=(await db.query(`SELECT f.id,f.numero,f.estado,f.fecha,l.importe FROM factura_lineas l JOIN facturas f ON f.id=l.factura_id WHERE f.empresa_id=$1 AND l.paralizacion_pedido_id=$2 AND ${validInvoiceSql('f')} ORDER BY f.fecha`,[c,id])).rows;
- return {pedido:p,reclamaciones:claims,documentos:documents,facturas:invoices,resumen:{documentado:claims.reduce((n,r)=>n+Number(r.documentado),0),aceptado:claims.filter(r=>r.estado==='aceptada').reduce((n,r)=>n+Number(r.aceptado),0),facturado:invoices.reduce((n,r)=>n+Number(r.importe),0),cobrado:null},definicion:'Importes netos. Intervalos reales declarados con documento y acuerdo comercial. Las líneas emitidas se enlazan al pedido; los cobros no son deducibles del estado de la factura.'};
+ return {pedido:p,demora_chofer:delay,demoras_chofer:delays,reclamaciones:claims,documentos:documents,facturas:invoices,resumen:{documentado:claims.reduce((n,r)=>n+Number(r.documentado),0),aceptado:claims.filter(r=>r.estado==='aceptada').reduce((n,r)=>n+Number(r.aceptado),0),facturado:invoices.reduce((n,r)=>n+Number(r.importe),0),cobrado:null},definicion:'Importes netos. Intervalos reales declarados con documento y acuerdo comercial. Las líneas emitidas se enlazan al pedido; los cobros no son deducibles del estado de la factura.'};
 }
 async function save(db,c,user,id,input){
  if(!uuid(input.operacion))throw fail('Falta identificador de operación.');const fingerprint=hash({pedido:id,...input});

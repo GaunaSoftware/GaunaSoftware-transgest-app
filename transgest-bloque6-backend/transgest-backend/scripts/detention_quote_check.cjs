@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { calculate } = require('../src/services/detentionQuote');
+const { list } = require('../src/services/detentionWorkflow');
 const start = '2026-01-01T00:00:00Z';
 const at = minutes => calculate({ inicio:start,fin:new Date(Date.parse(start)+minutes*60000).toISOString() });
 assert.equal(at(60).importe,0);
@@ -20,4 +21,17 @@ assert.throws(()=>calculate({inicio:'2026-01-01T00:00',fin:'2026-01-01T02:00'}),
 assert.throws(()=>calculate({inicio:start,fin:'2026-01-01T02:00:00Z'},new Date('2025-12-31')),/finalizados/);
 assert.throws(()=>calculate({inicio:'2022-01-01T00:00:00Z',fin:'2022-01-01T02:00:00Z'}),/verificada/);
 assert.equal(at(120).iva,null);
-console.log('detention_quote_check: 17 comprobaciones correctas');
+const loadStarted='2026-09-17T08:00:00Z',loadEnded='2026-09-17T10:00:00Z';
+const mockDb={query:async sql=>{
+  if(sql.includes('FROM pedidos WHERE'))return {rows:[{id:'synthetic',numero:'PED-SYNTHETIC'}]};
+  if(sql.includes('FROM pedido_chofer_pasos'))return {rows:[{data:{paradas:{'carga-capa':{tipo:'carga',label:'Capa Abanilla',
+    aviso_espera_carga:true,carga_ok:true,carga_iniciada_at:loadStarted,carga_ok_at:loadEnded}}}}]};
+  return {rows:[]};
+}};
+list(mockDb,'synthetic-company','synthetic').then(result=>{
+  assert.equal(result.demora_chofer.parada_id,'carga-capa');
+  assert.equal(result.demora_chofer.inicio,loadStarted);
+  assert.equal(result.demora_chofer.fin,loadEnded);
+  assert.equal(result.demoras_chofer.length,1);
+  console.log('detention_quote_check: 17 cálculos y demora por parada verificados');
+}).catch(error=>{console.error(error);process.exitCode=1;});

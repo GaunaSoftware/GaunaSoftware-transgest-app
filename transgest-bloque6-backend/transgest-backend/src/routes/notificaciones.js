@@ -109,6 +109,13 @@ async function ensureAvisosOperativosSchema() {
   `);
   await db.query("ALTER TABLE avisos_operativos_ignorados ADD COLUMN IF NOT EXISTS alert JSONB").catch(() => {});
   await db.query("CREATE INDEX IF NOT EXISTS idx_avisos_operativos_ignorados_usuario ON avisos_operativos_ignorados(empresa_id, usuario_id, created_at DESC)").catch(() => {});
+  await db.query(`CREATE TABLE IF NOT EXISTS avisos_operativos_reconocidos (
+    empresa_id UUID NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    alert_key VARCHAR(220) NOT NULL,
+    reconocido_por UUID NOT NULL REFERENCES usuarios(id),
+    reconocido_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (empresa_id, alert_key)
+  )`);
 }
 
 function buildAlert(row, kind, severity, title, detail, action) {
@@ -227,9 +234,10 @@ function minutesSinceIso(value) {
   return Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
 }
 
-function buildChoferAlert(row, kind, severity, title, detail, action, minutos) {
+function buildChoferAlert(row, kind, severity, title, detail, action, minutos, episodeAt, stopId = 'viaje') {
+  const phase = kind.includes('carga') && !kind.includes('descarga') ? 'demora_carga' : 'demora_descarga';
   return {
-    key: `chofer:${row.id}:${kind}`,
+    key: `chofer:${row.id}:${stopId}:${phase}:${String(episodeAt || 'sin_fecha')}`,
     kind,
     severity,
     pedido_id: row.id,
@@ -247,11 +255,13 @@ function buildChoferAlert(row, kind, severity, title, detail, action, minutos) {
     detail,
     action,
     minutos,
+    parada_id: stopId === 'viaje' ? null : stopId,
+    demora_paralizacion: true,
+    prefactura_disponible: kind === 'chofer_demora_carga',
   };
 }
 
-function buildChoferStaleAlerts(row) {
-  const data = row.pasos && typeof row.pasos === "object" ? row.pasos : {};
+function buildChoferStaleAlertsForStop(row, data, stopId = 'viaje') {
   const alerts = [];
   if (data.carga_proceso && !data.carga_ok) {
     const mins = minutesSinceIso(data.carga_proceso_at || data.carga_iniciada_at);
@@ -262,7 +272,8 @@ function buildChoferStaleAlerts(row) {
       `Carga bloqueada ${row.numero || ""}`.trim(),
       `El chofer lleva ${mins} minutos en carga. Revisar posible paralizacion, cita o incidencia con el punto de carga.`,
       "Contactar con chofer/cargador y valorar reclamacion por paralizacion.",
-      mins
+      mins,
+      data.carga_iniciada_at || data.carga_proceso_at, stopId
     ));
   } else if (data.carga_iniciada && !data.carga_proceso && !data.carga_ok) {
     const mins = minutesSinceIso(data.carga_iniciada_at);
@@ -273,7 +284,8 @@ function buildChoferStaleAlerts(row) {
       `Espera de carga ${row.numero || ""}`.trim(),
       `El chofer esta posicionado en carga desde hace ${mins} minutos y no consta inicio de carga.`,
       "Contactar con chofer/cargador y revisar cita.",
-      mins
+      mins,
+      data.carga_iniciada_at, stopId
     ));
   }
 
@@ -286,7 +298,8 @@ function buildChoferStaleAlerts(row) {
       `Descarga bloqueada ${row.numero || ""}`.trim(),
       `El chofer lleva ${mins} minutos en descarga. Revisar posible paralizacion o incidencia en destino.`,
       "Contactar con chofer/destinatario y valorar reclamacion por paralizacion.",
-      mins
+      mins,
+      data.descarga_iniciada_at || data.posicionado_descarga_at, stopId
     ));
   } else if (data.posicionado_descarga && !data.descarga_iniciada && !data.descarga_ok) {
     const mins = minutesSinceIso(data.posicionado_descarga_at);
@@ -297,16 +310,37 @@ function buildChoferStaleAlerts(row) {
       `Espera de descarga ${row.numero || ""}`.trim(),
       `El chofer esta en destino desde hace ${mins} minutos y no consta inicio de descarga.`,
       "Contactar con chofer/destinatario y revisar cita.",
-      mins
+      mins,
+      data.posicionado_descarga_at, stopId
     ));
   }
-  return alerts;
+  // The driver's threshold crossing is persisted in pedido_chofer_pasos.
+  // Keep the actionable notice after loading ends until traffic or management
+  // acknowledges this episode once for the whole company.
+  if (data.aviso_espera_carga && data.carga_ok) alerts.push(buildChoferAlert(
+    row, "chofer_demora_carga", "media",
+    `Demora de carga ${row.numero || ""}`.trim(),
+    "La carga terminó tras superar el umbral de espera. Verifica la causa y la documentación antes de solicitar paralización.",
+    "Abrir pedido y valorar paralización; el aviso no crea una factura automáticamente.",
+    null, data.carga_iniciada_at || data.aviso_espera_carga_at, stopId
+  ));
+  return alerts.map(alert => ({...alert, parada_label:data.label||null,
+    title:data.label?`${alert.title} · ${data.label}`:alert.title}));
+}
+
+function buildChoferStaleAlerts(row) {
+  const data = row.pasos && typeof row.pasos === 'object' ? row.pasos : {};
+  const stops = data.paradas && typeof data.paradas === 'object' && !Array.isArray(data.paradas)
+    ? Object.entries(data.paradas).filter(([,value]) => value && typeof value === 'object' && !Array.isArray(value)) : [];
+  return stops.length
+    ? stops.flatMap(([id,value]) => buildChoferStaleAlertsForStop(row,value,id))
+    : buildChoferStaleAlertsForStop(row,data);
 }
 
 function filterAlertsByRole(items, rol) {
   if (rol === "gerente") return items;
   const roleKinds = {
-    trafico: new Set(["workflow_no_enviado", "precio_sin_confirmar", "carga_sin_confirmar", "camino_sin_confirmar", "descarga_sin_confirmar", "chofer_carga_bloqueada", "chofer_espera_carga", "chofer_descarga_bloqueada", "chofer_espera_descarga"]),
+    trafico: new Set(["workflow_no_enviado", "precio_sin_confirmar", "carga_sin_confirmar", "camino_sin_confirmar", "descarga_sin_confirmar", "chofer_carga_bloqueada", "chofer_espera_carga", "chofer_demora_carga", "chofer_descarga_bloqueada", "chofer_espera_descarga"]),
     administrativo: new Set(["albaran_pendiente", "documentacion_pago_pendiente"]),
     contable: new Set(["albaran_pendiente", "documentacion_pago_pendiente"]),
   };
@@ -370,8 +404,15 @@ async function listarAvisosColaboradores(req, { all = false, includeRead = false
          LEFT JOIN choferes ch ON ch.id=COALESCE(s.chofer_id,p.chofer_id) AND ch.empresa_id=p.empresa_id
          LEFT JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
         WHERE p.empresa_id=$1
-          AND p.estado::text IN ('en_curso','descarga')
-          AND COALESCE(p.fecha_descarga,p.fecha_entrega,p.fecha_carga,p.fecha_pedido,p.created_at::date) >= CURRENT_DATE - INTERVAL '10 days'
+          AND (p.estado::text IN ('en_curso','descarga') OR COALESCE(s.data->>'aviso_espera_carga','false')='true'
+            OR EXISTS (SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof(s.data->'paradas')='object'
+              THEN s.data->'paradas' ELSE '{}'::jsonb END) AS stop(id,progress)
+              WHERE COALESCE(stop.progress->>'aviso_espera_carga','false')='true'))
+          AND (COALESCE(p.fecha_descarga,p.fecha_entrega,p.fecha_carga,p.fecha_pedido,p.created_at::date) >= CURRENT_DATE - INTERVAL '10 days'
+            OR COALESCE(s.data->>'aviso_espera_carga','false')='true'
+            OR EXISTS (SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof(s.data->'paradas')='object'
+              THEN s.data->'paradas' ELSE '{}'::jsonb END) AS stop(id,progress)
+              WHERE COALESCE(stop.progress->>'aviso_espera_carga','false')='true'))
         ORDER BY COALESCE(p.fecha_carga,p.fecha_pedido,p.created_at::date) ASC, p.numero ASC
         `,
       [empresaId]
@@ -390,13 +431,21 @@ async function listarAvisosColaboradores(req, { all = false, includeRead = false
     [empresaId, usuarioId]
   ).catch(() => ({ rows: [] }));
   const ignoredKeys = new Set(ignored.rows.map(r => String(r.alert_key || "")));
+  const acknowledged = await db.query('SELECT alert_key FROM avisos_operativos_reconocidos WHERE empresa_id=$1', [empresaId]);
+  const acknowledgedKeys = new Set(acknowledged.rows.map(r => String(r.alert_key)));
   const pending = filterAlertsByRole(
     rows.flatMap(buildColaboradorAlerts)
       .concat(choferRows.flatMap(buildChoferStaleAlerts))
-      .filter(a => !ignoredKeys.has(a.key)),
+      .filter(a => a.demora_paralizacion ? !acknowledgedKeys.has(a.key) : !ignoredKeys.has(a.key)),
     rol
   );
-  let unread = includeRead ? pending : await operativeRead.unreadItems(db, req.user, pending);
+  pending.sort((a,b) => Number(!!b.demora_paralizacion)-Number(!!a.demora_paralizacion)
+    || Number(b.severity==='alta')-Number(a.severity==='alta')
+    || String(a.fecha_carga||'').localeCompare(String(b.fecha_carga||'')));
+  let unread = includeRead ? pending : [
+    ...pending.filter(item => item.demora_paralizacion),
+    ...await operativeRead.unreadItems(db, req.user, pending.filter(item => !item.demora_paralizacion)),
+  ];
   if (!includeRead && noticeCenter.can(req.user, 'agenda')) {
     const { rows: tasks } = await db.query(`SELECT metadata->>'alert_key' AS alert_key,source_id,cause_code FROM agenda_eventos
       WHERE empresa_id=$1 AND (asignado_a=$2 OR creado_por=$2 OR visibilidad='equipo') AND estado IN ('pendiente','en_progreso')
@@ -404,7 +453,7 @@ async function listarAvisosColaboradores(req, { all = false, includeRead = false
     const delegated = new Set(tasks.map(t => t.alert_key));
     const automated = new Set(tasks.map(t => `${t.source_id}:${t.cause_code}`));
     const cause = {carga_sin_confirmar:'carga_sin_finalizar',descarga_sin_confirmar:'entrega_vencida'};
-    unread = unread.filter(i => !delegated.has(i.key) && !(cause[i.kind] && automated.has(`${i.pedido_id}:${cause[i.kind]}`)));
+    unread = unread.filter(i => i.demora_paralizacion || (!delegated.has(i.key) && !(cause[i.kind] && automated.has(`${i.pedido_id}:${cause[i.kind]}`))));
   }
   const items = all ? unread : unread.slice(0, 80);
   const resumen = {
@@ -440,7 +489,33 @@ router.post('/operativas/leer-todas', async (req, res, next) => {
     if (!ROLES_OPERATIVOS.has(req.user?.rol)) return res.status(403).json({ error: 'No autorizado' });
     const result = await listarAvisosColaboradores(req, { all: true });
     if (result.resumen.warning) return res.status(503).json({ error: 'No se pudieron consultar todos los avisos.' });
-    res.json({ ok: true, actualizadas: await operativeRead.markRead(db, req.user, result.items) });
+    const delays = result.items.filter(item => item.demora_paralizacion);
+    const regular = result.items.filter(item => !item.demora_paralizacion);
+    let shared = 0;
+    if (delays.length && ['trafico','gerente'].includes(req.user.rol)) {
+      const inserted = await db.query(`INSERT INTO avisos_operativos_reconocidos(empresa_id,alert_key,reconocido_por)
+        SELECT $1::uuid,keys.alert_key,$2::uuid FROM unnest($3::text[]) AS keys(alert_key) ON CONFLICT DO NOTHING RETURNING alert_key`,
+      [req.user.empresa_id,req.user.id,delays.map(item => item.key)]);
+      shared = inserted.rows.length;
+    }
+    res.json({ ok: true, actualizadas: shared + await operativeRead.markRead(db, req.user, regular) });
+  } catch (e) { next(e); }
+});
+router.post('/operativas/colaboradores/leer', async (req, res, next) => {
+  try {
+    if (!['trafico','gerente'].includes(req.user?.rol)) return res.status(403).json({ error: 'Solo tráfico o gerencia pueden reconocer este aviso' });
+    const key = String(req.body?.key || '');
+    if (!key || key.length > 300) return res.status(400).json({ error: 'Aviso no válido' });
+    const pending = await listarAvisosColaboradores(req, { all: true, includeRead: true });
+    if (pending.resumen.warning) return res.status(503).json({ error: 'No se pudieron consultar los avisos.' });
+    const alert = pending.items.find(item => item.key === key);
+    if (!alert) return res.status(404).json({ error: 'Aviso no encontrado o resuelto' });
+    if (alert.demora_paralizacion) {
+      const inserted = await db.query(`INSERT INTO avisos_operativos_reconocidos(empresa_id,alert_key,reconocido_por)
+        VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING alert_key`, [req.user.empresa_id,key,req.user.id]);
+      return res.json({ ok:true, actualizadas:inserted.rows.length, compartido:true });
+    }
+    res.json({ ok: true, actualizadas: await operativeRead.markRead(db, req.user, [alert]) });
   } catch (e) { next(e); }
 });
 

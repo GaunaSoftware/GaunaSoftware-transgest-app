@@ -9298,7 +9298,8 @@ export default function Pedidos() {
           // Consumir el destino antes de abrir: guardar/recargar no debe volver a abrirlo.
           if (!alive || focusPedidoAplicadoRef.current) return;
           focusPedidoAplicadoRef.current = true;
-          setEditando({ ...(full || found || { id: focusPedido.pedido_id, numero: focusPedido.numero || "" }), _focus_incidencia: focusIncidencia });
+          setEditando({ ...(full || found || { id: focusPedido.pedido_id, numero: focusPedido.numero || "" }), _focus_incidencia: focusIncidencia,
+            _focus_detention: focusPedido.detention === true, _focus_detention_stop: focusPedido.detention_stop_id || null });
           setModal(true);
           clearRuntimeFocus("tms_pedidos_focus");
         })
@@ -9308,7 +9309,8 @@ export default function Pedidos() {
           focusPedidoAplicadoRef.current = true;
           clearRuntimeFocus("tms_pedidos_focus");
           if (!found) { notify("No se pudo abrir el pedido indicado.", "error"); return; }
-          setEditando({ ...found, _focus_incidencia: focusIncidencia });
+          setEditando({ ...found, _focus_incidencia: focusIncidencia, _focus_detention: focusPedido.detention === true,
+            _focus_detention_stop: focusPedido.detention_stop_id || null });
           setModal(true);
         });
     }, 180);

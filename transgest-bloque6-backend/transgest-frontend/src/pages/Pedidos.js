@@ -4153,6 +4153,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
 
   function setStopsOrdenados(nextStops, { infer = true } = {}) {
     setForm(p => {
+      const previousStopWeight = Math.max(sumStopWeights(p.puntos_carga), sumStopWeights(p.puntos_descarga));
       const stopsToStore = nextStops
         .map((stop, idx) => {
           const next = {
@@ -4188,10 +4189,15 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
       updated.cmr_tipo = cmrTypeForPedidoStops(updated);
       const totalCarga = tipo === "carga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_carga);
       const totalDescarga = tipo === "descarga" ? sumStopWeights(stopsToStore) : sumStopWeights(updated.puntos_descarga);
-      const totalPeso = totalCarga || totalDescarga;
-      if (totalPeso > 0) {
+      const totalPeso = Math.max(totalCarga, totalDescarga);
+      const currentWeight = normalizePesoKgInput(p.peso_kg);
+      const autoWeight = p.peso_kg == null || String(p.peso_kg).trim() === '' || currentWeight === 0 ||
+        (previousStopWeight > 0 && currentWeight === previousStopWeight);
+      if (totalPeso > 0 && autoWeight) {
         updated.peso_kg = totalPeso;
         if (!updated.colaborador_id && Number(updated.km_ruta || 0) > 0) updated.coste_gasoil = calcularCosteGasoil(updated);
+      } else if (totalPeso === 0 && previousStopWeight > 0 && autoWeight) {
+        updated.peso_kg = '';
       }
       return syncPrecioClienteCol(updated);
     });
@@ -4387,7 +4393,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
                     <input type="time" style={inp} disabled={disabled} value={d.hora || ""} onChange={e=>updateStop(i,{hora:e.target.value})} />
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
                     <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
-                    <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.peso_kg || ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg" />
+                    <input type="text" inputMode="decimal" style={inp} disabled={disabled} value={d.peso_kg ?? ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg (8,0 = 8.000)" />
                     {(i > 0 || Number(d.precio||0) > 0) ? (
                       <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio extra ${label} EUR`} />
                     ) : (
@@ -4534,7 +4540,7 @@ compact ? <DropdownMenu data-pedido-mutation="true" label={`Acciones de ${label}
               onKeyDown={e=>completeOnTab(e, newStopRegions, newStop.provincia || "", value=>setNewStop(p=>({...p,provincia:value,provincia_manual:true})))}
             />
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
-            <input type="number" style={inp} placeholder="Peso kg" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
+            <input type="text" inputMode="decimal" style={inp} placeholder="Peso kg (8,0 = 8.000)" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
             <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
             <input className="tg-stop-grid-wide" style={inp} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>

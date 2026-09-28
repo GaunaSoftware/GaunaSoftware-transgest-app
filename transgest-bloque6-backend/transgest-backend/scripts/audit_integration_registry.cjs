@@ -4,7 +4,7 @@ module.exports=async({db,base,company,token})=>{
  const sa=jwt.sign({superadmin:true,id:'registry-audit'},process.env.SUPERADMIN_JWT_SECRET,{algorithm:'HS256',expiresIn:'5m'});
  const request=async(method,path,body,auth=sa)=>{const r=await fetch(base+'/superadmin/integraciones/registry'+path,{method,headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,data:await r.json()};};
  assert.equal((await request('GET','?empresa_id='+company,null,token)).status,401);
- let result=await request('GET','?empresa_id='+company);assert.equal(result.status,200);assert.equal(result.data.rows.length,16);assert.ok(result.data.rows.every(r=>r.state==='planned'));
+ let result=await request('GET','?empresa_id='+company);assert.equal(result.status,200);assert.equal(result.data.rows.length,Object.keys(service.CATALOG).length);assert.ok(result.data.rows.every(r=>r.state==='planned'));assert.ok(result.data.rows.some(r=>r.provider==='geotab'&&r.state==='planned'));
  const edit=async(input)=>{const row=(await service.list(company)).rows.find(r=>r.provider==='here');return request('PUT','/here',{empresa_id:company,revision:row.revision,...input});};
  assert.equal((await edit({state:'production_ready',environment:'production',api_version:'v8'})).status,409);
  assert.equal((await edit({state:'development',environment:'production',api_version:'v8'})).status,200);

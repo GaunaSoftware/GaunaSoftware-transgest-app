@@ -765,7 +765,7 @@ function IntegracionesAdmin({ saFetchFn }) {
   const [processingFiscalQueue, setProcessingFiscalQueue] = useState(false);
   const [iaQuota, setIaQuota] = useState("");
   const [fiscalAlertEmail, setFiscalAlertEmail] = useState("");
-  const labels = { here:"HERE Routing camion", ors:"OpenRouteService", anthropic:"Anthropic / Claude", openai:"OpenAI", ai_generic:"IA compatible OpenAI", locatel:"Locatel GPS", tacogest:"Tacogest GPS", movildata:"Movildata GPS", gps_generic:"GPS generico" };
+  const labels = { here:"HERE Routing camion", ors:"OpenRouteService", anthropic:"Anthropic / Claude", openai:"OpenAI", ai_generic:"IA compatible OpenAI", locatel:"Locatel GPS", tacogest:"Tacogest GPS", movildata:"Movildata GPS", geotab:"Geotab GPS", gps_generic:"GPS generico" };
 
   const cargar = useCallback(() => {
     setLoading(true);
@@ -795,7 +795,7 @@ function IntegracionesAdmin({ saFetchFn }) {
 
   const selectedEmpresa = data?.empresas?.find(e => String(e.id) === String(empresaId));
   const cfgEmpresa = data?.configs?.find(c => c.empresa_id === empresaId && c.provider === provider);
-  const gpsProviders = data?.gps_providers || ["locatel","tacogest","movildata","gps_generic"];
+  const gpsProviders = data?.gps_providers || ["locatel","tacogest","movildata","geotab","gps_generic"];
   const cfgGps = data?.configs?.find(c => c.empresa_id === empresaId && c.provider === gpsProvider);
   const fiscalCfgEmpresa = data?.fiscal_configs?.find(c => c.empresa_id === empresaId);
   const cfgGpsEmpresaId = cfgGps?.empresa_id;
@@ -1957,8 +1957,9 @@ function IntegracionesAdmin({ saFetchFn }) {
                 </select>
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave GPS propia</label>
-                <input aria-label="Clave GPS de empresa" autoComplete="new-password" type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value,use_global:false}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}` : "Pegar clave GPS de esta empresa"} />
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>{gpsProvider==='geotab'?'Credenciales Geotab de esta empresa':'Clave GPS propia'}</label>
+                <input aria-label="Clave GPS de empresa" autoComplete="new-password" type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value,use_global:false}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}` : gpsProvider==='geotab'?'JSON con database, userName y password':'Pegar clave GPS de esta empresa'} />
+                {gpsProvider==='geotab'&&<small style={{display:'block',marginTop:4,color:'#94a3b8'}}>Introduce un JSON con database, userName y password del usuario API de MyGeotab. Se guarda cifrado y no se muestra después. Requiere acceso a Device y DeviceStatusInfo.</small>}
               </div>
               <div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>

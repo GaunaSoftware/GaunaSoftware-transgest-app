@@ -227,6 +227,7 @@ const GPS_PROVIDER_LABELS = {
   locatel: "Locatel",
   tacogest: "Tacogest",
   movildata: "Movildata",
+  geotab: "Geotab",
   gps_generic: "GPS generico",
   manual: "Manual",
   ultima_descarga: "Ultima descarga",

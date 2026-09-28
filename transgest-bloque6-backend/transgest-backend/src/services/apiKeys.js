@@ -11,6 +11,7 @@ const PROVIDER_ENV = {
   locatel: "LOCATEL_API_KEY",
   tacogest: "TACOGEST_API_KEY",
   movildata: "MOVILDATA_API_KEY",
+  geotab: "GEOTAB_CONFIG_JSON",
   gps_generic: "GPS_API_KEY",
 };
 
@@ -209,7 +210,7 @@ async function setCompanyApiConfig(empresaId, provider, data, actorId = null) {
         updated_by=EXCLUDED.updated_by,
         updated_at=NOW()
     `, [empresaId, provider, encrypted, keyMask, useGlobal, activo, Number.isFinite(limite) ? limite : 0, actorId, clearKey]);
-    const gpsProviders = ['locatel', 'tacogest', 'movildata', 'gps_generic'];
+    const gpsProviders = ['locatel', 'tacogest', 'movildata', 'geotab', 'gps_generic'];
     if (activo && gpsProviders.includes(provider)) {
       await client.query(`UPDATE empresa_api_configs SET activo=false, updated_at=NOW()
         WHERE empresa_id=$1 AND provider <> $2 AND provider=ANY($3::varchar[])`, [empresaId,provider,gpsProviders]);

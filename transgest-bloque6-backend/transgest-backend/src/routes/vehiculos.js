@@ -19,12 +19,13 @@ const GPS_PROVIDERS = {
   locatel: "Locatel",
   tacogest: "Tacogest",
   movildata: "Movildata",
+  geotab: "Geotab",
   gps_generic: "GPS generico",
   manual: "Manual / fallback",
   ultima_descarga: "Ultima descarga",
   app_chofer: "App chofer",
 };
-const GPS_REMOTE_PROVIDERS = ["locatel", "tacogest", "movildata", "gps_generic"];
+const GPS_REMOTE_PROVIDERS = ["locatel", "tacogest", "movildata", "geotab", "gps_generic"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isUuid(value) {
@@ -622,6 +623,28 @@ async function syncWebhookOnlyProvider(empresaId, provider) {
     linked: Number(rows[0]?.linked || 0),
     webhook_only: true,
   };
+}
+
+async function syncGeotabPositions(empresaId, secret) {
+  const geotab = require('../services/geotabGps');
+  const snapshot = await geotab.snapshot(secret);
+  const vehicles = (await db.query(`SELECT id,matricula,gps_provider,gps_external_id FROM vehiculos
+    WHERE empresa_id=$1 AND activo IS DISTINCT FROM false`,[empresaId])).rows;
+  const matched = geotab.positions(snapshot, vehicles);
+  let updated=0,linked=0;
+  for (const item of matched.positions) {
+    if (item.vehicle.gps_provider !== 'geotab' || item.vehicle.gps_external_id !== item.deviceId) {
+      await db.query(`UPDATE vehiculos SET gps_provider='geotab',gps_external_id=$3
+        WHERE id=$1 AND empresa_id=$2`,[item.vehicle.id,empresaId,item.deviceId]);
+      linked++;
+    }
+    await updateVehiclePosition({empresaId,vehiculoId:item.vehicle.id,provider:'geotab',
+      externalId:item.deviceId,lat:item.lat,lng:item.lng,velocidad:item.speed,
+      raw:{source:'geotab_api',bearing:item.bearing},recordedAt:item.recordedAt});
+    updated++;
+  }
+  return {updated,linked,received:matched.positions.length+matched.unmatched,
+    unmatched:matched.unmatched,receivedVehicles:snapshot.devices.length};
 }
 
 async function getActiveGpsProvider(empresaId) {
@@ -1525,6 +1548,8 @@ r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
     let result = { updated: 0, received: 0, unmatched: 0 };
     if (provider === "movildata") {
       result = await syncMovildataPositions(empresaId, resolved.key);
+    } else if (provider === "geotab") {
+      result = await syncGeotabPositions(empresaId, resolved.key);
     } else {
       result = await syncWebhookOnlyProvider(empresaId, provider);
     }
@@ -1550,7 +1575,9 @@ r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
         km_received: result.km_received || 0,
         km_unmatched: result.km_unmatched || 0,
         km_error: result.km_error || null,
-        message: provider === "movildata"
+        message: provider === "geotab"
+          ? `Geotab sincronizado: ${result.updated || 0} posiciones, ${result.linked || 0} vehículos enlazados y ${result.unmatched || 0} posiciones sin vehículo coincidente.`
+          : provider === "movildata"
           ? `Movildata sincronizado: ${result.linked || 0} matricula(s) enlazadas, ${result.updated || 0} vehiculo(s) con posicion actualizada de ${result.received || 0} posicion(es) recibidas y ${result.km_updated || 0} kilometraje(s) actualizado(s)${result.fallback_used ? "; se uso consulta individual por vehiculo" : ""}${result.auth_error ? "; Movildata ha denegado el endpoint de posiciones para esta clave API" : ""}${result.no_signal ? "; no hay senal GPS disponible ahora mismo" : ""}${result.positions_error ? ` (${result.positions_error})` : ""}${result.km_error ? `; kilometraje no disponible: ${result.km_error}` : ""}${result.unmatched ? `; ${result.unmatched} posicion(es) sin matricula/ID coincidente` : ""}${result.km_unmatched ? `; ${result.km_unmatched} kilometraje(s) sin matricula/ID coincidente` : ""}${result.unmatchedVehicles?.length ? `; ${result.unmatchedVehicles.length} vehiculo(s) del proveedor no existen aun en TransGest` : ""}.`
           : `El proveedor ${GPS_PROVIDERS[provider] || provider} esta activo por webhook/API externa. Hay ${result.linked || 0} vehiculo(s) enlazados; cuando el proveedor envie posiciones se actualizaran automaticamente.`,
     });
@@ -1675,18 +1702,18 @@ r1.patch("/:id/km", GERENTE_O_TALLER, async (req, res) => {
 });
 
 
-// -- Poller automatico de posiciones (solo proveedores pull: Movildata) ------
+// -- Poller automático de posiciones para proveedores pull -------------------
 // Desactivado por defecto. Se activa con GPS_POLL_INTERVAL_MIN=<minutos>.
 let gpsPollTimer = null;
-async function pollMovildataCompanies() {
+async function pollGpsCompanies() {
   const logger = require("../services/logger");
   let empresas = [];
   try {
     const { rows } = await db.query(
-      `SELECT c.empresa_id
+      `SELECT c.empresa_id,c.provider
          FROM empresa_api_configs c
          JOIN empresas e ON e.id=c.empresa_id
-        WHERE c.provider='movildata' AND c.activo=true AND e.estado='activo'`
+        WHERE c.provider IN ('movildata','geotab') AND c.activo=true AND e.estado='activo'`
     );
     empresas = rows;
   } catch (e) {
@@ -1695,12 +1722,13 @@ async function pollMovildataCompanies() {
   }
   for (const row of empresas) {
     try {
-      const resolved = await resolveApiKey(row.empresa_id, "movildata");
+      const resolved = await resolveApiKey(row.empresa_id, row.provider);
       if (!resolved.key) continue;
-      await syncMovildataPositions(row.empresa_id, resolved.key);
-      await recordApiUsage(row.empresa_id, "movildata", 1).catch(() => {});
+      if (row.provider === 'geotab') await syncGeotabPositions(row.empresa_id,resolved.key);
+      else await syncMovildataPositions(row.empresa_id, resolved.key);
+      await recordApiUsage(row.empresa_id, row.provider, 1).catch(() => {});
     } catch (e) {
-      logger.debug("GPS poll Movildata empresa " + row.empresa_id + ": " + e.message);
+      logger.debug("GPS poll " + row.provider + " empresa " + row.empresa_id + ": " + e.message);
     }
   }
 }
@@ -1713,9 +1741,9 @@ function startGpsScheduler() {
   }
   if (gpsPollTimer) clearInterval(gpsPollTimer);
   gpsPollTimer = setInterval(() => {
-    pollMovildataCompanies().catch(e => require("../services/logger").warn("GPS poll: " + e.message));
+    pollGpsCompanies().catch(e => require("../services/logger").warn("GPS poll: " + e.message));
   }, minutes * 60 * 1000);
-  logger.info("GPS poller activo cada " + minutes + " min (Movildata).");
+  logger.info("GPS poller activo cada " + minutes + " min (Movildata y Geotab).");
 }
 r1.startGpsScheduler = startGpsScheduler;
 

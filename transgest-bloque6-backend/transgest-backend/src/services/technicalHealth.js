@@ -21,7 +21,7 @@ async function readTechnicalHealth(){
     return {state:cfg.last_test_at?(cfg.last_test_ok===true?'ok':'error'):'pending',checked_at:cfg.last_test_at||null,
       detail:cfg.last_test_at?(cfg.last_test_ok===true?'Último envío de prueba confirmado.':'El último envío de prueba falló.'):'Pendiente de un envío de prueba. Una configuración guardada no verifica la entrega.'};
   });
-  for(const [key,label,providers] of [['ai','IA / Intelligence',['openai','anthropic','ai_generic']],['routes','Rutas y distancias',['here','ors','google']],['gps','GPS',['movildata','locatel','tacogest','gps_generic']]]){
+  for(const [key,label,providers] of [['ai','IA / Intelligence',['openai','anthropic','ai_generic']],['routes','Rutas y distancias',['here','ors','google']],['gps','GPS',['movildata','locatel','tacogest','geotab','gps_generic']]]){
     await collect(key,label,async()=>{
       const {rows}=await db.query(`SELECT a.created_at,a.detalle->>'ok' AS ok,a.detalle->>'provider' AS provider,e.nombre AS empresa
         FROM audit_log_saas a LEFT JOIN empresas e ON e.id=a.empresa_id

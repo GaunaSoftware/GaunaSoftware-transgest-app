@@ -1521,7 +1521,7 @@ router.get("/integraciones/status", GERENTE_O_CONTABLE, async (req, res) => {
       getEmpresaFiscalConfig(empresaId).catch(() => ({})),
       Promise.all([
         "here", "ors",
-        "locatel", "tacogest", "movildata", "gps_generic",
+        "locatel", "tacogest", "movildata", "geotab", "gps_generic",
         "anthropic", "openai", "ai_generic",
         "firma_electronica", "signaturit", "vidsigner", "docusign",
       ].map(provider => integrationProviderStatus(empresaId, provider))),
@@ -1539,7 +1539,7 @@ router.get("/integraciones/status", GERENTE_O_CONTABLE, async (req, res) => {
       buildEdiFeedAuditSummary(empresaId),
     ]);
     const byProvider = Object.fromEntries(providers.map(item => [item.provider, item]));
-    const gpsProviders = [byProvider.locatel, byProvider.tacogest, byProvider.movildata, byProvider.gps_generic];
+    const gpsProviders = [byProvider.locatel, byProvider.tacogest, byProvider.movildata, byProvider.geotab, byProvider.gps_generic];
     const iaProviders = [byProvider.anthropic, byProvider.openai, byProvider.ai_generic];
     const firmaProviders = [byProvider.firma_electronica, byProvider.signaturit, byProvider.vidsigner, byProvider.docusign];
     const perfil = normalizeEmpresaProfile(empresa.rows[0]?.cfg_precios?.empresa_perfil || empresa.rows[0]?.cfg_precios || {});

@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-09-empty-km-after-loading",
+    "date": "2026-09-28",
+    "title": "Kilómetros en vacío al cerrar la carga",
+    "intro": "La asignación de un viaje puede cambiar hasta que se confirme la carga.",
+    "items": [
+      { "title": "Pregunta en el momento adecuado", "text": "Al asignar un chófer antes de cargar no se pedirán kilómetros en vacío. La sugerencia aparece cuando la carga ya está confirmada y usa el chófer y camión que finalmente realizan el viaje.", "module": "pedidos" }
+    ]
+  },
+  {
     "id": "2026-09-collaborator-alerts-email",
     "date": "2026-09-28",
     "title": "Avisos de colaboradores más precisos",

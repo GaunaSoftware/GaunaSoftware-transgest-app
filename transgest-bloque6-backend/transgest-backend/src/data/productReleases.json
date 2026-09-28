@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-09-tariff-update-confirmation",
+    "date": "2026-09-28",
+    "title": "Control al cambiar tarifas desde un viaje",
+    "intro": "El precio de un viaje y la tarifa guardada del cliente se pueden decidir por separado.",
+    "items": [
+      { "title": "Actualizar solo si lo confirmas", "text": "Si cambias el tipo, precio, recargo o mínimo de una ruta con tarifa, se muestran las diferencias y puedes actualizar la tarifa para futuros viajes o conservar el cambio solo en el viaje. La pregunta también aparece cuando el importe es cero.", "module": "pedidos" }
+    ]
+  },
+  {
     "id": "2026-09-empty-km-after-loading",
     "date": "2026-09-28",
     "title": "Kilómetros en vacío al cerrar la carga",

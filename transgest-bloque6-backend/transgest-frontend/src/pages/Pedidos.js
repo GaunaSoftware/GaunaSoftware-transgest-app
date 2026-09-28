@@ -19,6 +19,7 @@ import OrderDocumentFields from "./orders/editor/OrderDocumentFields";
 import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
 import { driverName, stopSchedule } from "./orders/quickInfo";
 import { hasCustomerDependentValues, recoverExistingTripPrice, routesForCustomer, switchCustomerDraft } from "./orders/clientTariffDraft";
+import { tariffChanges, tariffDraftValues } from "./orders/tariffUpdate";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
@@ -7347,12 +7348,10 @@ async function calcularKmVacio(vehiculoId, nuevoOrigen) {
 
 async function maybeCrearRutaClienteDesdePedido() {
   if (!form.origen || !form.destino || !form.cliente_id) return;
-  if (form.ruta_id) return form.ruta_id;
   const origenN  = form.origen.trim().toLowerCase();
   const destinoN = form.destino.trim().toLowerCase();
   const tipoRutaActual = tipoVehiculoDeTexto([remolqueActual?.clase, remolqueActual?.tipo, remolqueActual?.marca, remolqueActual?.modelo, remolqueActual?.notas_operacion].filter(Boolean).join(" "));
   const routeKey = `${form.cliente_id}|${origenN}|${destinoN}|${tipoRutaActual || "cualquiera"}`;
-  if (rutasCreadasRef.current.has(routeKey)) return;
   let rutasClienteActualizadas = rutas;
   try {
     const fresh = await getRutasCliente(form.cliente_id, { silentError: true });
@@ -7368,7 +7367,18 @@ async function maybeCrearRutaClienteDesdePedido() {
   } catch (e) {
     console.warn("No se pudieron refrescar las rutas del cliente antes de guardar:", e.message);
   }
-  const rutaExistente = rutasClienteActualizadas
+  const rutaVinculada = form.ruta_id
+    ? rutasClienteActualizadas.find(r => String(r.id || r.ruta_id) === String(form.ruta_id))
+    : null;
+  if (form.ruta_id && !rutaVinculada) {
+    notify("No se ha podido comprobar la tarifa vinculada. El viaje se ha guardado, pero revisa la tarifa desde Clientes.", "warning");
+    return form.ruta_id;
+  }
+  if (rutaVinculada && !routeEndpointsMatch(form, rutaVinculada)) {
+    notify("La ruta del viaje ya no coincide con su tarifa guardada. Revisa la vinculación desde el pedido antes de actualizar esa tarifa.", "warning");
+    return form.ruta_id;
+  }
+  const rutaExistente = rutaVinculada || rutasClienteActualizadas
     .filter(r =>
       routeEndpointsMatch(form, r) &&
       (!r.cliente_id || r.cliente_id === form.cliente_id) &&
@@ -7376,45 +7386,49 @@ async function maybeCrearRutaClienteDesdePedido() {
     )
     .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0];
   if (rutaExistente) {
-    if (!routeTarifaMatchesDraft(rutaExistente, form)) {
-      // Si lo unico que no cuadra es el TIPO de tarifa (p.ej. la guardada esta en
-      // "viaje" y el pedido es por "tonelada"), se ACTUALIZA la tarifa al tipo del
-      // pedido en vez de dejarla desincronizada (para que no vuelva a cargar mal).
-      const tipoRuta = String(rutaExistente.tarifa_tipo || "viaje");
-      const tipoDraft = String(form.tipo_precio || "viaje");
-      const draftTieneTarifa = parseLocaleNumber(form.precio_unitario, 0) > 0
-        || parseLocaleNumber(form.minimo_unidades, 0) > 0
-        || parseLocaleNumber(form.importe_minimo, 0) > 0;
-      if (draftTieneTarifa && tipoRuta !== tipoDraft) {
-        try {
-          await editarRutaCliente(form.cliente_id, rutaExistente.id, {
-            origen: rutaExistente.origen,
-            destino: rutaExistente.destino,
-            km: toNullableNumber(rutaExistente.km ?? form.km_ruta),
-            tipo_vehiculo: rutaExistente.tipo_vehiculo || tipoRutaActual || "cualquiera",
-            tarifa_tipo: tipoDraft,
-            precio_base: toFiniteNumber(form.precio_unitario, calcImporte(form)),
-            recargo_combustible_pct: toNullableNumber(form.recargo_combustible_pct),
-            minimo_facturable: tipoDraft === "viaje" ? toNullableNumber(form.importe_minimo) : null,
-            minimo_unidades: tipoDraft !== "viaje" ? toNullableNumber(form.minimo_unidades) : null,
-            notas: rutaExistente.notas || "",
-          });
-          if (!form.ruta_id) setForm(p => ({ ...p, ruta_id: rutaExistente.id }));
-          rutasCreadasRef.current.add(routeKey);
-          notify(`Tarifa de la ruta actualizada a ${tipoDraft === "tonelada" ? "por tonelada" : tipoDraft === "km" ? "por km" : tipoDraft === "hora" ? "por hora" : tipoDraft}.`, "success");
-          return rutaExistente.id || null;
-        } catch (e) {
-          console.warn("No se pudo actualizar el tipo de la tarifa:", e?.message || e);
-        }
+    const cambios = tariffChanges(rutaExistente, form, form.tipo_precio === "viaje"
+      ? rutaExistente.minimo_facturable
+      : normalizeMinimoUnidadesRuta(rutaExistente, rutaExistente.tarifa_tipo));
+    if (cambios.length) {
+      const mostrar = value => typeof value === "number" ? value.toLocaleString("es-ES", { maximumFractionDigits: 4 }) : value;
+      const actualizar = await confirmDialog({
+        title: "Actualizar tarifa guardada",
+        message: `El viaje se ha guardado con sus nuevos datos. La tarifa de ${rutaExistente.origen} → ${rutaExistente.destino} es distinta:\n\n${cambios.map(c => `• ${c.campo}: ${mostrar(c.antes)} → ${mostrar(c.despues)}`).join("\n")}\n\n¿Actualizar también la tarifa del cliente para los próximos viajes? Los viajes anteriores no cambiarán.`,
+        confirmText: "Actualizar tarifa",
+        cancelText: "Solo este viaje",
+      });
+      if (!actualizar) return form.ruta_id ? rutaExistente.id : null;
+      const propuesta = tariffDraftValues(form);
+      try {
+        await editarRutaCliente(form.cliente_id, rutaExistente.id, {
+          origen: rutaExistente.origen,
+          destino: rutaExistente.destino,
+          km: toNullableNumber(rutaExistente.km),
+          tipo_vehiculo: rutaExistente.tipo_vehiculo || tipoRutaActual || "cualquiera",
+          tarifa_tipo: propuesta.tipo,
+          precio_base: propuesta.precioBase,
+          recargo_combustible_pct: propuesta.recargo,
+          minimo_facturable: propuesta.tipo === "viaje" ? propuesta.minimo : null,
+          minimo_unidades: propuesta.tipo !== "viaje" ? propuesta.minimo : null,
+          notas: rutaExistente.notas || "",
+        });
+        setRutas(prev => prev.map(r => String(r.id) === String(rutaExistente.id) ? {
+          ...r, tarifa_tipo: propuesta.tipo, precio_base: propuesta.precioBase,
+          recargo_combustible_pct: propuesta.recargo,
+          minimo_facturable: propuesta.tipo === "viaje" ? propuesta.minimo : null,
+          minimo_unidades: propuesta.tipo !== "viaje" ? propuesta.minimo : null,
+        } : r));
+        notify("Tarifa del cliente actualizada para próximos viajes.", "success");
+      } catch (e) {
+        console.warn("No se pudo actualizar la tarifa del cliente:", e?.message || e);
+        notify("El viaje se ha guardado, pero la tarifa no se pudo actualizar. Revisa la tarifa desde Clientes.", "warning");
+        return form.ruta_id ? rutaExistente.id : null;
       }
-      rutasCreadasRef.current.add(routeKey);
-      notify("Existe una ruta con ese origen/destino, pero tiene otra tarifa. No se ha vinculado automaticamente.", "info");
-      return null;
     }
     if (!form.ruta_id && rutaExistente.id) setForm(p => ({...p, ruta_id: rutaExistente.id}));
-    rutasCreadasRef.current.add(routeKey);
     return rutaExistente.id || null;
   }
+  if (rutasCreadasRef.current.has(routeKey)) return null;
   const findExistingAfterSave = async () => {
     try {
       const fresh = await getRutasCliente(form.cliente_id, { silentError: true });
@@ -8060,8 +8074,8 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   const next = {
     ...draft,
     tipo_precio: tarifaTipo,
-    precio_unitario: precioFinal || draft.precio_unitario,
-    precio_base_sin_combustible: precioBase || draft.precio_base_sin_combustible || "",
+    precio_unitario: precioFinal,
+    precio_base_sin_combustible: precioBase,
     recargo_combustible_pct: recargoPct || 0,
     importe_minimo: tarifaTipo === "viaje" ? (ruta.minimo_facturable || "") : "",
     minimo_unidades: tarifaTipo !== "viaje" ? minimoUnidades : "",

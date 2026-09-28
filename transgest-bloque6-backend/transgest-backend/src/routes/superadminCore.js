@@ -69,8 +69,8 @@ function extractProviderUuid(response = {}) {
 }
 
 const { MONTHLY_EUR, normalizeOrigin, priceFor, monthlyEquivalent } = require('../services/commercialPricing');
-const API_PROVIDERS = ["here", "ors", "anthropic", "openai", "ai_generic", "locatel", "tacogest", "movildata", "gps_generic"];
-const GPS_PROVIDERS = ["locatel", "tacogest", "movildata", "gps_generic"];
+const API_PROVIDERS = ["here", "ors", "anthropic", "openai", "ai_generic", "locatel", "tacogest", "movildata", "geotab", "gps_generic"];
+const GPS_PROVIDERS = ["locatel", "tacogest", "movildata", "geotab", "gps_generic"];
 const APP_META_DEFAULTS = {
   brand_name: "TransGest",
   version_name: "TMS",
@@ -169,6 +169,15 @@ async function requestMovildataAdmin(path, apiKey, params = {}, options = {}) {
 
 async function testGpsProviderConnection(provider, apiKey, empresaId = null) {
   if (!apiKey) return { ok: false, message: "Falta clave API." };
+  if (provider === 'geotab') {
+    try {
+      const data = await require('../services/geotabGps').snapshot(apiKey);
+      return {ok:true,provider,pull_supported:true,remote_vehicles:data.devices.length,
+        remote_positions:data.statuses.length,message:'Conexión Geotab verificada. La sincronización enlazará vehículos por matrícula o ID del dispositivo.'};
+    } catch (error) {
+      return {ok:false,provider,pull_supported:true,message:error.message};
+    }
+  }
   if (['here','ors','openrouteservice'].includes(provider)) {
     const controller = new AbortController();
     const timeout = setTimeout(()=>controller.abort(),15000);

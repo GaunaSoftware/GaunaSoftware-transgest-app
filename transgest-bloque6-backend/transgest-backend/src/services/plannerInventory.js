@@ -119,6 +119,7 @@ async function transition(db,company,user,id,input){
    }
    if(action==='cancelar')await tx.query('UPDATE pedidos SET peso_kg=NULL,bultos=NULL,palets_cantidad=NULL,metros_lineales=NULL WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company]);
    if(action==='expedir'){
+    await require('./plannerPalletReturns').recordDispatch(tx,company,user,order,lines);
     await require('./plannerCosts').snapshotCosts(tx,company,user,prep,prep.reparto_coste?.criterio_solicitado||'peso');
     await tx.query("UPDATE pedidos SET estado='en_curso' WHERE id=$1 AND empresa_id=$2",[prep.pedido_id,company]);
     await tx.query("INSERT INTO planner_eventos(empresa_id,pedido_id,preparacion_id,tipo,datos,created_by) VALUES($1,$2,$3,'expedicion.salida',$4,$5)",[company,prep.pedido_id,id,JSON.stringify({confirmacion:'trafico',documentos:input.dcd_versiones_revisadas}),user]);

@@ -4749,6 +4749,7 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
       : source.notas;
     return {
       ...source,
+      peso_kg: require('../services/stopWeights').weightKg(source.peso_kg),
       direccion,
       pais: normalizePaisPedido(source.pais || source.country || (idx === 0 ? fallbackCountry : "España")),
       provincia: String(source.provincia || source.region || source.state || (idx === 0 ? fallbackRegion : "") || "").trim(),
@@ -8781,6 +8782,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     try {
+    require('../services/stopWeights').fillMissingOrderWeight(req.body);
     const { cliente_id, ruta_id, vehiculo_id, chofer_id, origen, destino,
             fecha_pedido, fecha_carga, hora_carga, fecha_entrega,
             mercancia, peso_kg, bultos, importe, notas, extracostes = [],
@@ -9535,6 +9537,10 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         body.destino_provincia ?? body.provincia_destino ?? pedidoActualRows[0].destino_provincia ?? ""
       )
     : normalizePedidoJsonList(pedidoActualRows[0].puntos_descarga);
+  if ((body.puntos_carga !== undefined || body.puntos_descarga !== undefined) &&
+      (body.peso_kg !== undefined || pedidoActualRows[0].peso_kg == null)) {
+    require('../services/stopWeights').fillMissingOrderWeight(body, puntosCargaNormUpdate, puntosDescargaNormUpdate);
+  }
   const geoTouched = body.puntos_carga !== undefined || body.puntos_descarga !== undefined ||
     body.origen_pais !== undefined || body.pais_origen !== undefined || body.origen_provincia !== undefined || body.provincia_origen !== undefined ||
     body.destino_pais !== undefined || body.pais_destino !== undefined || body.destino_provincia !== undefined || body.provincia_destino !== undefined ||

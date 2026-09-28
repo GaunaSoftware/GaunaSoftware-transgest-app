@@ -1,5 +1,5 @@
 const db = require('./db');
-const CATALOG = {here:'HERE',ors:'OpenRouteService',locatel:'Locatel',tacogest:'Tacogest',movildata:'Movildata',clavei:'ClaveiCon',sage:'Sage',a3:'A3',holded:'Holded',wtransnet:'Wtransnet',verifacti:'Verifacti',aeat:'AEAT directa',openai:'OpenAI',anthropic:'Anthropic',ai_generic:'IA compatible',firma:'Firma electrónica'};
+const CATALOG = {here:'HERE',ors:'OpenRouteService',locatel:'Locatel',tacogest:'Tacogest',movildata:'Movildata',geotab:'Geotab',clavei:'ClaveiCon',sage:'Sage',a3:'A3',holded:'Holded',wtransnet:'Wtransnet',verifacti:'Verifacti',aeat:'AEAT directa',openai:'OpenAI',anthropic:'Anthropic',ai_generic:'IA compatible',firma:'Firma electrónica'};
 const STATES = ['planned','development','sandbox_verified','pilot','production_ready','degraded'];
 const CRITERIA = ['authentication','roundtrip','idempotence','errors_retries','tenant_isolation','logs','monitoring','tests','healthcheck'];
 const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status});};

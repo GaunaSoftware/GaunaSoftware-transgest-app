@@ -35,6 +35,8 @@ router.get('/movimientos',wrap(async(req,res)=>res.json((await db.query(`SELECT 
  FROM planner_movimientos m JOIN planner_existencias e ON e.id=m.existencia_id AND e.empresa_id=m.empresa_id JOIN planner_articulos a ON a.id=e.articulo_id AND a.empresa_id=e.empresa_id
  LEFT JOIN usuarios u ON u.id=m.created_by AND u.empresa_id=m.empresa_id WHERE m.empresa_id=$1 ORDER BY m.created_at DESC,m.id LIMIT 200`,[req.empresaId])).rows)));
 router.post('/movimientos',write,wrap(async(req,res)=>res.status(201).json(await inventory.move(db,req.empresaId,req.user.id,req.body))));
+router.get('/palets-clientes',wrap(async(req,res)=>res.json(await require('../services/plannerPalletReturns').balances(db,req.empresaId))));
+router.post('/palets-clientes/devoluciones',write,wrap(async(req,res)=>res.status(201).json(await require('../services/plannerPalletReturns').returnToStock(db,req.empresaId,req.user.id,req.body))));
 router.get('/preparaciones',wrap(async(req,res)=>res.json((await db.query(`SELECT r.*,p.numero,p.cliente_id,p.fecha_carga,p.origen,p.destino,p.estado AS viaje_estado,p.puntos_descarga,p.colaborador_id,p.colaborador_precio_confirmado,
  p.matricula_colaborador,p.vehiculo_id,c.nombre AS cliente,co.nombre AS colaborador,
  (SELECT COUNT(*)::int FROM planner_preparacion_lineas l WHERE l.preparacion_id=r.id) AS lineas,

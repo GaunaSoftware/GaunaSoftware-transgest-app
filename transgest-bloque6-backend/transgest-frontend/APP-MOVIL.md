@@ -9,8 +9,8 @@ app solo de chófer: al iniciar sesión, **cada usuario ve lo suyo según su rol
 Es decir, **una sola app para todos**; lo que cambia es lo que ve cada uno según su login.
 
 - **Nombre**: TransGest · **ID de app**: `com.gaunasoftware.transgest`
-- La app llama al backend de producción automáticamente (mismo `REACT_APP_API_URL`
-  que la web; por defecto `https://transgest-backend.onrender.com`).
+- La compilación móvil fija `REACT_APP_API_URL=https://api.transgest.app` y comprueba
+  que el paquete Android contiene esa dirección. No reutilices un build web o de Planner.
 
 > IMPORTANTE (limitaciones de plataforma, no del proyecto):
 > - **Android** se compila en **Windows** con Android Studio. ✅
@@ -52,10 +52,18 @@ npm run mobile:icons
 
 ## 2. Android — compilar e instalar (Windows)
 
-1. Genera el build web y sincroniza el proyecto nativo:
+1. Genera el build móvil y sincroniza el proyecto nativo:
    ```
-   npm run mobile:sync
+   npm run mobile:android:prepare
    ```
+   `npm run mobile:sync` también aplica la misma comprobación. Si el APK ya está
+   instalado, hay que compilarlo e instalarlo de nuevo: la publicación de la web
+   no cambia los archivos empaquetados en el teléfono.
+   Si Chrome en el mismo móvil muestra `status: ok` en
+   `https://api.transgest.app/health` pero la app indica un error de conexión,
+   comprueba «Servidor» en el acceso. El aviso dentro de la app permite
+   restablecer una URL guardada o probar el acceso alternativo de Render;
+   ambas acciones cierran la sesión para entrar de nuevo con seguridad.
 2. Abre el proyecto en Android Studio:
    ```
    npm run mobile:open:android
@@ -108,10 +116,10 @@ En un **Mac**, dentro de `transgest-frontend`:
 
 ## 4. Actualizar la app cuando cambie la web
 
-Cada vez que cambie el frontend y quieras llevarlo a la app:
+Cada vez que cambie el frontend y quieras llevarlo a la app Android:
 
 ```
-npm run mobile:sync
+npm run mobile:android:prepare
 ```
 
 Y vuelve a compilar/instalar (Run en Android Studio / Xcode). Como la web va

@@ -1,5 +1,8 @@
 const fs=require('fs'),path=require('path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..');
+const scripts=require(path.join(root,'package.json')).scripts;
+assert.match(scripts['mobile:sync']||'',/mobile:build/,'La sincronización móvil debe compilar primero la variante móvil.');
+assert.match(scripts['mobile:build']||'',/REACT_APP_API_URL=https:\/\/api\.transgest\.app/,'La compilación móvil debe fijar la API de producción.');
 const config=JSON.parse(fs.readFileSync(path.join(root,'capacitor.config.json'),'utf8'));
 assert.equal(config.appId,'com.gaunasoftware.transgest');
 assert.equal(config.webDir,'build');
@@ -19,6 +22,9 @@ if(process.argv.includes('--assets')){
   assert.deepEqual(bundled.server,config.server);
   assert.ok(fs.existsSync(path.join(assets,'public/index.html')));
   assert.ok(!fs.existsSync(path.join(assets,'public/qa')),'No empaquetar demostraciones QA.');
+  const maplibreVersion=require('maplibre-gl/package.json').version;
+  const maplibreWorker=Number(maplibreVersion.split('.')[0])>=6?'maplibre-gl-worker.mjs':'maplibre-gl-csp-worker.js';
+  assert.ok(fs.existsSync(path.join(assets,'public/vendor/maplibre',maplibreVersion,maplibreWorker)),'Falta el worker MapLibre del mapa en Android.');
   const scripts=fs.readdirSync(path.join(assets,'public/static/js')).filter(f=>/^main\..*\.js$/.test(f));
   assert.equal(scripts.length,1);
   assert.ok(fs.readFileSync(path.join(assets,'public/static/js',scripts[0]),'utf8').includes('https://api.transgest.app'));

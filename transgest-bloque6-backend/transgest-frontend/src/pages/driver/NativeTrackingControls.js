@@ -16,8 +16,7 @@ export default function NativeTrackingControls({jornada,vehicleId,onStatus,visib
  if(!hasNativeDriverTracking()||!visible)return null;
  async function toggle(){setBusy(true);setError('');try{if(state.active)await stopNativeDriverTracking();else await startNativeDriverTracking();setState(await nativeDriverTrackingStatus());}catch(e){setError(e.message);}finally{setBusy(false);}}
  return <section aria-label="GPS de la jornada" className="driver-card" style={{padding:16,marginBottom:16}}>
-  <strong>Seguimiento de la jornada</strong><p role="status">{state.message}</p>
-  <p>Comparte la ubicación con tu empresa mientras trabajas. Android mantiene una notificación con «Detener». Se detiene al cerrar jornada, cambiar de conjunto o salir de la app.</p>
+  <strong>GPS de jornada</strong><p role="status">{state.message}</p>
   {state.last_sent_at&&<p>Último envío: {new Date(state.last_sent_at).toLocaleTimeString('es-ES')}</p>}
   {error&&<p role="alert">{error}</p>}
   <Button disabled={busy||(!eligible&&!state.active)} onClick={toggle}>{state.active?'Detener seguimiento':'Iniciar seguimiento'}</Button>

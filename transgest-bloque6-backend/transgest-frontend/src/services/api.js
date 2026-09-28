@@ -66,7 +66,7 @@ function friendlyApiError(message, status, requestId, path = "") {
     "la operacion";
 
   if (!raw || lower === "failed to fetch" || lower.includes("networkerror")) {
-    return "No se pudo conectar con el servidor. Comprueba que el backend esta arrancado y vuelve a intentarlo.";
+    return "No se pudo conectar con el servidor de TransGest. Comprueba la conexión del dispositivo y vuelve a intentarlo.";
   }
   if (lower.includes("tardado demasiado") || lower.includes("abort")) {
     return "El servidor ha tardado demasiado en responder. Vuelve a intentarlo y, si se repite, revisa el estado de la API.";

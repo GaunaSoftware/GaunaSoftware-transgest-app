@@ -3,10 +3,10 @@ import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibrePackage from "maplibre-gl/package.json";
 
-// The module worker imports a sibling shared module. Ship both, versioned,
-// through prepare_map_workers.cjs instead of emitting the worker as a lone asset.
+// Match the worker bundle to the installed MapLibre major version.
 const publicRoot = (process.env.PUBLIC_URL || "").replace(/^\.$/, "").replace(/\/$/, "");
-maplibregl.setWorkerUrl(`${publicRoot}/vendor/maplibre/${maplibrePackage.version}/maplibre-gl-worker.mjs`);
+const workerFile = Number(maplibrePackage.version.split('.')[0]) >= 6 ? 'maplibre-gl-worker.mjs' : 'maplibre-gl-csp-worker.js';
+maplibregl.setWorkerUrl(`${publicRoot}/vendor/maplibre/${maplibrePackage.version}/${workerFile}`);
 
 const key = process.env.REACT_APP_MAPTILER_KEY || "";
 const style = key

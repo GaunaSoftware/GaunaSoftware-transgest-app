@@ -7,6 +7,7 @@ import DriverDownloadedDocuments from './driver/DriverDownloadedDocuments';
 import {hasNativeDocuments} from '../services/nativeDocuments';
 import NativeTrackingControls from './driver/NativeTrackingControls';
 import {hasNativeDriverTracking} from '../services/nativeDriverTracking';
+import {clearConfiguredServer, getConfiguredServer, resolveApiBase, setConfiguredServer} from '../utils/serverConfig';
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getPedidos, getPedido, cambiarEstadoPedido, editarPedido, guardarFirmaEntrega, actualizarGpsPedido, registrarGpsChoferApp, getTallerSolicitudes, crearTallerSolicitud, subirPedidoDocChofer, guardarPedidoChoferPasos, getToken, getChoferJornadaApp, guardarChoferFirmaBaseApp, getChoferVacacionesApp, getNotificaciones, marcarNotificacionLeida } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -51,6 +52,28 @@ export default function AppChofer(){
   const [loadError, setLoadError] = useState("");
   const [firmaBaseOpen, setFirmaBaseOpen] = useState(false);
   const [firmaBaseForzada, setFirmaBaseForzada] = useState(false);
+  useEffect(()=>{
+    if(!hasNativeDriverTracking() || !user?.id)return;
+    const key=`transgest_driver_tracking_intro_v1:${user.empresa_id || 'empresa'}:${user.id}`;
+    try{if(localStorage.getItem(key))return;}catch{return;}
+    let cancelled=false;
+    const timer=setTimeout(async()=>{
+      const allow=await confirmDialog({
+        title:'Ubicación durante la jornada',
+        message:'TransGest puede enviar tu ubicación a la empresa mientras tengas la jornada abierta y actives el GPS. ¿Quieres permitir el acceso a la ubicación en este dispositivo? Podrás iniciar o detener el seguimiento desde Mi jornada.',
+        confirmText:'Permitir ubicación',cancelText:'Ahora no',
+      });
+      if(cancelled)return;
+      try{localStorage.setItem(key,allow?'permitido':'omitido');}catch{}
+      if(allow){
+        try{
+          const granted=await requestForegroundLocationPermission();
+          if(!cancelled)notify(granted?'Puedes iniciar el GPS desde Mi jornada.':'Podrás activar el permiso más adelante desde Mi jornada.',granted?'success':'warning');
+        }catch{if(!cancelled)notify('Podrás activar la ubicación más adelante desde Mi jornada.','warning');}
+      }
+    },300);
+    return()=>{cancelled=true;clearTimeout(timer);};
+  },[user?.empresa_id,user?.id]);
   useEffect(()=>{const stop=()=>{disableMobilePush().catch(()=>{});};window.addEventListener('tms:session-cleared',stop);return()=>{window.removeEventListener('tms:session-cleared',stop);stop();};},[]);
   useEffect(()=>{
     let disposed=false,remove=null;
@@ -424,8 +447,8 @@ export default function AppChofer(){
     <>
     <div className="tg-app-chofer-page">
       <DriverHeader user={user} tab={expandedPedidoId ? "detalle" : tab} onNavigate={setTab} onRefresh={()=>cargar({forceLoading:true})} unread={routeNotifications.length} loading={loading}/>
-      <NativeTrackingControls jornada={jornadaInfo?.jornada} vehicleId={jornadaInfo?.chofer?.vehiculo_id} onStatus={setGpsSeguimientoEstado} visible={tab==='jornada'||tab==='inicio'}/>
-      {loadError && <div className="driver-load-error" role="alert"><span>{loadError}</span><button onClick={()=>cargar({forceLoading:true})}>Reintentar</button></div>}
+      <NativeTrackingControls jornada={jornadaInfo?.jornada} vehicleId={jornadaInfo?.chofer?.vehiculo_id} onStatus={setGpsSeguimientoEstado} visible={tab==='jornada'}/>
+      {loadError && <div className="driver-load-error" role="alert"><span>{loadError}</span>{isNativeMobileApp() && <small>Servidor: {resolveApiBase()}</small>}<button onClick={()=>cargar({forceLoading:true})}>Reintentar</button>{isNativeMobileApp() && (getConfiguredServer() ? <button onClick={()=>{clearConfiguredServer();window.location.reload();}}>Restablecer servidor de TransGest y volver a entrar</button> : <button onClick={()=>{setConfiguredServer('https://transgest-backend.onrender.com');window.location.reload();}}>Probar acceso alternativo y volver a entrar</button>)}</div>}
 
       {/* Banner offline */}
       {offline && (

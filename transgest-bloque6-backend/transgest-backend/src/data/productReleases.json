@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-planner-palets-geotab-stops",
+    "date": "2026-09-28",
+    "title": "Palés retornables, pesos y GPS Geotab",
+    "intro": "Tres mejoras para seguir la mercancía y preparar los viajes con datos más claros.",
+    "items": [
+      { "title": "Palés pendientes por cliente", "text": "Al expedir artículos PALET desde Planner queda registrada su salida. En Almacén puedes ver lo pendiente y anotar cada devolución con su albarán.", "module": "planner" },
+      { "title": "Peso de varias paradas", "text": "En cargas y descargas adicionales, 8,0 se interpreta como 8.000 kg. Si el peso total está vacío, el pedido suma las paradas sin contar dos veces la misma mercancía.", "module": "pedidos" },
+      { "title": "Geotab disponible para GPS", "text": "La empresa puede conectar Geotab desde Integraciones y seguir sus vehículos desde la vista GPS una vez configuradas sus credenciales.", "module": "vehiculos" }
+    ]
+  },
+  {
     "id": "2026-09-tariff-update-confirmation",
     "date": "2026-09-28",
     "title": "Control al cambiar tarifas desde un viaje",

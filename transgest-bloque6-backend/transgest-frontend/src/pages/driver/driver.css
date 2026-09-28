@@ -73,8 +73,11 @@
 .driver-overlay>div { max-height:calc(100dvh - 40px); overflow:auto; border-radius:18px!important; }
 .driver-overlay input { background:#fff!important; color:#10213c!important; }
 .driver-overlay button { min-height:44px; border-radius:9px!important; }
-.driver-load-error { margin:16px 24px; padding:14px; border:1px solid #fda4af; background:rgba(225,29,72,.08); border-radius:12px; color:#be123c; display:flex; gap:12px; align-items:center; justify-content:space-between; }
+.driver-load-error { margin:16px 24px; padding:14px; border:1px solid #fda4af; background:rgba(225,29,72,.08); border-radius:12px; color:#be123c; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; }
+.driver-load-error span { flex:1 1 100%; }
+.driver-load-error small { flex:1 1 100%; overflow-wrap:anywhere; }
 .driver-load-error button { border:1px solid currentColor; background:transparent; color:inherit; padding:8px 12px; border-radius:8px; }
+@media (max-width:600px) { .driver-load-error { margin:12px 16px; } .driver-load-error button { flex:1 1 100%; } }
 .tg-driver-dcd-internal { display:none!important; }
 @media(max-width:600px) {
   .driver-header { padding:16px; padding-top:max(16px,env(safe-area-inset-top)); gap:8px; }

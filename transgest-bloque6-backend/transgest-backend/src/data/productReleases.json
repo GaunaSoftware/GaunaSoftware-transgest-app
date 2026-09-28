@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-driver-android-connection-tracking",
+    "date": "2026-09-28",
+    "title": "Acceso Android y GPS de jornada",
+    "intro": "La app del chófer muestra mejor los problemas de conexión y explica el GPS una sola vez.",
+    "items": [
+      { "title": "Servidor de TransGest", "text": "El nuevo paquete Android comprueba que se conecta a la API de TransGest. Si el dispositivo conserva una dirección personalizada, puedes restablecerla desde el acceso o desde el aviso de conexión.", "roles": ["chofer"] },
+      { "title": "GPS de jornada", "text": "Al entrar por primera vez en la app se pide permiso de ubicación. Después, el seguimiento se controla desde Mi jornada y deja de ocupar la pantalla de Inicio.", "roles": ["chofer"] }
+    ]
+  },
+  {
     "id": "2026-09-planner-palets-geotab-stops",
     "date": "2026-09-28",
     "title": "Palés retornables, pesos y GPS Geotab",

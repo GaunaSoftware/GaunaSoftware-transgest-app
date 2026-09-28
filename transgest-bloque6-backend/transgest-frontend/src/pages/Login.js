@@ -4,6 +4,7 @@ import { BRAND_NAME, getBrandVersionLabel } from "../branding";
 import { getLoginBrand, getPublicAppMeta, healthCheck, requestPasswordReset } from "../services/api";
 import { confirmDialog } from "../services/notify";
 import { getConfiguredServer, setConfiguredServer, clearConfiguredServer, isDesktopApp, DEFAULT_API_URL } from "../utils/serverConfig";
+import { isNativeMobileApp } from "../services/mobileRuntime";
 import { useTheme } from "../context/ThemeContext";
 import transgestLogoDark from "../assets/brand/transgest_logo_dark.svg";
 import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
@@ -68,9 +69,9 @@ export default function Login() {
   const [srvOpen, setSrvOpen] = useState(false);
   const [srvUrl, setSrvUrl] = useState(getConfiguredServer());
   const servidorPersonalizado = Boolean(getConfiguredServer());
-  // El configurador solo se ofrece en el ejecutable de escritorio o si ya hay
-  // un servidor local guardado (la web en la nube no lo necesita).
-  const mostrarConfigServidor = desktopApp || servidorPersonalizado;
+  // El escritorio y la app nativa pueden recuperar una conexión mal guardada;
+  // la web en la nube solo lo ofrece si ya existe una URL personalizada.
+  const mostrarConfigServidor = desktopApp || isNativeMobileApp() || servidorPersonalizado;
 
   function guardarServidor() {
     let guardada;

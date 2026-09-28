@@ -25,6 +25,21 @@ async function call(route, method, company, user, role = 'gerente', body = {}) {
 }
 
 async function main() {
+  const historic = new PGlite();
+  try {
+    await historic.exec(`CREATE TABLE empresas(id uuid PRIMARY KEY); CREATE TABLE usuarios(id uuid PRIMARY KEY);
+      CREATE TABLE bi_weekly_deliveries(empresa_id uuid,user_id uuid,week_start date,status text,message_id text,updated_at timestamptz);
+      INSERT INTO empresas VALUES('${A}'); INSERT INTO usuarios VALUES('${MANAGER}'),('${SECOND}');
+      INSERT INTO bi_weekly_deliveries VALUES
+        ('${A}','${MANAGER}','2026-09-21','fallido',NULL,'2026-09-28T07:00:00Z'),
+        ('${A}','${SECOND}','2026-09-21','enviado','previous-smtp-id','2026-09-28T07:05:00Z');`);
+    const migration=fs.readFileSync(path.join(__dirname,'migrations/20260928_bi_weekly_company_delivery.sql'),'utf8');
+    await historic.exec(migration);
+    await historic.exec(migration);
+    const previous=(await historic.query('SELECT status,message_id FROM bi_weekly_company_deliveries WHERE empresa_id=$1',[A])).rows;
+    assert.deepEqual(previous,[{status:'enviado',message_id:'previous-smtp-id'}],
+      'migration must preserve a prior successful week as one company delivery');
+  } finally { await historic.close(); }
   const template = PLANTILLAS.bi_rentabilidad_semanal({ empresa: '<Empresa & A>', desde: '2026-09-21', hasta: '2026-09-27' });
   assert.ok(template.html.includes('&lt;Empresa &amp; A&gt;'));
   assert.ok(template.html.includes('El margen directo no es beneficio neto'));
@@ -52,8 +67,8 @@ async function main() {
       catch (error) { await pg.exec('ROLLBACK'); throw error; } };
     await biSchema.ensureSchema({ query: db.query, transaction: db.transaction });
     await biSchema.ensureSchema({ query: db.query, transaction: db.transaction });
-    assert.equal((await pg.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE id LIKE '20260923_bi_%'")).rows[0].count, 2,
-      'Startup applies and records both BI migrations exactly once');
+    assert.equal((await pg.query("SELECT COUNT(*)::int AS count FROM schema_migrations WHERE id LIKE '%bi_%'")).rows[0].count, 3,
+      'Startup applies and records all BI migrations exactly once');
     await pg.query("UPDATE schema_migrations SET checksum='changed' WHERE id='20260923_bi_weekly_delivery'");
     await assert.rejects(biSchema.ensureSchema({ query: db.query, transaction: db.transaction }), /checksum distinto/);
     await pg.query("UPDATE schema_migrations SET checksum=$1 WHERE id='20260923_bi_weekly_delivery'", [
@@ -91,9 +106,10 @@ async function main() {
     assert.equal((await weekly.tick(new Date('2026-09-28T06:59:00Z'), deps)).skipped, 'fuera_de_horario');
     assert.equal(sent.length, 0);
     const first = await weekly.tick(new Date('2026-09-28T07:00:00Z'), deps);
-    assert.deepEqual(first.results.map(item => item.status), ['enviado', 'enviado']);
-    assert.equal(sent.length, 2);
-    assert.deepEqual(sent.map(item => item.destinatario).sort(), ['manager-a@example.test', 'manager-b@example.test']);
+    assert.deepEqual(first.results.map(item => item.status), ['enviado']);
+    assert.equal(sent.length, 1, 'one SMTP handoff per company and week');
+    assert.equal(sent[0].destinatario, 'manager-a@example.test');
+    assert.deepEqual(sent[0].bcc, ['manager-b@example.test']);
     for (const mail of sent) {
       assert.equal(mail.empresa_id, A);
       assert.equal(mail.attachments.length, 1);
@@ -101,10 +117,14 @@ async function main() {
       assert.equal(mail.datos.desde, '2026-09-21');
     }
     assert.deepEqual((await weekly.tick(new Date('2026-09-28T07:15:00Z'), deps)).results.map(item => item.status),
-      ['ya_registrado', 'ya_registrado'], 'restart or next tick cannot duplicate the weekly mail');
-    assert.equal(sent.length, 2);
+      ['ya_registrado'], 'restart or next tick cannot duplicate the weekly mail');
+    assert.equal(sent.length, 1);
+    assert.equal((await call('/semanal/configuracion', 'PUT', A, MANAGER, 'gerente', { destinatarios: [SECOND] })).status, 200);
+    assert.equal((await weekly.tick(new Date('2026-09-28T07:30:00Z'), deps)).results[0].status,'ya_registrado',
+      'changing the subscribed manager mid-week cannot send a second company report');
+    assert.equal(sent.length,1);
     const rows = await pg.query('SELECT status,week_start,empresa_id FROM bi_weekly_deliveries');
-    assert.equal(rows.rows.length, 2);
+    assert.equal(rows.rows.length, 1);
     assert.ok(rows.rows.every(row => row.status === 'enviado' && row.empresa_id === A));
     assert.equal((await call('/semanal/configuracion', 'GET', B, OTHER)).result.ultimos_envios.length, 0);
 
@@ -148,6 +168,36 @@ async function main() {
     const visible = (await call('/semanal/configuracion', 'GET', A, MANAGER)).result.ultimos_envios;
     assert.ok(visible.some(item => item.status === 'fallido'));
     assert.ok(visible.some(item => item.status === 'por_verificar'));
+    assert.equal((await call('/semanal/configuracion', 'PUT', B, OTHER, 'gerente', { destinatarios: [OTHER] })).status,200);
+    const multiSent=[];
+    const multi=await weekly.tick(new Date('2026-11-02T08:00:00Z'),{...deps,
+      generate:async(company,user,config)=>{
+        const saved=await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot,contract_version) VALUES($1,$2,$3,$4) RETURNING id',
+          [company,user,JSON.stringify({title:'Synthetic',metadata:{periodo:config}}),'bi-v1']);
+        return {id:saved.rows[0].id};
+      },
+      send:async mail=>{multiSent.push(mail);return {messageId:`multi-${multiSent.length}`};}
+    });
+    assert.deepEqual(multi.results.map(item=>item.status),['enviado','enviado']);
+    assert.deepEqual(multiSent.map(mail=>mail.empresa_id),[A,B]);
+    assert.equal((await call('/semanal/configuracion','PUT',A,MANAGER,'gerente',
+      {destinatarios:[MANAGER,SECOND]})).status,200);
+    const revoked=[];
+    const revokedResult=await weekly.processRecipient({empresa_id:A,user_id:MANAGER,email:'manager-a@example.test',
+      bcc:['manager-b@example.test'],empresa_nombre:'Empresa A'},
+    {desde:'2026-11-09',hasta:'2026-11-15'}, {...deps,
+      generate:async(company,user,config)=>{
+        await pg.query('UPDATE bi_weekly_subscriptions SET enabled=false WHERE empresa_id=$1 AND user_id=$2',[A,SECOND]);
+        const saved=await pg.query('INSERT INTO bi_report_runs(empresa_id,owner_id,snapshot,contract_version) VALUES($1,$2,$3,$4) RETURNING id',
+          [company,user,JSON.stringify({title:'Synthetic',metadata:{periodo:config}}),'bi-v1']);
+        return {id:saved.rows[0].id};
+      },
+      send:async mail=>{revoked.push(mail);return {messageId:'revoked-test'};},
+    });
+    assert.equal(revokedResult.status,'enviado');
+    assert.deepEqual(revoked[0].bcc,[], 'A manager unsubscribed during report generation cannot receive the PDF');
+    assert.deepEqual(multiSent.map(mail=>mail.destinatario),['manager-a@example.test','manager-c@example.test']);
+    assert.equal((await pg.query('SELECT COUNT(*)::int AS total FROM bi_weekly_company_deliveries WHERE week_start=$1',['2026-10-26'])).rows[0].total,2);
     console.log('BI weekly: Madrid calendar/DST, opt-in, roles, tenants, plan, PDF attachment, idempotency and SMTP simulation OK');
   } finally {
     db.query = oldQuery; db.transaction = oldTransaction;

@@ -109,6 +109,16 @@ function projectReport(workspace,config,company={}) {
     }
   }
   const warnings=metrics.filter(m=>m.estado!=='completo').map(m=>`${m.label}: ${m.estado||'sin cobertura'}${m.definicion?` - ${m.definicion}`:''}`);
+  const vehicleScope=t.kind==='vehiculo'?workspace.vehiculos_alcance||null:null;
+  const vehicleExplanations=t.kind==='vehiculo'?sourceRows.filter(r=>Number(r.margen_directo_registrado)<0).map(r=>{
+    const services=(workspace.servicios?.rows||[]).filter(p=>String(p.vehiculo_id||'sin_vehiculo')===String(r.id));
+    return {vehiculo:r.nombre,ingreso:r.ingreso,coste:r.coste_directo_registrado,margen:r.margen_directo_registrado,
+      servicios:services.map(p=>({numero:p.numero,ingreso:p.ingreso,coste:p.coste,advertencia:p.advertencia||null}))};
+  }):[];
+  if(vehicleScope?.sin_vehiculo)warnings.push(`${vehicleScope.sin_vehiculo} servicio(s) realizado(s) sin vehículo atribuido; revisa su asignación.`);
+  if(vehicleScope?.asignacion_historica_ambigua)warnings.push(`${vehicleScope.asignacion_historica_ambigua} servicio(s) con varios recursos históricos, sin atribución a una única tractora.`);
+  if(vehicleScope?.asignacion_sin_instantanea)warnings.push(`${vehicleScope.asignacion_sin_instantanea} servicio(s) atribuidos a la matrícula del pedido porque falta la instantánea del tramo físico; revisa cambios de vehículo posteriores.`);
+  if(vehicleScope?.pedidos_fuera_del_criterio)warnings.push(`${vehicleScope.pedidos_fuera_del_criterio} pedido(s) con vehículo no constan como entregados o facturados en el periodo y no forman parte del ingreso realizado.`);
   if(workspace.economia?.fuentes_no_disponibles?.length&&t.kind!=='calidad')warnings.push(`Fuentes no disponibles: ${workspace.economia.fuentes_no_disponibles.join(', ')}`);
   return {version:VERSION,metric_contract:t.kind==='calidad'?workspace.operations.version:workspace.economia.version,
     title:company.reportTitle||t.name,description:company.reportDescription||'',company:{name:company.name||'Empresa',logo:company.logo||null},config,
@@ -116,7 +126,11 @@ function projectReport(workspace,config,company={}) {
       generated_at:new Date().toISOString(),scope:'Empresa autenticada; datos de detalle completos',
       view_id:company.viewId||null,coverage:t.kind==='calidad'?null:workspace.economia?.cobertura||null,total_rows:rows.length},
     metrics,columns:config.columnas.map(id=>({id,...COLUMNS[id]})),rows,chart,bars,
-    bars_label:bars.length>=8?'Top 8 por importe absoluto; el detalle contiene todos los registros':'Selección representada; el detalle contiene todos los registros',warnings};
+    bars_label:t.kind==='vehiculo'
+      ?`${bars.length>=8?'Top 8 por margen absoluto. ':''}Margen directo registrado; verde positivo y ámbar negativo. El detalle contiene todos los registros.`
+      :bars.length>=8?'Top 8 por importe absoluto; el detalle contiene todos los registros':'Selección representada; el detalle contiene todos los registros',
+    vehicle_scope:vehicleScope,vehicle_explanations:vehicleExplanations,
+    vehicle_services:t.kind==='vehiculo'?(workspace.servicios?.rows||[]).map(p=>({numero:p.numero,vehiculo:p.vehiculo,ingreso:p.ingreso,coste:p.coste,margen:p.margen,advertencia:p.advertencia||null})):null,warnings};
 }
 function previewReport(snapshot,page=1) {
   const pageNumber=Number(page);

@@ -10,6 +10,15 @@ const reconcile=(more={})=>reconcileJourneys({empresaId:company,orders,journeys:
 let data=reconcile(), economics=buildEconomics({empresaId:company,range:period,orders:data.orders});
 assert.equal(economics.ingreso_km_total,1.5);assert.equal(economics.coste_km_total,1.25);assert.equal(economics.margen_km_total,0.25);assert.equal(economics.margen_directo,250);assert.equal(economics.porcentaje_vacio,20);assert.equal(economics.margen_directo_pct_sin_redondeo,250/1500*100);
 assert.equal(data.orders[0].vehiculo_id,'historic-truck');assert.equal(data.orders[0].bi_journey_cost,416.66);assert.equal(data.orders[1].bi_journey_cost,833.34);
+const snapshotMissing=reconcile({journeys:[{...journey,asignacion_snapshot:{}}]});
+assert.equal(snapshotMissing.orders[0].vehiculo_id,'new-truck','missing historic snapshot must retain recorded vehicle');
+assert.equal(snapshotMissing.orders[0].bi_assignment_warning,undefined);
+assert.equal(snapshotMissing.orders[0].bi_assignment_source,'pedido_sin_instantanea','fallback must be disclosed');
+const partiallyMissing=reconcile({journeys:[{...journey,relevos:[{anterior:{}}]}]});
+assert.equal(partiallyMissing.orders[0].vehiculo_id,'historic-truck','an empty historic assignment is not a second tractor');
+const switched=reconcile({journeys:[{...journey,relevos:[{anterior:{vehiculo_id:'earlier-truck'}}]}]});
+assert.equal(switched.orders[0].vehiculo_id,null,'two historic tractors must not be assigned to one');
+assert.match(switched.orders[0].bi_assignment_warning,/Varios recursos/);
 assert.equal(physicalKm(data.orders).total,1000);
 const filtered=reconcile({orders:[orders[0]]});assert.equal(filtered.orders[0].bi_journey_cost,416.66,'stable denominator before dimension filter');
 assert.equal(reconcile({costs:[cost,cost]}).reconciliation.costes_incluidos,1250);

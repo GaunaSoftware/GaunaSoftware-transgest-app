@@ -15,7 +15,7 @@ import MojibakeFixer from "./components/MojibakeFixer";
 import Login  from "./pages/Login";
 import Layout from "./components/Layout";
 import Bloqueado from "./pages/Bloqueado";
-import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, leerTodosAvisosOperativos, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
+import { getAccountingLaunch, getDocsProximosVencer, getClientesPendientesRevision, getColaboradoresPendientesRevision, getAlertasDocVehiculos, getTallerEstado, getExcepcionesOperativas, getNotificaciones, getPortalSolicitudesAdmin, getAvisosOperativosColaboradores, leerTodosAvisosOperativos, leerAvisoOperativo, crearAgendaAvisoOperativoColaborador, ignorarAvisoOperativoColaborador, completarAgendaEvento, getAgendaEventos, posponerAgendaEvento, getEmpresaBackend, saveEmpresa, getDemoOptions, switchDemoPlan, switchDemoUser, cambiarPassword } from "./services/api";
 import { clearRuntimeFocus, setRuntimeFocus } from "./services/runtimeFocus";
 import { getEmpresaPlanLocal, normalizePlan, planHasFeature } from "./utils/planFeatures";
 import { saveCompanyPalette } from "./utils/companyPalette";
@@ -886,8 +886,9 @@ function writeAvimSeen(user, keys) {
   } catch {}
 }
 
-function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove, onMarkRead, hidden = false }) {
-  const items = Array.isArray(data?.items) ? data.items : [];
+const EMPTY_OPERATIVE_ALERTS = [];
+function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove, onMarkRead, onAcknowledge, hidden = false }) {
+  const items = Array.isArray(data?.items) ? data.items : EMPTY_OPERATIVE_ALERTS;
   const pageSize = 12;
   const [orderEditorAnchor, setOrderEditorAnchor] = useState(null);
   useEffect(() => {
@@ -903,11 +904,20 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
     return { x: Math.max(12, window.innerWidth - 448), y: 62 };
   });
   const dragRef = useRef(null);
+  const announcedDelays = useRef(new Set());
   useEffect(() => {
     if (typeof window === "undefined") return;
     try { setMinimized(window.localStorage.getItem(minimizedKey) === "1"); }
     catch { setMinimized(false); }
   }, [minimizedKey]);
+  useEffect(() => {
+    const fresh = items.filter(item => item.demora_paralizacion && !announcedDelays.current.has(item.key));
+    if (!fresh.length) return;
+    fresh.forEach(item => announcedDelays.current.add(item.key));
+    writeAvimMinimized(user, false);
+    setMinimized(false);
+    onToggle(true);
+  }, [items, onToggle, user]);
   useEffect(() => {
     setVisibleCount(pageSize);
   }, [open, items.length]);
@@ -950,8 +960,8 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
     setMinimized(value);
   }
 
-  function abrirPedido(item) {
-    setRuntimeFocus("tms_pedidos_focus", { pedido_id:item.pedido_id, numero:item.pedido_numero || "", source:"avisos_operativos_colaborador" });
+  function abrirPedido(item, detention = false) {
+    setRuntimeFocus("tms_pedidos_focus", { pedido_id:item.pedido_id, numero:item.pedido_numero || "", source:"avisos_operativos_colaborador", detention, detention_stop_id:item.parada_id||null });
     window.dispatchEvent(new CustomEvent("tms:navegar", { detail:"pedidos" }));
     onToggle(false);
   }
@@ -1055,7 +1065,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
           )}
           <div className="avimp-items" style={{maxHeight:430,overflowY:"auto",padding:10,display:"grid",gap:8}}>
             {visibleItems.map(item => (
-              <div key={item.key} style={{border:`1px solid ${item.severity === "alta" ? "rgba(239,68,68,.28)" : "rgba(245,158,11,.25)"}`,background:item.severity === "alta" ? "rgba(239,68,68,.07)" : "rgba(245,158,11,.07)",borderRadius:8,padding:"9px 10px"}}>
+              <div key={item.key} role={item.demora_paralizacion ? 'alert' : undefined} style={{border:`2px solid ${item.demora_paralizacion ? '#f59e0b' : item.severity === "alta" ? "rgba(239,68,68,.28)" : "rgba(245,158,11,.25)"}`,background:item.severity === "alta" ? "rgba(239,68,68,.07)" : "rgba(245,158,11,.07)",borderRadius:8,padding:"9px 10px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
                   <div style={{fontSize:12,fontWeight:900,color:"var(--text)"}}>{item.title}</div>
                   <span style={{fontSize:10,fontWeight:900,color:item.severity === "alta" ? "#ef4444" : "#f59e0b",textTransform:"uppercase"}}>{item.severity}</span>
@@ -1066,8 +1076,10 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
                   <button onClick={() => abrirPedido(item)} style={{padding:"5px 8px",borderRadius:7,border:"1px solid rgba(59,130,246,.25)",background:"rgba(59,130,246,.10)",color:"#60a5fa",fontSize:11,fontWeight:800,cursor:"pointer"}}>Abrir pedido</button>
+                  {item.prefactura_disponible && <button onClick={() => abrirPedido(item, true)} style={{padding:"5px 8px",borderRadius:7,border:"1px solid #b45309",background:"#fef3c7",color:"#78350f",fontSize:11,fontWeight:900,cursor:"pointer"}}>Valorar paralización</button>}
+                  {item.demora_paralizacion && <button onClick={() => onAcknowledge?.(item)} style={{padding:"5px 8px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Visto · apagar aviso</button>}
                   <button onClick={() => crearAgenda(item)} style={{padding:"5px 8px",borderRadius:7,border:"1px solid rgba(16,185,129,.25)",background:"rgba(16,185,129,.10)",color:"#10b981",fontSize:11,fontWeight:800,cursor:"pointer"}}>Añadir agenda</button>
-                  <button onClick={() => ignorar(item)} style={{padding:"5px 8px",borderRadius:7,border:"1px solid rgba(148,163,184,.25)",background:"rgba(148,163,184,.10)",color:"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Ignorar</button>
+                  {!item.demora_paralizacion && <button onClick={() => ignorar(item)} style={{padding:"5px 8px",borderRadius:7,border:"1px solid rgba(148,163,184,.25)",background:"rgba(148,163,184,.10)",color:"var(--text3)",fontSize:11,fontWeight:800,cursor:"pointer"}}>Ignorar</button>}
                 </div>
               </div>
             ))}
@@ -1766,8 +1778,10 @@ function AppInner() {
           .catch(()=>{});
       }
     }, 300000); // 5 min refresh
+    const operationalAlertsIv = setInterval(calcAvisosOperativosColaboradores, 60000);
 
     return () => {
+      clearInterval(operationalAlertsIv);
       clearTimeout(earlyBadgeTimer);
       clearTimeout(badgeTimer);
       window.removeEventListener("tms:notificaciones-refresh", notifRefresh);
@@ -1976,6 +1990,16 @@ function AppInner() {
           const items = (prev.items || []).filter(item => item.key !== key);
           return { ...prev, items, resumen:{ ...(prev.resumen || {}), total:items.length, alta:items.filter(i=>i.severity==="alta").length, media:items.filter(i=>i.severity==="media").length, albaranes_pendientes:items.filter(i=>i.kind==="albaran_pendiente").length } };
         })}
+        onAcknowledge={async item => {
+          try {
+            await leerAvisoOperativo(item.key);
+            setAvisosOperativosColaboradores(prev => {
+              const items = (prev.items || []).filter(row => row.key !== item.key);
+              return { ...prev, items, resumen:{ ...(prev.resumen || {}), total:items.length, alta:items.filter(row=>row.severity==='alta').length, media:items.filter(row=>row.severity==='media').length } };
+            });
+            toast('Aviso confirmado por tráfico/gerencia para toda la empresa.', 'success');
+          } catch (error) { toast(error.message || 'No se pudo confirmar el aviso.', 'error'); }
+        }}
       />
     )}
     <StartupTasksPanel

@@ -203,6 +203,16 @@ Navegador integrado contra API real local y datos rotulados SINTÉTICO:
 
 Límites: no prueba nueva en Safari/iPhone físico; históricos reconstruidos con fichas vigentes, IVA no desglosado y flota actual expresamente indicados. No nueva migración, ningún cambio de documentos fiscales ni de datos reales. Estas pruebas locales no acreditan despliegue en producción.
 
+## Avisos de demora e informe semanal — 28/09/2026
+
+La demora de carga queda asociada a su parada y persiste al finalizar, incluso cuando la app no pudo emitir el aviso al superar los 60 minutos. Tráfico o Gerencia la reconoce una sola vez para toda la empresa; el servidor guarda quién y cuándo lo hizo. Otros perfiles no pueden reconocerla. La opción rápida de prefactura aparece tras finalizar la carga y conserva la parada y las horas reales como propuesta revisable; el aviso no genera por sí mismo una factura ni acredita la causa imputable. Sin aviso, queda el flujo ordinario de reclamación o factura separada.
+
+El informe por vehículo conserva la matrícula registrada en el pedido cuando falta una instantánea del tramo físico y declara esa cobertura como tal. Los recursos históricos distintos siguen sin atribuirse arbitrariamente. El PDF identifica verde/ámbar, explica las filas negativas como ingreso menos coste registrado y muestra los pedidos que las componen. La muestra PDF generada está rotulada como **sintética** y se inspeccionó visualmente en dos páginas; no se consultaron matrículas ni importes reales de Asensi para esta corrección.
+
+El envío semanal usa el SMTP de la empresa cuando está configurado (resolución ya existente), con una sola entrega SMTP por empresa y semana y destinatarios de Gerencia autorizados comprobados otra vez antes del envío. La migración aditiva `20260928_bi_weekly_company_delivery.sql` bloquea también el reenvío de semanas ya registradas por el sistema anterior. Si la entrega a SMTP resulta ambigua, el estado queda `por_verificar` y no se reintenta automáticamente. No se realizó envío externo ni despliegue en esta rama.
+
+Comprobaciones con datos sintéticos: `npm run bi:regression`, `npm run driver:regression`, `npm run operations:regression` y `npm run security:regression` completaron con código 0; incluyen dos empresas, roles, varias paradas, 1.501 servicios, idempotencia semanal, baja de un destinatario durante la generación y PDF real. Frontend: 76 suites y 192 pruebas aprobadas. `CI=false GENERATE_SOURCEMAP=false npm run build` terminó con código 0. `CI=true` convierte en errores advertencias ESLint previas de otros archivos; estas pruebas locales no acreditan recepción de correo ni comportamiento de la base de producción.
+
 ## Continuación operativa — 27/09/2026
 
 Baterías ampliadas y resultados en `TMS_OPERATIONAL_COMPLETION.md`. Regresión económica: 1.000 de porte (50 de combustible ya incluido) + 150 de paralización = 1.150 netos; dos servicios suman 2.300 en tarjeta, evolución, detalle y exportaciones. Factura automática/manual conserva una sola línea separada. Recuperación: 200 documentado/150 emitido = 75 %, efectivo desconocido; facturas borrador excluidas, revisiones posteriores al corte excluidas, idempotencia y página independiente del agregado.

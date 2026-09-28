@@ -40,9 +40,15 @@ function reconcileJourneys({empresaId, orders, journeys=[], members=[], costs=[]
     p.km_ruta=p.bi_legs.every(l=>l.cargados!=null)?p.bi_legs.reduce((n,l)=>n+l.cargados,0):null;
     p.km_vacio=p.bi_legs.every(l=>l.vacios!=null)?p.bi_legs.reduce((n,l)=>n+l.vacios,0):null;
     for(const key of ['vehiculo_id','chofer_id','remolque_id']){
-      const ids=[...new Set(p.bi_legs.flatMap(l=>[l.asignacion,...(l.asignaciones_anteriores||[])].map(a=>a[key]||null)))];
-      p[key]=ids.length===1?ids[0]:null;
-      if(ids.length>1)p.bi_assignment_warning='Varios recursos históricos; no atribuible a uno solo.';
+      const ids=[...new Set(p.bi_legs.flatMap(l=>[l.asignacion,...(l.asignaciones_anteriores||[])]
+        .map(a=>a?.[key]||null).filter(Boolean)))];
+      // A legacy physical leg may have no assignment snapshot. That absence is
+      // not evidence that the order's recorded vehicle/driver was removed.
+      if(ids.length===1) p[key]=ids[0];
+      else if(ids.length>1) {
+        p[key]=null;
+        p.bi_assignment_warning='Varios recursos históricos; no atribuible a uno solo.';
+      } else if(key==='vehiculo_id' && p[key]) p.bi_assignment_source='pedido_sin_instantanea';
     }
   }
   return {orders:result,reconciliation};

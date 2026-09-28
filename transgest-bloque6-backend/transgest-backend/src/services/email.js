@@ -787,7 +787,7 @@ const PLANTILLAS = {
 };
 
 // ── Función principal de envío ────────────────────────
-async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id, attachments = [], meta = {}, force_platform = false, require_company = false }) {
+async function enviarEmail({ trigger, destinatario, bcc = [], plantilla, datos, empresa_id, attachments = [], meta = {}, force_platform = false, require_company = false }) {
   const { cfg, source } = await resolveTransportConfig(empresa_id, { forcePlatform: force_platform });
   if(require_company&&source!=='empresa')throw new Error('La prueba requiere el SMTP de la empresa; no se utilizará un remitente de la plataforma.');
   const adjuntosCount = Array.isArray(attachments) ? attachments.length : 0;
@@ -819,6 +819,7 @@ async function enviarEmail({ trigger, destinatario, plantilla, datos, empresa_id
       from:    { name: fromName, address: fromAddress },
       replyTo: source === "empresa" ? (cfg.reply_to || fromAddress) : (brand?.replyTo || cfg.reply_to || fromAddress),
       to:      destinatario,
+      bcc:     Array.isArray(bcc) ? bcc : [],
       subject: tmpl.asunto,
       text:    tmpl.text || undefined,
       html:    tmpl.html,

@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 // Stable condition, not the continuously increasing wait-minute counter.
 function fingerprint(item) {
+  if (item.demora_paralizacion) return crypto.createHash('sha256').update(String(item.key)).digest('hex');
   return crypto.createHash('sha256').update(JSON.stringify([item.key, item.estado, item.colaborador_id, item.chofer_id, item.fecha_carga, item.fecha_descarga, item.severity])).digest('hex');
 }
 async function unreadItems(db, user, items) {

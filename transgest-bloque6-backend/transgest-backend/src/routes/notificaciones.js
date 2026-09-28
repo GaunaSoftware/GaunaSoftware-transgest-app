@@ -146,8 +146,11 @@ function buildColaboradorAlerts(row) {
   const albaranes = Number(row.albaranes_count || 0);
   const tieneFacturaProveedor = cleanText(row.factura_nombre) || cleanText(row.factura_data);
   const docPagoRecibida = row.documentacion_recibida === true;
+  // Las confirmaciones por enlace solo son accionables si podemos enviarlo.
+  // La falta de correo no equivale a aceptación del precio ni a una incidencia.
+  const puedeConfirmarPorEnlace = Boolean(cleanText(row.colaborador_email));
 
-  if (!finalizado && !row.colaborador_workflow_enviado_at) {
+  if (puedeConfirmarPorEnlace && !finalizado && !row.colaborador_workflow_enviado_at) {
     alerts.push(buildAlert(
       row,
       "workflow_no_enviado",
@@ -158,7 +161,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (!finalizado && !row.colaborador_precio_confirmado_at && Number(row.precio_colaborador || 0) > 0) {
+  if (puedeConfirmarPorEnlace && !finalizado && !row.colaborador_precio_confirmado_at && Number(row.precio_colaborador || 0) > 0) {
     alerts.push(buildAlert(
       row,
       "precio_sin_confirmar",
@@ -169,7 +172,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (!finalizado && cargaDiff !== null && cargaDiff <= 0 && ["confirmado", "en_curso", "descarga"].includes(estado) && !row.colaborador_carga_confirmada_at) {
+  if (puedeConfirmarPorEnlace && !finalizado && cargaDiff !== null && cargaDiff <= 0 && ["confirmado", "en_curso", "descarga"].includes(estado) && !row.colaborador_carga_confirmada_at) {
     alerts.push(buildAlert(
       row,
       "carga_sin_confirmar",
@@ -180,7 +183,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (!finalizado && row.colaborador_carga_confirmada_at && !row.colaborador_en_camino_confirmada_at && ["en_curso", "descarga"].includes(estado)) {
+  if (puedeConfirmarPorEnlace && !finalizado && row.colaborador_carga_confirmada_at && !row.colaborador_en_camino_confirmada_at && ["en_curso", "descarga"].includes(estado)) {
     alerts.push(buildAlert(
       row,
       "camino_sin_confirmar",
@@ -191,7 +194,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (!finalizado && (descargaDiff !== null && descargaDiff <= 0 || estado === "descarga") && !row.colaborador_descarga_confirmada_at) {
+  if (puedeConfirmarPorEnlace && !finalizado && (descargaDiff !== null && descargaDiff <= 0 || estado === "descarga") && !row.colaborador_descarga_confirmada_at) {
     alerts.push(buildAlert(
       row,
       "descarga_sin_confirmar",

@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-09-collaborator-alerts-email",
+    "date": "2026-09-28",
+    "title": "Avisos de colaboradores más precisos",
+    "intro": "Los avisos de tráfico tienen en cuenta si el colaborador puede recibir un enlace de confirmación.",
+    "items": [
+      { "title": "Sin correo, sin confirmación imposible", "text": "Cuando un colaborador no tiene correo registrado, no se te pedirá que envíes un enlace ni que esperes su confirmación del precio por ese canal. Los avisos por documentos pendientes siguen disponibles.", "module": "avisos" }
+    ]
+  },
+  {
     "id": "2026-09-general-order-documents",
     "date": "2026-09-28",
     "title": "La Bandeja IA entiende más formatos de órdenes",

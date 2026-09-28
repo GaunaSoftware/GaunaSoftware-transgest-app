@@ -1,0 +1,9 @@
+# Interpretación de órdenes de transporte en Bandeja IA
+
+La entrada puede ser texto pegado, correo, PDF con texto, PDF escaneado, imagen, DOCX, XLSX o archivo de texto. La extracción local conserva la utilidad básica; cuando la empresa tiene un proveedor de IA configurado, también se analiza el texto legible de formatos desconocidos y se usan los adjuntos compatibles con ese proveedor. No se crea un pedido por analizar un documento: el usuario revisa la propuesta y confirma la creación.
+
+La interpretación separa al **cliente contractual**, el **transportista efectivo** y cada **recogida y entrega**. La IA puede corregir una lectura local inicial, pero el cliente se vincula únicamente mediante un NIF o nombre coincidente de forma unívoca dentro de la empresa. Para documentos con texto, los nombres, NIF y puntos propuestos deben aparecer en ese texto; una ruta incompleta o un rol contradictorio queda pendiente de revisión. Una imagen sin texto verificable se muestra con un aviso de comprobación manual. Las órdenes tabulares con columnas `Carg. Cont.` y `Tta. Efectivo` siguen usando su lectura por posición, que se prioriza frente a la lectura plana.
+
+Si el documento parece una factura, albarán u otro justificante, o contiene varias órdenes independientes, la Bandeja IA señala el conflicto. Ni la clasificación ni la puntuación de confianza son garantía de exactitud. Los PDF con diseños nuevos, escaneos borrosos y textos truncados pueden necesitar corrección manual; no se debe usar el domicilio fiscal de un participante como punto operativo por deducción.
+
+Pruebas: `npm run ai:regression` y `node scripts/audit_workflows_regression_check.cjs` en `transgest-backend`. Esta última usa una respuesta de proveedor simulada para comprobar que un texto sin adjunto puede corregir al cliente y conservar dos recogidas y dos entregas, sin transmitir datos reales a un servicio externo.

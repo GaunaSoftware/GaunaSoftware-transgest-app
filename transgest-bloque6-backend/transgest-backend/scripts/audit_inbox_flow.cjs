@@ -7,6 +7,22 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company,cl
  const text=`Cliente: ${client.nombre||'Alfa Auditoría'}\nOrigen: Madrid\nDestino: Valencia\nFecha carga: 25/09/2026\nPrecio: 300 EUR\nMercancía: cemento`;
  const item=await request('POST','/pedidos/ai-inbox/entries',{texto:text},201);assert.equal(item.state,'nuevo');assert.equal(item.encrypted_payload,undefined);
  const parsed=await request('POST','/pedidos/ai-inbox/parse',{inbox_id:item.id});assert.equal(parsed.inbox_id,item.id);assert.equal(parsed.inbox_state,'revisar');
+ const customer=await request('POST','/clientes',{nombre:'CAR VOLUM TEST, S.L.',cif:'B98328891',direccion:'Calle de Prueba 2',cp:'46002',ciudad:'Valencia',email:'car-volum@example.invalid'},201);
+ await request('POST','/clientes',{nombre:'TRANSPORTES ASENSI TEST, S.L.',cif:'B03168853',direccion:'Base de prueba',cp:'46002',ciudad:'Valencia',email:'asensi@example.invalid'},201);
+ const samplePdf=await require('./order_pdf_roles_check.cjs').syntheticOrder();
+ const fromPdf=await request('POST','/pedidos/ai-inbox/parse',{attachments:[{name:'orden-sintetica.pdf',mediaType:'application/pdf',base64:samplePdf.toString('base64')} ]});
+ assert.equal(fromPdf.pedido.cliente_id,customer.id,'the contractual shipper, not the effective carrier, is the customer');
+ assert.equal(fromPdf.pedido.origen,'ALMENDRALEJO');assert.equal(fromPdf.pedido.destino,'FORTUNA');
+ assert.equal(fromPdf.pedido.puntos_carga[0].cliente_nombre,'NATUYSER TEST');
+ assert.equal(fromPdf.pedido.puntos_descarga[0].cliente_nombre,'PALECO TEST');
+ assert.equal(fromPdf.pedido.puntos_carga[0].ventana,'08:00-17:00');
+ assert.equal(fromPdf.pedido.puntos_descarga[0].fecha,'2026-09-29');
+ assert.equal(fromPdf.pedido.importe,600);
+ const unknownCustomer=await request('POST','/pedidos/ai-inbox/parse',{
+  texto:'Cliente: CLIENTE CONTRACTUAL NO REGISTRADO\nTransportista: TRANSPORTES ASENSI TEST, S.L.\nOrigen: Madrid\nDestino: Valencia\nFecha carga: 30/09/2026'
+ });
+ assert.equal(unknownCustomer.pedido.cliente_id,null,'a carrier mentioned in the document cannot become the customer');
+ assert.ok(unknownCustomer.issues.some(issue=>issue.key==='cliente_id'));
  const replay=await request('POST','/pedidos/ai-inbox/parse',{texto:text});assert.equal(replay.inbox_id,item.id);assert.equal(replay.duplicate,true);
  const payload={cliente_id:client.id,origen:'Madrid',destino:'Valencia',fecha_carga:'2026-09-25',importe:300,ai_metadata:{inbox_id:item.id}};
  await request('POST','/pedidos',payload,409);

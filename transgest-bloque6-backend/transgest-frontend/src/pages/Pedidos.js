@@ -2337,8 +2337,12 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
   const speechSupported = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
   const pedidoPreview = preview?.pedido || null;
+  const puntosPreview = [
+    { titulo: "Recogidas", puntos: parseStops(pedidoPreview?.puntos_carga) },
+    { titulo: "Entregas", puntos: parseStops(pedidoPreview?.puntos_descarga) },
+  ];
   const camposClave = [
-    "cliente_nombre", "origen", "destino", "fecha_carga", "hora_carga", "fecha_descarga",
+    "cliente_nombre", "transportista_detectado", "origen", "destino", "fecha_carga", "hora_carga", "fecha_descarga",
     "hora_descarga", "mercancia", "peso_kg", "bultos", "importe", "tipo_precio",
     "precio_unitario", "referencia_cliente", "matricula_detectada", "km_ruta"
   ];
@@ -2692,11 +2696,27 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
               {camposClave.filter(k => pedidoPreview?.[k] !== undefined && pedidoPreview?.[k] !== null && pedidoPreview?.[k] !== "").map(k=>(
                 <div key={k} style={{background:"var(--bg4)",borderRadius:7,padding:"7px 10px"}}>
-                  <div style={{fontSize:9,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{k.replace(/_/g," ")}</div>
+                  <div style={{fontSize:9,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{({cliente_nombre:"Cliente contractual",transportista_detectado:"Transportista efectivo"})[k] || k.replace(/_/g," ")}</div>
                   <div style={{fontSize:13,color:"var(--text)",fontWeight:600,marginTop:2}}>{String(pedidoPreview[k])}</div>
                 </div>
               ))}
             </div>
+            {puntosPreview.some(grupo => grupo.puntos.length) && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(min(100%, 240px), 1fr))",gap:8,marginBottom:14}}>
+                {puntosPreview.map(grupo => grupo.puntos.length > 0 && (
+                  <div key={grupo.titulo} style={{background:"var(--bg4)",borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{fontSize:11,fontWeight:800,color:"var(--teal)",marginBottom:7}}>{grupo.titulo}</div>
+                    {grupo.puntos.map((punto, index) => (
+                      <div key={`${grupo.titulo}-${index}`} style={{fontSize:12,color:"var(--text)",marginTop:index ? 9 : 0,overflowWrap:"anywhere"}}>
+                        <strong>{index + 1}. {punto.cliente_nombre || punto.nombre || punto.ciudad || "Punto sin identificar"}</strong>
+                        {punto.direccion && <div>{punto.direccion}</div>}
+                        {(punto.fecha || punto.ventana || punto.hora) && <div style={{color:"var(--text3)"}}>{[punto.fecha, punto.ventana || punto.hora].filter(Boolean).join(" · ")}</div>}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:8,padding:"9px 13px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
               {preview.next_action || "Se abrira el formulario de pedido con estos datos pre-rellenados. Puedes completar o corregir antes de guardar."}
             </div>

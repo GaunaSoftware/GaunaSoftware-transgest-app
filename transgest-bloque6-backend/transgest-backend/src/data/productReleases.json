@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-ai-order-pdf-roles",
+    "date": "2026-09-28",
+    "title": "Órdenes de carga más fáciles de revisar",
+    "intro": "La bandeja IA diferencia mejor quién contrata el transporte y dónde se carga y descarga.",
+    "items": [
+      { "title": "Cliente y transportista por separado", "text": "En las órdenes de carga con tabla, el cliente contractual se identifica por sus datos y el transportista efectivo se muestra aparte. Si no se puede asociar un cliente con seguridad, tendrás que seleccionarlo antes de guardar.", "module": "pedidos" },
+      { "title": "Puntos visibles en la propuesta", "text": "La vista previa muestra cada recogida y entrega con su dirección, fecha y horario para que puedas comprobar el viaje antes de crear el pedido.", "module": "pedidos" }
+    ]
+  },
+  {
     "id": "2026-09-loading-alerts-profit-report",
     "date": "2026-09-28",
     "title": "Esperas de carga e informes más claros",

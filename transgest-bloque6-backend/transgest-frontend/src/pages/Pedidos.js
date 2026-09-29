@@ -29,6 +29,7 @@ import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
 import { displayLocation, displayOrderLocation, missingLocationFields } from '../utils/orderTown';
 import { transportStateMeta } from '../utils/transportStateCatalog';
+import { addIsoDays, buildOrderScheduleShift, orderScheduleMatches } from '../utils/orderScheduleShift';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
 
@@ -449,10 +450,7 @@ function savePedidosGroupByClient(user, value) {
 
 function sumarDiasISO(fecha, dias) {
   if (!fecha) return "";
-  const base = new Date(`${String(fecha).slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(base.getTime())) return String(fecha).slice(0, 10);
-  base.setDate(base.getDate() + Number(dias || 0));
-  return base.toISOString().slice(0, 10);
+  return addIsoDays(fecha, dias);
 }
 
 function descargaAntesQueCarga(fechaCarga, fechaDescarga) {
@@ -605,32 +603,12 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
 }
 
 function buildPedidoReschedulePayload(basePedido = {}, offsetDays = 1, overrides = {}) {
-  const fechaCargaBase = basePedido?.fecha_carga || new Date().toISOString().slice(0, 10);
-  const fechaDescargaBase = basePedido?.fecha_descarga || fechaCargaBase;
-  const cargaNorm = String(fechaCargaBase).slice(0, 10);
-  const descargaNorm = String(fechaDescargaBase).slice(0, 10);
-  const diferenciaDias = Math.round(
-    (new Date(`${descargaNorm}T00:00:00`) - new Date(`${cargaNorm}T00:00:00`)) / 86400000
-  );
-  const nextFechaCarga = sumarDiasISO(cargaNorm, offsetDays);
-  const nextFechaDescarga = sumarDiasISO(nextFechaCarga, Number.isFinite(diferenciaDias) ? diferenciaDias : 0);
-  return sanitizePedidoPayload({
-    ...basePedido,
+  return {
+    ...buildOrderScheduleShift(basePedido, offsetDays),
     ...overrides,
-    fecha_carga: nextFechaCarga,
-    fecha_descarga: nextFechaDescarga,
     pendiente_completar: true,
     aviso_completar: `Viaje reprogramado desde pedidos: revisar horarios, asignacion y compromiso con el cliente.`,
-    importe: calcImporte(basePedido),
-    puntos_carga: parseStops(basePedido?.puntos_carga),
-    puntos_descarga: parseStops(basePedido?.puntos_descarga),
-    extracostes_importe: toFiniteNumber(basePedido?.extracostes ?? basePedido?.extracostes_importe, 0),
-    importe_revision_combustible: calcRevisionCombustible(basePedido),
-    importe_minimo: basePedido?.tipo_precio === "viaje" ? toNullableNumber(basePedido?.importe_minimo) : null,
-    minimo_unidades: basePedido?.tipo_precio !== "viaje" ? toNullableNumber(basePedido?.minimo_unidades) : null,
-    importe_paralizacion: toNullableNumber(basePedido?.importe_paralizacion),
-    paralizacion_horas: toNullableNumber(basePedido?.paralizacion_horas),
-  });
+  };
 }
 
 function mergePrimaryStopSchedule(stops, { fecha, hora, ventana } = {}) {
@@ -9693,7 +9671,9 @@ export default function Pedidos() {
         const fetched = await getPedido(pedido.id);
         if (fetched?.id) pedidoBase = fetched;
       }
-      await editarPedido(pedido.id, buildPedidoReschedulePayload(pedidoBase, offsetDays));
+      const payload = buildPedidoReschedulePayload(pedidoBase, offsetDays);
+      const saved = await editarPedido(pedido.id, payload, { silentSuccess: true });
+      if (!orderScheduleMatches(saved, payload)) throw new Error("El servidor no confirmó las nuevas fechas.");
       notify(`${pedido.numero || "Pedido"} reprogramado ${texto}.`, "success");
       cargar();
       if (typeof window !== "undefined") {
@@ -9838,9 +9818,11 @@ export default function Pedidos() {
           const fetched = await getPedido(pedido.id);
           if (fetched?.id) pedidoBase = fetched;
         }
-        await editarPedido(pedido.id, buildPedidoReschedulePayload(pedidoBase, offsetDays, {
+        const payload = buildPedidoReschedulePayload(pedidoBase, offsetDays, {
           aviso_completar: "Viaje reprogramado en lote desde pedidos: revisar horarios, asignacion y compromiso con el cliente.",
-        }));
+        });
+        const saved = await editarPedido(pedido.id, payload, { silentSuccess: true });
+        if (!orderScheduleMatches(saved, payload)) throw new Error(`No se confirmó el retraso de ${pedido.numero || pedido.id}.`);
       }
       notify(`${lista.length} pedido(s) criticos reprogramados ${texto}.`, "success");
       cargar();
@@ -9875,25 +9857,29 @@ export default function Pedidos() {
     });
     if (!ok) return;
     setBulkRescheduling(true);
+    const failed = [];
+    let succeeded = 0;
     try {
       for (const pedido of lista) {
-        let pedidoBase = pedido;
-        if (pedido?.id) {
-          const fetched = await getPedido(pedido.id);
-          if (fetched?.id) pedidoBase = fetched;
+        try {
+          const pedidoBase = await getPedido(pedido.id);
+          const payload = buildPedidoReschedulePayload(pedidoBase, offsetDays, {
+            aviso_completar: "Viaje reprogramado desde seleccion multiple: revisar horarios, asignacion y compromiso con el cliente.",
+          });
+          const saved = await editarPedido(pedido.id, payload, { silentSuccess: true, silentError: true });
+          if (!orderScheduleMatches(saved, payload)) throw new Error("El servidor no confirmó las nuevas fechas.");
+          succeeded += 1;
+        } catch (error) {
+          failed.push({ id: pedido.id, numero: pedido.numero || pedido.id, error: error.message });
         }
-        await editarPedido(pedido.id, buildPedidoReschedulePayload(pedidoBase, offsetDays, {
-          aviso_completar: "Viaje reprogramado desde seleccion multiple: revisar horarios, asignacion y compromiso con el cliente.",
-        }));
       }
-      notify(`${lista.length} pedido(s) seleccionados reprogramados ${texto}.`, "success");
-      setSelectedPedidoIds([]);
+      if (succeeded) notify(`${succeeded} de ${lista.length} pedido(s) retrasados ${texto}.`, failed.length ? "warning" : "success");
+      if (failed.length) notify(`Sin reprogramar: ${failed.map(item => item.numero).join(", ")}. ${failed[0].error}`, "error");
+      setSelectedPedidoIds(failed.map(item => String(item.id)));
       cargar();
-      if (typeof window !== "undefined") {
+      if (succeeded && typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { source: "pedidos-reschedule-selected" } }));
       }
-    } catch (e) {
-      notify(e.message || "No se pudieron reprogramar los pedidos seleccionados.", "error");
     } finally {
       setBulkRescheduling(false);
     }

@@ -2,6 +2,7 @@ import { displayOrderLocation } from '../../utils/orderTown';
 import { useState } from 'react';
 import { Badge, Button, EmptyState, Icon, Modal, SearchInput, Select } from '../../ui';
 import { pendingClosureRows, filterPendingClosures } from './closureQueue';
+import { incidentDescription } from './operationalStatus';
 import './pending-closures.css';
 
 const PAGE_SIZE = 8;
@@ -62,7 +63,7 @@ export default function PendingClosures({ orders, openOrder }) {
         {shown.length ? <ul className="closure-review-list">{shown.map(({order, date, days, dateLabel}) => <li key={order.id}>
           <div className="closure-review-order"><strong>{order.numero || 'Pedido sin número'}</strong><span>{order.cliente_nombre || 'Cliente sin indicar'}</span><small title={`${displayOrderLocation(order,'carga')} → ${displayOrderLocation(order,'descarga')}`}>{displayOrderLocation(order,'carga')} → {displayOrderLocation(order,'descarga')}</small></div>
           <div className="closure-review-date"><span>{days === 1 ? 'Hace 1 día' : `Hace ${days} días`}</span><time dateTime={date}>{dateText(date)}</time><small>{dateLabel}</small></div>
-          <div className="closure-review-reason"><Badge tone={order.estado === 'incidencia' ? 'danger' : 'neutral'}>{status[order.estado] || order.estado || 'Sin estado'}</Badge><p title={order.incidencia_descripcion || ''}>{order.incidencia_descripcion || (order.estado === 'incidencia' ? 'Revisar incidencia sin descripción.' : 'Entrega pendiente de confirmar.')}</p></div>
+          <div className="closure-review-reason"><Badge tone={order.estado === 'incidencia' ? 'danger' : 'neutral'}>{status[order.estado] || order.estado || 'Sin estado'}</Badge><p title={incidentDescription(order)}>{incidentDescription(order) || 'Entrega pendiente de confirmar.'}</p></div>
           <Button className="closure-review-action" aria-label={`Revisar ${order.numero || 'pedido'}`} onClick={() => reviewOrder(order)}>Revisar <Icon name="chevron" size={14}/></Button>
         </li>)}</ul> : <EmptyState title={rows.length ? 'No hay pedidos con estos filtros' : 'No quedan pedidos pendientes'} text={rows.length ? 'Prueba otra búsqueda o consulta todos los periodos.' : 'Las fechas y los estados están al día.'} action={rows.length ? <Button onClick={() => { selectFilter('all'); setQuery(''); }}>Limpiar filtros</Button> : null}/>}
         <footer className="closure-review-footer"><span>{filtered.length ? `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, filtered.length)} de ${filtered.length} pedidos` : '0 pedidos'}</span><div><Button aria-label="Página anterior" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>Anterior</Button><span>{currentPage} / {pages}</span><Button aria-label="Página siguiente" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>Siguiente</Button></div></footer>

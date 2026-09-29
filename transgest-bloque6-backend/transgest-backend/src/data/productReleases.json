@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-09-dashboard-resolved-incidents",
+    "date": "2026-09-29",
+    "title": "Seguimiento sin avisos de incidencias cerradas",
+    "intro": "El Dashboard también deja de señalar como activa una incidencia antigua de un pedido confirmado.",
+    "items": [
+      { "title": "Estado actual del viaje", "text": "En el seguimiento y en los pedidos pendientes de revisar, el motivo de incidencia solo aparece si sigue abierto. El historial del pedido se conserva.", "module": "dashboard" }
+    ]
+  },
+  {
     "id": "2026-09-resolved-order-incidents",
     "date": "2026-09-29",
     "title": "Incidencias de pedidos resueltas",

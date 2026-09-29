@@ -8,3 +8,6 @@ test('overdue operations use planned delivery and keep completed trips out',()=>
  expect(overdueOrder({estado:'pendiente'},now)).toBe(false);
 });
 test('incident description includes the recorded reason',()=>{expect(incidentDescription({estado:'incidencia',incidencia_tipo:'retraso_carga',incidencia_descripcion:'Muelle cerrado'})).toBe('retraso carga: Muelle cerrado');});
+test('confirmed collaborator order does not keep a resolved incident tooltip',()=>{
+ expect(incidentDescription({estado:'confirmado',colaborador_id:'supplier',incidencia_tipo:'operativa',incidencia_descripcion:'Operativa'})).toBe('');
+});

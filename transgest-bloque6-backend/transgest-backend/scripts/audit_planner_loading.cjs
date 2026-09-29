@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),crypto=require('crypto');
 module.exports=async({db,company,user,base,token,password,prep,order,stock})=>{
  assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);
  let checks=0;
- async function request(method,path,body,status=200,session=token){const r=await fetch(base+path,{method,headers:{Authorization:'Bearer '+session,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await r.json();assert.equal(r.status,status,JSON.stringify(data));checks++;return data;}
+ async function request(method,path,body,status=200,session=token){body=await require('./audit_company_login.cjs')(db,path,body);const r=await fetch(base+path,{method,headers:{Authorization:'Bearer '+session,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await r.json();assert.equal(r.status,status,JSON.stringify(data));checks++;return data;}
  const worker=crypto.randomUUID(),second=crypto.randomUUID();
  for(const [id,email]of[[worker,'forklift-qa@example.invalid'],[second,'forklift-other@example.invalid']])await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo,permisos) VALUES($1,$2,'Carretillero sintético',$3,$4,'carretillero',true,'{\"modulos\":{\"facturacion\":{\"ver\":true,\"editar\":true}}}')",[id,company,email,await require('bcryptjs').hash(password,4)]);
  const login=await request('POST','/auth/login',{email:'forklift-qa@example.invalid',password});assert.ok(login.token);const wToken=login.token;

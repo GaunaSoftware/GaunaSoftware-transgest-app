@@ -7,8 +7,10 @@ async function main() {
   try {
     await pg.exec(`CREATE TABLE empresas(id text PRIMARY KEY, nombre text);
       CREATE TABLE usuarios(id text PRIMARY KEY, empresa_id text, username text, email text, activo boolean DEFAULT true);
+      CREATE TABLE usuario_empresas(usuario_id text,empresa_id text,activo boolean DEFAULT true);
       INSERT INTO empresas VALUES ('a','Empresa A'),('b','Empresa B');
-      INSERT INTO usuarios VALUES ('ua','a','plg','a@example.test',true),('ub','b','plg','b@example.test',true);`);
+      INSERT INTO usuarios VALUES ('ua','a','plg','a@example.test',true),('ub','b','plg','b@example.test',true),('um','a','multi','multi@example.test',true);
+      INSERT INTO usuario_empresas VALUES ('ua','a',true),('ub','b',true),('um','a',true),('um','b',true);`);
     await ensureCompanyAccessCodes(pg);
     const companies = (await pg.query('SELECT id,codigo_acceso FROM empresas ORDER BY id')).rows;
     assert.equal(companies.length, 2);
@@ -16,13 +18,16 @@ async function main() {
     companies.forEach(({ codigo_acceso }) => assert.match(codigo_acceso, /^TG-[A-F0-9]{16}$/));
     await ensureCompanyAccessCodes(pg);
     assert.deepEqual((await pg.query('SELECT id,codigo_acceso FROM empresas ORDER BY id')).rows, companies);
-    const withoutCode = (await pg.query(`SELECT u.id FROM usuarios u JOIN empresas e ON e.id=u.empresa_id
+    const withoutCode = (await pg.query(`SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id AND m.activo=true JOIN empresas e ON e.id=m.empresa_id
       WHERE LOWER(u.username)=$1 AND e.codigo_acceso=$2 LIMIT 2`, ['plg',''])).rows;
     assert.equal(withoutCode.length, 0, 'without company code no account is selected');
-    const selected = (await pg.query(`SELECT u.id FROM usuarios u JOIN empresas e ON e.id=u.empresa_id
+    const selected = (await pg.query(`SELECT u.id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id AND m.activo=true JOIN empresas e ON e.id=m.empresa_id
       WHERE LOWER(u.username)=$1 AND e.codigo_acceso=$2 LIMIT 2`, ['plg',companies[0].codigo_acceso])).rows;
     assert.equal(selected.length, 1);
     assert.equal(selected[0].id, 'ua');
+    const secondary = (await pg.query(`SELECT u.id,m.empresa_id FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id AND m.activo=true JOIN empresas e ON e.id=m.empresa_id
+      WHERE LOWER(u.username)=$1 AND e.codigo_acceso=$2 LIMIT 2`, ['multi',companies[1].codigo_acceso])).rows;
+    assert.deepEqual(secondary, [{ id: 'um', empresa_id: 'b' }]);
     await assert.rejects(pg.query('UPDATE empresas SET codigo_acceso=$1 WHERE id=$2', [companies[0].codigo_acceso,'b']), /duplicate key/i);
     await assert.rejects(pg.query('UPDATE empresas SET codigo_acceso=NULL WHERE id=$1', ['b']), /null value/i);
     await pg.query("INSERT INTO empresas(id,nombre) VALUES ('c','Empresa C')");

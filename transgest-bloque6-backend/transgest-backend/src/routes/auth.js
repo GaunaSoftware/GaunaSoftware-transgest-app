@@ -173,7 +173,8 @@ router.get("/login-brand", async (req, res) => {
       `SELECT e.nombre, e.razon_social, e.logo_base64, e.cfg_precios->>'logo_mime' AS logo_mime,
               u.rol
          FROM usuarios u
-         JOIN empresas e ON e.id=u.empresa_id
+         JOIN usuario_empresas m ON m.usuario_id=u.id AND m.activo=true
+         JOIN empresas e ON e.id=m.empresa_id
         WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
           AND u.activo IS DISTINCT FROM false
           AND e.codigo_acceso=$2
@@ -208,9 +209,10 @@ router.post("/forgot-password",
     try {
       await ensureAuthSchema();
       const { rows } = await db.query(
-        `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,e.nombre AS empresa_nombre
+        `SELECT u.id,u.nombre,u.email,u.username,u.rol,m.empresa_id,e.nombre AS empresa_nombre
            FROM usuarios u
-           LEFT JOIN empresas e ON e.id=u.empresa_id
+           JOIN usuario_empresas m ON m.usuario_id=u.id AND m.activo=true
+           JOIN empresas e ON e.id=m.empresa_id
           WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
             AND e.codigo_acceso=$2
           ORDER BY u.activo DESC, u.created_at ASC
@@ -290,11 +292,13 @@ router.post("/login",
         `SELECT u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
                 u.username, u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,
                 u.login_failed_count, u.login_locked_until,
+                m.empresa_id AS login_empresa_id,
                 e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.codigo_acceso, e.cfg_precios,
                 e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
                 e.bloqueo_manual, e.bloqueo_motivo
          FROM usuarios u
-         LEFT JOIN empresas e ON e.id = u.empresa_id
+         JOIN usuario_empresas m ON m.usuario_id=u.id AND m.activo=true
+         JOIN empresas e ON e.id=m.empresa_id
          WHERE (LOWER(u.email) = $1 OR LOWER(u.username) = $1)
            AND e.codigo_acceso=$2
          LIMIT 2`,
@@ -351,20 +355,11 @@ router.post("/login",
       );
 
       const membershipService=require('../services/companyMembership');
-      const available=await membershipService.memberships(user.id);
-      if (companyCode && req.body.empresa_id && req.body.empresa_id !== user.empresa_id) {
+      const requested=user.login_empresa_id;
+      if (req.body.empresa_id && req.body.empresa_id !== requested) {
         return res.status(401).json({ error: "Credenciales incorrectas" });
       }
-      const requested=companyCode ? user.empresa_id : (req.body.empresa_id || (available.some(m=>m.empresa_id===user.empresa_id)?user.empresa_id:available[0]?.empresa_id));
       let member=requested?await membershipService.userForCompany(user.id,requested):null;
-      // A blocked primary subscription must not prevent entering another authorized company.
-      const blocked=m=>getSubscriptionState(m?{estado:m.empresa_estado,plan:m.plan,fecha_vencimiento:m.fecha_vencimiento,bloqueo_manual:m.bloqueo_manual,bloqueo_motivo:m.bloqueo_motivo}:null).blocked;
-      if(!companyCode&&!req.body.empresa_id&&member&&blocked(member)){
-        for(const candidate of available){if(candidate.empresa_id===requested)continue;
-          const alternative=await membershipService.userForCompany(user.id,candidate.empresa_id);
-          if(alternative&&!blocked(alternative)){member=alternative;break;}
-        }
-      }
       if(!member)return res.status(403).json({error:'No tienes una membresía activa en esa empresa.'});
       Object.assign(user,member);
       const subState = getSubscriptionState(user.empresa_id ? {

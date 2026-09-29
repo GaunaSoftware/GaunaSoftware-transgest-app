@@ -28,7 +28,7 @@ async function cleanup() {
 
 async function run() {
   await cleanup();
-  const empresa = (await db.query("SELECT id FROM empresas ORDER BY created_at LIMIT 1")).rows[0];
+  const empresa = (await db.query("SELECT id,codigo_acceso FROM empresas ORDER BY created_at LIMIT 1")).rows[0];
   assert(empresa?.id, "No hay empresa local para ejecutar la prueba");
   const hash = await bcrypt.hash(password, 12);
   await db.query(
@@ -36,7 +36,7 @@ async function run() {
     ["QA Security", email, hash, empresa.id]
   );
 
-  const login = await jsonRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+  const login = await jsonRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, codigo_empresa: empresa.codigo_acceso }) });
   assert(login.response.status === 200 && login.data.token, `Login QA fallo: ${login.response.status}`);
   const auth = { Authorization: `Bearer ${login.data.token}` };
 
@@ -54,7 +54,7 @@ async function run() {
 
   let lastStatus = 0;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const failed = await jsonRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password: "incorrecta-segura" }) });
+    const failed = await jsonRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password: "incorrecta-segura", codigo_empresa: empresa.codigo_acceso }) });
     lastStatus = failed.response.status;
   }
   assert(lastStatus === 429, `El bloqueo temporal no se activo: ${lastStatus}`);

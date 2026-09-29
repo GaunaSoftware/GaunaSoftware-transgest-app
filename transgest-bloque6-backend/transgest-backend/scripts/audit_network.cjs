@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),crypto=require('crypto');
 module.exports=async function({db,company,user,base,token,password,transportCompany,transportClient,sharedOrder,legacyToken,pdf,stock}){
- let checks=0;async function request(method,path,body,status=200,session=token){const response=await fetch(base+path,{method,headers:{Authorization:'Bearer '+session,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
+ let checks=0;async function request(method,path,body,status=200,session=token){body=await require('./audit_company_login.cjs')(db,path,body);const response=await fetch(base+path,{method,headers:{Authorization:'Bearer '+session,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
  const carrierUser=crypto.randomUUID();await db.query("INSERT INTO usuarios(id,empresa_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,'Gerente Network sintético','network-qa@example.invalid',$3,'gerente',true)",[carrierUser,transportCompany,await require('bcryptjs').hash(password,4)]);
  const carrier=(await request('POST','/auth/login',{email:'network-qa@example.invalid',password})).token;
  const other=(await request('POST','/auth/login',{email:'planner-b@example.invalid',password})).token;

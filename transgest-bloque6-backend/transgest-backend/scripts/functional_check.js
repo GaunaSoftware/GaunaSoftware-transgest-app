@@ -3,6 +3,7 @@ const user = process.env.FUNCTIONAL_USER || "gerente@empresa.com";
 const password = process.env.FUNCTIONAL_PASSWORD || "demo1234";
 const clienteUser = process.env.FUNCTIONAL_CLIENTE_USER || "cliente@empresa.com";
 const clientePassword = process.env.FUNCTIONAL_CLIENTE_PASSWORD || "demo1234";
+const companyCode = process.env.FUNCTIONAL_COMPANY_CODE || "";
 const superadminUser = process.env.FUNCTIONAL_SUPERADMIN_USER || process.env.SUPERADMIN_EMAIL || "admin@transgest.local";
 const superadminPassword = process.env.FUNCTIONAL_SUPERADMIN_PASSWORD || process.env.SUPERADMIN_PASSWORD || "admin1234";
 
@@ -642,14 +643,14 @@ async function checkPortalClienteOperativo(gerenteAuth) {
     if (!identifier || !tempPassword) return null;
     const portalLogin = await request(`login cliente portal ${motivo}`, "/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email: identifier, password: tempPassword }),
+      body: JSON.stringify({ email: identifier, password: tempPassword, codigo_empresa: companyCode }),
     });
     return { login: portalLogin, cliente_id: clienteActivo.id };
   }
   try {
     login = await request("login cliente portal", "/api/v1/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email: clienteUser, password: clientePassword }),
+      body: JSON.stringify({ email: clienteUser, password: clientePassword, codigo_empresa: companyCode }),
     });
     clienteIdPortal = login?.user?.cliente_id || null;
   } catch (e) {
@@ -2990,7 +2991,7 @@ async function run() {
 
   const login = await request("login gerente", "/api/v1/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: user, password }),
+    body: JSON.stringify({ email: user, password, codigo_empresa: companyCode }),
   });
   if (!login?.token) throw new Error("login gerente: no devuelve token");
   const auth = { Authorization: `Bearer ${login.token}` };

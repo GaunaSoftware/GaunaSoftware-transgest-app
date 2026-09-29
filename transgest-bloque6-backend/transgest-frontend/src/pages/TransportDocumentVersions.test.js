@@ -25,5 +25,13 @@ test('a replacement DeCA keeps the issue action visible but requires its reason'
   expect(issue.disabled).toBe(false);
   await act(async()=>issue.click());
   expect(generarPedidoDocumentoControl).toHaveBeenCalledWith('pedido-1',expect.objectContaining({motivo:'Corrección de mercancía',envio_id:'envio-1'}));
+  const permit=[...host.querySelectorAll('select')].find(select=>select.querySelector('option[value="mantener"]'));
+  await act(async()=>{permit.value='si';permit.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(issue.disabled).toBe(true);
+  const reference=host.querySelector('input[maxlength="120"]');
+  await act(async()=>{const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(reference,'AUT-123');reference.dispatchEvent(new Event('input',{bubbles:true}));});
+  expect(issue.disabled).toBe(false);
+  await act(async()=>issue.click());
+  expect(generarPedidoDocumentoControl).toHaveBeenLastCalledWith('pedido-1',expect.objectContaining({autorizacion_especial:{requerida:true,referencia:'AUT-123'}}));
  }finally{await act(async()=>root.unmount());host.remove();}
 });

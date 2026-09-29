@@ -5220,13 +5220,14 @@ ${bloqueCombustible}
         </div>
 
         <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
-          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:10}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
               <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
                 Consulta los documentos, las firmas y el estado de tramitación.
               </div>
             </div>
+            <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {docControlSupportUrl && (
                 <button
@@ -5267,7 +5268,7 @@ ${bloqueCombustible}
                 <button
                   onClick={descargarFirmaPaqueteDocControl}
                   style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(124,58,237,.28)",background:"rgba(124,58,237,.10)",color:"#8b5cf6",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                  Paquete firma eIDAS
+                  Preparar paquete de firma
                 </button>
               )}
               {(pedido.firma_fecha || pedido.firma_hash) && (
@@ -5286,7 +5287,6 @@ ${bloqueCombustible}
               )}
             </div>
           </div>
-          <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
           {docControl && (
             <>
               {(firmaPostModificada || firmaEvidenciaLoading) && (

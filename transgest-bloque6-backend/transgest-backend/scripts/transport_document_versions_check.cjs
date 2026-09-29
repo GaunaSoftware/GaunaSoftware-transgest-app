@@ -12,6 +12,8 @@ async function main(){
   const d={codigo_control:'SINTETICO',referencia_pedido:'QA-DeCA-001',fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético SL',nif:'SINTETICO-NO-VALIDO',domicilio:'Calle de ensayo 1, Madrid'},transportista_efectivo:{nombre:'Transportista de prueba',nif:'SINTETICO-NO-VALIDO'},empresa:{nombre:'DEMOSTRACIÓN SINTÉTICA'},origen:{nombre:'Almacén de ensayo',direccion:'Madrid, España'},destino:{nombre:'Destino sintético',direccion:'Valencia, España',destinatario:'Destinatario de prueba'},mercancia:{descripcion:'Cerámica de ensayo',peso_kg:1250,bultos:64,embalaje:'Paletizado'},vehiculo:{tractora:'QA-0000'},cargas:[],descargas:[],observaciones:'DATOS SINTÉTICOS. Documento de prueba sin valor para un transporte real.'};
   const args={empresaId:company,pedidoId:order,payload:{documento:d},baseUrl:'https://example.invalid',reason:'Ensayo inicial'};
   d.observaciones_publicas=d.observaciones;d.observaciones='NOTA INTERNA QUE NO SE PUBLICA';
+  d.condiciones={precio_acordado:'9999 EUR PRIVADOS'};
+  d.firmas={chofer:{nombre:'FIRMA ANTIGUA NO VINCULADA',fecha:'2026-01-01'}};
   await assert.rejects(service.issue(db,args),{code:'ORDER_NOT_CONFIRMED'});
   await pg.query("UPDATE pedidos SET estado='confirmado' WHERE id=$1",[order]);
   await pg.query('UPDATE pedidos SET remolque_id=$2 WHERE id=$1',[order,crypto.randomUUID()]);
@@ -31,15 +33,20 @@ async function main(){
   await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250,remolque_matricula_colaborador:'QA-OTRO'},reviewed),{code:'DECA_VEHICLE_CHANGED'});
   const original=await service.publicOriginal(db,initial.id,token);assert.equal(service.hash(original.pdf),initial.pdf_hash);
   assert.doesNotMatch((await require('pdf-parse')(original.pdf)).text,/NOTA INTERNA/);
+  assert.doesNotMatch((await require('pdf-parse')(original.pdf)).text,/9999 EUR PRIVADOS|FIRMA ANTIGUA NO VINCULADA/);
   assert.equal(await service.publicOriginal(db,initial.id,'wrong'),null);
   assert.equal(await service.read(db,other,order,initial.id),null);assert.deepEqual(await service.list(db,other,order),[]);
   await assert.rejects(service.issue(db,{...args,empresaId:other}),{code:'ORDER_NOT_FOUND'});
   await assert.rejects(pg.query('UPDATE transport_document_versions SET reason=$2 WHERE id=$1',[initial.id,'Rewrite']),{code:'55000'});
   await assert.rejects(pg.query('DELETE FROM transport_document_versions WHERE id=$1',[initial.id]),{code:'55000'});
-  d.mercancia.peso_kg=1400;await assert.rejects(service.issue(db,{...args,reason:''}),{code:'VERSION_REASON_REQUIRED'});
+  d.mercancia.peso_kg=1400;d.autorizacion_especial={requerida:true,referencia:''};
+  await assert.rejects(service.issue(db,{...args,reason:'Peso revisado'}),{code:'DECA_FIELDS_REQUIRED'});
+  d.autorizacion_especial.referencia='AUT-SINTETICA-001';
+  await assert.rejects(service.issue(db,{...args,reason:''}),{code:'VERSION_REASON_REQUIRED'});
   const second=await service.issue(db,{...args,reason:'Peso revisado'});assert.equal(second.version,2);
   await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1400},reviewed),{code:'DECA_REVIEW_REQUIRED'});
   const versions=await service.list(db,company,order);assert.deepEqual(versions.map(v=>v.estado),['activa','superada']);
+  assert.match((await require('pdf-parse')(Buffer.from((await service.read(db,company,order,second.id)).pdf))).text,/AUT-SINTETICA-001/);
   assert.notEqual(versions[0].public_url,initial.public_url);assert.notEqual(versions[0].pdf_hash,initial.pdf_hash);
   assert.deepEqual((await service.publicOriginal(db,initial.id,token)).pdf,original.pdf,'Old URL never regenerates current order data');
   await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'public_disabled',NOW(),'Disable requested too early')",[company,initial.id]);
@@ -77,6 +84,8 @@ async function main(){
   assert.ok((await service.read(db,company,order,initial.id)).pdf,'Authenticated retention survives public expiry');
   const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-deca-synthetic.pdf'),original.pdf);
   const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/Formato carta de porte|firma certificada|AdES|QES/);
+  const longPdf=await require('../src/services/transportDocumentPdf').renderDeca({documento:{...d,cargador_contractual:{...d.cargador_contractual,domicilio:`${'AVENIDA LARGA '.repeat(45)}FIN DE DIRECCION`},observaciones:''},version:1,generatedAt:new Date().toISOString(),url:'https://example.invalid/original'});
+  const longParsed=await require('pdf-parse')(longPdf);assert.ok(longParsed.numpages>1);assert.match(longParsed.text,/ANEXO · DATOS ÍNTEGROS/);assert.match(longParsed.text,/FIN DE DIRECCION/);
   console.log('PASS document versions: old QR direct original bytes, seven-day access after actual completion, manual disable guard, external originals, hashes, tenant isolation and retained private access. PDF pages:',parsed.numpages);
  }finally{await pg.close();}
 }

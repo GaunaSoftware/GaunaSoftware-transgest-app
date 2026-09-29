@@ -27,7 +27,11 @@ async function read(db, empresaId, pedidoId, id) {
 function documentSnapshot(documento) {
   // Whitelist administrative fields. No financial conditions, changing signatures or attachments.
   const d = JSON.parse(JSON.stringify(documento));
-  return {...Object.fromEntries(['codigo_control','referencia_pedido','fecha_transporte','cargador_contractual','transportista_efectivo','empresa','origen','destino','mercancia','vehiculo'].map(k => [k, d[k] || {}])),observaciones:d.observaciones_publicas||''};
+  return {...Object.fromEntries(['codigo_control','referencia_pedido','fecha_transporte','cargador_contractual','transportista_efectivo','empresa','origen','destino','mercancia','vehiculo'].map(k => [k, d[k] || {}])),
+    ...(d.autorizacion_especial ? { autorizacion_especial: {
+      requerida: d.autorizacion_especial.requerida === true,
+      referencia: d.autorizacion_especial.requerida === true ? String(d.autorizacion_especial.referencia || '').trim().slice(0, 120) : '',
+    } } : {}),observaciones:d.observaciones_publicas||''};
 }
 function requiredFields(d) {
   return [
@@ -36,7 +40,8 @@ function requiredFields(d) {
     ['transportista_efectivo.nif','NIF del transportista efectivo'], ['origen.direccion','Dirección de origen'], ['destino.direccion','Dirección de destino'],
     ['destino.destinatario','Destinatario'], ['mercancia.descripcion','Naturaleza de la mercancía'], ['fecha_transporte','Fecha de transporte'], ['vehiculo.tractora','Matrícula de la tractora'],
   ].filter(([path]) => !String(path.split('.').reduce((v, k) => v?.[k], d) || '').trim()).map(([, label]) => label)
-    .concat(Number(d.mercancia?.peso_kg) > 0 ? [] : ['Peso del envío (kg)']);
+    .concat(Number(d.mercancia?.peso_kg) > 0 ? [] : ['Peso del envío (kg)'])
+    .concat(d.autorizacion_especial?.requerida && !d.autorizacion_especial.referencia ? ['Referencia de la autorización especial de circulación'] : []);
 }
 async function validateExternal(base64, confirmedNative) {
   const raw = String(base64 || '').replace(/^data:application\/pdf;base64,/, '');

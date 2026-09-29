@@ -2373,7 +2373,7 @@ async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userI
   return rows[0] || null;
 }
 
-async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null }) {
+async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null, specialPermit = null }) {
   // Signatures, uploads and closing a journey must never regenerate its DeCA.
   const versions = await transportDocuments.list(db, empresaId, pedidoId);
   if (motivo !== "generacion_manual") {
@@ -2389,6 +2389,9 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
   const ctx = await getPedidoDocumentoControlContext(pedidoId, empresaId);
   if (!ctx) return null;
   const payload = buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl});
+  const activeVersion = versions.find(version => version.estado === 'activa' && (consolidated ? version.scope_key === 'consolidado' : !envioId || version.envio_id === envioId));
+  const previousPermit = activeVersion?.payload?.documento?.autorizacion_especial;
+  if (specialPermit || previousPermit) payload.documento.autorizacion_especial = specialPermit || previousPermit;
   return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:appBaseUrl,expectedUpdatedAt:ctx.pedido.updated_at});
 }
 
@@ -6791,6 +6794,10 @@ router.post('/:id/envios',GERENTE_O_TRAFICO,async(req,res)=>{
 router.post("/:id/documento-control-digital/generar", async (req, res) => {
   try {
     if (!['gerente','trafico','chofer'].includes(req.user?.rol)) return res.status(403).json({error:'Solo tráfico, gerencia o el chófer asignado pueden emitir el DeCA.'});
+    if (req.body?.autorizacion_especial) {
+      if (!['gerente','trafico'].includes(req.user.rol)) return res.status(403).json({error:'Solo tráfico o gerencia pueden declarar la autorización especial de circulación.'});
+      if (typeof req.body.autorizacion_especial !== 'object' || typeof req.body.autorizacion_especial.requerida !== 'boolean') return res.status(422).json({error:'Declara expresamente si la autorización especial es requerida.'});
+    }
     const empresaId = req.empresaId || req.user.empresa_id;
     if (req.user.rol === 'chofer') {
       const assigned = (await db.query('SELECT id,chofer_id,chofer2_id,vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2',[req.params.id,empresaId])).rows[0];
@@ -6808,6 +6815,10 @@ router.post("/:id/documento-control-digital/generar", async (req, res) => {
       envioId: req.body?.envio_id || null,
       consolidated: req.body?.consolidado === true,
       versionReason: req.body?.motivo || null,
+      specialPermit: req.body?.autorizacion_especial && typeof req.body.autorizacion_especial === 'object' ? {
+        requerida: req.body.autorizacion_especial.requerida === true,
+        referencia: String(req.body.autorizacion_especial.referencia || '').trim().slice(0, 120),
+      } : null,
     });
     const refreshed = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     res.json({

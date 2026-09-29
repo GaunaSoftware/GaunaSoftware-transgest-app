@@ -20,6 +20,7 @@ import RemolqueGrupaje from "../components/RemolqueGrupaje";
 import { inferPlaceGeo } from "../utils/placeGeo";
 import { TRANSPORT_STATES, RECOMMENDED_STATE_FLOW, transportStateMeta } from "../utils/transportStateCatalog";
 import { displayOrderLocation } from "../utils/orderTown";
+import { askOperationalDateChoice } from "./orders/loadingDateChoice";
 import { addIsoDays, buildOrderScheduleShift, orderScheduleMatches } from "../utils/orderScheduleShift";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3115,9 +3116,11 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       notify(`No se puede pasar a ${EC[nextEstado]?.label || nextEstado}: ${validationIssues[0]}.`, "warning");
       return;
     }
+    const dateChoice = await askOperationalDateChoice(pedido, nextEstado, user?.rol, confirmDialog);
+    if (dateChoice === null) return;
     setQuickUpdatingId(String(pedido.id));
     try {
-      await cambiarEstadoPedido(pedido.id, nextEstado);
+      await cambiarEstadoPedido(pedido.id, nextEstado, dateChoice);
       syncPedidoLocal(pedido.id, { estado: nextEstado });
       broadcastPedidosChanged({ pedido_id: pedido.id, estado: nextEstado, source: "gestion-trafico-quick-state" });
       notify(`Pedido ${pedido.numero || ""} actualizado a ${EC[nextEstado]?.label || nextEstado}.`, "success");
@@ -3456,12 +3459,23 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     if (!ok) return;
     setBulkCriticalAdvancing(true);
     try {
+      let updated = 0;
+      const failed = [];
+      const failedIds = [];
       for (const item of lista) {
-        await cambiarEstadoPedido(item.pedido.id, item.quick.next);
+        try {
+          const dateChoice = await askOperationalDateChoice(item.pedido, item.quick.next, user?.rol, confirmDialog);
+          if (dateChoice === null) { failed.push(item.pedido.numero || item.pedido.id); failedIds.push(String(item.pedido.id)); continue; }
+          await cambiarEstadoPedido(item.pedido.id, item.quick.next, dateChoice);
+          updated += 1;
+        } catch (err) {
+          failed.push(`${item.pedido.numero || item.pedido.id}: ${err.message}`);
+          failedIds.push(String(item.pedido.id));
+        }
       }
-      setSelectedCriticalIds([]);
-      broadcastPedidosChanged({ source: "gestion-trafico-advance-selected-criticals" });
-      notify(`Estado rapido aplicado en ${lista.length} pedido(s) criticos.`, "success");
+      setSelectedCriticalIds(failedIds);
+      if (updated) broadcastPedidosChanged({ source: "gestion-trafico-advance-selected-criticals" });
+      notify(`Estado rápido aplicado en ${updated} de ${lista.length} pedido(s).${failed.length ? ` Sin actualizar: ${failed.slice(0, 3).join(" | ")}` : ""}`, failed.length ? "warning" : "success");
       cargar();
     } catch (err) {
       notify(err.message || "No se pudieron avanzar los criticos seleccionados.", "error");

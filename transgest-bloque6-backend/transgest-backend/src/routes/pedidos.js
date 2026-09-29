@@ -9266,6 +9266,14 @@ router.patch("/:id/estado",
       cargaFecha = require('../services/loadDateChoice').loadDateChoice(rows[0], estado, req.user?.rol, req.body);
     } catch (error) {return res.status(error.status || 400).json({error:error.message,code:error.code,fecha_planificada:error.fecha_planificada,fecha_real:error.fecha_real});}
     const cargaRealDesdeEstado = cargaFecha.recordActual;
+    const fechaCargaReplanificada = cargaFecha.phase === 'carga' ? cargaFecha.rescheduleDate || null : null;
+    const fechaDescargaReplanificada = cargaFecha.phase === 'descarga' ? cargaFecha.rescheduleDate || null : null;
+    const puntosCargaReplanificados = fechaCargaReplanificada
+      ? require('../services/loadDateChoice').replanPrimaryLoadStop(rows[0].puntos_carga, fechaCargaReplanificada)
+      : null;
+    const puntosDescargaReplanificados = fechaDescargaReplanificada
+      ? require('../services/loadDateChoice').replanPrimaryStop(rows[0].puntos_descarga, fechaDescargaReplanificada, 'descarga')
+      : null;
     const descargaRealDesdeEstado = estado === "entregado" &&
       String(rows[0].estado || "").toLowerCase() !== "entregado" &&
       !rows[0].descarga_real_at;
@@ -9356,14 +9364,14 @@ router.patch("/:id/estado",
     } else if (estado === "entregado" && facturacionMes) {
       // La entrega y el mes elegido se guardan juntos, sin exito parcial.
       const result = await db.query(
-        "UPDATE pedidos SET estado=$1::estado_pedido, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
-        [estado, req.params.id, empresaId, facturacionMes, descargaRealDesdeEstado]
+        "UPDATE pedidos SET estado=$1::estado_pedido, facturacion_mes=$4, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END, fecha_descarga=COALESCE($6::date,fecha_descarga), fecha_entrega=CASE WHEN $6::date IS NOT NULL AND fecha_entrega IS NOT NULL THEN $6::date ELSE fecha_entrega END, puntos_descarga=COALESCE($7::jsonb,puntos_descarga) WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
+        [estado, req.params.id, empresaId, facturacionMes, descargaRealDesdeEstado, fechaDescargaReplanificada, puntosDescargaReplanificados ? JSON.stringify(puntosDescargaReplanificados) : null]
       );
       estadoActualizado = result.rowCount > 0;
     } else {
       const result = await db.query(
-        "UPDATE pedidos SET estado=$1::estado_pedido, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
-        [estado, req.params.id, empresaId, cargaRealDesdeEstado, descargaRealDesdeEstado]
+        "UPDATE pedidos SET estado=$1::estado_pedido, motivo_cancelacion=NULL, cancelado_at=NULL, cancelado_by=NULL, carga_real_at=CASE WHEN $4::boolean THEN COALESCE(carga_real_at,NOW()) ELSE carga_real_at END, descarga_real_at=CASE WHEN $5::boolean THEN COALESCE(descarga_real_at,NOW()) ELSE descarga_real_at END, fecha_carga=COALESCE($6::date,fecha_carga), puntos_carga=COALESCE($7::jsonb,puntos_carga), fecha_descarga=COALESCE($8::date,fecha_descarga), fecha_entrega=CASE WHEN $8::date IS NOT NULL AND fecha_entrega IS NOT NULL THEN $8::date ELSE fecha_entrega END, puntos_descarga=COALESCE($9::jsonb,puntos_descarga) WHERE id=$2 AND empresa_id=$3 AND estado<>$1::estado_pedido",
+        [estado, req.params.id, empresaId, cargaRealDesdeEstado, descargaRealDesdeEstado, fechaCargaReplanificada, puntosCargaReplanificados ? JSON.stringify(puntosCargaReplanificados) : null, fechaDescargaReplanificada, puntosDescargaReplanificados ? JSON.stringify(puntosDescargaReplanificados) : null]
       );
       estadoActualizado = result.rowCount > 0;
     }
@@ -9388,6 +9396,11 @@ router.patch("/:id/estado",
     await logPedidoEvento(req.params.id, empresaId, "estado.actualizado", {
       estado,
       fecha_carga_accion:cargaFecha.choice,
+      fecha_carga_anterior:fechaCargaReplanificada ? normalizePedidoDate(rows[0].fecha_carga) : null,
+      fecha_carga_nueva:fechaCargaReplanificada,
+      fecha_descarga_accion:cargaFecha.phase === 'descarga' ? cargaFecha.choice : null,
+      fecha_descarga_anterior:fechaDescargaReplanificada ? normalizePedidoDate(rows[0].fecha_descarga || rows[0].fecha_entrega) : null,
+      fecha_descarga_nueva:fechaDescargaReplanificada,
       incidencia: incidencia || null,
       motivo_cancelacion: motivoCancelacion || null,
     }, req.user?.rol || "usuario", actorUsuarioId)
@@ -9452,6 +9465,55 @@ router.patch("/:id/estado",
     }
   }
 );
+
+// A date-only change must not revalidate unrelated assignment or pricing fields.
+router.patch('/:id/reprogramar', GESTION_PEDIDOS_ESCRITURA, async (req, res, next) => {
+  const empresaId = req.empresaId || req.user?.empresa_id;
+  const days = Number(req.body?.dias);
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    return res.status(400).json({ error: 'Indica entre 1 y 365 días de retraso.' });
+  }
+  try {
+    const { rows } = await db.transaction(async tx => {
+      const current = await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE', [req.params.id, empresaId]);
+      const order = current.rows[0];
+      if (!order) return { rows: [] };
+      if (order.factura_id) {
+        const invoice = await tx.query('SELECT estado FROM facturas WHERE id=$1 AND empresa_id=$2', [order.factura_id, empresaId]);
+        if (invoice.rows[0] && invoice.rows[0].estado !== 'borrador') {
+          throw Object.assign(new Error('No se puede retrasar un pedido con factura emitida.'), { status: 409 });
+        }
+      }
+      const expected = req.body?.fecha_carga_original;
+      if (expected && dateOnly(expected) !== dateOnly(order.fecha_carga)) {
+        throw Object.assign(new Error('Las fechas del pedido han cambiado. Actualiza el listado antes de retrasarlo.'), { status: 409 });
+      }
+      const shifted = require('../services/pedidoScheduleShift').shiftPedidoSchedule(order, days);
+      return tx.query(`UPDATE pedidos SET fecha_carga=$1::date, fecha_descarga=$2::date,
+          fecha_entrega=$3::date, puntos_carga=COALESCE($4::jsonb,puntos_carga),
+          puntos_descarga=COALESCE($5::jsonb,puntos_descarga), pendiente_completar=true,
+          aviso_completar='Viaje reprogramado: revisar horarios y compromiso con el cliente.'
+          WHERE id=$6 AND empresa_id=$7 RETURNING *`, [
+        shifted.fecha_carga, shifted.fecha_descarga, shifted.fecha_entrega,
+        shifted.puntos_carga ? JSON.stringify(shifted.puntos_carga) : null,
+        shifted.puntos_descarga ? JSON.stringify(shifted.puntos_descarga) : null,
+        req.params.id, empresaId,
+      ]);
+    });
+    if (!rows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    await logPedidoEvento(req.params.id, empresaId, 'pedido.reprogramado', {
+      dias: days, fecha_carga_nueva: dateOnly(rows[0].fecha_carga),
+      fecha_descarga_nueva: dateOnly(rows[0].fecha_descarga || rows[0].fecha_entrega),
+    }, req.user?.rol || 'usuario', req.user?.id || null)
+      .catch(error => logger.warn('No se pudo registrar la reprogramación:', error.message));
+    await syncOrderIncidents({ empresaId, pedidoId: req.params.id })
+      .catch(error => logger.warn('No se pudieron actualizar los avisos tras reprogramar:', error.message));
+    res.json(rows[0]);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    next(error);
+  }
+});
 
 // PUT /pedidos/:id
 router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {

@@ -590,6 +590,8 @@ export const crearChoferClientePuntoCarga = (clienteId, data) => apiFetch(`/pedi
 export const getChoferClienteRutas = (clienteId) => apiFetch(`/pedidos/chofer/clientes/${encodeURIComponent(clienteId)}/rutas`);
 export const crearChoferRuta = (data) => apiFetch("/pedidos/chofer/rutas", { method:"POST", body:data });
 export const editarPedido   = (id,data,options={}) => apiFetch(`/pedidos/${id}`, { method:"PUT", body:data, ...options });
+export const retrasarPedido = (id, dias, fechaCargaOriginal, options={}) =>
+  apiFetch(`/pedidos/${id}/reprogramar`, { method:"PATCH", body:{ dias, fecha_carga_original:fechaCargaOriginal }, ...options });
 export const cambiarEstadoPedido = (id, estado, extra = {}) =>
   apiFetch(`/pedidos/${id}/estado`, { method:"PATCH", body:{ estado, ...extra } });
 export const enviarWorkflowColaborador = (id, force = false) =>

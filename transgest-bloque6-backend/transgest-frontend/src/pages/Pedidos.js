@@ -23,12 +23,14 @@ import { tariffChanges, tariffDraftValues } from "./orders/tariffUpdate";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
 import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
+import "./orders/actionDialogs.css";
 import { cargoPayload, fullLoadLength, resolveQuickFullLoadLength, syncFullLoadLength } from "../utils/cargoDimensions";
 import "./workspace/unified-tools.css";
 import OrdersWorkspace from "./orders/OrdersWorkspace";
 import { useDebounce } from "../hooks/useDebounce";
 import { displayLocation, displayOrderLocation, missingLocationFields } from '../utils/orderTown';
 import { transportStateMeta } from '../utils/transportStateCatalog';
+import { askOperationalDateChoice } from './orders/loadingDateChoice';
 import { addIsoDays, buildOrderScheduleShift, orderScheduleMatches } from '../utils/orderScheduleShift';
 import { supplierPriceType, supplierTonneAgreement, canIssueSupplierOrder } from '../utils/supplierPricing';
 import { verificarOrdenColaborador } from '../services/api';
@@ -44,7 +46,7 @@ import { getLogoDataUrl, ensureLogoCargado } from "../services/logoHelper";
 import { getPedidoDocs, getDescargas, subirPedidoDoc, borrarPedidoDoc, enviarPedidoDocAChofer, enviarTodosPedidoDocsAChofer, eliminarPedido, desvincularFacturaPedido, getPedidoEventos } from "../services/api";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { getPedidosResumenLista, getClientes, getVehiculos, getChoferes, getRutas, getColaboradores,
-         crearPedido, editarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
+         crearPedido, editarPedido, retrasarPedido, cambiarEstadoPedido, crearFactura, crearRutaCliente, editarRutaCliente,
          getRutasCliente, getClienteRiesgoOperativo, getPedido, getPedidoRentabilidadPredictiva, getPedidoDocumentoControl, getPedidoDocumentoControlExport, getPedidoDocumentoControlFirmaPaquete, getPedidoRegulatoryCoreExport, descargarPedidoRegulatoryDossierPdf, getPedidoRegulatoryPayload, crearPedidoRegulatoryTransmissionDraft, descargarFirmaEntregaEvidenciaInforme, registrarPedidoDocumentoControlEvento, getPedidoColaboradorPago, guardarPedidoColaboradorPago, getEmpresaConfig, setConfigPrecios,
          crearCliente, setClienteMercanciaHabitual, crearColaborador, enviarWorkflowColaborador, getWorkflowColaboradorPreview, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
          crearColaboradorLiquidacionToken, revocarColaboradorLiquidacionToken,
@@ -9426,21 +9428,6 @@ export default function Pedidos() {
     const confirmaCargaReal = estado === "en_curso" &&
       ["confirmado", "espera_carga", "cargando"].includes(String(p?.estado || "").toLowerCase()) &&
       !p?.carga_real_at;
-    if (confirmaCargaReal && user?.rol !== "chofer") {
-      const fechaPlan = String(p?.fecha_carga_planificada || p?.fecha_carga || "").slice(0, 10);
-      const hoyMadrid = new Intl.DateTimeFormat("sv-SE", { timeZone:"Europe/Madrid", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
-      if (fechaPlan && fechaPlan !== hoyMadrid) {
-        const confirmed = await confirmDialog({
-          title:"Registrar carga real",
-          message:`El pedido estaba planificado para ${fechaPlan}. Puedes mantener esa fecha al cambiar el estado, o registrar que la carga se ha completado hoy (${hoyMadrid}). Conservar la fecha no inventa una hora real de carga.`,
-          confirmText:"Registrar carga de hoy",
-          alternateText:"Conservar fecha original",
-          tone:"warning",
-        });
-        if (!confirmed) return false;
-        extra = { ...extra, fecha_carga_accion:confirmed==='alternate'?'conservar':'hoy', confirmar_carga_real:confirmed===true };
-      }
-    }
     const incidenciaTexto = String(extra.incidencia || "").trim();
     if (estado === "incidencia" && !incidenciaTexto) {
       setIncidenciaSelector({ pedidoId:id, tipo:"", detalle:"" });
@@ -9457,6 +9444,9 @@ export default function Pedidos() {
         return false;
       }
     }
+    const dateChoice = await askOperationalDateChoice(p, estado, user?.rol, confirmDialog);
+    if (dateChoice === null) return false;
+    extra = { ...extra, ...dateChoice };
     // Optimistic update - UI responds instantly
     setPedidos(prev => prev.map(x => x.id===id ? {
       ...x,
@@ -9474,6 +9464,7 @@ export default function Pedidos() {
       delete payloadExtra.__fromCancelFlow;
       delete payloadExtra.__facturacionResuelta;
       await cambiarEstadoPedido(id, estado, payloadExtra);
+      if (dateChoice.fecha_carga_accion === "hoy" || dateChoice.fecha_descarga_accion === "hoy") await cargar({ silent: true }).catch(() => {});
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("tms:pedidos-changed", { detail: { pedido_id: id, estado, source: "pedidos-estado" } }));
       if (confirmaCargaReal) await ofrecerKmVacioTrasCarga(id);
       return true;
@@ -9672,7 +9663,7 @@ export default function Pedidos() {
         if (fetched?.id) pedidoBase = fetched;
       }
       const payload = buildPedidoReschedulePayload(pedidoBase, offsetDays);
-      const saved = await editarPedido(pedido.id, payload, { silentSuccess: true });
+      const saved = await retrasarPedido(pedido.id, offsetDays, pedidoBase.fecha_carga, { silentSuccess: true });
       if (!orderScheduleMatches(saved, payload)) throw new Error("El servidor no confirmó las nuevas fechas.");
       notify(`${pedido.numero || "Pedido"} reprogramado ${texto}.`, "success");
       cargar();
@@ -9821,7 +9812,7 @@ export default function Pedidos() {
         const payload = buildPedidoReschedulePayload(pedidoBase, offsetDays, {
           aviso_completar: "Viaje reprogramado en lote desde pedidos: revisar horarios, asignacion y compromiso con el cliente.",
         });
-        const saved = await editarPedido(pedido.id, payload, { silentSuccess: true });
+        const saved = await retrasarPedido(pedido.id, offsetDays, pedidoBase.fecha_carga, { silentSuccess: true });
         if (!orderScheduleMatches(saved, payload)) throw new Error(`No se confirmó el retraso de ${pedido.numero || pedido.id}.`);
       }
       notify(`${lista.length} pedido(s) criticos reprogramados ${texto}.`, "success");
@@ -9866,7 +9857,7 @@ export default function Pedidos() {
           const payload = buildPedidoReschedulePayload(pedidoBase, offsetDays, {
             aviso_completar: "Viaje reprogramado desde seleccion multiple: revisar horarios, asignacion y compromiso con el cliente.",
           });
-          const saved = await editarPedido(pedido.id, payload, { silentSuccess: true, silentError: true });
+          const saved = await retrasarPedido(pedido.id, offsetDays, pedidoBase.fecha_carga, { silentSuccess: true, silentError: true });
           if (!orderScheduleMatches(saved, payload)) throw new Error("El servidor no confirmó las nuevas fechas.");
           succeeded += 1;
         } catch (error) {
@@ -10165,7 +10156,9 @@ export default function Pedidos() {
       let okCount = 0; const fallos = [];const completed=[];
       for (const pedido of validos) {
         try {
-          await cambiarEstadoPedido(pedido.id, bulkEstado,extra(pedido));
+          const dateChoice = await askOperationalDateChoice(pedido, bulkEstado, user?.rol, confirmDialog);
+          if (dateChoice === null) { fallos.push(`${pedido.numero || pedido.id}: fecha sin confirmar`); continue; }
+          await cambiarEstadoPedido(pedido.id, bulkEstado, { ...extra(pedido), ...dateChoice });
           completed.push(String(pedido.id));okCount++;
         } catch (err) {
           fallos.push(`${pedido.numero || pedido.id}: ${err.message || "error"}`);
@@ -10405,8 +10398,8 @@ export default function Pedidos() {
 
       {copyPlan && (
         <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && !copySaving && setCopyPlan(null)}>
-          <div style={{...S.mbox, width:"min(520px,96vw)"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>
+          <div className="order-action-dialog" role="dialog" aria-modal="true" aria-labelledby="copy-order-title" style={{...S.mbox, width:"min(520px,96vw)"}}>
+            <div id="copy-order-title" style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:16,color:"var(--text)"}}>
               Copiar viaje
             </div>
             <div style={{background:"rgba(59,110,245,.07)",border:"1px solid rgba(59,110,245,.15)",borderRadius:8,padding:"12px 16px",marginBottom:16}}>
@@ -10415,25 +10408,27 @@ export default function Pedidos() {
                 {(copyPlan.source?.origen || "-")} -> {(copyPlan.source?.destino || "-")}
               </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div className="order-action-fields">
               <div>
-                <label style={S.lbl}>Fecha de carga (todas las copias)</label>
+                <label className="order-action-label" htmlFor="copy-order-date">Fecha de carga (todas las copias)</label>
                 <input
+                  id="copy-order-date"
                   type="date"
                   min="2000-01-01"
                   max="2100-12-31"
-                  style={S.inp}
+                  className="order-action-input"
                   value={copyPlan.fecha_carga || ""}
                   onChange={e=>setCopyPlan(prev=>({...prev, fecha_carga:e.target.value}))}
                 />
               </div>
               <div>
-                <label style={S.lbl}>Numero de copias</label>
+                <label className="order-action-label" htmlFor="copy-order-count">Número de copias</label>
                 <input
+                  id="copy-order-count"
                   type="number"
                   min="1"
                   max="20"
-                  style={S.inp}
+                  className="order-action-input"
                   value={copyPlan.copias || 1}
                   onChange={e=>setCopyPlan(prev=>({...prev, copias:e.target.value}))}
                 />
@@ -10476,21 +10471,22 @@ export default function Pedidos() {
 
       {delayRequest && (
         <div style={S.modal} onMouseDown={e=>e.target===e.currentTarget && cerrarSelectorRetraso(null)}>
-          <div style={{...S.mbox, width:"min(440px,96vw)"}}>
-            <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:10,color:"var(--text)"}}>
+          <div className="order-action-dialog" role="dialog" aria-modal="true" aria-labelledby="delay-order-title" style={{...S.mbox, width:"min(440px,96vw)"}}>
+            <div id="delay-order-title" style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:10,color:"var(--text)"}}>
               Retrasar carga
             </div>
             <div style={{fontSize:12,color:"var(--text3)",marginBottom:14}}>
               Indica cuantos dias quieres retrasar {delayRequest.etiqueta || "este pedido"}. Se mantendra la separacion entre carga y descarga.
             </div>
-            <label style={S.lbl}>Dias de retraso</label>
+            <label className="order-action-label" htmlFor="delay-order-days">Días de retraso</label>
             <input
+              id="delay-order-days"
               type="number"
               min="1"
               max="365"
               step="1"
               autoFocus
-              style={S.inp}
+              className="order-action-input"
               value={delayRequest.value}
               onChange={e=>setDelayRequest(prev=>({...prev, value:e.target.value}))}
               onKeyDown={e=>{

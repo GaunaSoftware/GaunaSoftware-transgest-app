@@ -3,12 +3,36 @@ const {loadDateChoice}=require('../src/services/loadDateChoice');
 const {driverStops,mergeStop}=require('../src/services/driverStops');
 const now=new Date('2026-10-25T23:15:00Z'); // Madrid is already the following day after the DST change.
 const order={estado:'confirmado',fecha_carga:'2026-10-25',origen:'Madrid',destino:'Valencia',peso_kg:24000};
-assert.throws(()=>loadDateChoice(order,'en_curso','trafico',{},now),{code:'FECHA_REAL_CARGA_CONFIRMAR',fecha_real:'2026-10-26'});
-assert.deepEqual(loadDateChoice(order,'en_curso','trafico',{fecha_carga_accion:'conservar'},now),{recordActual:false,choice:'conservar'});
+assert.throws(()=>loadDateChoice(order,'en_curso','trafico',{},now),{code:'FECHA_CARGA_REPLANIFICAR',fecha_real:'2026-10-26'});
+assert.throws(()=>loadDateChoice(order,'cargando','trafico',{},now),{code:'FECHA_CARGA_REPLANIFICAR',fecha_real:'2026-10-26'});
+assert.deepEqual(loadDateChoice(order,'cargando','trafico',{fecha_carga_accion:'hoy'},now),{recordActual:false,choice:'hoy',phase:'carga',rescheduleDate:'2026-10-26'});
+assert.deepEqual(loadDateChoice(order,'cargando','trafico',{fecha_carga_accion:'conservar'},now),{recordActual:false,choice:'conservar',phase:'carga',rescheduleDate:null});
+assert.equal(loadDateChoice(order,'cargando','chofer',{},now).recordActual,false,'iniciar carga no significa haberla completado');
+const stops=[{direccion:'Origen',fecha:'2026-10-25'},{direccion:'Segundo origen',fecha:'2026-10-27'}];
+const shiftedStops=require('../src/services/loadDateChoice').replanPrimaryLoadStop(stops,'2026-10-26');
+assert.deepEqual(shiftedStops.map(stop=>stop.fecha),['2026-10-26','2026-10-27']);
+assert.equal(stops[0].fecha,'2026-10-25','la replanificación no muta la lectura original');
+assert.throws(()=>loadDateChoice({...order,fecha_descarga:'2026-10-25'},'cargando','trafico',{fecha_carga_accion:'hoy'},now),{code:'FECHA_DESCARGA_ANTERIOR'});
+assert.deepEqual(loadDateChoice(order,'en_curso','trafico',{fecha_carga_accion:'conservar'},now),{recordActual:false,choice:'conservar',phase:'carga',rescheduleDate:null});
 assert.equal(loadDateChoice(order,'en_curso','trafico',{fecha_carga_accion:'hoy'},now).recordActual,true);
 assert.equal(loadDateChoice(order,'en_curso','trafico',{confirmar_carga_real:true},now).recordActual,true,'old clients remain compatible');
+assert.equal(loadDateChoice(order,'en_curso','trafico',{confirmar_carga_real:true},now).rescheduleDate,null,'legacy actual confirmation must not silently move an agreed date');
 assert.equal(loadDateChoice(order,'en_curso','chofer',{fecha_carga_accion:'conservar'},now).recordActual,true,'driver observations cannot suppress actual timestamp');
 assert.throws(()=>loadDateChoice(order,'en_curso','trafico',{fecha_carga_accion:'ayer'},now),{status:400});
+const deliveryOrder={...order,estado:'en_curso',fecha_descarga:'2026-10-27'};
+for(const state of ['espera_descarga','descarga','entregado']){
+  assert.throws(()=>loadDateChoice(deliveryOrder,state,'trafico',{},now),{code:'FECHA_DESCARGA_REPLANIFICAR'});
+  assert.equal(loadDateChoice(deliveryOrder,state,'trafico',{fecha_descarga_accion:'hoy'},now).rescheduleDate,'2026-10-26');
+}
+assert.equal(loadDateChoice(deliveryOrder,'entregado','chofer',{},now).rescheduleDate,undefined);
+assert.deepEqual(require('../src/services/loadDateChoice').replanPrimaryStop([{fecha:'2026-10-27'},{fecha:'2026-10-28'}],'2026-10-26','descarga').map(s=>s.fecha),['2026-10-26','2026-10-28']);
+const {shiftPedidoSchedule}=require('../src/services/pedidoScheduleShift');
+const unassigned={fecha_carga:'2026-10-25',fecha_descarga:'2026-10-26',puntos_carga:[{fecha:'2026-10-25'}],puntos_descarga:[{fecha:'2026-10-26'}],vehiculo_id:null,chofer_id:null};
+const postponed=shiftPedidoSchedule(unassigned,2);
+assert.equal(postponed.fecha_carga,'2026-10-27');
+assert.equal(postponed.fecha_descarga,'2026-10-28');
+assert.equal(postponed.puntos_carga[0].fecha,'2026-10-27');
+assert.equal(unassigned.puntos_carga[0].fecha,'2026-10-25');
 let data={};const stop=driverStops(order)[0];
 function apply(patch){const r=mergeStop(order,data,{...patch,parada_id:stop.id});data=r.data;order.estado=r.state;return r;}
 apply({carga_iniciada:true});apply({carga_proceso:true});

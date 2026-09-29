@@ -1,16 +1,65 @@
+const day = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value || '').slice(0, 10);
+const madridDay = now => new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(now);
+
 function loadDateChoice(order, nextState, role, input = {}, now = new Date()) {
-  const transition = nextState === 'en_curso' && ['confirmado','espera_carga','cargando'].includes(order.estado) && !order.carga_real_at;
-  if (!transition) return {recordActual:false, choice:null};
-  if (role === 'chofer') return {recordActual:true, choice:'observada'};
-  const choice = input.fecha_carga_accion;
-  if (choice != null && !['conservar','hoy'].includes(choice)) throw Object.assign(new Error('Opción de fecha de carga no válida.'), {status:400});
-  const value=order.fecha_carga_planificada || order.fecha_carga;
-  const planned = value instanceof Date ? value.toISOString().slice(0,10) : String(value||'').slice(0,10);
-  const today = new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
-  if (planned && planned!==today && !choice && input.confirmar_carga_real!==true) {
-    throw Object.assign(new Error(`El pedido estaba planificado para ${planned}. Elige conservar su fecha o registrar la carga de hoy (${today}).`), {status:409,code:'FECHA_REAL_CARGA_CONFIRMAR',fecha_planificada:planned,fecha_real:today});
+  const state = String(nextState || '').toLowerCase();
+  const current = String(order.estado || '').toLowerCase();
+  const load = ['espera_carga', 'cargando', 'en_curso'].includes(state);
+  const delivery = ['espera_descarga', 'descarga', 'entregado'].includes(state);
+  const finishingLoad = state === 'en_curso' && ['confirmado', 'espera_carga', 'cargando'].includes(current) && !order.carga_real_at;
+  if ((!load && !delivery) || current === state) return { recordActual: false, choice: null };
+  // Driver events describe what happened; they never rewrite agreed dates.
+  if (role === 'chofer') return { recordActual: finishingLoad, choice: finishingLoad ? 'observada' : null };
+
+  const phase = load ? 'carga' : 'descarga';
+  const key = load ? 'fecha_carga_accion' : 'fecha_descarga_accion';
+  const explicitChoice = input[key];
+  const originalChoice = explicitChoice || (finishingLoad && input.confirmar_carga_real === true ? 'observada' : null);
+  if (explicitChoice != null && !['conservar', 'hoy'].includes(explicitChoice)) {
+    throw Object.assign(new Error(`Opción de fecha de ${phase} no válida.`), { status: 400 });
   }
-  // Keeping the planned date is not evidence of an actual loading timestamp.
-  return {recordActual:choice!=='conservar',choice:choice || 'hoy'};
+  const planned = day(load
+    ? order.fecha_carga_planificada || order.fecha_carga
+    : order.fecha_descarga_planificada || order.fecha_descarga || order.fecha_entrega);
+  const today = madridDay(now);
+  if (planned && planned !== today && !originalChoice) {
+    throw Object.assign(new Error(`La ${phase} estaba prevista para ${planned}. Elige cambiar la fecha a hoy (${today}) o conservar la prevista.`), {
+      status: 409, code: load ? 'FECHA_CARGA_REPLANIFICAR' : 'FECHA_DESCARGA_REPLANIFICAR',
+      fecha_planificada: planned, fecha_real: today,
+    });
+  }
+  const rescheduleDate = originalChoice === 'hoy' && planned !== today ? today : null;
+  if (rescheduleDate && load && day(order.fecha_descarga || order.fecha_entrega) < today &&
+      day(order.fecha_descarga || order.fecha_entrega)) {
+    throw Object.assign(new Error('La descarga quedaría antes de la carga. Reprograma primero la descarga o conserva la fecha prevista.'), {
+      status: 409, code: 'FECHA_DESCARGA_ANTERIOR',
+    });
+  }
+  if (rescheduleDate && delivery && day(order.fecha_carga) > today) {
+    throw Object.assign(new Error('La descarga quedaría antes de la carga. Reprograma primero la carga o conserva la fecha prevista.'), {
+      status: 409, code: 'FECHA_CARGA_POSTERIOR',
+    });
+  }
+  return {
+    recordActual: finishingLoad && originalChoice !== 'conservar',
+    choice: originalChoice,
+    phase,
+    rescheduleDate,
+  };
 }
-module.exports={loadDateChoice};
+
+function replanPrimaryStop(value, date, phase = 'carga') {
+  if (!date) return null;
+  const stops = Array.isArray(value) ? value : (() => { try { return JSON.parse(value || '[]'); } catch { return []; } })();
+  if (!Array.isArray(stops) || !stops.length) return null;
+  const phaseKey = phase === 'carga' ? 'fecha_carga' : 'fecha_descarga';
+  return stops.map((stop, index) => index === 0 ? {
+    ...stop,
+    fecha: date,
+    ...(stop?.[phaseKey] ? { [phaseKey]: date } : {}),
+  } : stop);
+}
+
+module.exports = { loadDateChoice, replanPrimaryStop, replanPrimaryLoadStop: replanPrimaryStop };

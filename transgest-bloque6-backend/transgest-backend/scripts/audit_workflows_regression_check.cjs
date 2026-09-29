@@ -71,6 +71,9 @@ async function main(){
  const base='http://127.0.0.1:'+server.address().port+'/api/v1';let token;
  async function call(label,method,url,body){
   body=await require('./audit_company_login.cjs')(db,url,body);
+  if(method==='PATCH'&&url.endsWith('/estado')&&body?.estado&&!['Exigir confirmación de carga real en otro día','Exigir decisión sobre descarga fuera de fecha'].includes(label)){
+   body={fecha_carga_accion:'conservar',fecha_descarga_accion:'conservar',...body};
+  }
   const response=await actualFetch(base+url,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data=await response.json();evidence.checks.push({label,method,url,status:response.status,...(data.error?{error:data.error}:{}),...(data.errors?{validation:data.errors}:{} )});return data;
  }
  try{
@@ -82,7 +85,15 @@ async function main(){
  const vehicle=await call('Crear tractora','POST','/vehiculos',{matricula:'1234AUD',tipo:'tractora',marca:'Prueba',modelo:'Auditoría',fecha_itv:'2027-09-16',km_actuales:10000,activo:true});
  const trailer=await call('Crear remolque con longitud útil','POST','/vehiculos',{matricula:'5678AUD',tipo:'remolque',metros_carga:12.4,activo:true});
  require('node:assert/strict').ok(trailer.id,'Debe existir el remolque de prueba');
- const defaultLengthOrder=await call('Carga completa sin longitud explícita','POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',importe:400});
+  const defaultLengthOrder=await call('Carga completa sin longitud explícita','POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',importe:400});
+  const delayedUnassigned=await call('Retrasar sin matrícula ni chófer','PATCH','/pedidos/'+defaultLengthOrder.id+'/reprogramar',{dias:2,fecha_carga_original:'2026-09-16'});
+  require('node:assert/strict').equal(String(delayedUnassigned.fecha_carga).slice(0,10),'2026-09-18');
+  require('node:assert/strict').equal(delayedUnassigned.vehiculo_id,null);
+  require('node:assert/strict').equal(delayedUnassigned.chofer_id,null);
+  const secondUnassigned=await call('Segundo pedido sin asignación','POST','/pedidos',{cliente_id:client.id,origen:'Madrid',destino:'Valencia',fecha_carga:'2026-09-16',fecha_descarga:'2026-09-17',importe:250});
+  const secondDelayed=await call('Retrasar segundo pedido seleccionado','PATCH','/pedidos/'+secondUnassigned.id+'/reprogramar',{dias:2,fecha_carga_original:'2026-09-16'});
+  require('node:assert/strict').equal(String(secondDelayed.fecha_carga).slice(0,10),'2026-09-18');
+  require('node:assert/strict').equal(String(secondDelayed.fecha_descarga).slice(0,10),'2026-09-19');
  require('node:assert/strict').equal(defaultLengthOrder.longitud_ocupada_mode,'auto');
  require('node:assert/strict').equal(Number(defaultLengthOrder.metros_lineales),13.65);
  require('node:assert/strict').equal(Number(defaultLengthOrder.carga_largo_m),13.65);
@@ -144,14 +155,22 @@ async function main(){
   const datedOrder=await call('Pedido con carga pactada anterior','POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2020-01-15',fecha_descarga:'2020-01-16',importe:400});
   await call('Confirmar carga pactada','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'confirmado'});
   const missingRealDateConfirmation=await call('Exigir confirmación de carga real en otro día','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'en_curso'});
-  require('node:assert/strict').equal(missingRealDateConfirmation.code,'FECHA_REAL_CARGA_CONFIRMAR');
-  const confirmedRealLoad=await call('Registrar carga real confirmada','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'en_curso',confirmar_carga_real:true});
+  require('node:assert/strict').equal(missingRealDateConfirmation.code,'FECHA_CARGA_REPLANIFICAR');
+  const confirmedRealLoad=await call('Conservar fecha pactada al iniciar viaje','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'en_curso',fecha_carga_accion:'conservar'});
   require('node:assert/strict').equal(confirmedRealLoad.estado,'en_curso');
   const datedAfter=(await db.query('SELECT fecha_carga,fecha_carga_planificada,fecha_descarga_planificada,carga_real_at FROM pedidos WHERE id=$1 AND empresa_id=$2',[datedOrder.id,company])).rows[0];
   require('node:assert/strict').equal(new Date(datedAfter.fecha_carga).toISOString().slice(0,10),'2020-01-15');
   require('node:assert/strict').equal(new Date(datedAfter.fecha_carga_planificada).toISOString().slice(0,10),'2020-01-15');
   require('node:assert/strict').equal(new Date(datedAfter.fecha_descarga_planificada).toISOString().slice(0,10),'2020-01-16');
-  require('node:assert/strict').ok(datedAfter.carga_real_at,'La ejecución real debe tener marca temporal del servidor');
+  require('node:assert/strict').equal(datedAfter.carga_real_at,null,'Conservar la fecha prevista no inventa una hora real');
+  const missingDeliveryChoice=await call('Exigir decisión sobre descarga fuera de fecha','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'entregado'});
+  require('node:assert/strict').equal(missingDeliveryChoice.code,'FECHA_DESCARGA_REPLANIFICAR');
+  const deliveryToday=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  await call('Reprogramar descarga al entregar','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'entregado',fecha_descarga_accion:'hoy',facturacion_mes:'2026-09-01'});
+  const deliveredSchedule=(await db.query('SELECT fecha_descarga,fecha_descarga_planificada,descarga_real_at FROM pedidos WHERE id=$1 AND empresa_id=$2',[datedOrder.id,company])).rows[0];
+  require('node:assert/strict').equal(new Date(deliveredSchedule.fecha_descarga).toISOString().slice(0,10),deliveryToday);
+  require('node:assert/strict').equal(new Date(deliveredSchedule.fecha_descarga_planificada).toISOString().slice(0,10),deliveryToday);
+  require('node:assert/strict').ok(deliveredSchedule.descarga_real_at);
   // Fuel is already part of the order total: persist separate lines in both invoice paths.
   const fuelOrders=[];
   for(const [i,amount,fuel] of [[1,528,48],[2,220,20]]){
@@ -407,6 +426,7 @@ async function main(){
   ['Estructura: bloqueo servidor de mes cerrado',409],
   ['Rechazar ruta de otro cliente al editar',400],
   ['Exigir confirmación de carga real en otro día',409],
+  ['Exigir decisión sobre descarga fuera de fecha',409],
   ['Rechazar recargo incluido en porte',409],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],

@@ -1615,7 +1615,7 @@ async function generateDocumentoControlPdf({
   section("Verificacion y soporte");
   writeLine("URL segura", documento?.soporte_url || qrUrl, { size: 8, width: 500 });
   writeLine("Codigo de verificacion", documento?.verificacion?.codigo_verificacion);
-  writeLine("Politica de acceso", "Enlace tokenizado, noindex, no-store. La descarga publica puede desactivarse; el repositorio interno conserva el documento.");
+  writeLine("Politica de acceso", "Enlace tokenizado, noindex, no-store. Descarga directa durante el servicio y siete dias naturales despues; el original se conserva al menos un ano.");
 
   ensureSpace(180);
   section("Firmas");

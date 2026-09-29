@@ -5,7 +5,7 @@ async function main(){
  const pg=new PGlite(),company=crypto.randomUUID(),other=crypto.randomUUID(),order=crypto.randomUUID();
  const db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
  try{
-  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz);');
+  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz,descarga_real_at timestamptz);');
   for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_document_versions.sql'),'utf8'));
   await pg.query('INSERT INTO pedidos VALUES($1,$2,NOW())',[order,company]);
@@ -32,6 +32,29 @@ async function main(){
   const versions=await service.list(db,company,order);assert.deepEqual(versions.map(v=>v.estado),['activa','superada']);
   assert.notEqual(versions[0].public_url,initial.public_url);assert.notEqual(versions[0].pdf_hash,initial.pdf_hash);
   assert.deepEqual((await service.publicOriginal(db,initial.id,token)).pdf,original.pdf,'Old URL never regenerates current order data');
+  await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'public_disabled',NOW(),'Disable requested too early')",[company,initial.id]);
+  assert.deepEqual((await service.publicOriginal(db,initial.id,token)).pdf,original.pdf,'Manual disable cannot break a QR during transport');
+  const completedAt=new Date('2026-09-25T12:00:00Z');
+  assert.equal(service.publicAccessEnded(completedAt,new Date('2026-10-02T11:59:59Z')),false);
+  assert.equal(service.publicAccessEnded(completedAt,new Date('2026-10-02T12:00:00Z')),true);
+  await pg.exec('CREATE TABLE documento_control_repositorio(empresa_id UUID,pedido_id UUID,pdf_base64 TEXT,pdf_hash_sha256 TEXT,pdf_filename TEXT,filename TEXT,created_at timestamptz,retencion_minima_hasta date);');
+  const legacyOrder=crypto.randomUUID();
+  await pg.query('INSERT INTO pedidos VALUES($1,$2,NOW(),NULL)',[legacyOrder,company]);
+  await pg.query('INSERT INTO documento_control_repositorio VALUES($1,$2,$3,$4,$5,$6,$7,NULL)',
+    [company,legacyOrder,original.pdf.toString('base64'),service.hash(original.pdf),'original-archive.pdf','document.html','2026-09-20T12:00:00Z']);
+  const legacy=await service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder});
+  assert.deepEqual(legacy.pdf,original.pdf,'Old QR must download the exact original bytes, not regenerate a different PDF');
+  assert.equal(legacy.filename,'original-archive.pdf');
+  assert.equal(await service.legacyPublicOriginal(db,{empresaId:other,pedidoId:legacyOrder}),null);
+  await pg.query('UPDATE pedidos SET descarga_real_at=$2 WHERE id=$1',[legacyOrder,completedAt]);
+  assert.equal(await service.hasProtectedLegacyDeca(db,company,legacyOrder,new Date('2027-09-24T12:00:00Z')),true);
+  assert.equal(await service.hasProtectedLegacyDeca(db,company,legacyOrder,new Date('2027-09-25T12:00:00Z')),false);
+  assert.equal(await service.hasProtectedLegacyDeca(db,other,legacyOrder,new Date('2027-01-01T00:00:00Z')),false);
+  assert.ok(await service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder,now:new Date('2026-10-02T11:59:59Z')}));
+  await assert.rejects(service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder,now:new Date('2026-10-02T12:00:00Z')}),{code:'PUBLIC_EXPIRED'});
+  await pg.query('UPDATE pedidos SET descarga_real_at=NULL WHERE id=$1',[legacyOrder]);
+  await pg.query('UPDATE documento_control_repositorio SET pdf_hash_sha256=$2 WHERE pedido_id=$1',[legacyOrder,'wrong']);
+  await assert.rejects(service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder}),{code:'DOCUMENT_INTEGRITY'});
   await assert.rejects(service.issue(db,{...args,payload:{documento:{...d,vehiculo:{}}}}),{code:'DECA_FIELDS_REQUIRED'});
   await assert.rejects(service.issue(db,{...args,baseUrl:'http://example.invalid'}),{code:'HTTPS_REQUIRED'});
   await assert.rejects(service.issue(db,{...args,payload:{documento:{...d,cargas:[{},{}]}}}),{code:'SHIPMENT_MAPPING_REQUIRED'});
@@ -44,7 +67,7 @@ async function main(){
   assert.ok((await service.read(db,company,order,initial.id)).pdf,'Authenticated retention survives public expiry');
   const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-deca-synthetic.pdf'),original.pdf);
   const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/firma certificada|AdES|QES/);
-  console.log('PASS document versions: exact bytes/old URL, external originals, payload/PDF hashes, no auto-generation over external, immutable SQL, tenant isolation, scope/readiness, retry deduplication, native PDF/HTTPS, actual-completion expiry and retained private access. PDF pages:',parsed.numpages);
+  console.log('PASS document versions: old QR direct original bytes, seven-day access after actual completion, manual disable guard, external originals, hashes, tenant isolation and retained private access. PDF pages:',parsed.numpages);
  }finally{await pg.close();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

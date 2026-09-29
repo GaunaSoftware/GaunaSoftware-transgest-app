@@ -2185,7 +2185,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
     payload.remision = {...payload.remision,download_url:current.public_url+'&download=1'};
   } else if (repositorio?.pdf_base64) {
     payload.documento = {...(repositorio.payload?.documento || payload.documento),soporte_url:'',qr_url:''};
-    payload.status = {...payload.status,ready:false,summary:'Original anterior conservado en el expediente privado. Emite una versión administrativa para su consulta pública.'};
+    payload.status = {...payload.status,ready:false,summary:'Documento anterior archivado. Emite un DeCA administrativo actualizado y entrégalo al conductor antes de iniciar o continuar el transporte.'};
     payload.remision = {...payload.remision,download_url:''};
   } else {
     payload.documento = {...payload.documento,soporte_url:'',qr_url:''};
@@ -2379,9 +2379,9 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
   if (!["generacion_manual", "creacion_app_chofer_dcd"].includes(motivo)) {
     if (motivo === "viaje_finalizado" && versions.length) {
       await db.query(`INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,created_by,reason)
-        SELECT d.empresa_id,d.id,'service_completed',p.descarga_real_at,$3,'Cierre registrado del servicio'
+        SELECT d.empresa_id,d.id,'service_completed',GREATEST(p.descarga_real_at,NOW()),$3,'Cierre registrado del servicio'
         FROM transport_document_versions d JOIN pedidos p ON p.empresa_id=d.empresa_id AND p.id=d.pedido_id
-        WHERE d.empresa_id=$1 AND d.pedido_id=$2 AND p.descarga_real_at IS NOT NULL
+        WHERE d.empresa_id=$1 AND d.pedido_id=$2
           AND NOT EXISTS(SELECT 1 FROM transport_document_events e WHERE e.empresa_id=d.empresa_id AND e.document_id=d.id AND e.event='service_completed')`, [empresaId,pedidoId,userId]);
     }
     return versions[0] || null;
@@ -3532,14 +3532,10 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req,res) => 
   try {
     const {empresaId,pedidoId}=req.params;
     if (!verifyPublicToken({empresaId,pedidoId,token:req.query.token}) || !verifyPublicVerificationCode({empresaId,pedidoId,code:req.query.verify})) return res.status(403).send('Enlace no válido');
-    const archived = await getDocumentoControlRepositorioByPedido(pedidoId,empresaId);
-    if (!archived?.pdf_base64) return res.status(404).send('No existe un PDF original archivado. Tráfico debe emitir una versión.');
-    // The legacy archive contains the private PDF (payment terms and internal
-    // checklist). It must not become public when replacing live regeneration.
-    // Keep its original available to the company; issue a new administrative
-    // version, with its own QR, for public access.
-    return res.status(410).send('Este archivo anterior se conserva en el expediente privado. Solicita a la empresa la versión administrativa con su nuevo QR.');
-  } catch(e) { res.status(e.status||500).send('No se pudo consultar el original'); }
+    const row = await transportDocuments.legacyPublicOriginal(db,{empresaId,pedidoId});
+    if (!row) return res.status(404).send('No existe un DeCA archivado para este QR. Contacta con la empresa transportista.');
+    return sendTransportOriginal(res,row.pdf,row.filename,row.pdf_hash,req.query.download==='1');
+  } catch(e) { res.status(e.status||500).send(e.status?e.message:'No se pudo consultar el DeCA'); }
 });
 
 router.use(authenticate);
@@ -6540,7 +6536,7 @@ router.get("/documento-control-repositorio", GERENTE_O_TRAFICO, async (req, res)
         tenant_isolation: "empresa_id",
         storage: "repositorio propio TransGest por empresa",
         external_provider_required: false,
-        finalized_trip_policy: "Al entregar el viaje, el DCD queda archivado/desactivado para edicion operativa. La descarga publica puede caducar/desactivarse y el PDF interno se conserva minimo 1 ano.",
+        finalized_trip_policy: "El QR descarga el PDF durante todo el servicio y al menos siete días naturales tras finalizarlo. El PDF y sus versiones se conservan al menos un año.",
       },
     });
   } catch (e) {
@@ -6619,6 +6615,17 @@ router.patch("/documento-control-repositorio/:repoId/publico", GERENTE_O_TRAFICO
     const activo = req.body?.activo !== false;
     const expiresAtRaw = req.body?.public_expires_at || req.body?.expires_at || null;
     const expiresAt = expiresAtRaw ? new Date(expiresAtRaw) : null;
+    const completion = (await db.query(`SELECT p.descarga_real_at FROM documento_control_repositorio r
+      JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id
+      WHERE r.id=$1 AND r.empresa_id=$2`,[req.params.repoId,empresaId])).rows[0];
+    if (!completion) return res.status(404).json({error:'DCD no encontrado en el repositorio'});
+    if (!activo && !transportDocuments.publicAccessEnded(completion.descarga_real_at)) {
+      return res.status(409).json({error:'El QR debe seguir descargando el PDF durante el transporte y siete días naturales después de su finalización real.'});
+    }
+    if (expiresAtRaw && (!expiresAt || Number.isNaN(expiresAt.getTime()) || !completion.descarga_real_at ||
+        expiresAt.getTime() < new Date(completion.descarga_real_at).getTime() + 7*24*60*60*1000)) {
+      return res.status(422).json({error:'La caducidad pública no puede anticiparse al fin del servicio más siete días naturales.'});
+    }
     const { rows } = await db.query(`
       UPDATE documento_control_repositorio
          SET public_activo=$3,
@@ -9954,6 +9961,12 @@ router.delete("/:id", async (req,res) => {
     const plannerTable=(await db.query("SELECT to_regclass('planner_preparaciones') AS tabla")).rows[0]?.tabla;
     if(plannerTable && (await db.query('SELECT id FROM planner_preparaciones WHERE pedido_id=$1 AND empresa_id=$2 LIMIT 1',[req.params.id,empresaId])).rows.length) {
       return res.status(409).json({error:'Este pedido conserva un historial de almacén. Libera la mercancía pendiente desde Almacén y stock y mantén el pedido cancelado para conservar la trazabilidad.'});
+    }
+    await ensureDocumentoControlRepositorioSchema();
+    const archivedDeca = await transportDocuments.hasProtectedLegacyDeca(db,empresaId,req.params.id);
+    if (archivedDeca) return res.status(409).json({error:'El DeCA archivado debe conservarse al menos un año. Mantén el pedido cancelado y el documento disponible en el expediente.'});
+    if (await transportDocuments.available(db) && (await db.query('SELECT 1 FROM transport_document_versions WHERE pedido_id=$1 AND empresa_id=$2 LIMIT 1',[req.params.id,empresaId])).rows.length) {
+      return res.status(409).json({error:'Este pedido conserva versiones inmutables del DeCA. Mantén el pedido cancelado para preservar el expediente.'});
     }
     const facturaId = rows[0].factura_id;
     await db.query("DELETE FROM pedidos WHERE id=$1 AND empresa_id=$2", [req.params.id, empresaId]);

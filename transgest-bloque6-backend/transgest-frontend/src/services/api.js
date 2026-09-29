@@ -433,7 +433,7 @@ export async function login(email, password, codigoEmpresa = "") {
 }
 
 export async function getMe() {
-  return apiFetch("/auth/me");
+  return apiFetch("/auth/me", { cache:"no-store" });
 }
 
 export const getDemoOptions = () => apiFetch("/auth/demo/options", { silentSuccess:true });

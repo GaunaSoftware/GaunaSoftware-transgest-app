@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-company-access-code-favicon",
+    "date": "2026-09-29",
+    "title": "Acceso de empresa e icono de TransGest",
+    "intro": "El acceso distingue cuentas con el mismo usuario en distintas empresas y el navegador muestra el icono de TransGest.",
+    "items": [
+      { "title": "Código de empresa", "text": "Puedes indicar el código de tu empresa al iniciar sesión. Así, el mismo nombre de usuario puede utilizarse en empresas diferentes sin entrar en la cuenta equivocada." },
+      { "title": "TransGest en la pestaña", "text": "Al abrir TransGest en el navegador verás su icono en la pestaña y al guardar el acceso en la pantalla de inicio." }
+    ]
+  },
+  {
     "id": "2026-09-deca-qr-legal-access",
     "date": "2026-09-29",
     "title": "Documentos de control disponibles en carretera",

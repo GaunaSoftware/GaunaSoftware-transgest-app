@@ -34,6 +34,11 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // APK interno: se instala junto a la app publicada y usa otra firma.
+            applicationIdSuffix ".beta"
+            versionNameSuffix "-pruebas"
+        }
         release {
             if (System.getenv("TRANSGEST_ANDROID_KEYSTORE")) signingConfig signingConfigs.release
             minifyEnabled false

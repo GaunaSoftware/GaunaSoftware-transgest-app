@@ -79,6 +79,14 @@ npm run mobile:icons
 - Pásalo al móvil (WhatsApp, cable, Drive…) y ábrelo para instalar (hay que permitir
   "instalar apps de orígenes desconocidos" la primera vez).
 
+El workflow **APK Android de pruebas** genera también un APK interno desde `main`
+y lo conserva 30 días como artefacto de GitHub Actions. Se identifica como
+**TransGest Pruebas** (`com.gaunasoftware.transgest.beta`) y puede instalarse junto
+a la app existente. Cada ejecución usa la firma de depuración temporal del runner:
+para instalar un nuevo APK de pruebas sobre otro anterior hay que desinstalar la
+versión de pruebas previa. No se debe usar como versión de producción ni sustituye
+una clave de firma permanente para Google Play.
+
 ### Para publicar en Google Play (opcional)
 - Necesitas una **cuenta de Google Play Developer** (pago único de 25 $).
 - En Android Studio: **Build → Generate Signed Bundle / APK → Android App Bundle (.aab)**,

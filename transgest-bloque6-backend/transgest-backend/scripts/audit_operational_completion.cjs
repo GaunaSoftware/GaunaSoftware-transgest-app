@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),crypto=require('crypto');
 module.exports=async function({db,base,company,user,token,password,pdf}){
- let checks=0;const call=async(method,path,body,status=200,auth=token)=>{const r=await fetch(base+path,{method,headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.equal(r.status,status,JSON.stringify(v));checks++;return v;};
+ let checks=0;const call=async(method,path,body,status=200,auth=token)=>{body=await require('./audit_company_login.cjs')(db,path,body);const r=await fetch(base+path,{method,headers:{Authorization:'Bearer '+auth,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const v=await r.json();assert.equal(r.status,status,JSON.stringify(v));checks++;return v;};
  const other=(await call('POST','/auth/login',{email:'planner-b@example.invalid',password})).token;
  const client=(await db.query('SELECT id FROM clientes WHERE empresa_id=$1 LIMIT 1',[company])).rows[0].id;
  const order=crypto.randomUUID();await db.query("INSERT INTO pedidos(id,empresa_id,numero,cliente_id,estado,importe,importe_revision_combustible,origen,destino) VALUES($1,$2,'QA-DETENTION',$3,'entregado',1000,50,'A','B')",[order,company,client]);

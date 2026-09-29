@@ -28,9 +28,10 @@ module.exports = async ({ db, base, company, token, password }) => {
   await expect(token, 'PUT', '/jornada-config', { usuario_id: foreign.id, hora_entrada: '08:00', hora_salida: '16:00', pausa_min: 0 }, 404);
 
   const employees = [];
+  const companyCode = (await db.query('SELECT codigo_acceso FROM empresas WHERE id=$1', [company])).rows[0].codigo_acceso;
   for (const role of ['trafico', 'administrativo', 'contable']) {
     const user = await employee(role); employees.push(user);
-    const login = await fetch(base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, password }) });
+    const login = await fetch(base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: user.email, password, codigo_empresa: companyCode }) });
     assert.equal(login.status, 200); user.token = (await login.json()).token;
     const concurrent = await Promise.all(Array.from({ length: 3 }, () => expect(user.token, 'POST', '/fichar', { accion: 'entrada', usuario_id: foreign.id, empresa_id: other, entrada_at: '2001-01-01T00:00:00Z' })));
     const entry = concurrent[0]; assert.ok(concurrent.every(r => r.id === entry.id));

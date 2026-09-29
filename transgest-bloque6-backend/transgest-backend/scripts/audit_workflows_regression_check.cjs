@@ -69,7 +69,10 @@ async function main(){
  app.use((err,request,res,next)=>res.status(err.status||500).json({error:err.message}));
  const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
  const base='http://127.0.0.1:'+server.address().port+'/api/v1';let token;
- async function call(label,method,url,body){const response=await actualFetch(base+url,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data=await response.json();evidence.checks.push({label,method,url,status:response.status,...(data.error?{error:data.error}:{}),...(data.errors?{validation:data.errors}:{} )});return data;}
+ async function call(label,method,url,body){
+  body=await require('./audit_company_login.cjs')(db,url,body);
+  const response=await actualFetch(base+url,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data=await response.json();evidence.checks.push({label,method,url,status:response.status,...(data.error?{error:data.error}:{}),...(data.errors?{validation:data.errors}:{} )});return data;
+ }
  try{
  const login=await call('Login gerente demo','POST','/auth/login',{email:'audit@example.invalid',password});token=login.token;
  if(!token)throw Error('No token on demo login');

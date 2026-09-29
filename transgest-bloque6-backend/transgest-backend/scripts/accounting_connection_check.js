@@ -53,7 +53,7 @@ async function login(email, password) {
   return request(
     `login TransGest ${email}`,
     `${transgestBaseUrl}/api/v1/auth/login`,
-    jsonOptions({ email, password })
+    jsonOptions({ email, password, codigo_empresa: process.env.ACCOUNTING_CHECK_COMPANY_CODE || '' })
   );
 }
 

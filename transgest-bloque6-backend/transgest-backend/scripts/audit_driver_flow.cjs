@@ -8,6 +8,7 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);
   let checks = 0;
   async function request(method, url, body, status = 200, token = driverToken) {
+    body = await require('./audit_company_login.cjs')(db, url, body);
     const res = await fetch(base + url, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const data = await res.json();
     assert.equal(res.status, status, `${method} ${url}: ${JSON.stringify(data)}`);

@@ -9,7 +9,8 @@ module.exports=async({db,base,company,token,password})=>{
  await save(company,{});await save(other,{rol:'contable',permisos:{modulos:{nominas:{ver:false,editar:false}}}});
  assert.equal((await call('GET','/auth/companies')).data.companies.length,2);
  await db.query('UPDATE empresas SET bloqueo_manual=true WHERE id=$1',[company]);
- const login=await call('POST','/auth/login',{email:'audit@example.invalid',password});assert.equal(login.status,200,JSON.stringify(login.data));assert.equal(login.data.user.empresa_id,other);assert.equal(login.data.bloqueado,null);
+ const otherCode=(await db.query('SELECT codigo_acceso FROM empresas WHERE id=$1',[other])).rows[0].codigo_acceso;
+ const login=await call('POST','/auth/login',{email:'audit@example.invalid',password,codigo_empresa:otherCode});assert.equal(login.status,200,JSON.stringify(login.data));assert.equal(login.data.user.empresa_id,other);assert.equal(login.data.bloqueado,null);
  await db.query('UPDATE empresas SET bloqueo_manual=false WHERE id=$1',[company]);
  const portalCustomer=crypto.randomUUID(),portalUser=crypto.randomUUID();
  await db.query("INSERT INTO clientes(id,empresa_id,nombre) VALUES($1,$2,'Portal compartido sintético')",[portalCustomer,company]);

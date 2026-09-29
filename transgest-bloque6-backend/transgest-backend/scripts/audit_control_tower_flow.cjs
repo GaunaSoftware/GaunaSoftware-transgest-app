@@ -3,6 +3,7 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company,pa
   assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);
   let checks=0;
   async function call(path,token,status=200,body) {
+    body=await require('./audit_company_login.cjs')(db,path,body);
     const response=await fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
     const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;
   }

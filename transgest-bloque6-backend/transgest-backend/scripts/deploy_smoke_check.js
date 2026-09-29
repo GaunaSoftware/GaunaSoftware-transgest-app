@@ -56,9 +56,11 @@ async function runClienteRoundtrip() {
     return;
   }
 
+  const companyCode = String(process.env.DEPLOY_SMOKE_COMPANY_CODE || '').trim();
+  if (!companyCode) throw new Error('Configura DEPLOY_SMOKE_COMPANY_CODE para la prueba de acceso');
   const login = await fetchJson("login smoke", "/api/v1/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: user, usuario: user, password }),
+    body: JSON.stringify({ email: user, usuario: user, password, codigo_empresa: companyCode }),
   });
   if (!login?.token) throw new Error("login smoke: no devuelve token");
 

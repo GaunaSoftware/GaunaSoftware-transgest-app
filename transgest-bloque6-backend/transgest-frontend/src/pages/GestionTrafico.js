@@ -1,8 +1,7 @@
 import useOptimizedRoute from "../services/useOptimizedRoute";
-import GroupageDraftBuilder from './traffic/GroupageDraftBuilder';
 import {trafficUnits} from '../utils/trafficUnits';
 import {assignGroupage} from '../services/api';
-import GroupageRouteEditor from './traffic/GroupageRouteEditor';
+import GroupageRouteEditor, { groupageStops } from './traffic/GroupageRouteEditor';
 import {madridDay,trafficWeek,visibleTrafficDays} from '../utils/trafficWeek';
 import WeeklyPendingPanel from './traffic/WeeklyPendingPanel';
 import RouteMapCanvas from "../components/RouteMapCanvas";
@@ -4010,7 +4009,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
   return (
     <div className="tg-traffic-page operations-workspace operations-traffic traffic-redesign" style={{ fontFamily:"'DM Sans',sans-serif", height:"100%", display:"flex", flexDirection:"column", overflow:"hidden", background:"var(--bg)" }}>
 
-      {!esModoChoferOptimizacion && !hideInternalTabs && <div className="traffic-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><div className="traffic-heading-actions"><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button><button onClick={()=>{setVistaMain("cuadrante");setSoloSinAsignar(true);}}>Revisar sin asignar</button></div></div>}
+      {!esModoChoferOptimizacion && !hideInternalTabs && <div className="traffic-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><div className="traffic-heading-actions"><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",view:vistaMain,action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button><button onClick={()=>{setVistaMain("cuadrante");setSoloSinAsignar(true);}}>Revisar sin asignar</button></div></div>}
       {/* â”€â”€ Vista tabs â”€â”€ */}
       {!esModoChoferOptimizacion && !hideInternalTabs && <div className="tg-traffic-tabs" style={{padding:"6px 16px",borderBottom:"1px solid var(--border)",background:"var(--bg3)",display:"flex",gap:6,flexShrink:0,alignItems:"center"}}>
         {[["cuadrante","Cuadrante semanal"],["diario","Plan diario"],["grupajes","Grupajes"],["optimizacion","Optimización de rutas"]].map(([v,lbl])=>(
@@ -5270,7 +5269,6 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
 
   return (
     <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
-      <GroupageDraftBuilder orders={allPedidos||pedidos} onReload={onReload} canEdit={puedeEditar("pedidos")}/>
       <datalist id="tg-grupaje-tractoras">
         {tractorasGrupaje.map(v => <option key={v.id} value={v.matricula} />)}
       </datalist>
@@ -5301,14 +5299,22 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           <div style={{fontSize:11,fontWeight:900,color:"#10b981",marginBottom:6,textTransform:"uppercase",letterSpacing:".05em"}}>
             Grupaje en borrador - simulacion de {selGids.length} grupos (todavia sin combinar)
           </div>
-          <RemolqueGrupaje
-            pedidos={selGids.flatMap(g => byGrupaje[g] || [])}
-            vehiculo={(() => {
-              const primero = selGids.flatMap(g => byGrupaje[g] || [])[0];
-              const mat = String(primero?.vehiculo_matricula || primero?.matricula || "").toUpperCase();
-              return vehiculos.find(v => String(v.matricula || "").toUpperCase() === mat) || null;
-            })()}
-          />
+          <div className="groupage-preview-grid">
+            <RemolqueGrupaje
+              pedidos={selGids.flatMap(g => byGrupaje[g] || [])}
+              vehiculo={(() => {
+                const primero = selGids.flatMap(g => byGrupaje[g] || [])[0];
+                const mat = String(primero?.vehiculo_matricula || primero?.matricula || "").toUpperCase();
+                return vehiculos.find(v => String(v.matricula || "").toUpperCase() === mat) || null;
+              })()}
+            />
+            <div className="groupage-preview-map"><strong>Paradas del grupaje</strong>{(() => {
+              const points = groupageStops(selGids.flatMap(g => byGrupaje[g] || [])).filter(stop=>stop.lat!=null&&stop.lng!=null&&String(stop.lat).trim()!==''&&String(stop.lng).trim()!=='').map((stop,index) => ({
+                lat:Number(stop.lat),lng:Number(stop.lng),label:`${stop.tipo==='carga'?'Carga':'Descarga'} · ${stop.pedido.numero} · ${stop.ciudad}`,stopNumber:index+1,tipo:stop.tipo,
+              })).filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lng)&&Math.abs(p.lat)<=90&&Math.abs(p.lng)<=180);
+              return points.length?<RouteMapCanvas points={points} compact/>:<p>Las paradas aún no tienen coordenadas. Complétalas en los pedidos para ver el recorrido en el mapa.</p>;
+            })()}</div>
+          </div>
         </div>
       )}
 

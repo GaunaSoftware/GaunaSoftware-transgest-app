@@ -1609,7 +1609,7 @@ export default function Empresa() {
               </div>
               <div>
                 <label style={S.lbl}>Serie órdenes de carga</label>
-                <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={empresa.serie_ordenes||"OC"} onChange={fe("serie_ordenes")} placeholder="OC" maxLength={5} disabled={!esGerente}/>
+                <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={empresa.serie_ordenes??"OC"} onChange={fe("serie_ordenes")} placeholder="Sin serie" maxLength={5} disabled={!esGerente}/>
                 <div style={{ fontSize:10, color:"var(--text5)", marginTop:4 }}>Ej: OC -> genera OC-2026-0001, OC-2026-0002...</div>
               </div>
               <div>
@@ -1714,9 +1714,10 @@ export default function Empresa() {
           </div>
 
           <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
-            <div style={S.secTitle}>AEAT - VERIFACTU / SII</div>
+            <div style={S.secTitle}>Configuración fiscal · AEAT</div>
             <div style={S.info}>
-              Configura el modo fiscal de esta empresa. Al emitir facturas, TransGest ya deja creado el registro fiscal y la cola de envio correspondiente.
+              Configura el modo fiscal de esta empresa. Al emitir facturas, TransGest crea el registro y la cola solo para los modos integrados.
+              «Sin integrar» no significa NO VERI*FACTU: esa modalidad requiere registros firmados, conservación y registro de eventos propios, y no remite cada factura automáticamente a la AEAT. No selecciones VERI*FACTU ni SII para representar NO VERI*FACTU.
             </div>
             {fiscalStatus && (
               <div style={{
@@ -1759,6 +1760,7 @@ export default function Empresa() {
                   <option value="ninguno">Sin integrar</option>
                   <option value="verifactu">VERIFACTU</option>
                   <option value="sii">SII</option>
+                  <option value="no_verifactu">NO VERI*FACTU · integración pendiente</option>
                 </select>
               </div>
               <div>
@@ -1784,9 +1786,13 @@ export default function Empresa() {
 
             <div style={{marginTop:12,padding:"12px 14px",background:"rgba(16,185,129,.06)",border:"1px solid rgba(16,185,129,.18)",borderRadius:8}}>
               <div style={{fontWeight:700,fontSize:11,color:"var(--green)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>
-                Ajustes {fiscalCfg.modo === "sii" ? "SII" : "VERIFACTU"}
+                Ajustes {fiscalCfg.modo === "sii" ? "SII" : fiscalCfg.modo === "verifactu" ? "VERIFACTU" : fiscalCfg.modo === "no_verifactu" ? "NO VERI*FACTU" : "sin integrar"}
               </div>
-              {fiscalCfg.modo === "sii" ? (
+              {fiscalCfg.modo === "no_verifactu" ? (
+                <div role="status" style={{fontSize:12,color:"var(--text3)",lineHeight:1.6}}>
+                  Esta modalidad está identificada, pero TransGest aún no puede emitir facturas con ella. Faltan el motor de registros encadenados y firmados, el registro de eventos, la conservación/exportación verificable y la validación fiscal de la versión. Seleccionarla bloqueará la emisión; no la sustituyas por VERI*FACTU, SII ni «Sin integrar» para declarar cumplimiento.
+                </div>
+              ) : fiscalCfg.modo === "sii" ? (
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"6px 14px",alignItems:"end"}}>
                   <div>
                     <label style={S.lbl}>Situacion SII</label>
@@ -1835,7 +1841,7 @@ export default function Empresa() {
                     SII queda preparado para configuracion y cola, pero no se considera listo hasta activar un conector AEAT externo con certificado, libros registro XML y acuses.
                   </div>
                 </div>
-              ) : (
+              ) : fiscalCfg.modo === "verifactu" ? (
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:"6px 14px",alignItems:"end"}}>
                   <div>
                     <label style={S.lbl}>Proveedor VERIFACTU</label>
@@ -1894,7 +1900,7 @@ export default function Empresa() {
                     </div>
                   )}
                 </div>
-              )}
+              ) : <div style={{fontSize:12,color:"var(--text4)"}}>No hay un canal fiscal integrado seleccionado.</div>}
               {fiscalCfg.modo === "verifactu" && fiscalCfg.verifactu?.proveedor === "verifacti" && (
                 <div style={{marginTop:10,display:"grid",gap:8}}>
                   <div style={{fontSize:11,color:"var(--text4)",lineHeight:1.5}}>

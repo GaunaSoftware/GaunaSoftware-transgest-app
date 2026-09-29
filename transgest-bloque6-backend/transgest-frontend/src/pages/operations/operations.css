@@ -31,6 +31,9 @@
 @media(max-width:900px){.traffic-week-pending{display:none}.traffic-week-layout{min-height:0}}
 
 .groupage-route-editor{padding:14px;color:var(--text)}
+.groupage-preview-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr);gap:12px;align-items:stretch}
+.groupage-preview-grid>*,.groupage-preview-map{min-width:0}.groupage-preview-map{border:1px solid var(--border);border-radius:10px;background:var(--bg2);padding:12px}.groupage-preview-map strong{display:block;margin-bottom:8px;font-size:12px}.groupage-preview-map p,.groupage-map-missing{color:var(--text4);font-size:12px;line-height:1.5}
+@media(max-width:900px){.groupage-preview-grid{grid-template-columns:minmax(0,1fr)}}
 .groupage-plan-columns{display:grid;grid-template-columns:minmax(150px,.7fr) minmax(260px,1.1fr) minmax(320px,1.4fr);gap:16px}
 .groupage-plan-columns>section{min-width:0}.groupage-plan-columns h3{font-size:14px}.groupage-plan-columns p{font-size:12px;color:var(--text4)}
 .groupage-order{display:grid;gap:4px;border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:12px}
@@ -38,11 +41,8 @@
 .groupage-route-editor footer{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;font-size:12px}
 @media(max-width:1150px){.groupage-plan-columns{grid-template-columns:1fr}.groupage-plan-columns>section{width:100%}}
 
-.groupage-draft,.journey-costs {padding:16px;border:1px solid var(--border2);border-radius:12px;margin-block:12px;background:var(--bg2);}
-.groupage-draft-columns {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:16px;}
-.groupage-draft-columns section {border:1px dashed var(--border2);padding:12px;min-width:0;}
-.groupage-draft-columns section>div {margin-bottom:10px;}
+.journey-costs {padding:16px;border:1px solid var(--border2);border-radius:12px;margin-block:12px;background:var(--bg2);}
 .journey-costs form {display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
 .journey-costs label {display:grid;gap:6px;flex:1 1 170px;min-width:0;}
 .journey-costs input {width:100%;min-width:0;}
-@media(max-width:768px){.groupage-draft-columns{grid-template-columns:1fr;}.journey-costs form{display:grid;grid-template-columns:minmax(0,1fr);}}
+@media(max-width:768px){.journey-costs form{display:grid;grid-template-columns:minmax(0,1fr);}}

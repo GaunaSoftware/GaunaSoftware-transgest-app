@@ -135,16 +135,17 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
             return (
               <div key={c.pedido.id || i}
                 draggable={!!onReorder}
-                onDragStart={event=>{if(onReorder)event.dataTransfer.setData('application/transgest-cargo',String(c.pedido.id));}}
+                onDragStart={event=>{if(onReorder){event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/transgest-cargo',String(c.pedido.id));event.dataTransfer.setData('text/plain',String(c.pedido.id));}}}
                 onDragOver={event=>{if(onReorder)event.preventDefault();}}
-                onDrop={event=>{if(!onReorder)return;event.preventDefault();const source=event.dataTransfer.getData('application/transgest-cargo');if(source)onReorder(source,c.pedido.id);}}
+                onDrop={event=>{if(!onReorder)return;event.preventDefault();event.stopPropagation();const source=event.dataTransfer.getData('application/transgest-cargo')||event.dataTransfer.getData('text/plain');if(source&&source!==String(c.pedido.id))onReorder(source,c.pedido.id);}}
                 onClick={() => onSelect && onSelect(c.pedido)}
+                aria-label={`${c.pedido.numero || `Carga ${i+1}`}. Posición ${i+1}${onReorder?'. Arrastra para cambiar la disposición.':''}`}
                 title={`${c.pedido.numero || "Viaje"} - ${c.pedido.cliente_nombre || ""} | ${fmt(c.ml)} ML, ${fmt(c.peso, 0)} kg, ${c.palets} palets`}
                 style={{
                   width: `${pct}%`, minWidth: pct > 0 ? 8 : 0,
                   background: c.color, opacity: sel ? 1 : 0.82,
                   borderRight: "1px solid rgba(255,255,255,.35)",
-                  cursor: onSelect ? "pointer" : "default",
+                  cursor: onReorder ? "grab" : onSelect ? "pointer" : "default",
                   display: "flex", flexDirection: "column", justifyContent: "center",
                   padding: "4px 5px", overflow: "hidden", color: "#fff",
                   outline: sel ? "2px solid #fff" : "none", outlineOffset: -3,

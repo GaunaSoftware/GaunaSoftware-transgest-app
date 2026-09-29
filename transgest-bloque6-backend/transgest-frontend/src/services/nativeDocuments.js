@@ -11,4 +11,13 @@ export async function saveNativePdf(blob,name){
 }
 export const listNativePdfs=()=>Documents.list({owner:getOfflineOwner()});
 export const openNativePdf=id=>Documents.open({owner:getOfflineOwner(),id});
+export const previewNativePdf=async id=>{
+ try{return await Documents.preview({owner:getOfflineOwner(),id});}
+ catch(error){
+  // An installed APK may still contain the previous native bridge while its web
+  // assets have updated. Keep document access available until the APK is updated.
+  if(/not implemented|unimplemented|does not exist/i.test(String(error?.message||error)))return openNativePdf(id);
+  throw error;
+ }
+};
 export const removeNativePdf=id=>Documents.remove({owner:getOfflineOwner(),id});

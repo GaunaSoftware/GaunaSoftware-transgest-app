@@ -22,7 +22,7 @@ const inventory=require('../src/services/plannerInventory');
  await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_planner_wms.sql'),'utf8'));
  await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260928_planner_pallet_returns.sql'),'utf8'));
  await pg.exec("UPDATE pedidos SET origen_producto='planner'");
- await pg.exec('ALTER TABLE pedidos ADD updated_at timestamptz DEFAULT now()');
+ await pg.exec('ALTER TABLE pedidos ADD updated_at timestamptz DEFAULT now();ALTER TABLE pedidos ADD carga_real_at timestamptz');
  for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
  const review={};const document=async id=>{const doc=await require('./synthetic_planner_document.cjs')(db,company,id,user);review[id]={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[doc.id]};};
  const article=(await pg.query("INSERT INTO planner_articulos(empresa_id,referencia,descripcion,coste,precio_venta,peso_kg) VALUES($1,'REF-1','Artículo',2,3,1) RETURNING id",[company])).rows[0].id;

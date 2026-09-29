@@ -49,6 +49,12 @@ public class DriverDocumentsPlugin extends Plugin {
    getActivity().startActivity(intent);call.resolve();
   }catch(Exception e){call.reject("No se pudo abrir el PDF. Comprueba que hay un lector instalado.");}
  }
+ @PluginMethod public void preview(PluginCall call){
+  try{File file=pdf(ownerDirectory(call),call.getString("id"));if(!file.isFile())throw new Exception("Copia local no disponible");
+   Intent intent=new Intent(getContext(),PdfPreviewActivity.class).putExtra("pdf_path",file.getAbsolutePath());
+   getActivity().startActivity(intent);call.resolve();
+  }catch(Exception e){call.reject("No se pudo mostrar el justificante: "+e.getMessage());}
+ }
  @PluginMethod public void remove(PluginCall call){
   try{File dir=ownerDirectory(call),file=pdf(dir,call.getString("id"));if(file.exists()&&!file.delete())throw new Exception("No se pudo retirar la copia local");new File(dir,call.getString("id")+".json").delete();call.resolve();}
   catch(Exception e){call.reject(e.getMessage());}

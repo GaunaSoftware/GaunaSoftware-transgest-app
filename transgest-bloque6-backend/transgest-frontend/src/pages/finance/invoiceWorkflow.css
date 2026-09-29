@@ -4,3 +4,9 @@
 .invoice-workflow .tgui-table td:nth-child(2) button { white-space: nowrap; word-break: normal; }
 .invoice-workflow .tgui-table td:nth-child(3) { white-space: nowrap; }
 .invoice-workflow p { line-height: 1.55; }
+.invoice-workflow-fuel { display: grid; justify-items: start; gap: 10px; margin: 16px 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg3); }
+.invoice-workflow-fuel label { display: block; margin-bottom: 6px; font-weight: 700; }
+.invoice-workflow-fuel-input { display: flex; align-items: center; gap: 8px; }
+.invoice-workflow-fuel-input input { width: min(180px, 70vw); }
+.invoice-workflow-fuel p { margin: 6px 0 0; font-size: 12px; }
+.invoice-workflow-fuel [role="alert"] { color: var(--red, #b91c1c); }

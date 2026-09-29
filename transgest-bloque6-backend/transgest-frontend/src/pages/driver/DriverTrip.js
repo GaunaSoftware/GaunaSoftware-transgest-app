@@ -1,4 +1,5 @@
 import OperationSignature from './OperationSignature';
+import {signaturePayload} from './signaturePayload';
 import { driverStops, stopData, stopDone, activeDriverStop } from "./driverStops";
 import DriverTripCard from './DriverTripCard';
 import { transportStateKey } from '../../utils/transportStateCatalog';
@@ -9,7 +10,7 @@ import { openMobileDocument, shareMobileDocument } from '../../services/mobileRu
 import { hasNativeDocuments } from '../../services/nativeDocuments';
 import { restoreDriverSteps } from './driverSupport';
 import { useState, useEffect, useCallback } from "react";
-import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, getPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
+import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, getPedidoDocumentoControl, generarPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
 
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion, adrRequisitos } from "../../utils/adr";
 import { confirmDialog, promptDialog, notify } from "../../services/notify";
@@ -217,7 +218,16 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function confirmarDcdAntesDeSalir() {
-    const data = await cargarDocumentoControl();
+    let data = await cargarDocumentoControl();
+    if (!data?.status?.ready && !(data?.versiones || []).some(v => v.estado === 'activa')) {
+      try {
+        await generarPedidoDocumentoControl(pedido.id);
+        data = await cargarDocumentoControl();
+      } catch (error) {
+        notify(error.message || 'Tráfico debe completar los datos del DeCA antes de salir.', 'warning');
+        return false;
+      }
+    }
     if (!data?.status?.ready) {
       notify(data?.status?.summary||'No se ha podido comprobar el DeCA. Revisa la conexión o avisa a tráfico antes de salir.','warning');
       return false;
@@ -340,13 +350,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function registrarFirmaCargador(dataURL, firmaNombre, evidence) {
-    const firmaPayload = {
-      ...(activeStop?{parada_id:activeStop.id}:{}),
-      rol: "cargador",
-      firma_destinatario: dataURL,
-      firma_nombre: firmaNombre || "Remitente",
-      source: "app_chofer_carga",
-    };
+    const firmaPayload = signaturePayload({stopId:activeStop?.id,role:'cargador',image:dataURL,name:firmaNombre||'Remitente',evidence});
     try {
       await guardarFirmaEntrega(pedido.id, firmaPayload);
       setFirmandoCargador(false);
@@ -595,12 +599,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   async function registrarFirma(dataURL, firmaNombre, evidence){
-    const firmaPayload = {
-      ...(activeStop?{parada_id:activeStop.id}:{}),
-      firma_destinatario: dataURL,
-      firma_nombre: firmaNombre || "Destinatario",
-      source: "app_chofer",
-    };
+    const firmaPayload = signaturePayload({stopId:activeStop?.id,role:'destinatario',image:dataURL,name:firmaNombre||'Destinatario',evidence});
     try{
       await guardarFirmaEntrega(pedido.id, firmaPayload);
       setFirmandoCargador(false);

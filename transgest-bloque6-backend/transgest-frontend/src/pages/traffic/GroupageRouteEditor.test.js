@@ -40,3 +40,21 @@ test('failed loading never enables saving an empty plan and can be retried',asyn
  await click('Volver a cargar el plan');
  expect([...host.querySelectorAll('button')].find(b=>b.textContent==='Guardar plan').disabled).toBe(false);
 });
+test('dragging cargo inside the trailer changes only the saved load order',async()=>{
+ getGroupagePlan.mockResolvedValue({origen:'legacy'});saveGroupagePlan.mockResolvedValue({version:1});
+ await act(async()=>root.render(<GroupageRouteEditor orders={orders} groupId="g"/>));
+ const source=host.querySelector('[aria-label^="B. Posición 2"]');
+ const target=host.querySelector('[aria-label^="A. Posición 1"]');
+ const values=new Map(),dataTransfer={effectAllowed:'',setData:(key,value)=>values.set(key,value),getData:key=>values.get(key)||''};
+ const drag=type=>{const event=new Event(type,{bubbles:true,cancelable:true});Object.defineProperty(event,'dataTransfer',{value:dataTransfer});return event;};
+ await act(async()=>{
+  source.dispatchEvent(drag('dragstart'));
+  target.dispatchEvent(drag('drop'));
+ });
+ await click('Guardar plan');
+ expect(saveGroupagePlan).toHaveBeenLastCalledWith('g',expect.objectContaining({disposicion:['b','a']}));
+});
+test('groupage map uses order coordinates when a stop has no separate pin',()=>{
+ const stops=groupageStops([{...orders[0],origen_lat:39.47,origen_lng:-0.38,destino_lat:40.42,destino_lng:-3.7}]);
+ expect(stops.map(stop=>[stop.lat,stop.lng])).toEqual([[39.47,-0.38],[40.42,-3.7]]);
+});

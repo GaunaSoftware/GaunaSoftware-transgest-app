@@ -4,9 +4,11 @@ import "./traffic/traffic.css";
 import { useEffect, useState } from "react";
 import PlanDiario from "./PlanDiario";
 import GestionTrafico from "./GestionTrafico";
+import TrafficLocationAgenda from './traffic/TrafficLocationAgenda';
 
 const TABS = [
   { id: "cuadrante", label: "Cuadrante semanal" },
+  { id: "ubicacion", label: "Ubicación prevista" },
   { id: "plan_diario", label: "Plan diario" },
   { id: "grupajes", label: "Grupajes" },
   { id: "optimizacion", label: "Optimización de rutas" },
@@ -35,7 +37,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       color: "var(--text)",
       fontFamily: "'DM Sans',sans-serif",
     }}>
-      <header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button></header>
+      <header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",view:tab,action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button></header>
       <div className="tg-planificacion-tabs" style={{
         display: "flex",
         alignItems: "center",
@@ -71,6 +73,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {tab === "plan_diario" && <PlanDiario />}
         {tab === "cuadrante" && <GestionTrafico initialVista="cuadrante" hideInternalTabs onViewChange={setTab} />}
+        {tab === "ubicacion" && <TrafficLocationAgenda />}
         {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs onViewChange={setTab} />}
         {tab === "optimizacion" && <GestionTrafico initialVista="optimizacion" hideInternalTabs />}
       </div>

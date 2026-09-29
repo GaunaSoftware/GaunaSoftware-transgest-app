@@ -644,13 +644,14 @@ async function requireCliente(req, res, next) {
           AND (
             LOWER(TRIM(COALESCE(email,'')))=LOWER(TRIM($2))
             OR LOWER(TRIM(COALESCE(email_facturacion,'')))=LOWER(TRIM($2))
-            OR POSITION(LOWER(TRIM($2)) IN LOWER(COALESCE(emails_albaranes,''))) > 0
+            OR LOWER(TRIM($2)) = ANY(regexp_split_to_array(LOWER(COALESCE(emails_albaranes,'')), '[,;[:space:]]+'))
           )
           AND COALESCE(activo,true)=true
         ORDER BY created_at DESC NULLS LAST
-        LIMIT 1`,
+        LIMIT 2`,
       [empresaId(req), req.user.email]
     ).catch(() => ({ rows: [] }));
+    if(rows.length>1)return res.status(409).json({error:'Este correo coincide con varios clientes. Vincula el usuario a un cliente concreto antes de entrar en el portal.'});
     if (rows[0]?.id) req.user.cliente_id = rows[0].id;
   }
   const modulos = req.user?.permisos?.modulos || {};
@@ -3003,6 +3004,7 @@ router.patch("/admin/solicitudes/:id", requireGestion, asyncRoute(async (req, re
 
 module.exports = router;
 module.exports._test = {
+  requireCliente,
   asyncRoute,
   nextPedidoNumero,
   normalizeNonNegativeNumeric,

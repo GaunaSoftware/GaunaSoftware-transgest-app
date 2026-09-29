@@ -62,6 +62,8 @@ module.exports=async({db,company,user,base,token,password,prep,order,stock})=>{
  assert.equal(await balance(),100,'Loading does not dispatch stock');
  await request('POST',`/planner/inventario/preparaciones/${prep.id}/accion`,{accion:'expedir',version:current.version},409);
  assert.equal(await balance(),100,'Document rejection is atomic');
+ const loadedOrder=(await db.query('SELECT estado,carga_real_at FROM pedidos WHERE id=$1 AND empresa_id=$2',[order.id,company])).rows[0];
+ assert.ok(loadedOrder.carga_real_at,`Planner did not retain the completed load: ${JSON.stringify(loadedOrder)}`);
  const documentIds=await db.transaction(tx=>require('../src/services/plannerDocumentation').prepareDeca(tx,company,user,order.id,'https://example.invalid'));
  const doc={id:documentIds[0]};assert.ok(doc.id);
  const review={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[doc.id]};

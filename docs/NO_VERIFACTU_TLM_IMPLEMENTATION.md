@@ -21,6 +21,8 @@ Existe un certificado digital de la titular autónoma productora, pero **no se h
 
 `transgest-backend/src/services/fiscal.js` reconoce `no_verifactu` como modo explícito, informa que no está listo y **bloquea la emisión** en ese modo. Así no lo convierte silenciosamente en `ninguno` ni lo envía por SII/VERI*FACTU. La emisión actual y `factura_registros_fiscales` no forman un registro NO VERI*FACTU firmado ni mantienen un registro de eventos del SIF con sus garantías propias. La factura independiente usa el mismo circuito de borrador/revisión/emisión y queda igualmente bloqueada si se configura este modo.
 
+En la migración actual `022_fiscal_accounting_delivery.sql`, `factura_registros_fiscales` y `factura_eventos_fiscales` enlazan con facturas mediante `ON DELETE CASCADE`; ese esquema no proporciona por sí solo conservación inalterable ante borrados. `huella` es un hash, no una firma XAdES verificable. El log `factura_eventos_fiscales` es un historial de aplicación, no el registro de eventos firmado exigido para NO VERI*FACTU. La futura migración deberá preservar los históricos y separar claramente los nuevos registros fiscales inmutables de estas tablas existentes.
+
 ## Secuencia de implementación propuesta
 
 1. Confirmar documentalmente la situación fiscal de TLM, NIF y territorio, fecha de obligación, exclusión del SII y política de custodia. Registrar el criterio por escrito junto a la versión normativa usada.
@@ -39,5 +41,6 @@ Existe un certificado digital de la titular autónoma productora, pero **no se h
 - Rectificativa y anulación que conservan el registro anterior, con sus importes y referencias; periodos y cambio de horario Europe/Madrid.
 - PDF, QR, exportación y datos fiscales conciliados para igual factura; no mostrar `enviado a AEAT` en esta modalidad.
 - Recuperación desde copia en entorno aislado y verificación de cadena/eventos tras la restauración.
+- Borrado o modificación de factura/empresa: los registros fiscales y de eventos ya emitidos siguen conservados y verificables según la política legal; no se aprovecha el `ON DELETE CASCADE` del esquema anterior para eliminarlos.
 
 Hasta superar estas pruebas y la validación fiscal, la interfaz debe indicar **«NO VERI*FACTU: pendiente de integración»** y no afirmar que TLM cumple con este modo mediante TransGest.

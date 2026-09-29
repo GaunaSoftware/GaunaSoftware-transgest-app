@@ -17,6 +17,7 @@ Trabajo en rama aislada `codex/driver-signature-traffic-invoices`. No se ha cons
 - `node scripts/transport_document_versions_check.cjs` y `node scripts/transport_shipments_check.cjs` — pasaron, incluida la emisión por punto de carga.
 - `node scripts/no_verifactu_guard_check.cjs` — pasó; verifica bloqueo seguro, **no** cumplimiento fiscal completo.
 - `npm run driver:regression` y `npm run portal:regression` — pasaron tras retirar los automatismos de emisión; incluyen flujos de varias paradas y aislamiento de accesos.
+- `npm run check` — pasó completo, incluidos operativa, BI, Planner, seguridad de rutas y regresión de chófer. Las advertencias de pruebas sobre rechazos de permisos y envíos simulados son resultados previstos de escenarios negativos.
 - `CI=true npm test -- --runInBand --watch=false src/utils/invoiceLines.test.js src/pages/driver/signaturePayload.test.js src/pages/traffic/trafficLocationProjection.test.js src/pages/finance/StandaloneInvoice.test.js` — 4 suites, 25 pruebas pasadas.
 - `npm run build` — compiló con avisos ESLint preexistentes en páginas ajenas a esta tanda.
 - `git diff --check` — sin errores de espacios.

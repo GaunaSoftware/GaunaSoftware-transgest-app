@@ -37,7 +37,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       color: "var(--text)",
       fontFamily: "'DM Sans',sans-serif",
     }}>
-      <header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button></header>
+      <header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",view:tab,action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button></header>
       <div className="tg-planificacion-tabs" style={{
         display: "flex",
         alignItems: "center",

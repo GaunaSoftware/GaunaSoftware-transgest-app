@@ -5220,7 +5220,6 @@ ${bloqueCombustible}
         </div>
 
         <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
-          <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
@@ -5287,6 +5286,7 @@ ${bloqueCombustible}
               )}
             </div>
           </div>
+          <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
           {docControl && (
             <>
               {(firmaPostModificada || firmaEvidenciaLoading) && (
@@ -8760,7 +8760,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     requiere_cinchas: true,
     pendiente_completar: true,
     aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
-    _focus_asignacion: true,
+    _focus_asignacion: focus.source !== "gestion_trafico" || focus.view !== "grupajes",
     _nuevo_desde_trafico: true,
     ...(focus.source === "almacen_palets" ? {
       cliente_id: defaults.cliente_id || "",

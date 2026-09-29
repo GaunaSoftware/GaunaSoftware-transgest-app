@@ -561,6 +561,7 @@ const PLANTILLAS = {
       <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
         <p>Hola ${data.nombre || ""},</p>
         <p>Se ha creado tu acceso para <strong>${data.empresa || "tu empresa"}</strong>.</p>
+        ${data.codigo_empresa ? `<p>Código de empresa: <strong>${data.codigo_empresa}</strong></p>` : ""}
         <p>Este enlace caduca en <strong>72 horas</strong>:</p>
         <p style="margin:20px 0;">
           <a href="${data.url}" style="display:inline-block;background:#1e3a6e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Crear contraseña</a>

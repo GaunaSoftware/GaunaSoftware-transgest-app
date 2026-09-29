@@ -12,7 +12,7 @@ const { authenticate, getSubscriptionState, normalizePermissionsForRole } = requ
 const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
 const { enviarEmail, getPlatformEmailConfig } = require("../services/email");
 const ensureDemoShowcase = require("../../scripts/ensure_demo_showcase");
-const { ensureCompanyAccessCodes, normalizeCompanyCode } = require("../services/companyAccessCode");
+const { ensureCompanyAccessCodes, normalizeCompanyCode, validCompanyCode } = require("../services/companyAccessCode");
 
 const router = express.Router();
 const LOGIN_MAX_ATTEMPTS = Math.max(3, Number(process.env.LOGIN_MAX_ATTEMPTS || 5));
@@ -166,7 +166,7 @@ async function auditLogin({ user, identifier, ok, req, motivo }) {
 router.get("/login-brand", async (req, res) => {
   const identifier = String(req.query.identifier || req.query.email || req.query.usuario || "").trim().toLowerCase();
   const companyCode = normalizeCompanyCode(req.query.codigo_empresa);
-  if (!identifier || identifier.length < 3) return res.json({ found: false });
+  if (!identifier || identifier.length < 3 || !validCompanyCode(companyCode)) return res.json({ found: false });
   try {
     await ensureAuthSchema();
     const { rows } = await db.query(
@@ -176,7 +176,7 @@ router.get("/login-brand", async (req, res) => {
          JOIN empresas e ON e.id=u.empresa_id
         WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
           AND u.activo IS DISTINCT FROM false
-          AND ($2::text='' OR e.codigo_acceso=$2)
+          AND e.codigo_acceso=$2
         LIMIT 2`,
       [identifier, companyCode]
     );
@@ -204,6 +204,7 @@ router.post("/forgot-password",
     if (!raw || raw.length < 3) {
       return res.status(400).json({ error: "Indica tu usuario o email" });
     }
+    if (!validCompanyCode(companyCode)) return res.status(400).json({ error: "Indica el código de empresa." });
     try {
       await ensureAuthSchema();
       const { rows } = await db.query(
@@ -211,7 +212,7 @@ router.post("/forgot-password",
            FROM usuarios u
            LEFT JOIN empresas e ON e.id=u.empresa_id
           WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
-            AND ($2::text='' OR e.codigo_acceso=$2)
+            AND e.codigo_acceso=$2
           ORDER BY u.activo DESC, u.created_at ASC
           LIMIT 2`,
         [raw, companyCode]
@@ -280,6 +281,7 @@ router.post("/login",
     const identifier = String(email || usuario || "").trim().toLowerCase();
     const companyCode = normalizeCompanyCode(req.body?.codigo_empresa);
     if (!identifier) return res.status(400).json({ error: "Usuario/email y contraseña requeridos" });
+    if (!validCompanyCode(companyCode)) return res.status(400).json({ error: "Indica el código de empresa." });
 
     try {
       await ensureAuthSchema();
@@ -294,7 +296,7 @@ router.post("/login",
          FROM usuarios u
          LEFT JOIN empresas e ON e.id = u.empresa_id
          WHERE (LOWER(u.email) = $1 OR LOWER(u.username) = $1)
-           AND ($2::text='' OR e.codigo_acceso=$2)
+           AND e.codigo_acceso=$2
          LIMIT 2`,
         [identifier, companyCode]
       );

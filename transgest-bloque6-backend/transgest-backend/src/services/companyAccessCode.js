@@ -11,11 +11,12 @@ function validCompanyCode(value) {
 }
 
 async function applyCompanyAccessCodes(database) {
-      await database.query('CREATE SEQUENCE IF NOT EXISTS empresas_codigo_acceso_seq');
       await database.query('ALTER TABLE empresas ADD COLUMN IF NOT EXISTS codigo_acceso VARCHAR(20)');
-      await database.query(`ALTER TABLE empresas ALTER COLUMN codigo_acceso SET DEFAULT ('TG-' || LPAD(nextval('empresas_codigo_acceso_seq')::text, 8, '0'))`);
-      // Existing companies keep a stable code. The sequence also supplies every new company.
-      await database.query(`UPDATE empresas SET codigo_acceso='TG-' || LPAD(nextval('empresas_codigo_acceso_seq')::text, 8, '0') WHERE codigo_acceso IS NULL OR BTRIM(codigo_acceso)=''`);
+      // Preserve every issued code; only companies without one receive a random code.
+      // 64 random bits leave enough room for the TG- prefix within VARCHAR(20).
+      await database.query(`ALTER TABLE empresas ALTER COLUMN codigo_acceso SET DEFAULT ('TG-' || UPPER(SUBSTRING(REPLACE(gen_random_uuid()::text, '-', ''), 1, 16)))`);
+      await database.query(`UPDATE empresas SET codigo_acceso='TG-' || UPPER(SUBSTRING(REPLACE(gen_random_uuid()::text, '-', ''), 1, 16)) WHERE codigo_acceso IS NULL OR BTRIM(codigo_acceso)=''`);
+      await database.query('ALTER TABLE empresas ALTER COLUMN codigo_acceso SET NOT NULL');
       await database.query('CREATE UNIQUE INDEX IF NOT EXISTS empresas_codigo_acceso_unique ON empresas (UPPER(codigo_acceso))');
 }
 

@@ -807,6 +807,10 @@ export default function Empresa() {
         )}
       </div>
       <div style={S.sub}>Datos fiscales y configuración - alimentan todas las facturas y comunicaciones</div>
+      {esGerente && user?.codigo_acceso && <div style={{...S.section,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",padding:"14px 18px"}}>
+        <span style={{fontSize:13,fontWeight:700,color:"var(--text2)"}}>Código de empresa para iniciar sesión</span>
+        <strong style={{fontSize:16,letterSpacing:".06em",color:"var(--text)",userSelect:"all"}}>{user.codigo_acceso}</strong>
+      </div>}
 
       {tab === "empresa" && <>
       {/* ── Logo de empresa ────────────────────────────────────────── */}

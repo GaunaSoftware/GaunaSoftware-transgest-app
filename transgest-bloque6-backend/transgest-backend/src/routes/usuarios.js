@@ -237,14 +237,14 @@ router.post("/",
       );
       const usuario = rows[0];
       if (modoAlta === "invitacion") {
-        const empresa = await db.query("SELECT id,nombre FROM empresas WHERE id=$1 LIMIT 1", [eid]).then(r => r.rows[0] || { id: eid, nombre: "" });
+        const empresa = await db.query("SELECT id,nombre,codigo_acceso FROM empresas WHERE id=$1 LIMIT 1", [eid]).then(r => r.rows[0] || { id: eid, nombre: "" });
         const invitacion = await crearInvitacionUsuario({ usuario, empresa, actorEmail: req.user?.email || req.user?.username || "" });
         const mail = await enviarEmail({
           trigger: "invitacion_usuario",
           destinatario: usuario.email,
           plantilla: "invitacion_usuario",
           empresa_id: eid,
-          datos: { nombre: usuario.nombre, empresa: empresa.nombre, url: invitacion.url },
+          datos: { nombre: usuario.nombre, empresa: empresa.nombre, codigo_empresa: empresa.codigo_acceso, url: invitacion.url },
           meta: { usuario_id: usuario.id, modo_alta: "invitacion" },
         }).catch(e => ({ error: e.message }));
         return res.status(201).json({

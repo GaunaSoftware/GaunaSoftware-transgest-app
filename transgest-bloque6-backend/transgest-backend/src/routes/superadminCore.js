@@ -1277,7 +1277,7 @@ router.post("/empresas", superAuth, async (req, res) => {
     const result = await db.transaction(async (client) => {
       const empresaRes = await client.query(`
         INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, fecha_vencimiento, ciclo_facturacion, metodo_pago, iban_facturacion, email_facturacion, origen_comercial)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, nombre, dominio
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, nombre, dominio, codigo_acceso
       `, [nombre_empresa, cif||null, email_admin, dominio, plan, 0, 0,
           fecha_vencimiento || null, ciclo_facturacion, normalizeBillingMethod(metodo_pago), iban_facturacion || null, email_facturacion || email_admin, origen_comercial]);
 
@@ -1303,7 +1303,7 @@ router.post("/empresas", superAuth, async (req, res) => {
       trigger: "invitacion_usuario",
       destinatario: email_admin,
       plantilla: "invitacion_usuario",
-      datos: { nombre: nombre_admin, empresa: nombre_empresa, url: result.url },
+      datos: { nombre: nombre_admin, empresa: nombre_empresa, codigo_empresa: result.empresa.codigo_acceso, url: result.url },
       empresa_id: result.empresa.id,
       force_platform: true,
     }).catch(e => ({ error: e.message }));
@@ -1343,7 +1343,7 @@ router.post("/empresas/demo", superAuth, async (req, res) => {
       const empresaRes = await client.query(`
         INSERT INTO empresas (nombre, cif, email_admin, dominio, plan, max_vehiculos, max_usuarios, estado, ciclo_facturacion, metodo_pago, email_facturacion)
         VALUES ($1,$2,$3,$4,'enterprise',0,0,'activo','mensual','pendiente',$3)
-        RETURNING id, nombre, dominio, plan, estado
+        RETURNING id, nombre, dominio, codigo_acceso, plan, estado
       `, [nombreEmpresa, `DEMO${stamp.slice(-8)}`, emailAdmin, dominio]);
       const empresa = empresaRes.rows[0];
 
@@ -1576,7 +1576,7 @@ router.post("/empresas/:id/reset-password", superAuth, async (req, res) => {
 });
 
 router.post("/empresas/:id/reinvitar", superAuth, async (req, res) => {
-  const empresaRes = await db.query("SELECT id,nombre,email_admin FROM empresas WHERE id=$1", [req.params.id]);
+  const empresaRes = await db.query("SELECT id,nombre,email_admin,codigo_acceso FROM empresas WHERE id=$1", [req.params.id]);
   const empresa = empresaRes.rows[0];
   if (!empresa) return res.status(404).json({ error: "Empresa no encontrada" });
 
@@ -1618,7 +1618,7 @@ router.post("/empresas/:id/reinvitar", superAuth, async (req, res) => {
     trigger: "invitacion_usuario",
     destinatario: email,
     plantilla: "invitacion_usuario",
-    datos: { nombre: result.usuario.nombre || nombre, empresa: empresa.nombre, url: result.url },
+    datos: { nombre: result.usuario.nombre || nombre, empresa: empresa.nombre, codigo_empresa: empresa.codigo_acceso, url: result.url },
     empresa_id: empresa.id,
     force_platform: true,
   }).catch(e => ({ error: e.message }));

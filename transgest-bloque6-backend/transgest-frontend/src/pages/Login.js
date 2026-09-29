@@ -12,6 +12,12 @@ import transgestLogoWhite from "../assets/brand/transgest_logo_white.svg";
 import "./driver/login.css";
 
 const IS_DEMO = process.env.REACT_APP_DEMO_MODE === "true";
+const randomCodeExample = () => {
+  const bytes = new Uint8Array(8);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+  else bytes.forEach((_, index) => { bytes[index] = Math.floor(Math.random() * 256); });
+  return `Ej.: TG-${Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+};
 
 const S = {
   bg: { minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center",
@@ -54,6 +60,7 @@ export default function Login() {
   const versionLabel = getBrandVersionLabel(appMeta);
   const [email, setEmail] = useState("");
   const [companyCode, setCompanyCode] = useState("");
+  const [companyCodeExample] = useState(randomCodeExample);
   const [pass,  setPass]  = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -119,7 +126,7 @@ export default function Login() {
 
   useEffect(() => {
     const identifier = email.trim();
-    if (identifier.length < 3) {
+    if (identifier.length < 3 || companyCode.trim().length < 3) {
       setLoginBrand(null);
       return undefined;
     }
@@ -138,6 +145,7 @@ export default function Login() {
   async function handleLogin(e) {
     e?.preventDefault();
     if (!email || !pass) { setError("Introduce usuario/email y contraseña"); return; }
+    if (!companyCode.trim()) { setError("Introduce el código de empresa"); return; }
     setLoading(true); setError("");
     try {
       await login(email, pass, companyCode);
@@ -181,6 +189,7 @@ export default function Login() {
       setForgotMessage("Indica tu usuario o email.");
       return;
     }
+    if (!companyCode.trim()) { setForgotMessage("Indica el código de empresa en la pantalla de acceso."); return; }
     setForgotLoading(true);
     setForgotMessage("");
     try {
@@ -239,10 +248,9 @@ export default function Login() {
         <form onSubmit={handleLogin} aria-label="Iniciar sesión">
         <div style={{ marginBottom:14 }}>
           <label style={S.label} htmlFor="login-company-code">Código de empresa</label>
-          <input id="login-company-code" autoComplete="organization" autoCapitalize="characters" spellCheck={false} style={S.input} type="text" value={companyCode}
+          <input id="login-company-code" autoComplete="organization" autoCapitalize="characters" spellCheck={false} style={S.input} type="text" value={companyCode} required
             onChange={e=>setCompanyCode(e.target.value.toUpperCase())}
-            placeholder="Ej.: TLM-001" />
-          <small style={{display:"block",color:"var(--text4)",marginTop:5}}>Identifica tu empresa cuando otras usen el mismo nombre de usuario.</small>
+            placeholder={companyCodeExample} />
         </div>
         <div style={{ marginBottom:14 }}>
           <label style={S.label} htmlFor="login-identifier">Usuario o correo electrónico</label>

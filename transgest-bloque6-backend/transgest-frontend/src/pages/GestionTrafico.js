@@ -20,6 +20,7 @@ import RemolqueGrupaje from "../components/RemolqueGrupaje";
 import { inferPlaceGeo } from "../utils/placeGeo";
 import { TRANSPORT_STATES, RECOMMENDED_STATE_FLOW, transportStateMeta } from "../utils/transportStateCatalog";
 import { displayOrderLocation } from "../utils/orderTown";
+import { addIsoDays, buildOrderScheduleShift, orderScheduleMatches } from "../utils/orderScheduleShift";
 
 // â”€â”€ Calculadora de tiempo de conducciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcTiempoTransito(km, cfg){
@@ -326,10 +327,7 @@ function normalizePedidoForModal(pedido) {
 
 function sumarDiasISO(fecha, dias) {
   if (!fecha) return "";
-  const base = new Date(`${String(fecha).slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(base.getTime())) return String(fecha).slice(0, 10);
-  base.setDate(base.getDate() + Number(dias || 0));
-  return base.toISOString().slice(0, 10);
+  return addIsoDays(fecha, dias);
 }
 
 function sanitizePedidoCopyPayload(payload) {
@@ -380,20 +378,8 @@ function buildPedidoCopyPayload(pedido, { offsetDays = 7, keepAssignment = true 
 }
 
 function buildPedidoReschedulePayload(pedido, offsetDays = 1) {
-  const fechaCargaBase = toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido);
-  const fechaDescargaBase = toDateInputValue(pedido?.fecha_descarga || pedido?.fecha_entrega || fechaCargaBase);
-  const deltaDias = fechaCargaBase && fechaDescargaBase
-    ? Math.round((new Date(`${fechaDescargaBase}T00:00:00`) - new Date(`${fechaCargaBase}T00:00:00`)) / 86400000)
-    : 0;
-  const nuevaFechaCarga = sumarDiasISO(fechaCargaBase || new Date().toISOString().slice(0, 10), offsetDays);
-  const nuevaFechaDescarga = fechaDescargaBase
-    ? sumarDiasISO(nuevaFechaCarga, Number.isFinite(deltaDias) ? deltaDias : 0)
-    : null;
   return {
-    ...pedido,
-    fecha_carga: nuevaFechaCarga,
-    fecha_descarga: nuevaFechaDescarga,
-    fecha_entrega: nuevaFechaDescarga,
+    ...buildOrderScheduleShift(pedido, offsetDays),
     pendiente_completar: true,
     aviso_completar: "Viaje reprogramado desde trafico: revisar horarios, asignacion y compromiso con cliente.",
   };
@@ -3208,7 +3194,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
     try {
       const fresh = await getPedido(pedido.id).catch(() => pedido);
       const payload = buildPedidoReschedulePayload(fresh || pedido, offsetDays);
-      await editarPedido(pedido.id, payload);
+      const saved = await editarPedido(pedido.id, payload, { silentSuccess: true });
+      if (!orderScheduleMatches(saved, payload)) throw new Error("El servidor no confirmó las nuevas fechas.");
       broadcastPedidosChanged({ source: "gestion-trafico-reschedule", pedido_id: pedido.id });
       notify(`${pedido.numero || "Pedido"} reprogramado ${texto}.`, "success");
       cargar();
@@ -3371,7 +3358,8 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
       for (const pedido of lista) {
         const fresh = await getPedido(pedido.id).catch(() => pedido);
         const payload = buildPedidoReschedulePayload(fresh || pedido, offsetDays);
-        await editarPedido(pedido.id, payload);
+        const saved = await editarPedido(pedido.id, payload, { silentSuccess: true });
+        if (!orderScheduleMatches(saved, payload)) throw new Error(`No se confirmó el retraso de ${pedido.numero || pedido.id}.`);
       }
       setSelectedCriticalIds([]);
       broadcastPedidosChanged({ source: "gestion-trafico-reschedule-selected-criticals" });

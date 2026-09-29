@@ -1482,6 +1482,9 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   const [modo,       setModo]       = useState("linea"); // linea|detalle|kg
   const [aplicarClausulaGasoil, setAplicarClausulaGasoil] = useState(false);
   const [porcentajeGasoil, setPorcentajeGasoil] = useState('0');
+  const [mostrarVariacionGasoil, setMostrarVariacionGasoil] = useState(false);
+  const [porcentajeGasoilBorrador, setPorcentajeGasoilBorrador] = useState('');
+  const [lineasPersonalizadas, setLineasPersonalizadas] = useState(false);
   const [concepto,   setConcepto]   = useState("");
   const [referenciaFactura, setReferenciaFactura] = useState("");
   const [fechaFactura, setFechaFactura] = useState(() => localDateValue());
@@ -1579,6 +1582,8 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   const selArr   = pedidos.filter(p=>selIds.has(p.id));
   const porcentajeGasoilNumero = Number(String(porcentajeGasoil).replace(',', '.'));
   const porcentajeGasoilValido = String(porcentajeGasoil).trim() !== '' && Number.isFinite(porcentajeGasoilNumero) && porcentajeGasoilNumero >= 0 && porcentajeGasoilNumero <= 100 && Math.abs(porcentajeGasoilNumero * 100 - Math.round(porcentajeGasoilNumero * 100)) < 0.000001;
+  const porcentajeGasoilBorradorNumero = Number(String(porcentajeGasoilBorrador).replace(',', '.'));
+  const porcentajeGasoilBorradorValido = String(porcentajeGasoilBorrador).trim() !== '' && Number.isFinite(porcentajeGasoilBorradorNumero) && porcentajeGasoilBorradorNumero >= 0 && porcentajeGasoilBorradorNumero <= 100 && Math.abs(porcentajeGasoilBorradorNumero * 100 - Math.round(porcentajeGasoilBorradorNumero * 100)) < 0.000001;
   const basePortes = selArr.reduce((s,p)=>s+Math.round(Number(p.importe||0)*100)-Math.round(Number(p.importe_revision_combustible||0)*100),0);
   const recargoActual = selArr.reduce((s,p)=>s+Math.round(Number(p.importe_revision_combustible||0)*100),0);
   const recargoAplicado = aplicarClausulaGasoil && porcentajeGasoilValido ? Math.round(basePortes * porcentajeGasoilNumero / 100) : recargoActual;
@@ -1592,14 +1597,15 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   function toggleSel(id){ setSelIds(p=>{ const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n; }); }
   function toggleAll(){ selIds.size===pedidos.length ? setSelIds(new Set()) : setSelIds(new Set(pedidos.map(p=>p.id))); }
 
-  function buildLineas(){
+  function buildLineas(fuelPercent = aplicarClausulaGasoil && porcentajeGasoilValido ? porcentajeGasoilNumero : null){
     const cliente = clientes.find(c=>c.id===clienteSel);
     const modoFact = modo || cliente?.modo_facturacion || "linea";
-    return buildTransportInvoiceLines(selArr, modoFact, concepto, aplicarClausulaGasoil && porcentajeGasoilValido ? porcentajeGasoilNumero : null);
+    return buildTransportInvoiceLines(selArr, modoFact, concepto, fuelPercent);
   }
 
   useEffect(() => {
     setLineasEdit(buildLineas().map((l, idx) => ({ ...l, id: `linea-${idx}` })));
+    setLineasPersonalizadas(false);
     setConfirmCantidades(false);
     setConfirmReferencias(false);
     setConfirmAlbaranes(false);
@@ -1609,6 +1615,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
 
   function updateLineaFactura(idx, key, value) {
     setLineasEdit(prev => prev.map((linea, i) => i === idx ? { ...linea, [key]: key === "concepto" ? value : value } : linea));
+    setLineasPersonalizadas(true);
     setConfirmCantidades(false);
   }
 
@@ -1821,21 +1828,6 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
           </div>
         </div>}
 
-        {/* Cláusula pactada para esta factura */}
-        {paso===2 && <div style={{border:'1px solid var(--border)',borderRadius:9,padding:'12px 14px',background:'var(--bg3)',marginBottom:12}}>
-          <label style={{display:'flex',alignItems:'center',gap:8,fontWeight:700,color:'var(--text2)'}}>
-            <input type="checkbox" checked={aplicarClausulaGasoil} onChange={e=>setAplicarClausulaGasoil(e.target.checked)}/>
-            Aplicar cláusula de gasóleo al preparar esta factura
-          </label>
-          {aplicarClausulaGasoil && <div style={{marginTop:10,maxWidth:420}}>
-            <label style={lbl}>Porcentaje pactado sobre el porte sin recargo</label>
-            <input type="number" min="0" max="100" step="0.01" value={porcentajeGasoil} onChange={e=>setPorcentajeGasoil(e.target.value)} style={inp}/>
-            <div style={{fontSize:11,color:porcentajeGasoilValido?'var(--text4)':'#b45309',marginTop:5}}>
-              {porcentajeGasoilValido ? `Recargo actual: ${fmt2(recargoActual/100)} € · Cláusula aplicada: ${fmt2(recargoAplicado/100)} €. Se sustituye el recargo anterior, sin duplicarlo, y figura en línea separada.` : 'Indica un porcentaje entre 0 y 100 con hasta dos decimales.'}
-            </div>
-          </div>}
-        </div>}
-
         {/* Concepto (solo modo linea) */}
         {paso===2 && modo==="linea" && (
           <div style={{marginBottom:12}}>
@@ -1973,15 +1965,33 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
                 <div style={{fontWeight:800,fontSize:12,color:"#10b981",textTransform:"uppercase",letterSpacing:".06em"}}>Revision de lineas de factura</div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>Ajusta conceptos, cantidades o importes antes de crear el borrador.</div>
               </div>
-              <button type="button" onClick={()=>setLineasEdit(prev=>[...prev,{id:`extra-${Date.now()}`,concepto:"Concepto adicional",cantidad:1,precio_unit:0}])} style={{...S.btn,background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)",padding:"5px 8px"}}>Anadir linea</button>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                <button type="button" onClick={()=>{setPorcentajeGasoilBorrador(aplicarClausulaGasoil?porcentajeGasoil:'');setMostrarVariacionGasoil(true);}} style={{...S.btn,background:'rgba(16,185,129,.12)',color:'var(--green)',border:'1px solid rgba(16,185,129,.3)',padding:'5px 8px'}}>+ Variación de gasoil</button>
+                <button type="button" onClick={()=>{setLineasEdit(prev=>[...prev,{id:`extra-${Date.now()}`,concepto:"Concepto adicional",cantidad:1,precio_unit:0}]);setLineasPersonalizadas(true);}} style={{...S.btn,background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)",padding:"5px 8px"}}>Añadir línea</button>
+              </div>
             </div>
+            {(mostrarVariacionGasoil || aplicarClausulaGasoil) && <div style={{border:'1px solid var(--border)',borderRadius:9,padding:'12px 14px',background:'var(--bg)',marginBottom:12}}>
+              <div style={{fontWeight:800,fontSize:13,color:'var(--text)',marginBottom:8}}>Variación de gasoil</div>
+              <label htmlFor="invoice-fuel-percent" style={lbl}>Porcentaje pactado sobre el porte sin recargo</label>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                <input id="invoice-fuel-percent" inputMode="decimal" value={porcentajeGasoilBorrador} onChange={e=>setPorcentajeGasoilBorrador(e.target.value)} placeholder="Ej.: 8,5" style={{...inp,maxWidth:170}} aria-invalid={porcentajeGasoilBorrador!==''&&!porcentajeGasoilBorradorValido}/>
+                <span style={{color:'var(--text3)'}}>%</span>
+                <button type="button" disabled={!porcentajeGasoilBorradorValido} onClick={()=>{setPorcentajeGasoil(String(porcentajeGasoilBorradorNumero));setAplicarClausulaGasoil(true);setLineasEdit(buildLineas(porcentajeGasoilBorradorNumero).map((l,idx)=>({...l,id:`linea-${idx}`})));setLineasPersonalizadas(false);setConfirmCantidades(false);}} style={{...S.btn,background:'var(--accent)',color:'#fff',border:'1px solid var(--accent)'}}>Aplicar variación</button>
+                {aplicarClausulaGasoil && <button type="button" onClick={()=>{setAplicarClausulaGasoil(false);setPorcentajeGasoilBorrador('');setLineasEdit(buildLineas(null).map((l,idx)=>({...l,id:`linea-${idx}`})));setLineasPersonalizadas(false);setConfirmCantidades(false);}} style={{...S.btn,background:'transparent',color:'var(--text3)',border:'1px solid var(--border)'}}>Restaurar recargo del pedido</button>}
+              </div>
+              <div style={{fontSize:11,color:porcentajeGasoilBorrador===''||porcentajeGasoilBorradorValido?'var(--text4)':'#b45309',marginTop:7}}>
+                {porcentajeGasoilBorradorValido ? `Porte: ${fmt2(basePortes/100)} € · Recargo ya registrado: ${fmt2(recargoActual/100)} € · Nueva línea de gasoil: ${fmt2(Math.round(basePortes*porcentajeGasoilBorradorNumero/100)/100)} € de base antes de IVA. El porcentaje sustituye el recargo anterior; no se suma dos veces. Se aplicará el IVA que corresponda al servicio.` : 'Indica un porcentaje entre 0 y 100 con hasta dos decimales.'}
+              </div>
+              {lineasPersonalizadas && <div style={{fontSize:11,color:'#b45309',marginTop:5}}>Aplicar o restaurar la variación regenerará las líneas y descartará los cambios manuales hechos en ellas.</div>}
+              {aplicarClausulaGasoil && <div style={{fontSize:11,color:'var(--green)',fontWeight:700,marginTop:6}}>Aplicado: {fmt2(porcentajeGasoilNumero)} % · {fmt2(recargoAplicado/100)} € en línea separada.</div>}
+            </div>}
             <div style={{display:"grid",gap:8}}>
               {lineasEdit.map((l,i)=>(
                 <div className="finance-grid finance-line-editor" key={l.id || i} style={{display:"grid","--finance-columns":"1fr 90px 120px 34px",gap:8,alignItems:"end"}}>
                   <label><span>Concepto</span><input value={l.concepto || ""} onChange={e=>updateLineaFactura(i,"concepto",e.target.value)} style={inp} /></label>
                   <label><span>Cantidad</span><input value={l.cantidad ?? ""} onChange={e=>updateLineaFactura(i,"cantidad",e.target.value)} style={{...inp,textAlign:"right"}} /></label>
                   <label><span>Precio unitario</span><input value={l.precio_unit ?? ""} onChange={e=>updateLineaFactura(i,"precio_unit",e.target.value)} style={{...inp,textAlign:"right"}} /></label>
-                  <button type="button" aria-label={`Eliminar línea ${i + 1}`} onClick={()=>setLineasEdit(prev=>prev.filter((_,idx)=>idx!==i))} style={{...S.btn,padding:"7px 9px",background:"rgba(239,68,68,.10)",color:"var(--red)",border:"1px solid rgba(239,68,68,.24)"}}>×</button>
+                  <button type="button" aria-label={`Eliminar línea ${i + 1}`} onClick={()=>{setLineasEdit(prev=>prev.filter((_,idx)=>idx!==i));setLineasPersonalizadas(true);setConfirmCantidades(false);}} style={{...S.btn,padding:"7px 9px",background:"rgba(239,68,68,.10)",color:"var(--red)",border:"1px solid rgba(239,68,68,.24)"}}>×</button>
                 </div>
               ))}
             </div>

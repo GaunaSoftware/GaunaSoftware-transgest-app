@@ -37,12 +37,15 @@ function fuelInvoiceLinesForOrders(orders, clause = null) {
     const next = index === orders.length - 1 ? applied : base ? Math.round(cumulative * applied / base) : 0;
     const fuel = next - apportioned;
     apportioned = next;
-    return fuelInvoiceLines({ ...order, importe: (transport + fuel) / 100, importe_revision_combustible: fuel / 100 });
+    return fuelInvoiceLines({ ...order, importe: (transport + fuel) / 100, importe_revision_combustible: fuel / 100 })
+      .map(line => line.concepto.startsWith('Recargo de combustible')
+        ? { ...line, concepto: `Variación de gasoil (${clause.percentage.toLocaleString('es-ES', { maximumFractionDigits: 2 })} %) · ${order.numero || ''}`.trim() }
+        : line);
   });
 }
 function validateFuelInvoiceLines(orders, lines, clause = null) {
   const expected = clause ? cents(clause.applied_fuel) : orders.reduce((sum, order) => sum + cents(fuelParts(order).fuel), 0);
-  const fuelLines = lines.filter(l => /(?:(?:recargo|revision).*combustible|clausula.*gaso)/.test(String(l.concepto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()));
+  const fuelLines = lines.filter(l => /(?:(?:recargo|revision|variacion).*combustible|(?:recargo|revision|variacion|clausula).*gaso|gasoil.*(?:recargo|revision|variacion))/.test(String(l.concepto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()));
   const actual = fuelLines.reduce((sum, l) => sum + cents(Number(l.cantidad) * Number(l.precio_unit)), 0);
   if (expected !== actual) fail('El recargo de combustible debe figurar en una línea separada por su importe exacto. Regenera las líneas del borrador para separar el porte sin duplicar el recargo.');
   for(const order of orders){

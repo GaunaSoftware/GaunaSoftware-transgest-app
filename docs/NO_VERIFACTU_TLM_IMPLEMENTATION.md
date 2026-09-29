@@ -21,6 +21,8 @@ Existe un certificado digital de la titular autónoma productora, pero **no se h
 
 `transgest-backend/src/services/fiscal.js` reconoce `no_verifactu` como modo explícito, informa que no está listo y **bloquea la emisión** en ese modo. Así no lo convierte silenciosamente en `ninguno` ni lo envía por SII/VERI*FACTU. La emisión actual y `factura_registros_fiscales` no forman un registro NO VERI*FACTU firmado ni mantienen un registro de eventos del SIF con sus garantías propias. La factura independiente usa el mismo circuito de borrador/revisión/emisión y queda igualmente bloqueada si se configura este modo.
 
+La configuración de Mi empresa muestra ahora la opción NO VERI*FACTU y sus cinco grupos de requisitos sin campos de Verifacti o un endpoint SII inaplicable. **Elegir y guardar esta opción no habilita la emisión**: el servidor devuelve `NO_VERIFACTU_NOT_READY`. No debe cambiarse la modalidad de una empresa que está emitiendo facturas hasta acordar con su asesoría la transición y disponer del motor validado. Las pruebas locales comprueban el bloqueo y los diagnósticos; no acreditan firma, custodia ni conformidad fiscal.
+
 En la migración actual `022_fiscal_accounting_delivery.sql`, `factura_registros_fiscales` y `factura_eventos_fiscales` enlazan con facturas mediante `ON DELETE CASCADE`; ese esquema no proporciona por sí solo conservación inalterable ante borrados. `huella` es un hash, no una firma XAdES verificable. El log `factura_eventos_fiscales` es un historial de aplicación, no el registro de eventos firmado exigido para NO VERI*FACTU. La futura migración deberá preservar los históricos y separar claramente los nuevos registros fiscales inmutables de estas tablas existentes.
 
 ## Secuencia de implementación propuesta

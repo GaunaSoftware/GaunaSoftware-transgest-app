@@ -265,8 +265,18 @@ function buildFiscalStatus(configInput = {}) {
   };
 
   addCheck("Modo fiscal seleccionado", config.modo !== "ninguno", "Selecciona el modo fiscal aplicable a la empresa.");
-  if (config.modo === "no_verifactu") addCheck("Motor NO VERI*FACTU validado", false,
-    "NO VERI*FACTU todavía no está implantado: faltan registros firmados, registro de eventos, verificación, exportación, conservación y declaración responsable de la versión.");
+  if (config.modo === "no_verifactu") {
+    addCheck("Registros fiscales NO VERI*FACTU", false,
+      "Falta generar y conservar los registros de alta y anulación encadenados, sin borrado en cascada.");
+    addCheck("Firma XAdES y certificado", false,
+      "Falta firmar y verificar los registros con un certificado apto para el obligado tributario.");
+    addCheck("Registro de eventos y comprobación", false,
+      "Falta el registro de eventos firmado y la comprobación de huellas, firmas, cadenas y anomalías.");
+    addCheck("Conservación, exportación y recuperación", false,
+      "Falta exportación fiscal verificable y restauración probada sin pérdida de registros.");
+    addCheck("Documento fiscal y declaración de versión", false,
+      "Faltan QR/leyenda propios y validación de la declaración responsable del productor para esta versión.");
+  }
   addCheck("NIF declarante", !!config.nif_declarante, "Falta el NIF del declarante.");
   addCheck("Razon social declarante", !!config.razon_social_declarante, "Falta la razon social del declarante.");
   addCheck("Email de alertas", !!config.email_alertas, "Conviene definir un email de alertas fiscales.", "warning");
@@ -328,7 +338,7 @@ function buildFiscalStatus(configInput = {}) {
     addCheck("Conector SII AEAT", false, externalConnectorReason);
   }
 
-  if (config.entorno === "produccion") {
+  if (config.entorno === "produccion" && ["verifactu", "sii"].includes(config.modo)) {
     addCheck("Canal listo para produccion", config.modo === "verifactu"
       ? config.verifactu.proveedor === "verifacti"
         ? !!config.verifactu.provider_api_key
@@ -343,7 +353,7 @@ function buildFiscalStatus(configInput = {}) {
       : config.modo === "sii"
         ? !!config.sii.endpoint_url
         : false, "No hay endpoint real configurado para produccion.");
-  } else {
+  } else if (config.entorno !== "produccion") {
     addCheck("Entorno de pruebas activo", true, "La empresa esta trabajando en entorno de pruebas.", "warning");
   }
 

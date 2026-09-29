@@ -9,8 +9,10 @@ async function main() {
  validateFuelInvoiceLines(orders,detailed);
  const grouped=[{concepto:'Transporte',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:68}];
  validateFuelInvoiceLines(orders,grouped);
+ validateFuelInvoiceLines(orders,[grouped[0],{concepto:'Variación de gasoil',cantidad:1,precio_unit:68}]);
  assert.throws(()=>validateFuelInvoiceLines(orders,[{concepto:'Transporte',cantidad:1,precio_unit:748}]),e=>e.status===409);
  assert.throws(()=>validateFuelInvoiceLines(orders,[...grouped,grouped[1]]),e=>e.status===409);
+ assert.throws(()=>validateFuelInvoiceLines(orders,[...grouped,{concepto:'Variación de gasoil',cantidad:1,precio_unit:68}]),e=>e.status===409);
  assert.throws(()=>fuelInvoiceLines({numero:'INVALID',importe:10,importe_revision_combustible:11}),e=>e.status===409);
  assert.equal(fuelInvoiceLines({importe:100}).length,1);
  assert.equal(fuelInvoiceLines({importe:10,importe_revision_combustible:10})[0].precio_unit,0);
@@ -20,8 +22,11 @@ async function main() {
  assert.equal(changed.applied_fuel,85);
  validateFuelInvoiceLines(orders,[{concepto:'Transporte',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:85}],changed);
  const workflowLines=fuelInvoiceLinesForOrders(orders,changed);
+ assert.ok(workflowLines.some(line=>line.concepto.startsWith('Variación de gasoil (12,5 %)')));
  validateFuelInvoiceLines(orders,workflowLines,changed);
  assert.equal(workflowLines.reduce((sum,line)=>sum+Math.round(line.cantidad*line.precio_unit*100),0),76500);
+ const clausePdf=await parsePdf(await buildFacturaPdfBuffer({numero:'VAR-FUEL',base_imponible:765,tipo_iva:21,cuota_iva:160.65,total:925.65},workflowLines));
+ assert.ok(clausePdf.text.includes('Variación de gasoil'));
  assert.throws(()=>validateFuelInvoiceLines(orders,grouped,changed),e=>e.status===409);
  assert.throws(()=>fuelClause(orders,101),e=>e.status===409);
  assert.throws(()=>fuelClause(orders,''),e=>e.status===409);

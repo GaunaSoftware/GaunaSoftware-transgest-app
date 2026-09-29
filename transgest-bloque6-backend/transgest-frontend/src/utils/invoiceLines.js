@@ -6,6 +6,9 @@ export function buildTransportInvoiceLines(orders, mode, concept, fuelClausePerc
 }
 function transportLines(orders, mode, concept, fuelClausePercent) {
   const parts = orders.map(order => ({ order, total: cents(order.importe), fuel: cents(order.importe_revision_combustible) }));
+  const fuelConcept = fuelClausePercent !== null && fuelClausePercent !== undefined
+    ? `Variación de gasoil (${Number(fuelClausePercent).toLocaleString('es-ES', { maximumFractionDigits: 2 })} %)`
+    : 'Recargo de combustible';
   if (fuelClausePercent !== null && fuelClausePercent !== undefined) {
     const base = parts.reduce((sum, p) => sum + p.total - p.fuel, 0);
     const applied = Math.round(base * Number(fuelClausePercent) / 100);
@@ -22,7 +25,7 @@ function transportLines(orders, mode, concept, fuelClausePercent) {
   const transport = parts.reduce((sum, p) => sum + p.total - p.fuel, 0);
   if (!parts.length) return [];
   if (['linea', 'agrupada_linea'].includes(mode)) {
-    return [line(concept, transport), ...(fuel ? [line('Recargo de combustible', fuel)] : [])];
+    return [line(concept, transport), ...(fuel ? [line(fuelConcept, fuel)] : [])];
   }
   if (['kg', 'agrupada_kg'].includes(mode)) {
     const groups = new Map();
@@ -39,17 +42,17 @@ function transportLines(orders, mode, concept, fuelClausePercent) {
       const exact = g.rate > 0 && g.kg > 0 && cents(g.kg / 1000 * g.rate) === g.amount;
       const description = `Transporte ${g.kg.toLocaleString('es-ES')} kg (${g.count} viajes)`;
       return exact ? { concepto: description, cantidad: g.kg / 1000, precio_unit: g.rate } : line(description, g.amount);
-    }), ...(fuel ? [line('Recargo de combustible', fuel)] : [])];
+    }), ...(fuel ? [line(fuelConcept, fuel)] : [])];
   }
   if (mode === 'detalle_combustible_agrupado') {
     return [...parts.map(({ order: p, total, fuel: surcharge }) => {
       const ref = `${p.numero || ''}${p.referencia_cliente ? ' / Ref. ' + p.referencia_cliente : ''}`;
       return line(`${ref} - ${p.origen || ''}${p.destino ? ' → ' + p.destino : ''} (${p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString('es-ES') : '-'})`, total - surcharge);
-    }), ...(fuel ? [line('Recargo de combustible', fuel)] : [])];
+    }), ...(fuel ? [line(fuelConcept, fuel)] : [])];
   }
   return parts.flatMap(({ order: p, total, fuel: surcharge }) => {
     const ref = `${p.numero || ''}${p.referencia_cliente ? ' / Ref. ' + p.referencia_cliente : ''}`;
     const description = `${ref} - ${p.origen || ''}${p.destino ? ' → ' + p.destino : ''} (${p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString('es-ES') : '-'})`;
-    return [line(description, total - surcharge), ...(surcharge ? [line(`Recargo de combustible · ${ref}`, surcharge)] : [])];
+    return [line(description, total - surcharge), ...(surcharge ? [line(`${fuelConcept} · ${ref}`, surcharge)] : [])];
   });
 }

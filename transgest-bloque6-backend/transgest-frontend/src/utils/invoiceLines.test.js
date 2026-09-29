@@ -39,6 +39,9 @@ test.each(['linea','detalle','kg'])('%s adds the separate agreed detention charg
 test.each(['linea','detalle','detalle_combustible_agrupado','kg'])('%s replaces stored fuel with invoice-time clause without doubling it', mode=>{
  const lines=build(orders,mode,'Transporte',10);
  expect(total(lines)).toBe(913);
- expect(total(lines.filter(l=>l.concepto.startsWith('Recargo de combustible')))).toBe(83);
- expect(total(lines.filter(l=>!l.concepto.startsWith('Recargo de combustible')))).toBe(830);
+ expect(total(lines.filter(l=>l.concepto.startsWith('Variación de gasoil (10 %)')))).toBe(83);
+ expect(total(lines.filter(l=>!l.concepto.startsWith('Variación de gasoil (10 %)')))).toBe(830);
+});
+test('invoice-time fuel percentage is visible in its own line for one trip',()=>{
+ expect(build([orders[0]],'detalle','',8.5)).toContainEqual({concepto:'Variación de gasoil (8,5 %) · PED-1',cantidad:1,precio_unit:40.8});
 });

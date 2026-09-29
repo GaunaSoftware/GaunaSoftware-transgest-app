@@ -6,7 +6,10 @@ async function main() {
   assert.equal(config.modo,'no_verifactu','Unsupported mode must not silently become ninguno');
   const status = fiscal.buildFiscalStatus(config);
   assert.equal(status.ready,false);
-  assert.ok(status.issues.some(issue=>issue.includes('NO VERI*FACTU')));
+  assert.ok(status.checks.some(check=>check.label.includes('NO VERI*FACTU')&&!check.ok));
+  assert.ok(status.checks.some(check=>check.label==='Firma XAdES y certificado'&&!check.ok));
+  assert.ok(status.checks.some(check=>check.label==='Registro de eventos y comprobación'&&!check.ok));
+  assert.equal(status.checks.some(check=>check.label==='Endpoint real configurado'),false,'NO VERI*FACTU no tiene endpoint de envío instantáneo');
   const client = {query:async sql=>{
     assert.match(sql,/SELECT configuracion FROM empresas/);
     return {rows:[{configuracion:{facturacion_fiscal:config}}]};

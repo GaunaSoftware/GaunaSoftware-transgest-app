@@ -47,7 +47,10 @@ try{
   app.use('/prefs',require('../src/routes/userExperience'));
   await db.exec(`ALTER TABLE usuarios ADD COLUMN nombre text;ALTER TABLE usuarios ADD COLUMN rol text;
     ALTER TABLE agenda_eventos ADD COLUMN created_at timestamptz DEFAULT NOW();
-    INSERT INTO agenda_eventos(empresa_id,titulo,fecha_inicio,estado,visibilidad,creado_por) VALUES('${A}','Reunión manual',NOW(),'pendiente','personal','${U}');`);
+    INSERT INTO agenda_eventos(empresa_id,titulo,fecha_inicio,estado,visibilidad,creado_por) VALUES('${A}','Reunión manual',NOW(),'pendiente','personal','${U}');
+    INSERT INTO agenda_eventos(empresa_id,titulo,fecha_inicio,estado,visibilidad,creado_por,metadata) VALUES
+      ('${A}','Evento sin autor',NOW(),'pendiente','equipo',NULL,'{}'),
+      ('${A}','Aviso con autor técnico',NOW(),'pendiente','equipo','${U}','{"source":"aviso_automatico"}');`);
   const auth=require('../src/middleware/auth'),originalAuth=auth.authenticate;
   auth.authenticate=(req,res,next)=>next();
   app.use('/calendar',require('../src/routes/agenda'));

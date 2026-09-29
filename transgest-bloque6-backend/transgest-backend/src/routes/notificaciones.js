@@ -3,6 +3,7 @@ const db = require("../services/db");
 const noticeCenter = require('../services/noticeCenter');
 const companyInsurance = require('../services/companyInsurance');
 const operativeRead = require('../services/operativeReadState');
+const { madridClock, scheduleReached, elapsedDaysSince } = require('../services/operativeAlertTiming');
 const {
   crearNotificacion,
   listarNotificaciones,
@@ -31,11 +32,10 @@ function dateOnly(value) {
 function daysFromToday(value) {
   const date = dateOnly(value);
   if (!date) return null;
-  const d = new Date(`${date}T00:00:00`);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (Number.isNaN(d.getTime())) return null;
-  return Math.round((d.getTime() - today.getTime()) / 86400000);
+  const d = Date.parse(`${date}T00:00:00Z`);
+  const today = Date.parse(`${madridClock().date}T00:00:00Z`);
+  if (!Number.isFinite(d)) return null;
+  return Math.round((d - today) / 86400000);
 }
 
 async function ensureAvisosOperativosSchema() {
@@ -172,7 +172,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (puedeConfirmarPorEnlace && !finalizado && cargaDiff !== null && cargaDiff <= 0 && ["confirmado", "en_curso", "descarga"].includes(estado) && !row.colaborador_carga_confirmada_at) {
+  if (puedeConfirmarPorEnlace && !finalizado && scheduleReached(dateOnly(row.fecha_carga || row.fecha_pedido), row.hora_carga, row.ventana_carga) && ["confirmado", "en_curso", "descarga"].includes(estado) && !row.colaborador_carga_confirmada_at) {
     alerts.push(buildAlert(
       row,
       "carga_sin_confirmar",
@@ -194,7 +194,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (puedeConfirmarPorEnlace && !finalizado && (descargaDiff !== null && descargaDiff <= 0 || estado === "descarga") && !row.colaborador_descarga_confirmada_at) {
+  if (puedeConfirmarPorEnlace && !finalizado && (scheduleReached(dateOnly(row.fecha_descarga || row.fecha_entrega), row.hora_descarga, row.ventana_descarga) || estado === "descarga") && !row.colaborador_descarga_confirmada_at) {
     alerts.push(buildAlert(
       row,
       "descarga_sin_confirmar",
@@ -205,7 +205,8 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (["entregado", "facturado"].includes(estado) && albaranes <= 0) {
+  const deliveryDocumentDue = finalizado && elapsedDaysSince(row.colaborador_descarga_confirmada_at || row.descarga_real_at || row.entrega_evento_at, 3);
+  if (deliveryDocumentDue && albaranes <= 0) {
     alerts.push(buildAlert(
       row,
       "albaran_pendiente",
@@ -216,7 +217,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (["entregado", "facturado"].includes(estado) && albaranes > 0 && (!docPagoRecibida || !tieneFacturaProveedor)) {
+  if (deliveryDocumentDue && albaranes > 0 && (!docPagoRecibida || !tieneFacturaProveedor)) {
     alerts.push(buildAlert(
       row,
       "documentacion_pago_pendiente",
@@ -365,6 +366,8 @@ async function listarAvisosColaboradores(req, { all = false, includeRead = false
   try {
     const result = await db.query(
     `SELECT p.id, p.numero, p.estado, p.fecha_pedido, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
+            p.hora_carga, p.ventana_carga, p.hora_descarga, p.ventana_descarga, p.descarga_real_at,
+            delivery.entrega_evento_at,
             p.precio_colaborador, p.colaborador_id,
             p.colaborador_workflow_enviado_at, p.colaborador_precio_confirmado_at,
             p.colaborador_carga_confirmada_at, p.colaborador_en_camino_confirmada_at, p.colaborador_descarga_confirmada_at,
@@ -374,6 +377,12 @@ async function listarAvisosColaboradores(req, { all = false, includeRead = false
        FROM pedidos p
        JOIN colaboradores co ON co.id=p.colaborador_id AND co.empresa_id=p.empresa_id AND COALESCE(co.activo,true)=true
        LEFT JOIN pedido_colaborador_pagos pay ON pay.pedido_id=p.id AND pay.empresa_id=p.empresa_id
+       LEFT JOIN LATERAL (
+         SELECT MIN(e.created_at) AS entrega_evento_at FROM pedido_eventos e
+          WHERE e.pedido_id=p.id AND e.empresa_id=p.empresa_id
+            AND (e.tipo='colaborador.descarga_confirmada'
+              OR (e.tipo='estado.actualizado' AND e.detalle->>'estado'='entregado'))
+       ) delivery ON true
        LEFT JOIN LATERAL (
          SELECT COUNT(*)::int AS albaranes_count
            FROM pedido_docs d

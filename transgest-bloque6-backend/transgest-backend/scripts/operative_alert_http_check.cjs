@@ -14,14 +14,15 @@ async function run(){
    CREATE TABLE colaboradores(id uuid PRIMARY KEY,empresa_id uuid,nombre text,email text,activo boolean);
    CREATE TABLE vehiculos(id uuid PRIMARY KEY,empresa_id uuid,matricula text);
    CREATE TABLE choferes(id uuid PRIMARY KEY,empresa_id uuid,nombre text,apellidos text);
-   CREATE TABLE pedidos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,numero text,estado text,fecha_pedido date,fecha_carga date,fecha_descarga date,fecha_entrega date,created_at timestamptz DEFAULT NOW(),colaborador_id uuid,chofer_id uuid,vehiculo_id uuid);
+   CREATE TABLE pedidos(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,numero text,estado text,fecha_pedido date,fecha_carga date,fecha_descarga date,fecha_entrega date,hora_carga text,ventana_carga text,hora_descarga text,ventana_descarga text,descarga_real_at timestamptz,created_at timestamptz DEFAULT NOW(),colaborador_id uuid,chofer_id uuid,vehiculo_id uuid);
+   CREATE TABLE pedido_eventos(pedido_id uuid,empresa_id uuid,tipo text,detalle jsonb,created_at timestamptz DEFAULT NOW());
    CREATE TABLE colaborador_facturas(pedido_id uuid,empresa_id uuid,colaborador_id uuid,factura_proveedor_id uuid,created_at timestamptz);
    CREATE TABLE facturas_proveedor(id uuid,empresa_id uuid,nombre text,estado text,created_at timestamptz);
    CREATE TABLE agenda_eventos(id uuid DEFAULT gen_random_uuid(),empresa_id uuid,asignado_a uuid,creado_por uuid,estado text,metadata jsonb,source_type text,source_id text,cause_code text,visibilidad text,created_at timestamptz DEFAULT NOW(),titulo text,descripcion text,fecha_inicio timestamptz,todo_dia boolean,tipo text,prioridad text,pedido_id uuid);
    INSERT INTO empresas VALUES('${A}'),('${B}');INSERT INTO usuarios(id,empresa_id) VALUES('${U}','${A}'),('${V}','${B}'),('${T}','${A}');
    INSERT INTO colaboradores VALUES('${A}','${A}','Transportista QA A','qa-a@example.invalid',true),('${B}','${B}','Transportista QA B','qa-b@example.invalid',true);
-   INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id) SELECT '${A}','QA-'||n,'entregado',CURRENT_DATE,'${A}' FROM generate_series(1,301)n;
-   INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id) VALUES('${B}','SECRET-B','entregado',CURRENT_DATE,'${B}');`);
+   INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,descarga_real_at,colaborador_id) SELECT '${A}','QA-'||n,'entregado',CURRENT_DATE-4,NOW()-INTERVAL '4 days','${A}' FROM generate_series(1,301)n;
+   INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,descarga_real_at,colaborador_id) VALUES('${B}','SECRET-B','entregado',CURRENT_DATE-4,NOW()-INTERVAL '4 days','${B}');`);
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260928_operational_alert_reads.sql'),'utf8'));
   db.query=pg.query.bind(pg);
   db.transaction=fn=>pg.transaction(fn);
@@ -105,9 +106,40 @@ async function run(){
   await pg.query(`UPDATE colaboradores SET email='   ' WHERE id=$1`,[supplierWithoutEmail]);
   assert.equal((await trafficAlerts()).items.some(item=>item.pedido_id===withoutEmail.id),false,
     'removing the email resolves link-only alerts without recording a false price acceptance');
-  await pg.query(`UPDATE pedidos SET estado='entregado' WHERE id=$1`,[withoutEmail.id]);
+  await pg.query(`UPDATE pedidos SET estado='entregado', descarga_real_at=NOW()-INTERVAL '4 days' WHERE id=$1`,[withoutEmail.id]);
   assert.ok((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===withoutEmail.id && item.kind==='albaran_pendiente'),
     'missing delivery documents remain actionable even when the supplier has no email');
+  await pg.query(`UPDATE colaboradores SET email='proveedor@example.invalid' WHERE id=$1`,[supplierWithoutEmail]);
+  const {rows:[recentDelivery]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,descarga_real_at,colaborador_id)
+    VALUES($1,'POD-THREE-DAYS','entregado',CURRENT_DATE-10,NOW()-INTERVAL '2 days',$2) RETURNING id`,[A,supplierWithoutEmail]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===recentDelivery.id),false,
+    'planned delivery date cannot trigger POD before three days from confirmed delivery');
+  await pg.query(`UPDATE pedidos SET descarga_real_at=NOW()-INTERVAL '3 days 1 minute' WHERE id=$1`,[recentDelivery.id]);
+  assert.ok((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===recentDelivery.id && item.kind==='albaran_pendiente'));
+  await pg.query(`INSERT INTO pedido_docs(empresa_id,pedido_id,nombre,tipo) VALUES($1,$2,'POD.pdf','pod')`,[A,recentDelivery.id]);
+  assert.ok((await get('/operativas/colaboradores',{headers:{'x-test-user':'office'}})).items.some(item=>item.pedido_id===recentDelivery.id && item.kind==='documentacion_pago_pendiente'),
+    'payment documents use the same three-day confirmed-delivery threshold');
+  const {rows:[withoutActual]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_descarga,colaborador_id)
+    VALUES($1,'POD-NO-ACTUAL','entregado',CURRENT_DATE-10,$2) RETURNING id`,[A,supplierWithoutEmail]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===withoutActual.id),false,
+    'no confirmed delivery timestamp is not replaced with a planned date');
+  await pg.query(`INSERT INTO pedido_eventos(empresa_id,pedido_id,tipo,detalle,created_at)
+    VALUES($1,$2,'estado.actualizado','{"estado":"entregado"}',NOW()-INTERVAL '4 days')`,[B,withoutActual.id]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===withoutActual.id),false,
+    'another company event cannot establish this company delivery date');
+  await pg.query(`INSERT INTO pedido_eventos(empresa_id,pedido_id,tipo,detalle,created_at)
+    VALUES($1,$2,'estado.actualizado','{"estado":"entregado"}',NOW()-INTERVAL '4 days')`,[A,withoutActual.id]);
+  assert.ok((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===withoutActual.id && item.kind==='albaran_pendiente'),
+    'an audited delivery transition is a valid fallback when the actual timestamp is absent');
+  const {rows:[webStatus]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at)
+    VALUES($1,'WEB-STATUS','en_curso',CURRENT_DATE-1,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===webStatus.id && item.kind==='camino_sin_confirmar'),false,
+    'web status alone does not imply an unconfirmed departure');
+  const { madridClock }=require('../src/services/operativeAlertTiming');
+  const {rows:[noHour]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at)
+    VALUES($1,'LOAD-NO-HOUR','confirmado',$3::date,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail,madridClock().date]);
+  assert.ok((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===noHour.id && item.kind==='carga_sin_confirmar'),
+    'a load without a time is reminded on its planned date');
   console.log('PASS HTTP AvImp: 301 notices, tenant isolation, company-wide traffic/management delay acknowledgement, multi-stop persistence, read ALL and agenda deduplication.');
  }finally{db.query=original;db.transaction=originalTransaction;if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}await pg.close();}
 }

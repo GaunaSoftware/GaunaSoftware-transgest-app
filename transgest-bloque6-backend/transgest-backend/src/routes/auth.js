@@ -406,6 +406,7 @@ router.post('/company',authenticate,async(req,res,next)=>{try{
 }catch(e){next(e);}});
 
 router.get("/me", authenticate, async (req, res) => {
+  res.set("Cache-Control", "no-store");
   if (req.user.superadmin_impersonation) return res.json({ ...await authUserPayload(req.user), superadmin_impersonation: true, impersonado_por: req.user.impersonado_por });
   const user = {...req.user};
   user.productos = req.user.productos;

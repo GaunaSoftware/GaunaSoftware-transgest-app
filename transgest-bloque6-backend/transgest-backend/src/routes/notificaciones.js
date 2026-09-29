@@ -525,7 +525,11 @@ router.post('/operativas/colaboradores/leer', async (req, res, next) => {
 router.get("/", async (req, res) => {
   const empresaId = req.user?.empresa_id;
   const usuarioId = req.user?.id;
-  if (!empresaId || !usuarioId) return res.status(401).json({ error: "Sesion no valida" });
+  if (!empresaId) return res.status(401).json({ error: "Sesion no valida" });
+  // La sesión temporal de SuperAdmin tiene empresa, pero no usuario de la empresa.
+  // Su bandeja personal está vacía; no invalidar la sesión por ese motivo.
+  if (!usuarioId && req.user?.superadmin_impersonation) return res.json({ data: [], no_leidas: 0 });
+  if (!usuarioId) return res.status(403).json({ error: "Esta sesión no tiene bandeja personal" });
   const result = await listarNotificaciones(empresaId, usuarioId, {
     limit: req.query.limit,
     includeRead: req.query.include_read,
@@ -647,7 +651,8 @@ router.post("/operativas/colaboradores/ignorar", async (req, res, next) => {
     await ensureAvisosOperativosSchema();
     const empresaId = req.user?.empresa_id;
     const usuarioId = req.user?.id;
-    if (!empresaId || !usuarioId) return res.status(401).json({ error: "Sesion no valida" });
+    if (!empresaId) return res.status(401).json({ error: "Sesion no valida" });
+    if (!usuarioId) return res.status(403).json({ error: "Esta sesión no puede gestionar avisos personales" });
     const pending = await listarAvisosColaboradores(req, { all:true, includeRead:true });
     const alert = pending.items.find(a=>a.key === req.body?.alert?.key);
     if (!alert) return res.status(404).json({error:'Aviso no encontrado o ya resuelto'});
@@ -697,7 +702,8 @@ router.post("/operativas/colaboradores/ignorar", async (req, res, next) => {
 router.patch("/:id/leida", async (req, res) => {
   const empresaId = req.user?.empresa_id;
   const usuarioId = req.user?.id;
-  if (!empresaId || !usuarioId) return res.status(401).json({ error: "Sesion no valida" });
+  if (!empresaId) return res.status(401).json({ error: "Sesion no valida" });
+  if (!usuarioId) return res.status(403).json({ error: "Esta sesión no puede gestionar avisos personales" });
   const item = await marcarLeida(empresaId, usuarioId, req.params.id);
   if (!item) return res.status(404).json({ error: "Notificacion no encontrada" });
   res.json({ ok: true, data: item });
@@ -706,7 +712,8 @@ router.patch("/:id/leida", async (req, res) => {
 router.post("/leer-todas", async (req, res) => {
   const empresaId = req.user?.empresa_id;
   const usuarioId = req.user?.id;
-  if (!empresaId || !usuarioId) return res.status(401).json({ error: "Sesion no valida" });
+  if (!empresaId) return res.status(401).json({ error: "Sesion no valida" });
+  if (!usuarioId) return res.status(403).json({ error: "Esta sesión no puede gestionar avisos personales" });
   const count = await marcarTodasLeidas(empresaId, usuarioId);
   res.json({ ok: true, actualizadas: count });
 });

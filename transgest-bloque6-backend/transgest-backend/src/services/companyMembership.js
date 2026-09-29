@@ -6,7 +6,7 @@ async function userForCompany(userId,companyId,client=db){
  if(!uuid(userId)||(companyId&&!uuid(companyId)))return null;
  return (await client.query(`SELECT u.id,u.nombre,u.email,u.username,u.activo,u.password_changed_at,u.debe_cambiar_password,
  m.empresa_id,m.rol,m.permisos,m.perfil,m.trafico_config,m.cliente_id,m.chofer_id,m.colaborador_id,m.bi_consolidado,m.revision AS membership_revision,
- e.nombre AS empresa_nombre,e.email_admin,e.dominio,e.cfg_precios,e.plan,e.estado AS empresa_estado,e.fecha_vencimiento,e.bloqueo_manual,e.bloqueo_motivo
+ e.nombre AS empresa_nombre,e.email_admin,e.dominio,e.codigo_acceso,e.cfg_precios,e.plan,e.estado AS empresa_estado,e.fecha_vencimiento,e.bloqueo_manual,e.bloqueo_motivo
  FROM usuarios u JOIN usuario_empresas m ON m.usuario_id=u.id AND m.empresa_id=COALESCE($2::uuid,u.empresa_id) AND m.activo=true
  JOIN empresas e ON e.id=m.empresa_id WHERE u.id=$1 AND u.activo=true`,[userId,companyId||null])).rows[0]||null;
 }

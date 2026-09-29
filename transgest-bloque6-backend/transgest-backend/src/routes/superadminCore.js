@@ -1462,6 +1462,12 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
   } = req.body;
   const updates = [], params = [];
   let i = 1;
+  if ("codigo_acceso" in req.body) {
+    const { normalizeCompanyCode, validCompanyCode } = require('../services/companyAccessCode');
+    const code = normalizeCompanyCode(req.body.codigo_acceso);
+    if (!validCompanyCode(code)) return res.status(400).json({ error: "Código de empresa no válido (3–20 letras, números o guiones)." });
+    updates.push(`codigo_acceso=$${i++}`); params.push(code);
+  }
   if (plan !== undefined) {
     if (!["lite","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({ error: "Plan no válido" });
     updates.push(`plan=$${i++}`); params.push(plan);
@@ -1521,7 +1527,7 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
         await client.query(`INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,$2) ON CONFLICT(empresa_id) DO UPDATE SET modalidad=EXCLUDED.modalidad,updated_at=NOW()`,[req.params.id,plan==='planner'?'planner':plan==='pro_planner'?'combinado':'transgest']);
       }
     });
-  } catch (error) { return res.status(error.status || (error.code === '23505' ? 409 : 500)).json({error:error.status ? error.message : 'No se pudo actualizar la empresa. Revisa si el email ya está registrado.'}); }
+  } catch (error) { return res.status(error.status || (error.code === '23505' ? 409 : 500)).json({error:error.status ? error.message : error.code === '23505' ? 'El código de empresa o el email ya está registrado.' : 'No se pudo actualizar la empresa.'}); }
   await audit(req, "empresa.actualizada", req.body, req.params.id);
   res.json({ ok: true });
 });

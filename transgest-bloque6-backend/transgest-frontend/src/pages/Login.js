@@ -53,6 +53,7 @@ export default function Login() {
   const [loginBrand, setLoginBrand] = useState(null);
   const versionLabel = getBrandVersionLabel(appMeta);
   const [email, setEmail] = useState("");
+  const [companyCode, setCompanyCode] = useState("");
   const [pass,  setPass]  = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -107,9 +108,10 @@ export default function Login() {
       const saved = JSON.parse(localStorage.getItem("tms_remember_credentials") || "null");
       if (saved?.remember) {
         setEmail(saved.email || "");
+        setCompanyCode(saved.codigo_empresa || "");
         setRemember(true);
         if (saved.password) {
-          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email:saved.email || "" }));
+          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email:saved.email || "", codigo_empresa:saved.codigo_empresa || "" }));
         }
       }
     } catch {}
@@ -123,7 +125,7 @@ export default function Login() {
     }
     let alive = true;
     const timer = setTimeout(() => {
-      getLoginBrand(identifier)
+      getLoginBrand(identifier, companyCode)
         .then(data => { if (alive) setLoginBrand(data?.found ? data : null); })
         .catch(() => { if (alive) setLoginBrand(null); });
     }, 350);
@@ -131,17 +133,17 @@ export default function Login() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [email]);
+  }, [email, companyCode]);
 
   async function handleLogin(e) {
     e?.preventDefault();
     if (!email || !pass) { setError("Introduce usuario/email y contraseña"); return; }
     setLoading(true); setError("");
     try {
-      await login(email, pass);
+      await login(email, pass, companyCode);
       try {
         if (remember) {
-          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email }));
+          localStorage.setItem("tms_remember_credentials", JSON.stringify({ remember:true, email, codigo_empresa:companyCode.trim().toUpperCase() }));
         } else {
           localStorage.removeItem("tms_remember_credentials");
         }
@@ -182,7 +184,7 @@ export default function Login() {
     setForgotLoading(true);
     setForgotMessage("");
     try {
-      const data = await requestPasswordReset(identifier);
+      const data = await requestPasswordReset(identifier, companyCode);
       setForgotMessage(data?.message || "Solicitud enviada. Superadmin recibirá el aviso.");
     } catch (err) {
       setForgotMessage(err?.message || "No se pudo registrar la solicitud.");
@@ -235,6 +237,13 @@ export default function Login() {
         )}
 
         <form onSubmit={handleLogin} aria-label="Iniciar sesión">
+        <div style={{ marginBottom:14 }}>
+          <label style={S.label} htmlFor="login-company-code">Código de empresa</label>
+          <input id="login-company-code" autoComplete="organization" autoCapitalize="characters" spellCheck={false} style={S.input} type="text" value={companyCode}
+            onChange={e=>setCompanyCode(e.target.value.toUpperCase())}
+            placeholder="Ej.: TLM-001" />
+          <small style={{display:"block",color:"var(--text4)",marginTop:5}}>Identifica tu empresa cuando otras usen el mismo nombre de usuario.</small>
+        </div>
         <div style={{ marginBottom:14 }}>
           <label style={S.label} htmlFor="login-identifier">Usuario o correo electrónico</label>
           <input id="login-identifier" autoComplete="username" autoCapitalize="none" spellCheck={false} style={S.input} type="text" value={email}

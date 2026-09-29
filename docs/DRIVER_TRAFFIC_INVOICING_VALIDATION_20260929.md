@@ -1,5 +1,7 @@
 # Validación de ajustes de chófer, tráfico y facturación — 29/09/2026
 
+> Corrección normativa posterior (29/09/2026): el tercer punto de «Comportamiento comprobado» describe el primer diseño de esta rama, pero ya no es el criterio vigente. La [Resolución de 5 de junio de 2026](https://www.boe.es/diario_boe/txt.php?id=BOE-A-2026-12784) exige generar el DeCA con los datos conocidos antes del inicio efectivo del servicio; por ello la emisión propia ahora admite un pedido confirmado antes de terminar la carga. La carga real que cambie los datos exige una versión nueva revisada y entregada antes de la salida. Véase [DECA_LEGAL_FLOW_REVIEW_20260929.md](DECA_LEGAL_FLOW_REVIEW_20260929.md). Las pruebas de emisión por punto se actualizaron a ese criterio.
+
 Trabajo en rama aislada `codex/driver-signature-traffic-invoices`. No se ha consultado ni modificado producción.
 
 ## Comportamiento comprobado

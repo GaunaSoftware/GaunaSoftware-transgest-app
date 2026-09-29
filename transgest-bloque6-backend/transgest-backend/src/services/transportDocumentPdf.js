@@ -22,7 +22,7 @@ async function renderDeca({ documento: d, version, generatedAt, url }) {
     pdf.fillColor('#172b2b').text(content, left, pdf.y, { width, lineGap: 2 }); pdf.moveDown(.35);
   };
   pdf.font('Helvetica-Bold').fontSize(14).fillColor('#0f766e').text('DOCUMENTO ELECTRÓNICO DE\nCONTROL ADMINISTRATIVO (DeCA)', left, 38, { width: 390 });
-  pdf.font('Helvetica').fontSize(10).fillColor('#334155').text('Formato carta de porte', { width: 380 });
+  pdf.font('Helvetica').fontSize(10).fillColor('#334155').text('Documento administrativo del transporte', { width: 380 });
   pdf.fontSize(8).text(`${d.referencia_pedido} · Versión ${version}`, { width: 380 });
   const qr = await QRCode.toBuffer(url, { width: 180, margin: 1 }); pdf.image(qr, 465, 35, { width: 90 });
   pdf.y = 136;

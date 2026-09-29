@@ -5,17 +5,20 @@ async function main(){
  const pg=new PGlite(),company=crypto.randomUUID(),other=crypto.randomUUID(),order=crypto.randomUUID();
  const db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
  try{
-  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz,descarga_real_at timestamptz,estado TEXT,carga_real_at timestamptz);');
+  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz,descarga_real_at timestamptz,estado TEXT,carga_real_at timestamptz,remolque_id UUID);');
   for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_document_versions.sql'),'utf8'));
-  await pg.query('INSERT INTO pedidos VALUES($1,$2,NOW())',[order,company]);
+  await pg.query('INSERT INTO pedidos(id,empresa_id,updated_at) VALUES($1,$2,NOW())',[order,company]);
   const d={codigo_control:'SINTETICO',referencia_pedido:'QA-DeCA-001',fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético SL',nif:'SINTETICO-NO-VALIDO',domicilio:'Calle de ensayo 1, Madrid'},transportista_efectivo:{nombre:'Transportista de prueba',nif:'SINTETICO-NO-VALIDO'},empresa:{nombre:'DEMOSTRACIÓN SINTÉTICA'},origen:{nombre:'Almacén de ensayo',direccion:'Madrid, España'},destino:{nombre:'Destino sintético',direccion:'Valencia, España',destinatario:'Destinatario de prueba'},mercancia:{descripcion:'Cerámica de ensayo',peso_kg:1250,bultos:64,embalaje:'Paletizado'},vehiculo:{tractora:'QA-0000'},cargas:[],descargas:[],observaciones:'DATOS SINTÉTICOS. Documento de prueba sin valor para un transporte real.'};
   const args={empresaId:company,pedidoId:order,payload:{documento:d},baseUrl:'https://example.invalid',reason:'Ensayo inicial'};
   d.observaciones_publicas=d.observaciones;d.observaciones='NOTA INTERNA QUE NO SE PUBLICA';
   await assert.rejects(service.issue(db,args),{code:'ORDER_NOT_CONFIRMED'});
   await pg.query("UPDATE pedidos SET estado='confirmado' WHERE id=$1",[order]);
-  await assert.rejects(service.issue(db,args),{code:'LOAD_NOT_COMPLETED'});
-  await pg.query('UPDATE pedidos SET carga_real_at=NOW() WHERE id=$1',[order]);
+  await pg.query('UPDATE pedidos SET remolque_id=$2 WHERE id=$1',[order,crypto.randomUUID()]);
+  await assert.rejects(service.issue(db,args),{code:'DECA_FIELDS_REQUIRED'});
+  d.vehiculo.remolque='QA-REM-01';
+  // The first document is generated with known, complete data before service starts.
+  // Loading changes require a new version and review before departure.
   const first=await service.issue(db,args);assert.equal(first.created,true);
   const repeated=await service.issue(db,args);assert.equal(repeated.id,first.id);assert.equal(repeated.created,false);
   const initial=(await service.list(db,company,order))[0];const token=new URL(initial.public_url).searchParams.get('token');
@@ -23,6 +26,9 @@ async function main(){
   const reviewed={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[initial.id]};
   await service.assertDeparture(db,company,{id:order,peso_kg:1250},reviewed);
   await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1251},reviewed),{code:'DECA_GOODS_CHANGED'});
+  await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250,mercancia:'Otra mercancía'},reviewed),{code:'DECA_GOODS_CHANGED'});
+  await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250,matricula_colaborador:'QA-9999'},reviewed),{code:'DECA_VEHICLE_CHANGED'});
+  await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250,remolque_matricula_colaborador:'QA-OTRO'},reviewed),{code:'DECA_VEHICLE_CHANGED'});
   const original=await service.publicOriginal(db,initial.id,token);assert.equal(service.hash(original.pdf),initial.pdf_hash);
   assert.doesNotMatch((await require('pdf-parse')(original.pdf)).text,/NOTA INTERNA/);
   assert.equal(await service.publicOriginal(db,initial.id,'wrong'),null);
@@ -43,7 +49,7 @@ async function main(){
   assert.equal(service.publicAccessEnded(completedAt,new Date('2026-10-02T12:00:00Z')),true);
   await pg.exec('CREATE TABLE documento_control_repositorio(empresa_id UUID,pedido_id UUID,pdf_base64 TEXT,pdf_hash_sha256 TEXT,pdf_filename TEXT,filename TEXT,created_at timestamptz,retencion_minima_hasta date);');
   const legacyOrder=crypto.randomUUID();
-  await pg.query('INSERT INTO pedidos VALUES($1,$2,NOW(),NULL)',[legacyOrder,company]);
+  await pg.query('INSERT INTO pedidos(id,empresa_id,updated_at,descarga_real_at) VALUES($1,$2,NOW(),NULL)',[legacyOrder,company]);
   await pg.query('INSERT INTO documento_control_repositorio VALUES($1,$2,$3,$4,$5,$6,$7,NULL)',
     [company,legacyOrder,original.pdf.toString('base64'),service.hash(original.pdf),'original-archive.pdf','document.html','2026-09-20T12:00:00Z']);
   const legacy=await service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder});
@@ -70,7 +76,7 @@ async function main(){
   await assert.rejects(service.publicOriginal(db,initial.id,token),{code:'PUBLIC_EXPIRED'});
   assert.ok((await service.read(db,company,order,initial.id)).pdf,'Authenticated retention survives public expiry');
   const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-deca-synthetic.pdf'),original.pdf);
-  const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/firma certificada|AdES|QES/);
+  const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/Formato carta de porte|firma certificada|AdES|QES/);
   console.log('PASS document versions: old QR direct original bytes, seven-day access after actual completion, manual disable guard, external originals, hashes, tenant isolation and retained private access. PDF pages:',parsed.numpages);
  }finally{await pg.close();}
 }

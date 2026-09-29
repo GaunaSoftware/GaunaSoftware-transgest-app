@@ -19,8 +19,6 @@ async function main(){
   await assert.rejects(shipments.declare(db,{...args,operationId:crypto.randomUUID()}),{code:'SHIPMENTS_EXIST'});
   const payload={documento:{referencia_pedido:order.numero,fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético',nif:'QA',domicilio:'Madrid'},transportista_efectivo:{nombre:'Transportista sintético',nif:'QA'},vehiculo:{tractora:'QA-0000'}}};
   const issue={empresaId:company,pedidoId:id,payload,baseUrl:'https://example.invalid',reason:'Prueba de envíos explícitos'};
-  await assert.rejects(documents.issue(db,issue),{code:'LOAD_NOT_COMPLETED'});
-  await pg.query('UPDATE pedidos SET carga_real_at=NOW() WHERE id=$1',[id]);
   await assert.rejects(documents.issue(db,issue),{code:'SHIPMENT_REQUIRED'});
   await assert.rejects(documents.issue(db,{...issue,envioId:crypto.randomUUID()}),{code:'SHIPMENT_NOT_FOUND'});
   for(const envioId of result.envio_ids)await documents.issue(db,{...issue,envioId});
@@ -41,9 +39,12 @@ async function main(){
   const combinedRows=await documents.list(db,company,otherId);assert.equal(combinedRows.length,1);
   assert.equal(combinedRows[0].payload.documento.envios.length,2);assert.equal(combinedRows[0].payload.documento.mercancia.peso_kg,1000);
   await documents.assertDeparture(db,company,{...order,id:otherId},{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[issued.id]});
+  await pg.exec('CREATE TABLE pedido_chofer_pasos(pedido_id uuid,empresa_id uuid,data jsonb);');
+  await pg.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[otherId,company,JSON.stringify({paradas:{[stops[0].id]:{mercancia_confirmada:true,mercancia_cargada:'Cerámica revisada',mercancia_peso_kg:1020}}})]);
+  await assert.rejects(documents.issue(db,{...combined,consolidationAllowed:true,reason:'Carga real diferente'}),{code:'SHIPMENT_ACTUAL_ALLOCATION_REQUIRED'});
+  await pg.query('DELETE FROM pedido_chofer_pasos WHERE pedido_id=$1',[otherId]);
   await assert.rejects(documents.issue(db,{...issue,pedidoId:otherId,envioId:other.envio_ids[0]}),{code:'DOCUMENT_SCOPE_CONFLICT'});
   const pdf=await documents.read(db,company,otherId,issued.id),out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-consolidated-synthetic.pdf'),Buffer.from(pdf.pdf));
-  await pg.exec('CREATE TABLE pedido_chofer_pasos(pedido_id uuid,empresa_id uuid,data jsonb);');
   const multiId=crypto.randomUUID();
   await pg.query("INSERT INTO pedidos(id,empresa_id,estado,numero,origen,destino,peso_kg,puntos_carga,puntos_descarga,carga_real_at) VALUES($1,$2,'confirmado','QA-DOS-CARGAS','Madrid','Valencia',1000,$3,$4,NOW())",
     [multiId,company,JSON.stringify([{id:'load-a',direccion:'Madrid'},{id:'load-b',direccion:'Cuenca'}]),JSON.stringify([{id:'drop',direccion:'Valencia'}])]);
@@ -51,11 +52,23 @@ async function main(){
   const multiRows=[0,1].map(i=>({origen_id:multiStops[i].id,destino_id:multiStops[2].id,referencia:'LOAD-'+i,destinatario:'Cliente sintético',mercancia:'Cerámica',peso_kg:500,bultos:5}));
   const multi=await shipments.declare(db,{...args,pedidoId:multiId,operationId:crypto.randomUUID(),rows:multiRows});
   await pg.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[multiId,company,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true}}})]);
-  await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[0]});
-  await assert.rejects(documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1]}),{code:'SHIPMENT_LOAD_NOT_COMPLETED'});
-  await assert.rejects(documents.issue(db,{...issue,pedidoId:multiId,consolidated:true,consolidationAllowed:true}),{code:'SHIPMENT_LOAD_NOT_COMPLETED'});
-  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true},[multiStops[1].id]:{carga_ok:true}}})]);
+  const firstLoad=await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[0]});
+  const firstSteps={paradas:{[multiStops[0].id]:{carga_ok:true}},dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[firstLoad.id]};
+  await documents.assertDeparture(db,company,multiOrder,firstSteps);
+  await assert.rejects(documents.assertDeparture(db,company,multiOrder,{...firstSteps,paradas:{...firstSteps.paradas,[multiStops[1].id]:{carga_ok:true}}}),{code:'DECA_REQUIRED'});
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true},[multiStops[1].id]:{viaje_iniciado:true}}})]);
+  await assert.rejects(documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1]}),{code:'DECA_ISSUED_LATE'});
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true}}})]);
+  // Both mapped shipments may be documented before their physical load begins.
   await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1]});
+  await assert.rejects(documents.issue(db,{...issue,pedidoId:multiId,consolidated:true,consolidationAllowed:true}),{code:'DOCUMENT_SCOPE_CONFLICT'});
+  const actualStops={paradas:{[multiStops[0].id]:{carga_ok:true},[multiStops[1].id]:{carga_ok:true,mercancia_confirmada:true,mercancia_cargada:'Cerámica revisada',mercancia_peso_kg:520,mercancia_palets:5}}};
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify(actualStops)]);
+  const revised=await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1],reason:'Mercancía real de la segunda carga'});
+  assert.equal(revised.version,2);
+  const current=await documents.list(db,company,multiId);
+  assert.equal(current.find(v=>v.id===revised.id).payload.documento.mercancia.peso_kg,520);
+  await documents.assertDeparture(db,company,multiOrder,{...actualStops,dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:current.filter(v=>v.estado==='activa').map(v=>v.id)});
   assert.equal((await pg.query('SELECT count(*)::int n FROM pedido_eventos')).rows[0].n,3);
   console.log('PASS explicit shipments: user mapping, totals, wrong-point rejection, idempotency/conflict, tenant, migration repeat, individual DeCA/PDFs and complete departure coverage.');
  }finally{await pg.close();}

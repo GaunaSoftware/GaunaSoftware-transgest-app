@@ -6,7 +6,9 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company,dr
  const ids=[crypto.randomUUID(),crypto.randomUUID()];
  for(let i=0;i<ids.length;i++)await db.query(`INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado,fecha_carga,origen,destino,importe,mercancia,peso_kg,bultos,vehiculo_id,chofer_id)
    SELECT $1,$2,id,$3,'confirmado',CURRENT_DATE,$4,$5,200,'Sacos sintéticos',100,2,$6,$7 FROM clientes WHERE empresa_id=$2 ORDER BY id LIMIT 1`,[ids[i],company,`QA-CHOFER-PARADAS-${i+1}`,i?'Murcia':'Alicante',i?'Guadalajara':'Madrid',vehicle.id,driver.id]);
- const grouped=await call('POST','/pedidos/grupaje/combinar',{pedido_ids:ids,borrador:false,client_operation_uuid:crypto.randomUUID()},200,managerToken);
+ const trailer=crypto.randomUUID();
+ await db.query("INSERT INTO vehiculos(id,empresa_id,matricula,clase,estado,activo) VALUES($1,$2,'R-GRP-CHOFER-QA','Semirremolque','disponible',true)",[trailer,company]);
+ const grouped=await call('POST','/pedidos/grupaje/combinar',{pedido_ids:ids,borrador:false,client_operation_uuid:crypto.randomUUID(),asignacion:{vehiculo_id:vehicle.id,remolque_id:trailer,chofer_id:driver.id,asignacion_revisada:true}},200,managerToken);
  let context=(await call('GET',`/pedidos/${ids[0]}/chofer-pasos`)).viaje_operativo;
  assert.equal(context.id,grouped.viaje_id);assert.equal(context.paradas.length,4);
  const [first,second]=context.paradas;

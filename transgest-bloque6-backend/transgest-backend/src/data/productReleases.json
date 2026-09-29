@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-deca-qr-legal-access",
+    "date": "2026-09-29",
+    "title": "Documentos de control disponibles en carretera",
+    "intro": "El QR del DeCA vuelve a abrir directamente su PDF durante el viaje y el plazo de consulta posterior.",
+    "items": [
+      { "title": "QR de documentos anteriores", "text": "Los QR ya impresos permiten consultar el PDF original archivado. Si cambian los datos del transporte, Tráfico debe emitir una nueva versión y entregarla al chófer con su nuevo QR.", "module": "pedidos" },
+      { "title": "Conservación del DeCA", "text": "El acceso permanece disponible durante el servicio y al menos siete días naturales tras finalizarlo. El expediente conserva el fichero durante al menos un año.", "module": "pedidos" }
+    ]
+  },
+  {
     "id": "2026-09-driver-android-connection-tracking",
     "date": "2026-09-28",
     "title": "Acceso Android y GPS de jornada",

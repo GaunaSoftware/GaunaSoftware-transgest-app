@@ -6,6 +6,11 @@ const canonical = value => JSON.stringify(value, function (key, v) {
 });
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const validId = v => /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(String(v || ''));
+const PUBLIC_MINIMUM_AFTER_COMPLETION_MS = 7 * 24 * 60 * 60 * 1000;
+function publicAccessEnded(completedAt, now = new Date()) {
+  const completion = completedAt && new Date(completedAt).getTime();
+  return Number.isFinite(completion) && new Date(now).getTime() >= completion + PUBLIC_MINIMUM_AFTER_COMPLETION_MS;
+}
 async function available(db) { return !!(await db.query("SELECT to_regclass('public.transport_document_versions') AS name")).rows[0]?.name; }
 const columns = 'id,empresa_id,pedido_id,envio_id,viaje_id,scope_key,version,source,payload,payload_hash,material_hash,pdf_hash,filename,reason,created_by,created_at,public_url,retention_until,metadata';
 async function list(db, empresaId, pedidoId) {
@@ -102,17 +107,42 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
     return { id, created: true, version };
   });
 }
-async function publicOriginal(db, id, token) {
+async function publicOriginal(db, id, token, now = new Date()) {
   if (!validId(id) || typeof token !== 'string' || token.length > 128) return null;
   const row = (await db.query('SELECT * FROM transport_document_versions WHERE id=$1 AND token_hash=$2', [id, hash(token)])).rows[0];
   if (!row) return null;
   const events = (await db.query('SELECT event,effective_at FROM transport_document_events WHERE empresa_id=$1 AND document_id=$2 ORDER BY created_at DESC,id DESC', [row.empresa_id,row.id])).rows;
   const completion = events.find(e => e.event === 'service_completed');
-  const access = events.find(e => e.event.startsWith('public_'));
-  if (access?.event === 'public_disabled' || (completion && Date.now() > new Date(completion.effective_at).getTime() + 7 * 86400000)) fail('La consulta pública ha finalizado. Solicita el original a la empresa.', 'PUBLIC_EXPIRED', 410);
+  // A manual disable must never make a road-inspection QR unusable before
+  // seven full natural days have elapsed after actual service completion.
+  if (publicAccessEnded(completion?.effective_at, now)) fail('La consulta pública ha finalizado. Solicita el original a la empresa.', 'PUBLIC_EXPIRED', 410);
   const pdf = Buffer.from(row.pdf);
   if (hash(pdf) !== row.pdf_hash) fail('Fallo de integridad del documento conservado', 'DOCUMENT_INTEGRITY', 500);
   return { ...row, pdf };
+}
+async function legacyPublicOriginal(db, { empresaId, pedidoId, now = new Date() }) {
+  if (!validId(empresaId) || !validId(pedidoId)) return null;
+  const order = (await db.query('SELECT descarga_real_at FROM pedidos WHERE empresa_id=$1 AND id=$2', [empresaId,pedidoId])).rows[0];
+  if (!order) return null;
+  if (publicAccessEnded(order.descarga_real_at, now)) fail('La descarga pública del DeCA ha finalizado. Solicita el original a la empresa.', 'PUBLIC_EXPIRED', 410);
+  const archived = (await db.query('SELECT pdf_base64,pdf_hash_sha256,pdf_filename,filename FROM documento_control_repositorio WHERE empresa_id=$1 AND pedido_id=$2', [empresaId,pedidoId])).rows[0];
+  if (!archived?.pdf_base64) return null;
+  // The printed QR identifies this original file. Never regenerate or silently
+  // replace it: a different PDF requires a different QR under the 2026 rules.
+  const pdf = Buffer.from(archived.pdf_base64, 'base64');
+  if (pdf.subarray(0,5).toString() !== '%PDF-') fail('El archivo conservado no es un PDF válido', 'DOCUMENT_INTEGRITY', 500);
+  const pdfHash = hash(pdf);
+  if (archived.pdf_hash_sha256 && pdfHash !== archived.pdf_hash_sha256) fail('Fallo de integridad del documento conservado', 'DOCUMENT_INTEGRITY', 500);
+  return { pdf, pdf_hash:pdfHash, filename:archived.pdf_filename || archived.filename || 'DeCA.pdf' };
+}
+async function hasProtectedLegacyDeca(db, empresaId, pedidoId, now = new Date()) {
+  const rows = (await db.query(`SELECT 1 FROM documento_control_repositorio r
+    JOIN pedidos p ON p.id=r.pedido_id AND p.empresa_id=r.empresa_id
+    WHERE r.pedido_id=$1 AND r.empresa_id=$2 AND r.pdf_base64 IS NOT NULL
+      AND $3::timestamptz<GREATEST(COALESCE(r.retencion_minima_hasta::timestamptz,'epoch'::timestamptz),
+        GREATEST(r.created_at,COALESCE(p.descarga_real_at,r.created_at))+INTERVAL '1 year') LIMIT 1`,
+    [pedidoId,empresaId,now])).rows;
+  return rows.length > 0;
 }
 async function assertDeparture(db,empresaId,order,steps){
   const active=(await list(db,empresaId,order.id)).filter(v=>v.estado==='activa');
@@ -121,4 +151,4 @@ async function assertDeparture(db,empresaId,order,steps){
   if(!steps.dcd_revisado||!steps.dcd_disponible||active.some(v=>!steps.dcd_versiones_revisadas?.includes(v.id)))fail('Revisa y lleva disponibles las versiones vigentes del DeCA antes de salir.','DECA_REVIEW_REQUIRED');
   if(Math.abs(active.reduce((sum,v)=>sum+Number(v.payload.documento?.mercancia?.peso_kg||0),0)-Number(order.peso_kg))>.01)fail('El peso cargado difiere de los DeCA. Tráfico debe emitir o adjuntar su nueva versión.','DECA_GOODS_CHANGED');
 }
-module.exports = { issue, list, read, publicOriginal, requiredFields, documentSnapshot, available, canonical, hash, assertDeparture };
+module.exports = { issue, list, read, publicOriginal, legacyPublicOriginal, hasProtectedLegacyDeca, publicAccessEnded, requiredFields, documentSnapshot, available, canonical, hash, assertDeparture };

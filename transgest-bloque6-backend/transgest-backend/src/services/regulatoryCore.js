@@ -529,8 +529,8 @@ function buildRegulatoryCertificationDossier(pkg = {}) {
     ],
     governance: {
       tenant_isolation: "Todos los datos del expediente se filtran por empresa_id.",
-      public_access: "Solo enlaces tokenizados para soporte DCD; la descarga publica puede desactivarse despues del servicio.",
-      retention: "Conservacion interna minima configurada/recomendada de 1 ano para DCD, ampliable por politica de empresa.",
+      public_access: "QR con descarga directa del PDF durante el servicio y al menos siete dias naturales tras su finalizacion real.",
+      retention: "Conservacion obligatoria de cada fichero DeCA durante al menos un ano, ampliable por politica de empresa.",
       security_note: "Los hashes permiten detectar modificaciones, pero la certificacion externa requiere proveedor/plataforma conforme cuando aplique.",
     },
   };
@@ -1093,8 +1093,8 @@ async function buildRegulatoryTransportPackage(pedidoId, empresaId, options = {}
     audit: audit.rows || [],
     transmissions: transmissions.rows || [],
     governance: {
-      deca_public_download_policy: "URL/QR descargable durante el servicio; desactivable tras el plazo operativo.",
-      retention_policy: "Conservacion interna minima recomendada: 1 ano, ampliable por politica de empresa.",
+      deca_public_download_policy: "URL/QR descargable durante el servicio; desactivable una vez transcurridos siete dias naturales desde su finalizacion real.",
+      retention_policy: "Conservacion obligatoria de cada fichero DeCA durante al menos un ano, ampliable por politica de empresa.",
       immutable_evidence: "Hashes SHA-256 y versiones de documento/payload para detectar cambios.",
     },
   };

@@ -6164,6 +6164,8 @@ router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req,res,next)=>{
   const empresaId=req.user.empresa_id;
   const ids=[...new Set((req.body?.pedido_ids||[]).map(normalizePedidoUuid).filter(Boolean))].sort();
   if(ids.length<2)return res.status(400).json({error:'Selecciona al menos dos pedidos.'});
+  const asignacion=req.body?.asignacion||{};
+  if(!asignacion.vehiculo_id)return res.status(400).json({error:'Selecciona el vehículo del conjunto antes de agrupar.'});
   const result=await db.transaction(async tx=>{
    await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:groupage-write`]);
    const rows=(await tx.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) ORDER BY id FOR UPDATE',[empresaId,ids])).rows;
@@ -6181,10 +6183,13 @@ router.post("/grupaje/combinar", GERENTE_O_TRAFICO, async (req,res,next)=>{
    }
    await tx.query("UPDATE pedidos SET grupaje_id=$1::uuid,tipo_carga='grupaje',grupaje_borrador=true WHERE empresa_id=$2 AND id=ANY($3::uuid[])",[group,empresaId,ids]);
    const draft=req.body?.borrador===true||req.body?.borrador==='true';
-   if(draft)return {ok:true,grupaje_id:group,count:ids.length,borrador:true};
-   return require('../services/groupagePlan').saveGroupagePlan(tx,{empresaId,grupajeId:group,operationId:req.body.client_operation_uuid||crypto.randomUUID(),actorId:req.user.id,confirm:true});
+   return require('../services/journeyAssignment').assignGroupage(tx,{
+    empresaId,groupId:group,actorId:req.user.id,operationId:crypto.randomUUID(),
+    saveOperationId:req.body.client_operation_uuid||crypto.randomUUID(),patch:asignacion,confirm:!draft,requireConjunto:true,
+    authorize:order=>assertGroupageTrafficScope(req,order)
+   });
   });res.json(result);
- }catch(error){next(error);}
+ }catch(error){res.status(error.status||500).json({error:error.message,code:error.code,advertencias:error.advertencias});}
 });
 function assertGroupageTrafficScope(req, order) {
   if (req.user.rol === 'trafico' && !traficoConfigMatchesPedido(req.user.trafico_config, order)) {

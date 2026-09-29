@@ -535,7 +535,7 @@ export const getDisponibilidadRecursos = (fecha = "", excluirPedidoId = "") =>
 export const getChoferUltimoViaje = (choferId, excluirPedidoId = "", antesDe = "", vehiculoId = "", trasCarga = false) =>
   apiFetch(`/pedidos/chofer-ultimo-viaje?chofer_id=${encodeURIComponent(choferId)}${excluirPedidoId ? `&excluir=${encodeURIComponent(excluirPedidoId)}` : ""}${antesDe ? `&antes_de=${encodeURIComponent(antesDe)}` : ""}${vehiculoId ? `&vehiculo_id=${encodeURIComponent(vehiculoId)}` : ""}${trasCarga ? "&tras_carga=1" : ""}`, { silentError: true });
 // borrador=true guarda el grupaje como provisional (agrupado pero sin confirmar).
-export const combinarGrupaje = (pedidoIds = [], borrador = false) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds, borrador, client_operation_uuid: crypto.randomUUID() } });
+export const combinarGrupaje = (pedidoIds = [], borrador = false, asignacion = {}) => apiFetch("/pedidos/grupaje/combinar", { method: "POST", body: { pedido_ids: pedidoIds, borrador, asignacion, client_operation_uuid: crypto.randomUUID() } });
 export const confirmarGrupaje = (grupajeId) => apiFetch("/pedidos/grupaje/confirmar", { method: "POST", body: { grupaje_id: grupajeId, client_operation_uuid: crypto.randomUUID() } });
 export const separarGrupaje  = (pedidoIds = []) => apiFetch("/pedidos/grupaje/separar", { method: "POST", body: { pedido_ids: pedidoIds } });
 export const enlazarPedidoRetorno = (id, data) => apiFetch(`/pedidos/${id}/ida-retorno`, { method:"POST", body:data });

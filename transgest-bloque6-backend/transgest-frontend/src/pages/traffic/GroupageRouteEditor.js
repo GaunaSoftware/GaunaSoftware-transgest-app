@@ -55,7 +55,7 @@ export default function GroupageRouteEditor({groupId,orders,vehicle,onReload,can
    <section><h3>Pedidos del viaje ({orders.length})</h3><p>Se conservan clientes, precios y documentos de cada pedido.</p>
     {orders.map(order=><div className="groupage-order" key={order.id}><strong>{order.numero}</strong><span>{order.cliente_nombre}</span><span>{order.mercancia}</span></div>)}
    </section>
-   <section><h3>Disposición de mercancía</h3><RemolqueGrupaje pedidos={cargo} vehiculo={vehicle} onReorder={editable?(source,target)=>setLayout(old=>moveBefore(old,source,target)):null}/>
+   <section><h3>Disposición de mercancía</h3><RemolqueGrupaje pedidos={cargo} vehiculo={vehicle} capacidadEstricta onReorder={editable?(source,target)=>setLayout(old=>moveBefore(old,source,target)):null}/>
     <p>La cabeza del remolque está a la izquierda. Mover mercancía aquí conserva la ruta.</p>
     <button className="tgui-button" disabled={!editable} onClick={()=>setLayout([...ordered.filter(s=>s.tipo==='descarga').map(s=>s.pedido.id)].reverse())}>Optimizar disposición según ruta</button>
     <ol>{cargo.map((order,index)=><li key={order.id}>{order.numero} <button aria-label={`Adelantar mercancía ${order.numero}`} disabled={!editable||index===0} onClick={()=>setLayout(old=>moveBefore(old,order.id,old[index-1]))}>←</button><button aria-label={`Retrasar mercancía ${order.numero}`} disabled={!editable||index===cargo.length-1} onClick={()=>setLayout(old=>moveBefore(old,old[index+1],order.id))}>→</button></li>)}</ol>

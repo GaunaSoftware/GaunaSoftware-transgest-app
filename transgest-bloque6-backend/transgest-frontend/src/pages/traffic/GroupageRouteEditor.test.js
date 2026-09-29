@@ -29,6 +29,15 @@ test('gross mass is never treated as payload capacity',()=>{
  expect(capacidadRemolque(null).metros).toBe(13.65);
 });
 
+test('strict groupage capacity uses the selected body or trailer without standard dimensions',()=>{
+ const rigid={clase:'Camion rigido',matricula:'1234-ABC',metros_carga:'7,20',carga_max_kg:12000,capacidad_palets:18,longitud_mm:9800};
+ const trailer={clase:'Semirremolque',matricula:'R-4321',metros_carga:'12,4',carga_max_kg:22000,capacidad_palets:30};
+ expect(capacidadRemolque(rigid,{estricta:true})).toMatchObject({metros:7.2,peso:12000,palets:18,estimado:false});
+ expect(capacidadRemolque(trailer,{estricta:true})).toMatchObject({metros:12.4,peso:22000,palets:30,estimado:false});
+ expect(capacidadRemolque({clase:'Camion rigido',longitud_mm:9800,masa_total_kg:18000},{estricta:true}))
+  .toMatchObject({metros:null,peso:null,palets:null,estimado:true});
+});
+
 test('proximity proposal preserves precedences and requires actual coordinates',()=>{
  const points=[{key:'a1',tipo:'carga',pedido:{id:'a'},lat:39,lng:-1},{key:'a2',tipo:'descarga',pedido:{id:'a'},lat:38,lng:-2},{key:'b1',tipo:'carga',pedido:{id:'b'},lat:39.1,lng:-1},{key:'b2',tipo:'descarga',pedido:{id:'b'},lat:40,lng:-1}];
  const result=nearestGroupageSequence(points);expect(validGroupageSequence(result.map(key=>points.find(p=>p.key===key)))).toBe(true);expect(result[1]).toBe('b1');expect(nearestGroupageSequence([{...points[0],lat:null}])).toBeNull();

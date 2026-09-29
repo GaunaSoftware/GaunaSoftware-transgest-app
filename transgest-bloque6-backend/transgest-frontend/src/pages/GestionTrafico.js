@@ -5133,9 +5133,13 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
 
   // ── Combinar / separar / asignar grupajes desde la propia pestana ──
   const [selGids, setSelGids] = useState([]);
+  const [preVehiculoId, setPreVehiculoId] = useState("");
+  const [preRemolqueId, setPreRemolqueId] = useState("");
+  const [preChoferId, setPreChoferId] = useState("");
   const [trabajandoGrupaje, setTrabajandoGrupaje] = useState(false);
   const [asignaGid, setAsignaGid] = useState("");   // grupo con el panel de asignacion abierto
   const [asignaMat, setAsignaMat] = useState("");
+  const [asignaRemolque, setAsignaRemolque] = useState("");
   const [asignaChofer, setAsignaChofer] = useState("");
   const [asignaColab, setAsignaColab] = useState("");   // colaborador (subcontrata) elegido
   const [creandoColab, setCreandoColab] = useState(false);
@@ -5148,7 +5152,15 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
     return !esRemolque;
   }), [vehiculos]);
 
+  const preVehiculo = tractorasGrupaje.find(v => String(v.id) === String(preVehiculoId));
+  const preEsTractora = String(preVehiculo?.clase || preVehiculo?.tipo || "").toLowerCase().includes("tractora");
+  const remolquesGrupaje = (vehiculos || []).filter(v => /remolque/i.test(String(v.clase || v.tipo || "")) && v.activo !== false);
+  const preRemolque = remolquesGrupaje.find(v => String(v.id) === String(preRemolqueId));
+  const conjuntoListo = !!preVehiculo && (!preEsTractora || !!preRemolque);
+  const capacidadSeleccionada = preEsTractora ? preRemolque : preVehiculo;
+
   function toggleSelGid(gid) {
+    if (!conjuntoListo) return;
     setSelGids(prev => prev.includes(gid) ? prev.filter(x => x !== gid) : [...prev, gid]);
   }
 
@@ -5171,18 +5183,26 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
 
   async function combinarSeleccionados(borrador = false) {
     const ids = selGids.flatMap(gid => (byGrupaje[gid] || []).map(p => p.id));
+    if (!conjuntoListo) { notify("Selecciona primero el vehículo y, para una tractora, el remolque del conjunto.", "info"); return; }
     if (ids.length < 2) { notify("Marca al menos 2 grupos para combinarlos en un grupaje.", "info"); return; }
     const ok = await confirmDialog({
       title: borrador ? "Guardar grupaje como borrador" : "Combinar en un grupaje",
       message: borrador
         ? `Se guardaran ${ids.length} pedidos como grupaje EN BORRADOR: quedan agrupados y visibles, pero marcados como no definitivos hasta que lo confirmes. Puedes deshacerlo separandolos.`
-        : `Se juntaran ${ids.length} pedidos en un mismo viaje (grupaje). Podras ordenar las descargas y asignarles la matricula.`,
+        : `Se juntaran ${ids.length} pedidos en un mismo viaje (grupaje). Podrás ordenar las descargas del conjunto seleccionado.`,
       confirmText: borrador ? "Guardar borrador" : "Combinar",
     });
     if (!ok) return;
     setTrabajandoGrupaje(true);
     try {
-      await combinarGrupaje(ids, borrador);
+      const asignacion = { vehiculo_id: preVehiculo.id, remolque_id: preEsTractora ? preRemolque.id : "", chofer_id: preChoferId || preVehiculo.chofer_id || "" };
+      try { await combinarGrupaje(ids, borrador, asignacion); }
+      catch (error) {
+        if (error?.data?.code !== "ASSIGNMENT_REVIEW_REQUIRED") throw error;
+        const acepta = await confirmDialog({ title: "Revisar conjunto", message: error.message, confirmText: "Combinar con avisos", tone: "warning" });
+        if (!acepta) return;
+        await combinarGrupaje(ids, borrador, { ...asignacion, asignacion_revisada: true });
+      }
       notify(borrador ? "Grupaje guardado como borrador." : "Grupaje creado.", "success");
       setSelGids([]);
       onReload?.();
@@ -5240,7 +5260,11 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
       if (m) patch.matricula_colaborador = m;
     } else {
       const veh = m ? vehiculos.find(v => String(v.matricula || "").toUpperCase() === m) : null;
-      if (veh) patch = { vehiculo_id: veh.id, colaborador_id: "", matricula_manual: "", chofer_id: asignaChofer || veh.chofer_id || "" };
+      if (veh) {
+        const tractora = String(veh.clase||veh.tipo||"").toLowerCase().includes("tractora");
+        if (tractora && !asignaRemolque) { notify("Selecciona el remolque del conjunto.", "info"); return; }
+        patch = { vehiculo_id: veh.id, remolque_id: tractora ? asignaRemolque : "", colaborador_id: "", matricula_manual: "", chofer_id: asignaChofer || veh.chofer_id || "" };
+      }
       else if (m) patch = { matricula_manual: m, vehiculo_id: "", colaborador_id: "", chofer_id: asignaChofer || "" };
       else if (asignaChofer) patch = { chofer_id: asignaChofer };
     }
@@ -5252,7 +5276,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
         if(!assigned)return;
       }else await editarPedido(peds[0].id,patch);
       notify(`Asignado al grupaje (${peds.length} pedidos).`, 'success');
-      setAsignaGid(""); setAsignaMat(""); setAsignaChofer(""); setAsignaColab(""); setCreandoColab(false); setNuevoColabNombre("");
+      setAsignaGid(""); setAsignaMat(""); setAsignaRemolque(""); setAsignaChofer(""); setAsignaColab(""); setCreandoColab(false); setNuevoColabNombre("");
       onReload?.();
     } catch(error){notify(error.message,"error");} finally { setTrabajandoGrupaje(false); }
   }
@@ -5272,9 +5296,30 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
       <datalist id="tg-grupaje-tractoras">
         {tractorasGrupaje.map(v => <option key={v.id} value={v.matricula} />)}
       </datalist>
+      <div className="traffic-responsive-flex" style={{marginBottom:12,display:"flex",alignItems:"end",gap:12,flexWrap:"wrap",padding:14,border:"1px solid var(--border2)",borderRadius:10,background:"var(--bg2)"}}>
+        <label style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>1. Vehículo del grupaje
+          <select aria-label="Vehículo del grupaje" value={preVehiculoId} onChange={e=>{const v=tractorasGrupaje.find(item=>String(item.id)===e.target.value);setPreVehiculoId(e.target.value);setPreRemolqueId(String(v?.clase||v?.tipo||"").toLowerCase().includes("tractora")?v?.remolque_id||"":"");setPreChoferId(v?.chofer_id||"");setSelGids([]);}} style={{display:"block",marginTop:5,padding:8,minWidth:185,maxWidth:"100%",border:"1px solid var(--border2)",borderRadius:7,background:"var(--bg4)",color:"var(--text)"}}>
+            <option value="">Seleccionar vehículo</option>
+            {tractorasGrupaje.filter(v=>v.activo!==false).map(v=><option key={v.id} value={v.id}>{v.matricula} · {v.clase||v.tipo||"Vehículo"}</option>)}
+          </select>
+        </label>
+        {preEsTractora && <label style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>Remolque del conjunto
+          <select aria-label="Remolque del grupaje" value={preRemolqueId} onChange={e=>{setPreRemolqueId(e.target.value);setSelGids([]);}} style={{display:"block",marginTop:5,padding:8,minWidth:185,maxWidth:"100%",border:"1px solid var(--border2)",borderRadius:7,background:"var(--bg4)",color:"var(--text)"}}>
+            <option value="">Seleccionar remolque</option>
+            {remolquesGrupaje.map(v=><option key={v.id} value={v.id}>{v.matricula} · {v.clase||"Remolque"}</option>)}
+          </select>
+        </label>}
+        <label style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>Chófer
+          <select aria-label="Chófer del grupaje" value={preChoferId} onChange={e=>setPreChoferId(e.target.value)} style={{display:"block",marginTop:5,padding:8,minWidth:185,maxWidth:"100%",border:"1px solid var(--border2)",borderRadius:7,background:"var(--bg4)",color:"var(--text)"}}>
+            <option value="">Sin chófer asignado</option>
+            {choferes.filter(c=>c.activo!==false).map(c=><option key={c.id} value={c.id}>{driverOption(c)}</option>)}
+          </select>
+        </label>
+        <span style={{fontSize:11,color:"var(--text5)"}}>{conjuntoListo ? "2. Selecciona los viajes que quieres agrupar." : "Selecciona el conjunto para activar los viajes."}</span>
+      </div>
       <div className="traffic-responsive-flex" style={{marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{fontSize:12,color:"var(--text5)"}}>
-          Marca los grupos con la casilla y pulsa "Combinar" para juntarlos en un viaje. Dentro de cada grupaje, arrastra las paradas para ordenarlas.
+          Selecciona primero el conjunto y después los pedidos. La ocupación utiliza la capacidad real de su ficha; dentro del grupaje puedes ordenar las paradas.
         </div>
         {selGids.length >= 2 && (
           <div className="traffic-responsive-flex" style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -5302,11 +5347,8 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
           <div className="groupage-preview-grid">
             <RemolqueGrupaje
               pedidos={selGids.flatMap(g => byGrupaje[g] || [])}
-              vehiculo={(() => {
-                const primero = selGids.flatMap(g => byGrupaje[g] || [])[0];
-                const mat = String(primero?.vehiculo_matricula || primero?.matricula || "").toUpperCase();
-                return vehiculos.find(v => String(v.matricula || "").toUpperCase() === mat) || null;
-              })()}
+              vehiculo={capacidadSeleccionada}
+              capacidadEstricta
             />
             <div className="groupage-preview-map"><strong>Paradas del grupaje</strong>{(() => {
               const points = groupageStops(selGids.flatMap(g => byGrupaje[g] || [])).filter(stop=>stop.lat!=null&&stop.lng!=null&&String(stop.lat).trim()!==''&&String(stop.lng).trim()!=='').map((stop,index) => ({
@@ -5335,8 +5377,8 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
             <div key={gid} style={{background:"var(--bg2)",border:selGids.includes(gid)?"1px solid rgba(16,185,129,.5)":(esBorradorGrupaje?"1px dashed rgba(245,158,11,.6)":"1px solid var(--border2)"),borderRadius:12,overflow:"hidden"}}>
               {/* Header */}
               <div className="traffic-responsive-flex" style={{background:"var(--bg3)",padding:"10px 16px",borderBottom:"1px solid var(--border2)",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                <input type="checkbox" checked={selGids.includes(gid)} onChange={()=>toggleSelGid(gid)}
-                  title="Marca para combinar con otros grupos" style={{width:16,height:16,accentColor:"#10b981",cursor:"pointer"}}/>
+                <input type="checkbox" checked={selGids.includes(gid)} onChange={()=>toggleSelGid(gid)} disabled={!conjuntoListo}
+                  title={conjuntoListo ? "Marca para combinar con otros grupos" : "Selecciona primero el conjunto"} style={{width:16,height:16,accentColor:"#10b981",cursor:"pointer"}}/>
                 <span style={{fontWeight:800,fontSize:14,color:"var(--text)"}}>
                   {grupoLabel}
                 </span>
@@ -5355,7 +5397,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 )}
                 <span style={{fontSize:11,color:"var(--text5)",marginLeft:4}}>{peds.length} pedido{peds.length!==1?"s":""} - {Number(kgTotal).toLocaleString("es-ES")} kg - {Number(impTotal).toLocaleString("es-ES",{minimumFractionDigits:2})} EUR</span>
                 <div className="traffic-responsive-flex" style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
-                  <button onClick={()=>{ setAsignaGid(asignaGid===gid?"":gid); setAsignaMat(veh?.matricula||primerPed?.matricula_manual||""); setAsignaChofer(primerPed?.chofer_id||""); }} disabled={trabajandoGrupaje}
+                  <button onClick={()=>{ setAsignaGid(asignaGid===gid?"":gid); setAsignaMat(veh?.matricula||primerPed?.matricula_manual||""); setAsignaRemolque(primerPed?.remolque_id||veh?.remolque_id||""); setAsignaChofer(primerPed?.chofer_id||""); }} disabled={trabajandoGrupaje}
                     style={{padding:"3px 10px",borderRadius:5,border:"1px solid var(--accent-a35)",background:"var(--accent-a12)",color:"var(--accent)",fontSize:11,fontWeight:700,cursor:"pointer"}}>
                     Asignar matricula
                   </button>
@@ -5372,8 +5414,14 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 <div className="traffic-responsive-flex" style={{background:"var(--bg3)",borderBottom:"1px solid var(--border2)",padding:"10px 16px",display:"flex",flexDirection:"column",gap:8}}>
                   <div className="traffic-responsive-flex" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                     <span style={{fontSize:11,color:"var(--text5)",minWidth:70}}>Flota / a mano:</span>
-                    <input list="tg-grupaje-tractoras" value={asignaMat} onChange={e=>setAsignaMat(e.target.value.toUpperCase())} placeholder={asignaColab ? "Matricula del colaborador (opcional)" : "Ej: 1234-ABC"}
+                    <input list="tg-grupaje-tractoras" value={asignaMat} onChange={e=>{const mat=e.target.value.toUpperCase();const v=tractorasGrupaje.find(item=>String(item.matricula||"").toUpperCase()===mat);setAsignaMat(mat);setAsignaRemolque(v?.remolque_id||"");}} placeholder={asignaColab ? "Matricula del colaborador (opcional)" : "Ej: 1234-ABC"}
                       style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,width:200,outline:"none"}}/>
+                    {String(tractorasGrupaje.find(v=>String(v.matricula||"").toUpperCase()===String(asignaMat||"").toUpperCase())?.clase||"").toLowerCase().includes("tractora") && !asignaColab && (
+                      <select aria-label="Remolque del conjunto asignado" value={asignaRemolque} onChange={e=>setAsignaRemolque(e.target.value)} style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12}}>
+                        <option value="">Seleccionar remolque</option>
+                        {remolquesGrupaje.map(v=><option key={v.id} value={v.id}>{v.matricula}</option>)}
+                      </select>
+                    )}
                     <select value={asignaChofer} onChange={e=>setAsignaChofer(e.target.value)} disabled={!!asignaColab}
                       style={{background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"6px 10px",borderRadius:7,fontSize:12,outline:"none",opacity:asignaColab?.5:1}}>
                       <option value="">Chofer (auto del vehículo)</option>
@@ -5413,7 +5461,7 @@ function CuadranteCascada({ pedidos, vehiculos, choferes, colaboradores = [], al
                 </div>
               )}
 
-              {esGrupoReal ? <GroupageRouteEditor groupId={String(gid).replace('grupo:','')} orders={peds} canEdit={puedeEditar("pedidos")} vehicle={vehiculos.find(v=>v.id===(primerPed?.remolque_id||veh?.remolque_id))||veh} onReload={onReload}/> : <div style={{padding:16}}><p>Selecciona este pedido y otros para preparar un grupaje.</p><RemolqueGrupaje pedidos={peds} vehiculo={veh}/></div>}
+              {esGrupoReal ? <GroupageRouteEditor groupId={String(gid).replace('grupo:','')} orders={peds} canEdit={puedeEditar("pedidos")} vehicle={vehiculos.find(v=>v.id===primerPed?.remolque_id)||veh} onReload={onReload}/> : <div style={{padding:16}}><p>Selecciona este pedido y otros para preparar un grupaje.</p><RemolqueGrupaje pedidos={peds} vehiculo={vehiculos.find(v=>v.id===primerPed?.remolque_id)||veh} capacidadEstricta/></div>}
 
             </div>
           );

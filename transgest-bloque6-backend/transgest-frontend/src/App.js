@@ -905,19 +905,25 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
   });
   const dragRef = useRef(null);
   const announcedDelays = useRef(new Set());
+  const [urgentDelayKey, setUrgentDelayKey] = useState(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try { setMinimized(window.localStorage.getItem(minimizedKey) === "1"); }
     catch { setMinimized(false); }
   }, [minimizedKey]);
   useEffect(() => {
+    if (hidden) return;
     const fresh = items.filter(item => item.demora_paralizacion && !announcedDelays.current.has(item.key));
     if (!fresh.length) return;
     fresh.forEach(item => announcedDelays.current.add(item.key));
+    setUrgentDelayKey(fresh[0].key);
     writeAvimMinimized(user, false);
     setMinimized(false);
     onToggle(true);
-  }, [items, onToggle, user]);
+  }, [items, hidden, onToggle, user]);
+  useEffect(() => {
+    if (urgentDelayKey && !items.some(item => item.key === urgentDelayKey)) setUrgentDelayKey(null);
+  }, [items, urgentDelayKey]);
   useEffect(() => {
     setVisibleCount(pageSize);
   }, [open, items.length]);
@@ -926,6 +932,7 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
   const esGerente = user?.rol === "gerente";
   const importantes = items.filter(i => i.severity === "alta");
   const visibleItems = items.slice(0, visibleCount);
+  const urgentDelay = items.find(item => item.key === urgentDelayKey);
   const remainingItems = Math.max(0, items.length - visibleItems.length);
   const totalAvisos = resumen.total || items.length;
 
@@ -1100,7 +1107,18 @@ function OperativeAlertsPanel({ user, data, open, onToggle, onRefresh, onRemove,
         </div>
       )}
     </div>;
-  return orderEditorAnchor ? createPortal(<details className="order-editor-alert-popover"><summary className="order-editor-alert-button">AvIm · {totalAvisos}</summary><div className="order-editor-alert-content">{panel}</div></details>, orderEditorAnchor) : panel;
+  const urgentNotice = urgentDelay && (
+    <div role="alert" style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:9400,width:"min(520px,calc(100vw - 32px))",padding:14,borderRadius:12,border:"2px solid #f59e0b",background:"var(--bg2)",color:"var(--text)",boxShadow:"0 18px 55px rgba(0,0,0,.28)",display:"grid",gap:8}}>
+      <strong style={{fontSize:14}}>Aviso operativo · {urgentDelay.title}</strong>
+      <span style={{fontSize:12,lineHeight:1.45}}>{urgentDelay.detail}</span>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <button type="button" onClick={() => { setUrgentDelayKey(null); abrirPedido(urgentDelay); }} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer"}}>Abrir pedido</button>
+        <button type="button" onClick={() => { setUrgentDelayKey(null); onAcknowledge?.(urgentDelay); }} style={{padding:"7px 10px",borderRadius:8,border:"1px solid #b45309",background:"#fef3c7",color:"#78350f",fontWeight:800,cursor:"pointer"}}>Visto · apagar aviso</button>
+        <button type="button" onClick={() => setUrgentDelayKey(null)} style={{padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg3)",color:"var(--text)",fontWeight:800,cursor:"pointer"}}>Ver en AvIm</button>
+      </div>
+    </div>
+  );
+  return <>{orderEditorAnchor ? createPortal(<details className="order-editor-alert-popover"><summary className="order-editor-alert-button">AvIm · {totalAvisos}</summary><div className="order-editor-alert-content">{panel}</div></details>, orderEditorAnchor) : panel}{urgentNotice}</>;
 }
 
 function dateKey(value) {
@@ -1673,7 +1691,7 @@ function AppInner() {
           const arr = Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.eventos) ? payload.eventos : [];
           const today = addDaysKey(0);
           const tomorrow = addDaysKey(1);
-          const abiertas = uniquePendingTasks(arr).filter(ev => ["pendiente","en_progreso"].includes(String(ev.estado || "").toLowerCase()) && !reminderIsPostponed(ev));
+          const abiertas = uniquePendingTasks(arr).filter(ev => ev.creado_por && !ev.source_type && ["", "agenda_manual"].includes(String(ev.metadata?.source || "")) && ["pendiente","en_progreso"].includes(String(ev.estado || "").toLowerCase()) && !reminderIsPostponed(ev));
           const next = {
             visible: false,
             pasadas: abiertas.filter(ev => dateKey(ev.fecha_inicio || ev.start || ev.fecha) && dateKey(ev.fecha_inicio || ev.start || ev.fecha) < today),

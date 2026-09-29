@@ -95,7 +95,7 @@ router.get("/", async (req, res) => {
   if (!empresaId(req)) return res.status(401).json({ error: "Sin empresa_id" });
   const params = [empresaId(req)];
   const where = ["e.empresa_id=$1"];
-  if (req.query.origen === 'manual') where.push("e.source_type IS NULL AND COALESCE(e.metadata->>'source','') <> 'avisos_operativos_colaborador'");
+  if (req.query.origen === 'manual') where.push("e.creado_por IS NOT NULL AND e.source_type IS NULL AND COALESCE(e.metadata->>'source','') IN ('','agenda_manual')");
   if (req.query.mostrar_resueltas !== '1') where.push('(e.source_type IS NULL OR e.resolved_at IS NULL)');
   const qIdx = () => `$${params.length}`;
 

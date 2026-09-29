@@ -60,8 +60,8 @@ export function AuthProvider({ children }) {
     return ()=>{window.removeEventListener('storage',onStorage);window.removeEventListener('pageshow',onPageshow);window.removeEventListener('tms:session-cleared',onCleared);};
   }, []);
 
-  const login = useCallback(async (email, password) => {
-    const data = await apiLogin(email, password);
+  const login = useCallback(async (email, password, codigoEmpresa = "") => {
+    const data = await apiLogin(email, password, codigoEmpresa);
     if (!hasProduct(data.user, "planner")) {
       window.history.replaceState(null, "", "/?workspace=tms");
       window.dispatchEvent(new PopStateEvent("popstate"));

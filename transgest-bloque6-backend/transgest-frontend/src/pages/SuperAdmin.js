@@ -258,6 +258,7 @@ const supportRequest = (path, options) => saFetch(`/soporte${path}`,options);
 
 function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
   const [form,setForm]=useState({
+    codigo_acceso:empresa.codigo_acceso||"",
     plan:empresa.plan,
     origen_comercial:empresa.origen_comercial||"",
     estado:empresa.estado,
@@ -396,6 +397,7 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
         {err&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,padding:"9px 12px",color:"#fca5a5",fontSize:12,marginBottom:12}}>{err}</div>}
 
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>Código de empresa para acceder</label><input style={inp} value={form.codigo_acceso} onChange={e=>setForm(p=>({...p,codigo_acceso:e.target.value.toUpperCase()}))} maxLength={20}/><small>Único para cada empresa. Los usuarios pueden repetir iniciales en empresas distintas.</small></div>
           <div><label style={lbl}>Plan</label>
             <select style={inp} value={form.plan} onChange={f("plan")}>
               {form.plan === "basico" && <option value="basico">Control · pendiente migración a Pro</option>}
@@ -3374,6 +3376,7 @@ export default function SuperAdmin(){
                           <td style={{...S.td,fontWeight:700,color:"#e2e8f0"}}>
                             <div>{e.nombre}</div>
                             <div style={{fontSize:11,color:"#64748b"}}>{e.email_admin}</div>
+                            <div style={{fontSize:10,color:"#5eead4"}}>Código: {e.codigo_acceso || "Pendiente"}</div>
                             {e.cif&&<div style={{fontSize:10,color:"#475569"}}>{e.cif}</div>}
                           </td>
                           <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{getBrandDisplayName(e.plan)}</span></td>

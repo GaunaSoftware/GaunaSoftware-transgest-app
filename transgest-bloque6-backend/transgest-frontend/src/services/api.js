@@ -408,10 +408,10 @@ export async function verArchivoProtegido(path, fallbackName = "documento") {
   return { filename, size: blob.size };
 }
 
-export async function login(email, password) {
+export async function login(email, password, codigoEmpresa = "") {
   const data = await apiFetch("/auth/login", {
     method: "POST",
-    body: { email, password },
+    body: { email, password, codigo_empresa: codigoEmpresa },
   });
   applyAuthSession(data);
   if (data.bloqueado) {
@@ -439,7 +439,7 @@ export async function getMe() {
 export const getDemoOptions = () => apiFetch("/auth/demo/options", { silentSuccess:true });
 export const switchDemoPlan = (plan) => apiFetch("/auth/demo/switch-plan", { method:"POST", body:{ plan }, silentSuccess:true }).then(applyAuthSession);
 export const switchDemoUser = (user_id) => apiFetch("/auth/demo/switch-user", { method:"POST", body:{ user_id }, silentSuccess:true }).then(applyAuthSession);
-export const requestPasswordReset = (identifier) => apiFetch("/auth/forgot-password", { method:"POST", body:{ identifier }, silentSuccess:true });
+export const requestPasswordReset = (identifier, codigoEmpresa = "") => apiFetch("/auth/forgot-password", { method:"POST", body:{ identifier, codigo_empresa: codigoEmpresa }, silentSuccess:true });
 
 export async function getAccountingLaunch() {
   return apiFetch("/accounting/launch-token", { silentSuccess: true });
@@ -950,8 +950,8 @@ export const getPublicAppMeta = async () => {
   if (typeof window !== "undefined") window.__TMS_APP_META = meta;
   return meta;
 };
-export const getLoginBrand = async (identifier) => {
-  const q = new URLSearchParams({ identifier: String(identifier || "").trim() });
+export const getLoginBrand = async (identifier, codigoEmpresa = "") => {
+  const q = new URLSearchParams({ identifier: String(identifier || "").trim(), codigo_empresa: String(codigoEmpresa || "").trim() });
   const res = await fetch(`${BASE}/api/v1/auth/login-brand?${q.toString()}`);
   if (!res.ok) return { found:false };
   return fixMojibakePayload(await res.json().catch(() => ({ found:false })));

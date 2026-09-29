@@ -12,6 +12,7 @@ const { authenticate, getSubscriptionState, normalizePermissionsForRole } = requ
 const { ensurePasswordPolicySchema, assertPasswordNotReused, rememberPasswordHash } = require("../services/passwordPolicy");
 const { enviarEmail, getPlatformEmailConfig } = require("../services/email");
 const ensureDemoShowcase = require("../../scripts/ensure_demo_showcase");
+const { ensureCompanyAccessCodes, normalizeCompanyCode } = require("../services/companyAccessCode");
 
 const router = express.Router();
 const LOGIN_MAX_ATTEMPTS = Math.max(3, Number(process.env.LOGIN_MAX_ATTEMPTS || 5));
@@ -36,6 +37,7 @@ function failAuthSchema(error) {
 
 async function ensureAuthSchema() {
   if (authSchemaReady) return;
+  await ensureCompanyAccessCodes().catch(failAuthSchema);
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS chofer_id UUID REFERENCES choferes(id) ON DELETE SET NULL").catch(failAuthSchema);
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trafico_config JSONB NOT NULL DEFAULT '{}'::jsonb").catch(failAuthSchema);
   await db.query("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS debe_cambiar_password BOOLEAN NOT NULL DEFAULT false").catch(failAuthSchema);
@@ -123,6 +125,7 @@ async function authUserPayload(user = {}, extra = {}) {
     rol: user.rol,
     empresa_id: user.empresa_id,
     empresa_nombre: user.empresa_nombre || extra.empresa_nombre || "",
+    codigo_acceso: user.codigo_acceso || extra.codigo_acceso || "",
     bi_consolidado: user.bi_consolidado === true,
     plan: user.plan,
     productos: user.productos || (await require("../services/companyProducts").get(user.empresa_id)).productos,
@@ -162,6 +165,7 @@ async function auditLogin({ user, identifier, ok, req, motivo }) {
 // ── POST /api/v1/auth/login ───────────────────────────
 router.get("/login-brand", async (req, res) => {
   const identifier = String(req.query.identifier || req.query.email || req.query.usuario || "").trim().toLowerCase();
+  const companyCode = normalizeCompanyCode(req.query.codigo_empresa);
   if (!identifier || identifier.length < 3) return res.json({ found: false });
   try {
     await ensureAuthSchema();
@@ -172,10 +176,11 @@ router.get("/login-brand", async (req, res) => {
          JOIN empresas e ON e.id=u.empresa_id
         WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
           AND u.activo IS DISTINCT FROM false
-        LIMIT 1`,
-      [identifier]
+          AND ($2::text='' OR e.codigo_acceso=$2)
+        LIMIT 2`,
+      [identifier, companyCode]
     );
-    const row = rows[0];
+    const row = rows.length === 1 ? rows[0] : null;
     if (!row) return res.json({ found: false });
     res.json({
       found: true,
@@ -192,8 +197,10 @@ router.get("/login-brand", async (req, res) => {
 router.post("/forgot-password",
   body("identifier").optional().isString().trim().isLength({ min: 3 }),
   body("email").optional().isString().trim().isLength({ min: 3 }),
+  body("codigo_empresa").optional().isString().trim(),
   async (req, res) => {
     const raw = String(req.body?.identifier || req.body?.email || "").trim().toLowerCase();
+    const companyCode = normalizeCompanyCode(req.body?.codigo_empresa);
     if (!raw || raw.length < 3) {
       return res.status(400).json({ error: "Indica tu usuario o email" });
     }
@@ -203,11 +210,13 @@ router.post("/forgot-password",
         `SELECT u.id,u.nombre,u.email,u.username,u.rol,u.empresa_id,e.nombre AS empresa_nombre
            FROM usuarios u
            LEFT JOIN empresas e ON e.id=u.empresa_id
-          WHERE LOWER(u.email)=$1 OR LOWER(u.username)=$1
+          WHERE (LOWER(u.email)=$1 OR LOWER(u.username)=$1)
+            AND ($2::text='' OR e.codigo_acceso=$2)
           ORDER BY u.activo DESC, u.created_at ASC
-          LIMIT 1`,
-        [raw]
+          LIMIT 2`,
+        [raw, companyCode]
       );
+      if (rows.length > 1) return res.status(400).json({ error: "Indica el código de empresa para identificar tu cuenta." });
       const user = rows[0] || null;
       await db.query(
         `INSERT INTO password_reset_requests
@@ -261,6 +270,7 @@ router.post("/forgot-password",
 router.post("/login",
   body("email").optional().isString().trim().isLength({ min: 1 }),
   body("usuario").optional().isString().trim().isLength({ min: 1 }),
+  body("codigo_empresa").optional().isString().trim(),
   body("password").isLength({ min: 6 }),
   async (req, res) => {
     const errors = validationResult(req);
@@ -268,6 +278,7 @@ router.post("/login",
 
     const { email, usuario, password } = req.body;
     const identifier = String(email || usuario || "").trim().toLowerCase();
+    const companyCode = normalizeCompanyCode(req.body?.codigo_empresa);
     if (!identifier) return res.status(400).json({ error: "Usuario/email y contraseña requeridos" });
 
     try {
@@ -277,14 +288,18 @@ router.post("/login",
         `SELECT u.id, u.nombre, u.email, u.password_hash, u.rol, u.activo, u.empresa_id, u.cliente_id, u.chofer_id, u.colaborador_id,
                 u.username, u.perfil, u.permisos, u.trafico_config, u.debe_cambiar_password, u.password_changed_at,
                 u.login_failed_count, u.login_locked_until,
-                e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.cfg_precios,
+                e.nombre AS empresa_nombre, e.email_admin, e.dominio, e.codigo_acceso, e.cfg_precios,
                 e.plan, e.estado AS empresa_estado, e.fecha_vencimiento,
                 e.bloqueo_manual, e.bloqueo_motivo
          FROM usuarios u
          LEFT JOIN empresas e ON e.id = u.empresa_id
-         WHERE LOWER(u.email) = $1 OR LOWER(u.username) = $1`,
-        [identifier]
+         WHERE (LOWER(u.email) = $1 OR LOWER(u.username) = $1)
+           AND ($2::text='' OR e.codigo_acceso=$2)
+         LIMIT 2`,
+        [identifier, companyCode]
       );
+
+      if (rows.length > 1) return res.status(400).json({ error: "Indica el código de empresa para identificar tu cuenta." });
 
       const user = rows[0];
 
@@ -335,11 +350,14 @@ router.post("/login",
 
       const membershipService=require('../services/companyMembership');
       const available=await membershipService.memberships(user.id);
-      const requested=req.body.empresa_id || (available.some(m=>m.empresa_id===user.empresa_id)?user.empresa_id:available[0]?.empresa_id);
+      if (companyCode && req.body.empresa_id && req.body.empresa_id !== user.empresa_id) {
+        return res.status(401).json({ error: "Credenciales incorrectas" });
+      }
+      const requested=companyCode ? user.empresa_id : (req.body.empresa_id || (available.some(m=>m.empresa_id===user.empresa_id)?user.empresa_id:available[0]?.empresa_id));
       let member=requested?await membershipService.userForCompany(user.id,requested):null;
       // A blocked primary subscription must not prevent entering another authorized company.
       const blocked=m=>getSubscriptionState(m?{estado:m.empresa_estado,plan:m.plan,fecha_vencimiento:m.fecha_vencimiento,bloqueo_manual:m.bloqueo_manual,bloqueo_motivo:m.bloqueo_motivo}:null).blocked;
-      if(!req.body.empresa_id&&member&&blocked(member)){
+      if(!companyCode&&!req.body.empresa_id&&member&&blocked(member)){
         for(const candidate of available){if(candidate.empresa_id===requested)continue;
           const alternative=await membershipService.userForCompany(user.id,candidate.empresa_id);
           if(alternative&&!blocked(alternative)){member=alternative;break;}

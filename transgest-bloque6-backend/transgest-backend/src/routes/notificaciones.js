@@ -194,7 +194,7 @@ function buildColaboradorAlerts(row) {
     ));
   }
 
-  if (puedeConfirmarPorEnlace && !finalizado && (scheduleReached(dateOnly(row.fecha_descarga || row.fecha_entrega), row.hora_descarga, row.ventana_descarga) || estado === "descarga") && !row.colaborador_descarga_confirmada_at) {
+  if (puedeConfirmarPorEnlace && !finalizado && scheduleReached(dateOnly(row.fecha_descarga || row.fecha_entrega), row.hora_descarga, row.ventana_descarga) && !row.colaborador_descarga_confirmada_at) {
     alerts.push(buildAlert(
       row,
       "descarga_sin_confirmar",

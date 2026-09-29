@@ -135,6 +135,10 @@ async function run(){
     VALUES($1,'WEB-STATUS','en_curso',CURRENT_DATE-1,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail]);
   assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===webStatus.id && item.kind==='camino_sin_confirmar'),false,
     'web status alone does not imply an unconfirmed departure');
+  const {rows:[earlyUnload]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at)
+    VALUES($1,'UNLOAD-NOT-DUE','descarga',CURRENT_DATE-1,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail]);
+  assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===earlyUnload.id && item.kind==='descarga_sin_confirmar'),false,
+    'the descarga status does not anticipate the agreed delivery window');
   const { madridClock }=require('../src/services/operativeAlertTiming');
   const {rows:[noHour]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at)
     VALUES($1,'LOAD-NO-HOUR','confirmado',$3::date,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail,madridClock().date]);

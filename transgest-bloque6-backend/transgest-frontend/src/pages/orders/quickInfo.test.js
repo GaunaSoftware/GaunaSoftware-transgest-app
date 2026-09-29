@@ -1,4 +1,4 @@
-import { driverName, driverOption, orderRig, incidentDescription, incidentLabel, assignDriver, stopSchedule } from './quickInfo';
+import { driverName, driverOption, orderRig, hasActiveIncident, incidentDescription, incidentLabel, assignDriver, stopSchedule } from './quickInfo';
 
 test('selecting a driver fills missing rig but preserves manual overrides', () => {
   const drivers=[{id:'d',vehiculo_id:'t'},{id:'d2',vehiculo_id:'t2'}];
@@ -30,10 +30,15 @@ test('incidents display the actual reason or explicitly identify missing details
   expect(incidentDescription({estado:'incidencia',incidencia_descripcion:'Retraso en muelle'})).toBe('Retraso en muelle');
   expect(incidentDescription({estado:'incidencia'})).toContain('sin descripción registrada');
   expect(incidentDescription({estado:'entregado'})).toBe('');
-  expect(incidentDescription({estado:'confirmado',incidencia_tipo:'operativa'})).toContain('ejecución del transporte');
-  expect(incidentDescription({estado:'confirmado',incidencia_tipo:'operativa'})).toContain('No hay un motivo concreto registrado');
-  expect(incidentDescription({estado:'confirmado',incidencia_tipo:'operativa',motivo_incidencia:'Muelle ocupado'})).toBe('Muelle ocupado');
-  expect(incidentLabel({estado:'confirmado',incidencia_tipo:'operativa'})).toBe('Operativa');
-  expect(incidentDescription({incidencia_tipo:'documentacion'})).toContain('albarán');
-  expect(incidentDescription({incidencia_tipo:'otra_categoria'})).toContain('otra categoria');
+  expect(incidentDescription({estado:'incidencia',incidencia_tipo:'documentacion'})).toContain('albarán');
+  expect(incidentDescription({estado:'incidencia',incidencia_tipo:'otra_categoria'})).toContain('otra categoria');
+});
+
+test('resolved incident metadata does not mark a confirmed collaborator order as active', () => {
+  const confirmed = {estado:'confirmado',colaborador_id:'supplier',incidencia_tipo:'operativa',incidencia_descripcion:'Incidencia anterior'};
+  expect(hasActiveIncident(confirmed)).toBe(false);
+  expect(incidentLabel(confirmed)).toBe('');
+  expect(incidentDescription(confirmed)).toBe('');
+  expect(incidentDescription({...confirmed,estado:'incidencia'})).toBe('Incidencia anterior');
+  expect(incidentLabel({...confirmed,incidencia_activa:true})).toBe('Operativa');
 });

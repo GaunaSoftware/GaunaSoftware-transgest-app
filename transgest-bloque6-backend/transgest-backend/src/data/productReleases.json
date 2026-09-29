@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-09-resolved-order-incidents",
+    "date": "2026-09-29",
+    "title": "Incidencias de pedidos resueltas",
+    "intro": "Los pedidos confirmados dejan de mostrar como activa una incidencia anterior conservada en su historial.",
+    "items": [
+      { "title": "Estado e incidencias coherentes", "text": "En Pedidos / Tráfico y Dashboard, una incidencia solo se señala como abierta si el viaje sigue en estado incidencia. Los detalles históricos del pedido permanecen guardados.", "module": "pedidos" }
+    ]
+  },
+  {
     "id": "2026-09-company-access-code-favicon",
     "date": "2026-09-29",
     "title": "Acceso de empresa e icono de TransGest",

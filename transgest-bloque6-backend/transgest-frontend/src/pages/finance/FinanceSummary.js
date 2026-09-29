@@ -22,13 +22,13 @@ export default function FinanceSummary({ forecast, money, backlogCount, backlogA
     <div className="finance-summary-middle">
       <Card as="section" className="finance-summary-chart"><h2><Icon name="wallet" />Evolución de tesorería <small>(próximos 60 días)</small></h2><TreasuryChart forecast={forecast} money={money} /></Card>
       <Card as="section" className="finance-summary-backlog"><div className="finance-summary-card-heading"><span className="finance-summary-icon tgui-tone--warning"><Icon name="truck" size={26} /></span><h2>Viajes pendientes de facturar</h2></div>
-        <p className="finance-summary-backlog-value"><strong>{backlogCount}</strong> viajes <span>·</span> <strong>{money(backlogAmount)} €</strong></p>
-        <p>Viajes entregados sin factura · Todos los períodos.</p>
+        <p className="finance-summary-backlog-value"><strong>{backlogCount == null ? '—' : backlogCount}</strong> viajes <span>·</span> <strong>{backlogAmount == null ? '—' : `${money(backlogAmount)} €`}</strong></p>
+        <p>Viajes entregados pendientes de emitir, incluidos los que tienen borrador · Todos los períodos.</p>
         <div className="tgui-actions"><Button variant="primary" onClick={onBacklog}>Revisar viajes</Button>{canEdit && <Button onClick={onInvoice}>Facturar pedidos</Button>}</div>
       </Card>
     </div>
     <Card as="section" className="finance-invoices finance-summary-invoices" aria-label="Facturas de clientes">
-      <header className="finance-invoices-header"><div className="finance-summary-card-heading"><span className="finance-summary-icon"><Icon name="invoice" /></span><div><h2>Facturas de clientes</h2><p>Emisión, fiscalidad y control de facturas.</p></div></div>{canEdit && <Button onClick={onExport}>Exportar</Button>}</header>
+      <header className="finance-invoices-header"><div className="finance-summary-card-heading"><span className="finance-summary-icon"><Icon name="invoice" /></span><div><h2>Facturas de clientes</h2><p>Borradores y emitidas, con cobro y registro fiscal.</p></div></div>{canEdit && <Button onClick={onExport}>Exportar</Button>}</header>
       {filters}
       {renderInvoices(rows)}
       <footer className="finance-summary-pagination"><span>Mostrando {rows.length ? start + 1 : 0}–{start + rows.length} de {invoices.length} facturas cargadas <small>· {totalCount} en el período</small></span><div className="tgui-actions"><Button aria-label="Página anterior del resumen" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>‹</Button><span>{currentPage} / {pages}</span><Button aria-label="Página siguiente del resumen" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>›</Button><select className="tgui-input" aria-label="Facturas por página en resumen" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}><option value={5}>5 por página</option><option value={10}>10 por página</option></select><Button onClick={onAllInvoices}>Ver todas</Button></div></footer>

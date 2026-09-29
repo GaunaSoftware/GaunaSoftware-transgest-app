@@ -46,7 +46,9 @@ function pendingQuery(empresaId, options) {
   return { params, sql: `WITH pending AS (
     SELECT p.id,p.numero,p.cliente_id,c.nombre AS cliente_nombre,p.origen,p.destino,
       p.fecha_carga,p.fecha_descarga,p.fecha_entrega,p.referencia_cliente,
-      p.importe AS importe_registrado,p.factura_id AS borrador_id,
+      p.importe AS importe_registrado,p.importe,p.importe_revision_combustible,
+      p.importe_paralizacion,p.peso_kg,p.precio_unitario,p.precio_base_sin_combustible,
+      p.factura_id AS borrador_id,f.estado AS factura_estado,f.numero AS factura_numero,
       COALESCE(p.fecha_carga,p.fecha_descarga,p.fecha_entrega) AS fecha_periodo,
       CASE WHEN p.importe IS NULL THEN 'ausente'
         WHEN p.importe::text IN ('NaN','Infinity','-Infinity') THEN 'no_finito'
@@ -78,7 +80,9 @@ async function readUnbilledTrips(client, empresaId, options) {
   const pagination = `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   const { rows } = await client.query(customer
     ? `${sql} SELECT id,numero,cliente_id,origen,destino,fecha_carga,fecha_descarga,fecha_entrega,
-        referencia_cliente,importe_registrado,estado_importe,borrador_id,fecha_periodo
+        referencia_cliente,importe_registrado,importe,importe_revision_combustible,
+        importe_paralizacion,peso_kg,precio_unitario,precio_base_sin_combustible,
+        estado_importe,borrador_id,factura_estado,factura_numero,fecha_periodo
        FROM pending ORDER BY fecha_periodo ASC NULLS LAST,id ${pagination}`
     : `${sql} SELECT cliente_id,cliente_nombre,${COUNTS},MIN(fecha_periodo) AS fecha_mas_antigua,
         MAX(fecha_periodo) AS fecha_mas_reciente FROM pending GROUP BY cliente_id,cliente_nombre

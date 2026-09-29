@@ -1,4 +1,5 @@
 import { displayOrderLocation } from '../../utils/orderTown';
+import { incidentDescription } from './operationalStatus';
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 export function pendingClosureRows(orders, now = new Date()) {
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
@@ -19,6 +20,6 @@ export function filterPendingClosures(rows, filter, query, sort) {
     if (filter === 'recent' && row.days > 7) return false;
     if (filter === 'older' && row.days <= 7) return false;
     if (filter === 'incident' && row.order.estado !== 'incidencia') return false;
-    return !text || normalize([row.order.numero, row.order.cliente_nombre, displayOrderLocation(row.order,"carga"), displayOrderLocation(row.order,"descarga"), row.order.incidencia_descripcion].join(' ')).includes(text);
+    return !text || normalize([row.order.numero, row.order.cliente_nombre, displayOrderLocation(row.order,"carga"), displayOrderLocation(row.order,"descarga"), incidentDescription(row.order)].join(' ')).includes(text);
   }).sort((a, b) => (sort === 'oldest' ? b.days - a.days : a.days - b.days) || String(a.order.numero).localeCompare(String(b.order.numero)));
 }

@@ -192,6 +192,12 @@ async function main(){
   require('node:assert/strict').equal(Number(fuelInvoice.total),905.08);
   const fuelLines=(await db.query('SELECT concepto,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[fuelInvoice.id])).rows;
   require('node:assert/strict').equal(fuelLines.length,2);require('node:assert/strict').equal(Number(fuelLines[1].importe),68);
+  const unconfirmedClause=await call('Rechazar cláusula de gasóleo sin confirmación','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',pedidos_ids:fuelOrders,fuel_clause_percent:12.5,lineas:[{concepto:'Portes',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:85}]});
+  require('node:assert/strict').ok(unconfirmedClause.error);
+  const changedClause=await call('Aplicar cláusula de gasóleo en factura','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',pedidos_ids:fuelOrders,fuel_clause_percent:12.5,fuel_clause_confirmed:true,lineas:[{concepto:'Portes',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:85}]});
+  require('node:assert/strict').equal(Number(changedClause.base_imponible),765);
+  require('node:assert/strict').equal(Number(changedClause.fuel_clause?.applied_fuel),85);
+  require('node:assert/strict').equal(Number((await db.query('SELECT importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden DESC LIMIT 1',[changedClause.id])).rows[0].importe),85);
   const order=await call('Crear viaje asignado','POST','/pedidos',{cliente_id:client.id,vehiculo_id:vehicle.id,chofer_id:driver.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',fecha_entrega:'2026-09-17',fecha_descarga:'2026-09-17',hora_carga:'09:00',importe:500,mercancia:'Palets auditoría',peso_kg:24200,bultos:20});
   if(order.id){
    await call('Confirmar viaje','PATCH','/pedidos/'+order.id+'/estado',{estado:'confirmado'});
@@ -353,7 +359,7 @@ async function main(){
    evidence.driverFlow=await require('./audit_driver_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client,driver,vehicle,password});
    evidence.controlTowerFlow=await require('./audit_control_tower_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,password});
    evidence.operationalModel=await require('./audit_operational_model.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
-   evidence.groupagePlan=await require('./audit_groupage_plan.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
+   evidence.groupagePlan=await require('./audit_groupage_plan.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,vehicle,driver});
    evidence.journeyReplanning=await require('./audit_journey_replanning.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company});
    evidence.orderInbox=await require('./audit_inbox_flow.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,client});
    evidence.driverJourney=await require('./audit_driver_journey.cjs')({base,fetch:actualFetch,db,managerToken,driverToken:token,company,driver,vehicle});
@@ -420,7 +426,22 @@ async function main(){
   assert.ok(attachedExpense.factura_data);
   await call('Estructura: quitar puntual de ensayo','DELETE','/empresa/gastos-estructura/'+oneOffExpense.id);
   await call('Estructura: quitar mensual de ensayo','DELETE','/empresa/gastos-estructura/'+monthlyExpense.id);
+  const independentInvoice=await call('Factura independiente: crear borrador sin pedido ni documento','POST','/facturas',{cliente_id:client.id,serie:'A',fecha:'2026-09-29',estado:'borrador',pedidos_ids:[],referencia_cliente:'SERVICIO-EXTRA-QA',lineas:[{concepto:'Servicio independiente sintético',cantidad:1,precio_unit:125.5}]});
+  assert.ok(independentInvoice.id,JSON.stringify(independentInvoice));
+  assert.equal(Number(independentInvoice.base_imponible),125.5);
+  assert.equal(Number(independentInvoice.total),151.86);
+  assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM factura_pedidos WHERE factura_id=$1',[independentInvoice.id])).rows[0].n,0);
+  await call('Factura independiente: revisión sin soporte de transporte','POST','/facturas/'+independentInvoice.id+'/revision',{confirmado:true});
+  const emittedIndependent=await call('Factura independiente: emitir sin pedido','PATCH','/facturas/'+independentInvoice.id+'/estado',{estado:'emitida'});
+  assert.equal(emittedIndependent.estado_nuevo,'emitida');
+  token=foreignLogin.token;
+  await call('Factura independiente: otra empresa no accede','GET','/facturas/'+independentInvoice.id);
+  token=login.token;
+  await db.query('UPDATE pedidos SET matricula_colaborador=$1 WHERE id=$2 AND empresa_id=$3',['1234-ABC',secondUnassigned.id,company]);
+  const locationRows=await call('Agenda de tráfico: matrícula de colaborador','GET','/pedidos/resumen-lista?desde=2026-09-18&hasta=2026-09-24&limit=100');
+  assert.equal(locationRows.data.find(p=>p.id===secondUnassigned.id)?.matricula_colaborador,'1234-ABC');
   const expectedErrors=new Map([
+  ['Factura independiente: otra empresa no accede',404],
   ['Estructura: chófer sin acceso a comparativa',403],
   ['Estructura: no editar gasto de otra empresa',404],
   ['Estructura: bloqueo servidor de mes cerrado',409],
@@ -428,6 +449,7 @@ async function main(){
   ['Exigir confirmación de carga real en otro día',409],
   ['Exigir decisión sobre descarga fuera de fecha',409],
   ['Rechazar recargo incluido en porte',409],
+  ['Rechazar cláusula de gasóleo sin confirmación',400],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],

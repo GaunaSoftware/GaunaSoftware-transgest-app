@@ -5220,14 +5220,14 @@ ${bloqueCombustible}
         </div>
 
         <details className="document-control" open={!esColaborador}><summary>Documento de control digital · Documentos, firma y seguimiento</summary>
-          <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
-          <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",marginBottom:10,flexWrap:"wrap"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:10}}>
             <div>
               <div style={{fontFamily:"'Syne',sans-serif",fontWeight:800,fontSize:14,color:"var(--text)"}}>Documento de Control Digital</div>
               <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>
                 Consulta los documentos, las firmas y el estado de tramitación.
               </div>
             </div>
+            <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {docControlSupportUrl && (
                 <button
@@ -5268,7 +5268,7 @@ ${bloqueCombustible}
                 <button
                   onClick={descargarFirmaPaqueteDocControl}
                   style={{padding:"6px 12px",borderRadius:7,border:"1px solid rgba(124,58,237,.28)",background:"rgba(124,58,237,.10)",color:"#8b5cf6",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                  Paquete firma eIDAS
+                  Preparar paquete de firma
                 </button>
               )}
               {(pedido.firma_fecha || pedido.firma_hash) && (
@@ -8760,7 +8760,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     requiere_cinchas: true,
     pendiente_completar: true,
     aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
-    _focus_asignacion: true,
+    _focus_asignacion: focus.source !== "gestion_trafico" || focus.view !== "grupajes",
     _nuevo_desde_trafico: true,
     ...(focus.source === "almacen_palets" ? {
       cliente_id: defaults.cliente_id || "",
@@ -8950,6 +8950,7 @@ export default function Pedidos() {
   const [bulkRescheduling, setBulkRescheduling] = useState(false);
   const [bulkClearing, setBulkClearing] = useState(false);
   const [bulkVehiculo, setBulkVehiculo] = useState("");
+  const [bulkRemolque, setBulkRemolque] = useState("");
   const [bulkChofer, setBulkChofer] = useState("");
   const [bulkMatricula, setBulkMatricula] = useState("");
   const [bulkAssigning, setBulkAssigning] = useState(false);
@@ -9948,6 +9949,9 @@ export default function Pedidos() {
   async function combinarSeleccionadosEnGrupaje() {
     const lista = selectedPedidosOperables.filter(p => !pedidoTieneFacturaFinal(p) && !pedidoTieneFacturaBorrador(p));
     if (lista.length < 2) { notify("Selecciona al menos 2 pedidos para agruparlos en un grupaje.", "info"); return; }
+    const vehiculo = vehiculos.find(v => String(v.id) === String(bulkVehiculo));
+    const esTractora = String(vehiculo?.clase || vehiculo?.tipo || "").toLowerCase().includes("tractora");
+    if (!vehiculo || (esTractora && !bulkRemolque)) { notify("Selecciona el vehículo y el remolque del conjunto antes de agrupar.", "info"); return; }
     const ok = await confirmDialog({
       title: "Combinar en grupaje",
       message: `Se agruparan ${lista.length} pedidos en un mismo viaje (grupaje). Apareceran juntos en Mesa de trafico > Grupajes, respetando el orden de las descargas, y podras asignarles la matricula (propia o de colaborador).`,
@@ -9956,7 +9960,15 @@ export default function Pedidos() {
     if (!ok) return;
     setBulkAssigning(true);
     try {
-      const res = await combinarGrupaje(lista.map(p => p.id));
+      const asignacion = { vehiculo_id: vehiculo.id, remolque_id: esTractora ? bulkRemolque : "", chofer_id: bulkChofer || vehiculo.chofer_id || "" };
+      let res;
+      try { res = await combinarGrupaje(lista.map(p => p.id), false, asignacion); }
+      catch (error) {
+        if (error?.data?.code !== "ASSIGNMENT_REVIEW_REQUIRED") throw error;
+        const acepta = await confirmDialog({ title: "Revisar conjunto", message: error.message, confirmText: "Combinar con avisos", tone: "warning" });
+        if (!acepta) return;
+        res = await combinarGrupaje(lista.map(p => p.id), false, { ...asignacion, asignacion_revisada: true });
+      }
       notify(`Grupaje creado con ${res?.count || lista.length} pedidos. Revisalo en Mesa de trafico > Grupajes.`, "success");
       setSelectedPedidoIds([]);
       cargar();
@@ -10341,10 +10353,16 @@ export default function Pedidos() {
             Aplicar estado
           </button>
           <button disabled={bulkRescheduling||!selectedPedidosOperables.length} onClick={()=>setBulkReason({mode:"eliminar",orders:selectedPedidosOperables})} style={S.btn}>Eliminar seleccionados</button>
-          <select value={bulkVehiculo} onChange={e => setBulkVehiculo(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
+          <select aria-label="Vehículo para asignar o agrupar" value={bulkVehiculo} onChange={e => { const v=vehiculos.find(item=>String(item.id)===e.target.value);setBulkVehiculo(e.target.value);setBulkRemolque(String(v?.clase||v?.tipo||"").toLowerCase().includes("tractora")?v?.remolque_id||"":""); }} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
             <option value="">Vehiculo...</option>
-            {vehiculos.map(v => <option key={v.id} value={v.id}>{v.matricula}</option>)}
+            {vehiculos.filter(v=>v.activo!==false&&!/remolque|dolly/i.test(String(v.clase||v.tipo||""))).map(v => <option key={v.id} value={v.id}>{v.matricula}</option>)}
           </select>
+          {selectedPedidoIds.length >= 2 && String(vehiculos.find(v=>String(v.id)===String(bulkVehiculo))?.clase||"").toLowerCase().includes("tractora") && (
+            <select aria-label="Remolque para agrupar" value={bulkRemolque} onChange={e=>setBulkRemolque(e.target.value)} style={{...S.sel,width:160,padding:"5px 10px",fontSize:11}}>
+              <option value="">Remolque del conjunto...</option>
+              {vehiculos.filter(v=>/remolque/i.test(String(v.clase||v.tipo||""))&&v.activo!==false).map(v=><option key={v.id} value={v.id}>{v.matricula}</option>)}
+            </select>
+          )}
           <select value={bulkChofer} onChange={e => setBulkChofer(e.target.value)} style={{...S.sel,width:150,padding:"5px 10px",fontSize:11}}>
             <option value="">Chofer (auto del vehiculo)...</option>
             {choferes.map(c => <option key={c.id} value={c.id}>{driverName(c)}</option>)}
@@ -10354,7 +10372,7 @@ export default function Pedidos() {
           </button>
           {selectedPedidoIds.length >= 2 && (
             <button onClick={combinarSeleccionadosEnGrupaje} disabled={bulkAssigning}
-              title="Junta los pedidos seleccionados en un mismo viaje (grupaje), respetando el orden de descargas. Luego se asignan matriculas en Mesa de trafico > Grupajes."
+              title="Selecciona antes el conjunto; se utilizará su capacidad real para el grupaje."
               style={{...S.btn,padding:"5px 10px",fontSize:11,background:"rgba(16,185,129,.12)",color:"#10b981",border:"1px solid rgba(16,185,129,.3)",opacity:bulkAssigning?0.6:1,cursor:bulkAssigning?"not-allowed":"pointer"}}>
               Combinar en grupaje
             </button>

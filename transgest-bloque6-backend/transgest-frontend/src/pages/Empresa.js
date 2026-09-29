@@ -1609,7 +1609,7 @@ export default function Empresa() {
               </div>
               <div>
                 <label style={S.lbl}>Serie órdenes de carga</label>
-                <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={empresa.serie_ordenes||"OC"} onChange={fe("serie_ordenes")} placeholder="OC" maxLength={5} disabled={!esGerente}/>
+                <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={empresa.serie_ordenes??"OC"} onChange={fe("serie_ordenes")} placeholder="Sin serie" maxLength={5} disabled={!esGerente}/>
                 <div style={{ fontSize:10, color:"var(--text5)", marginTop:4 }}>Ej: OC -> genera OC-2026-0001, OC-2026-0002...</div>
               </div>
               <div>

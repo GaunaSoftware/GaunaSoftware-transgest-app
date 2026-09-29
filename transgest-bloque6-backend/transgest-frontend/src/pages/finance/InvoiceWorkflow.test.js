@@ -14,3 +14,21 @@ test('batch only sends selected ready services and surfaces failed data requests
  invoiceWorkflow.mockRejectedValue(new Error('Servicio no disponible'));await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent==='Actualizar preparación').click());expect(node.querySelector('[role="alert"]').textContent).toContain('Servicio no disponible');expect(node.querySelector('table')).toBeNull();
  }finally{await act(async()=>root.unmount());node.remove();}
 });
+
+test('batch fuel variation accepts a Spanish percentage and sends the confirmed clause',async()=>{
+ global.IS_REACT_ACT_ENVIRONMENT=true;
+ const node=document.createElement('div');document.body.append(node);const root=createRoot(node),onInvoice=jest.fn();
+ invoiceWorkflow.mockImplementation(path=>Promise.resolve(path.startsWith('/reglas')?{reglas:{hito:'delivery',exigir_pod:true,exigir_deca:false,bloquear_incidencia:true}}:{total:1,data:[{id:'ready-fuel',numero:'QA-FUEL',estado:'listo',importe:110,documentos:{pod:1,deca:1}}]}));
+ crearFactura.mockResolvedValue({id:'fuel-draft'});
+ try{
+  await act(async()=>root.render(<InvoiceWorkflow clients={[]} canEdit manager={false} onInvoice={onInvoice}/>));
+  await act(async()=>{node.querySelector('details').open=true;Simulate.toggle(node.querySelector('details'));});
+  await act(async()=>Simulate.change(node.querySelector('input[type="checkbox"]'),{target:{checked:true}}));
+  await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent.includes('Variación de gasoil')).click());
+  const percent=node.querySelector('#workflow-fuel-percent');
+  await act(async()=>Simulate.change(percent,{target:{value:'8,5'}}));
+  await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent.startsWith('Preparar borrador')).click());
+  expect(crearFactura).toHaveBeenCalledWith({workflow_pedidos_ids:['ready-fuel'],fuel_clause_percent:8.5,fuel_clause_confirmed:true});
+  expect(onInvoice).toHaveBeenCalledWith('fuel-draft');
+ }finally{await act(async()=>root.unmount());node.remove();}
+});

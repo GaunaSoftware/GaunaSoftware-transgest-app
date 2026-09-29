@@ -4,10 +4,10 @@ const shipments=require('../src/services/transportShipments'),documents=require(
 async function main(){
  const pg=new PGlite(),company=crypto.randomUUID(),id=crypto.randomUUID(),db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
  try{
-  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,estado text,numero text,origen text,destino text,peso_kg numeric,puntos_carga jsonb,puntos_descarga jsonb); CREATE TABLE pedido_eventos(id uuid DEFAULT gen_random_uuid(),pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,actor_id uuid,detalle jsonb);');
+  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,estado text,numero text,origen text,destino text,peso_kg numeric,puntos_carga jsonb,puntos_descarga jsonb,carga_real_at timestamptz); CREATE TABLE pedido_eventos(id uuid DEFAULT gen_random_uuid(),pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,actor_id uuid,detalle jsonb);');
   for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql','20260926_transport_shipment_declarations.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_shipment_declarations.sql'),'utf8'));
-  await pg.query("INSERT INTO pedidos VALUES($1,$2,'confirmado','QA-ENVIOS','Madrid','Valencia',1000,$3,$4)",[id,company,JSON.stringify([{id:'load',direccion:'Madrid'}]),JSON.stringify([{id:'a',direccion:'Valencia'},{id:'b',direccion:'Alicante'}])]);
+  await pg.query("INSERT INTO pedidos(id,empresa_id,estado,numero,origen,destino,peso_kg,puntos_carga,puntos_descarga) VALUES($1,$2,'confirmado','QA-ENVIOS','Madrid','Valencia',1000,$3,$4)",[id,company,JSON.stringify([{id:'load',direccion:'Madrid'}]),JSON.stringify([{id:'a',direccion:'Valencia'},{id:'b',direccion:'Alicante'}])]);
   const order=(await pg.query('SELECT * FROM pedidos')).rows[0],stops=require('../src/services/driverStops').driverStops(order);
   const rows=[0,1].map(i=>({origen_id:stops[0].id,destino_id:stops[i+1].id,referencia:'REF-'+i,destinatario:'Cliente sintético '+i,mercancia:'Cerámica '+i,peso_kg:i?600:400,bultos:i?6:4,embalaje:'Cajas'}));
   const args={empresaId:company,pedidoId:id,operationId:crypto.randomUUID(),rows};
@@ -28,7 +28,7 @@ async function main(){
   await documents.assertDeparture(db,company,order,{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:versions.map(v=>v.id)});
   await assert.rejects(documents.issue(db,{...issue,consolidated:true,consolidationAllowed:true}),{code:'DOCUMENT_SCOPE_CONFLICT'});
   const otherId=crypto.randomUUID();
-  await pg.query("INSERT INTO pedidos SELECT $1,empresa_id,estado,'QA-CONSOLIDADO',origen,destino,peso_kg,puntos_carga,puntos_descarga FROM pedidos WHERE id=$2",[otherId,id]);
+  await pg.query("INSERT INTO pedidos SELECT $1,empresa_id,estado,'QA-CONSOLIDADO',origen,destino,peso_kg,puntos_carga,puntos_descarga,carga_real_at FROM pedidos WHERE id=$2",[otherId,id]);
   const other=await shipments.declare(db,{...args,pedidoId:otherId,operationId:crypto.randomUUID()});
   const combined={...issue,pedidoId:otherId,consolidated:true};
   await assert.rejects(documents.issue(db,combined),{code:'CONSOLIDATION_NOT_ALLOWED'});
@@ -39,9 +39,37 @@ async function main(){
   const combinedRows=await documents.list(db,company,otherId);assert.equal(combinedRows.length,1);
   assert.equal(combinedRows[0].payload.documento.envios.length,2);assert.equal(combinedRows[0].payload.documento.mercancia.peso_kg,1000);
   await documents.assertDeparture(db,company,{...order,id:otherId},{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[issued.id]});
+  await pg.exec('CREATE TABLE pedido_chofer_pasos(pedido_id uuid,empresa_id uuid,data jsonb);');
+  await pg.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[otherId,company,JSON.stringify({paradas:{[stops[0].id]:{mercancia_confirmada:true,mercancia_cargada:'Cerámica revisada',mercancia_peso_kg:1020}}})]);
+  await assert.rejects(documents.issue(db,{...combined,consolidationAllowed:true,reason:'Carga real diferente'}),{code:'SHIPMENT_ACTUAL_ALLOCATION_REQUIRED'});
+  await pg.query('DELETE FROM pedido_chofer_pasos WHERE pedido_id=$1',[otherId]);
   await assert.rejects(documents.issue(db,{...issue,pedidoId:otherId,envioId:other.envio_ids[0]}),{code:'DOCUMENT_SCOPE_CONFLICT'});
   const pdf=await documents.read(db,company,otherId,issued.id),out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-consolidated-synthetic.pdf'),Buffer.from(pdf.pdf));
-  assert.equal((await pg.query('SELECT count(*)::int n FROM pedido_eventos')).rows[0].n,2);
+  const multiId=crypto.randomUUID();
+  await pg.query("INSERT INTO pedidos(id,empresa_id,estado,numero,origen,destino,peso_kg,puntos_carga,puntos_descarga,carga_real_at) VALUES($1,$2,'confirmado','QA-DOS-CARGAS','Madrid','Valencia',1000,$3,$4,NOW())",
+    [multiId,company,JSON.stringify([{id:'load-a',direccion:'Madrid'},{id:'load-b',direccion:'Cuenca'}]),JSON.stringify([{id:'drop',direccion:'Valencia'}])]);
+  const multiOrder=(await pg.query('SELECT * FROM pedidos WHERE id=$1',[multiId])).rows[0],multiStops=require('../src/services/driverStops').driverStops(multiOrder);
+  const multiRows=[0,1].map(i=>({origen_id:multiStops[i].id,destino_id:multiStops[2].id,referencia:'LOAD-'+i,destinatario:'Cliente sintético',mercancia:'Cerámica',peso_kg:500,bultos:5}));
+  const multi=await shipments.declare(db,{...args,pedidoId:multiId,operationId:crypto.randomUUID(),rows:multiRows});
+  await pg.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[multiId,company,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true}}})]);
+  const firstLoad=await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[0]});
+  const firstSteps={paradas:{[multiStops[0].id]:{carga_ok:true}},dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[firstLoad.id]};
+  await documents.assertDeparture(db,company,multiOrder,firstSteps);
+  await assert.rejects(documents.assertDeparture(db,company,multiOrder,{...firstSteps,paradas:{...firstSteps.paradas,[multiStops[1].id]:{carga_ok:true}}}),{code:'DECA_REQUIRED'});
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true},[multiStops[1].id]:{viaje_iniciado:true}}})]);
+  await assert.rejects(documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1]}),{code:'DECA_ISSUED_LATE'});
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify({paradas:{[multiStops[0].id]:{carga_ok:true}}})]);
+  // Both mapped shipments may be documented before their physical load begins.
+  await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1]});
+  await assert.rejects(documents.issue(db,{...issue,pedidoId:multiId,consolidated:true,consolidationAllowed:true}),{code:'DOCUMENT_SCOPE_CONFLICT'});
+  const actualStops={paradas:{[multiStops[0].id]:{carga_ok:true},[multiStops[1].id]:{carga_ok:true,mercancia_confirmada:true,mercancia_cargada:'Cerámica revisada',mercancia_peso_kg:520,mercancia_palets:5}}};
+  await pg.query('UPDATE pedido_chofer_pasos SET data=$2 WHERE pedido_id=$1',[multiId,JSON.stringify(actualStops)]);
+  const revised=await documents.issue(db,{...issue,pedidoId:multiId,envioId:multi.envio_ids[1],reason:'Mercancía real de la segunda carga'});
+  assert.equal(revised.version,2);
+  const current=await documents.list(db,company,multiId);
+  assert.equal(current.find(v=>v.id===revised.id).payload.documento.mercancia.peso_kg,520);
+  await documents.assertDeparture(db,company,multiOrder,{...actualStops,dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:current.filter(v=>v.estado==='activa').map(v=>v.id)});
+  assert.equal((await pg.query('SELECT count(*)::int n FROM pedido_eventos')).rows[0].n,3);
   console.log('PASS explicit shipments: user mapping, totals, wrong-point rejection, idempotency/conflict, tenant, migration repeat, individual DeCA/PDFs and complete departure coverage.');
  }finally{await pg.close();}
 }

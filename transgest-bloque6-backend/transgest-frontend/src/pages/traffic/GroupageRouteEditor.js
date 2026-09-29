@@ -9,7 +9,7 @@ import {routeGeometry} from '../../utils/routeGeometry';
 import {getGroupagePlan,saveGroupagePlan,optimizarRuta} from '../../services/api';
 import {notify} from '../../services/notify';
 
-export function groupageStops(orders){return orders.flatMap(order=>driverStops(order).map(stop=>({...stop,key:`${order.id}:${stop.id}`,pedido:order,ciudad:displayLocation(stop,order[stop.tipo==='carga'?'origen':'destino'])})));}
+export function groupageStops(orders){return orders.flatMap(order=>driverStops(order).map(stop=>{const side=stop.tipo==='carga'?'origen':'destino';return {...stop,key:`${order.id}:${stop.id}`,pedido:order,ciudad:displayLocation(stop,order[side]),lat:stop.lat??stop.latitud??stop.latitude??(stop.index===0?order[`${side}_lat`]:null),lng:stop.lng??stop.lon??stop.longitud??stop.longitude??(stop.index===0?order[`${side}_lng`]:null)};}));}
 export function validGroupageSequence(stops){const loaded=new Set();for(const stop of stops){if(stop.tipo==='carga')loaded.add(stop.pedido.id);else if(!loaded.has(stop.pedido.id))return false;}return true;}
 export function nearestGroupageSequence(stops){
  if(stops.some(s=>s.lat==null||(s.lng??s.lon)==null||!Number.isFinite(Number(s.lat))||!Number.isFinite(Number(s.lng??s.lon))))return null;
@@ -46,7 +46,7 @@ export default function GroupageRouteEditor({groupId,orders,vehicle,onReload,can
  }catch(e){setError(e.message);}finally{setSaving(false);}}
  const editable=canEdit&&!saving&&!loading&&!loadFailed;
  const points=ordered.map((s,i)=>({lat:s.lat==null?NaN:Number(s.lat),lng:(s.lng??s.lon)==null?NaN:Number(s.lng??s.lon),label:s.ciudad,stopNumber:i+1})).filter(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lng)&&Math.abs(p.lat)<=90&&Math.abs(p.lng)<=180);
- const routePoints=route?.waypoint_coordinates?.map((p,i)=>({lat:Number(p.lat),lng:Number(p.lon),label:p.address,stopNumber:i+1}))||points;
+ const routePoints=route?.waypoint_coordinates?.length?route.waypoint_coordinates.map((p,i)=>({lat:Number(p.lat),lng:Number(p.lon),label:p.address,stopNumber:i+1})):points;
  const geometry=routeGeometry(route?.geometry);
  if(loading)return <p role="status">Cargando plan del grupaje…</p>;
  return <section className="groupage-route-editor" aria-label="Plan del grupaje">
@@ -55,13 +55,13 @@ export default function GroupageRouteEditor({groupId,orders,vehicle,onReload,can
    <section><h3>Pedidos del viaje ({orders.length})</h3><p>Se conservan clientes, precios y documentos de cada pedido.</p>
     {orders.map(order=><div className="groupage-order" key={order.id}><strong>{order.numero}</strong><span>{order.cliente_nombre}</span><span>{order.mercancia}</span></div>)}
    </section>
-   <section><h3>Disposición de mercancía</h3><RemolqueGrupaje pedidos={cargo} vehiculo={vehicle} onReorder={editable?(source,target)=>setLayout(old=>moveBefore(old,source,target)):null}/>
+   <section><h3>Disposición de mercancía</h3><RemolqueGrupaje pedidos={cargo} vehiculo={vehicle} capacidadEstricta onReorder={editable?(source,target)=>setLayout(old=>moveBefore(old,source,target)):null}/>
     <p>La cabeza del remolque está a la izquierda. Mover mercancía aquí conserva la ruta.</p>
     <button className="tgui-button" disabled={!editable} onClick={()=>setLayout([...ordered.filter(s=>s.tipo==='descarga').map(s=>s.pedido.id)].reverse())}>Optimizar disposición según ruta</button>
     <ol>{cargo.map((order,index)=><li key={order.id}>{order.numero} <button aria-label={`Adelantar mercancía ${order.numero}`} disabled={!editable||index===0} onClick={()=>setLayout(old=>moveBefore(old,order.id,old[index-1]))}>←</button><button aria-label={`Retrasar mercancía ${order.numero}`} disabled={!editable||index===cargo.length-1} onClick={()=>setLayout(old=>moveBefore(old,old[index+1],order.id))}>→</button></li>)}</ol>
     <p>La propuesta deja la primera entrega junto al portón; revisa accesibilidad y apilado según la carga real.</p>
    </section>
-   <section><h3>Ruta y paradas</h3><RouteMapCanvas points={routePoints} geometry={geometry} compact/>
+   <section><h3>Ruta y paradas</h3>{routePoints.length?<RouteMapCanvas points={routePoints} geometry={geometry} compact/>:<p className="groupage-map-missing">Completa las coordenadas de las paradas para verlas en el mapa. Puedes ordenar las paradas igualmente.</p>}
     <button className="tgui-button" disabled={!editable} onClick={()=>{const next=nearestGroupageSequence(ordered);if(next)changeSequence(next);else notify('Completa las coordenadas de las paradas para proponer el orden.','warning');}}>Proponer orden por proximidad</button>
     <p>Propuesta geométrica, pendiente de revisar horarios y restricciones. Calcula después el recorrido por carretera.</p>
     <button className="tgui-button" disabled={!editable||routing} onClick={calculate}>{routing?'Calculando…':'Calcular ruta por carretera'}</button>

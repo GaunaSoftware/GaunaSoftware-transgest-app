@@ -6,8 +6,10 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company}){
    const data=await r.json();assert.equal(r.status,status,JSON.stringify(data));checks++;return data;
  };
  const ids=[crypto.randomUUID(),crypto.randomUUID()];
- for(const [i,id] of ids.entries())await db.query("INSERT INTO pedidos(id,empresa_id,numero,estado,origen,destino,importe,peso_kg,bultos,cliente_id) SELECT $1,$2,$3,'pendiente','Valencia','Madrid',600,1000,10,id FROM clientes WHERE empresa_id=$2 ORDER BY id LIMIT 1",[id,company,'REPLAN-SYN-'+i]);
- const group=await call('/pedidos/grupaje/combinar',{pedido_ids:ids,borrador:false,client_operation_uuid:crypto.randomUUID()});
+ for(const [i,id] of ids.entries())await db.query("INSERT INTO pedidos(id,empresa_id,numero,estado,fecha_carga,origen,destino,importe,peso_kg,bultos,cliente_id) SELECT $1,$2,$3,'pendiente',CURRENT_DATE,'Valencia','Madrid',600,1000,10,id FROM clientes WHERE empresa_id=$2 ORDER BY id LIMIT 1",[id,company,'REPLAN-SYN-'+i]);
+ const initialVehicle=crypto.randomUUID();
+ await db.query("INSERT INTO vehiculos(id,empresa_id,matricula,clase,estado,activo) VALUES($1,$2,'RIG-REPLAN-QA','Camion rigido','disponible',true)",[initialVehicle,company]);
+ const group=await call('/pedidos/grupaje/combinar',{pedido_ids:ids,borrador:false,client_operation_uuid:crypto.randomUUID(),asignacion:{vehiculo_id:initialVehicle,asignacion_revisada:true}});
  let model=await call(`/pedidos/${ids[0]}/operativa`),trip=model.viajes[0];
  const original=trip.paradas[0];
  await db.query("UPDATE viaje_paradas SET estado='finalizada',llegada_real_at='2026-09-27T07:00:00Z',fin_real_at='2026-09-27T08:00:00Z',evidencias='[{\"hash\":\"synthetic-original\"}]' WHERE empresa_id=$1 AND id=$2",[company,original.id]);

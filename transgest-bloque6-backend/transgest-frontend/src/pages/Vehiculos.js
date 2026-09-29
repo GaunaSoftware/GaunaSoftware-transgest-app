@@ -166,6 +166,8 @@ const CARROCERIAS_REMOLQUE = [
   "Gondola / lowboy", "Cerrado", "Otro",
 ];
 
+function esClaseRigido(clase = "") { return /camio?n r[ií]gido/i.test(String(clase || "")); }
+
 function esClaseRemolque(clase = "") {
   const c = String(clase || "").toLowerCase();
   return c.includes("remolque") || c.includes("semirremolque") || c.includes("dolly");
@@ -192,7 +194,7 @@ function normalizeVehiculoForClase(data = {}) {
     next.homologacion_co2 = "";
     next.remolque_id = "";
     next.chofer_id = "";
-  } else {
+  } else if (!esClaseRigido(next.clase)) {
     next.tipo_carroceria = "";
     next.apertura_lateral = "";
     next.techo_elevable = "";
@@ -215,7 +217,7 @@ function carroceriaUsaMedidaEstandar(form = {}) {
 }
 function aplicarMedidasEstandarCarga(next = {}) {
   // Rellena la medida estandar solo si esta vacia (no pisa lo que ponga el usuario).
-  if (carroceriaUsaMedidaEstandar(next) && !String(next.metros_carga || "").trim()) {
+  if (!esClaseRigido(next.clase) && carroceriaUsaMedidaEstandar(next) && !String(next.metros_carga || "").trim()) {
     next.metros_carga = METROS_CARGA_ESTANDAR;
   }
   return next;
@@ -1437,9 +1439,9 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                 </div>
               </div>
 
-              {!esRemolque ? (
+              {!esRemolque && (
                 <>
-                  <div style={S.sec}>Motor y mecanica de la tractora</div>
+                  <div style={S.sec}>Motor y mecánica</div>
                   <div style={S.grid3}>
                     <div>
                       <label style={S.lbl}>Combustible</label>
@@ -1469,9 +1471,10 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                     </div>
                   </div>
                 </>
-              ) : (
+              )}
+              {(esRemolque || esClaseRigido(form.clase)) && (
                 <>
-                  <div style={S.sec}>Carroceria y operativa del remolque</div>
+                  <div style={S.sec}>Carrocería y capacidad útil {esRemolque ? "del remolque" : "del camión rígido"}</div>
                   <div style={S.grid3}>
                     <div>
                       <label style={S.lbl}>Tipo de carroceria</label>
@@ -1498,8 +1501,8 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                     </div>
                     <div>
                       <label style={S.lbl}>Metros de carga (LDM)</label>
-                      <input type="text" inputMode="decimal" style={S.inp} value={form.metros_carga||""} onChange={f("metros_carga")} placeholder="13,65"/>
-                      <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>Longitud util de carga en metros. Estandar 13,65 en tautliner, lateral bajo y plataforma.</div>
+                      <input type="text" inputMode="decimal" style={S.inp} value={form.metros_carga||""} onChange={f("metros_carga")} placeholder={esRemolque ? "13,65" : "Indica la longitud útil"}/>
+                      <div style={{fontSize:10,color:"var(--text5)",marginTop:3}}>Indica la longitud útil real de la zona de carga. No se usa la longitud exterior del vehículo.</div>
                     </div>
                     <label style={{display:"flex",alignItems:"center",gap:8,marginTop:25,color:"var(--text3)",fontSize:13,fontWeight:800}}>
                       <input type="checkbox" checked={!!form.techo_elevable} onChange={f("techo_elevable")}/>

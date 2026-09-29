@@ -1,11 +1,13 @@
 const assert=require('node:assert/strict'),crypto=require('node:crypto');
-module.exports=async function({base,fetch,db,managerToken,driverToken,company}){
+module.exports=async function({base,fetch,db,managerToken,driverToken,company,vehicle,driver}){
  assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);let checks=0;
  async function call(path,token,status=200,body){const response=await fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
  const ids=[crypto.randomUUID(),crypto.randomUUID()],operation=crypto.randomUUID();
  for(let i=0;i<ids.length;i++)await db.query(`INSERT INTO pedidos(id,empresa_id,cliente_id,numero,estado,fecha_carga,origen,destino,importe,mercancia,peso_kg,bultos)
    SELECT $1,$2,id,$3,'pendiente',CURRENT_DATE,'Valencia','Madrid',200,'Sacos sintéticos',1000,4 FROM clientes WHERE empresa_id=$2 ORDER BY id LIMIT 1`,[ids[i],company,`QA-GRUPAJE-${i+1}`]);
- const body={pedido_ids:ids,borrador:false,client_operation_uuid:operation};
+ const initialVehicle=crypto.randomUUID();
+ await db.query("INSERT INTO vehiculos(id,empresa_id,matricula,clase,estado,activo) VALUES($1,$2,'RIG-GRP-QA','Camion rigido','disponible',true)",[initialVehicle,company]);
+ const body={pedido_ids:ids,borrador:false,client_operation_uuid:operation,asignacion:{vehiculo_id:initialVehicle,asignacion_revisada:true}};
  await call('/pedidos/grupaje/combinar',driverToken,403,body);
  const group=await call('/pedidos/grupaje/combinar',managerToken,200,body);
  assert.equal((await call('/pedidos/grupaje/combinar',managerToken,200,body)).viaje_id,group.viaje_id);
@@ -15,12 +17,11 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company}){
  const saved=await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,200,payload);
  assert.equal((await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,200,payload)).version,saved.version);
  await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,409,{...payload,client_operation_uuid:crypto.randomUUID()});
- const fleet=(await db.query('SELECT id FROM vehiculos WHERE empresa_id=$1 ORDER BY id LIMIT 1',[company])).rows[0];
- const driver=(await db.query('SELECT id FROM choferes WHERE empresa_id=$1 ORDER BY id LIMIT 1',[company])).rows[0];
+ const fleet=vehicle;
  const assignment={client_operation_uuid:crypto.randomUUID(),asignacion:{vehiculo_id:fleet.id,chofer_id:driver.id,asignacion_revisada:true}};
  await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,driverToken,403,assignment);
  await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,409,{...assignment,asignacion:{...assignment.asignacion,chofer_id:crypto.randomUUID()}});
- assert.equal((await db.query('SELECT count(*)::int n FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) AND vehiculo_id IS NOT NULL',[company,ids])).rows[0].n,0,'A failing resource assignment rolls back every child');
+ assert.equal((await db.query('SELECT count(*)::int n FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) AND vehiculo_id=$3',[company,ids,initialVehicle])).rows[0].n,2,'A failing reassignment preserves the selected conjunto on every child');
  const assigned=await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,200,assignment);
  assert.equal((await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,200,assignment)).version,assigned.version);
  assert.equal((await db.query('SELECT count(*)::int n FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[]) AND vehiculo_id=$3',[company,ids,fleet.id])).rows[0].n,2);

@@ -52,6 +52,7 @@
         </activity>
 
         <service android:name=".DriverTrackingService" android:exported="false" android:foregroundServiceType="location" android:stopWithTask="true" />
+        <activity android:name=".PdfPreviewActivity" android:exported="false" android:label="Justificante para firma" />
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

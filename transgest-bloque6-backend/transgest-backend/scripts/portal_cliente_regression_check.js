@@ -1,7 +1,9 @@
 const assert = require("node:assert/strict");
+const db = require("../src/services/db");
 const portalRouter = require("../src/routes/cliente_portal");
 
 const {
+  requireCliente,
   asyncRoute,
   nextPedidoNumero,
   normalizeNonNegativeNumeric,
@@ -114,6 +116,23 @@ async function run() {
   assert.equal(tarifa.km_ruta, 392);
   assert.equal(tarifa.precio_unitario, 680.64);
   assert.equal(tarifa.importe, 680.64);
+
+  const originalQuery = db.query;
+  try {
+    db.query = async sql => {
+      assert.match(sql, /LIMIT 2/);
+      return { rows: [{ id: "cliente-uno" }, { id: "cliente-dos" }] };
+    };
+    const req = { user: { rol: "cliente", empresa_id: "empresa-qa", email: "shared@example.invalid" } };
+    const res = { status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } };
+    let nextCalled = false;
+    await requireCliente(req, res, () => { nextCalled = true; });
+    assert.equal(res.code, 409);
+    assert.equal(nextCalled, false);
+    assert.equal(req.user.cliente_id, undefined);
+  } finally {
+    db.query = originalQuery;
+  }
 
   const marker = new Error("qa async route");
   await new Promise((resolve, reject) => {

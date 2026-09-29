@@ -32,16 +32,16 @@ export const paletsDeCarga = p => p.palets_tipo === 'granel' ? 0 : cargoCount(p)
 // Capacidad del remolque a partir del vehiculo asignado. Si le faltan datos cae
 // al trailer estandar y lo indica, para no confundir un valor por defecto con
 // una medida real de la flota.
-export function capacidadRemolque(vehiculo) {
-  const metros = Number(vehiculo?.metros_carga || 0)
-    || (Number(vehiculo?.longitud_mm || 0) ? Number(vehiculo.longitud_mm) / 1000 : 0);
+export function capacidadRemolque(vehiculo, { estricta = false } = {}) {
+  // La longitud exterior del vehículo no equivale a su longitud útil de carga.
+  const metros = Number(String(vehiculo?.metros_carga || "").replace(",", ".")) || 0;
   // Gross vehicle mass is not payload capacity.
   const peso = Number(vehiculo?.carga_max_kg || 0);
   const palets = Number(vehiculo?.capacidad_palets || 0);
   return {
-    metros: metros > 0 ? metros : REMOLQUE_DEFECTO.metros,
-    peso: peso > 0 ? peso : REMOLQUE_DEFECTO.peso,
-    palets: palets > 0 ? palets : REMOLQUE_DEFECTO.palets,
+    metros: metros > 0 ? metros : (estricta ? null : REMOLQUE_DEFECTO.metros),
+    peso: peso > 0 ? peso : (estricta ? null : REMOLQUE_DEFECTO.peso),
+    palets: palets > 0 ? palets : (estricta ? null : REMOLQUE_DEFECTO.palets),
     estimado: !(metros > 0 && peso > 0 && palets > 0),
   };
 }
@@ -51,14 +51,14 @@ const fmt = (n, d = 1) => Number(n || 0).toLocaleString("es-ES", { maximumFracti
 
 function Barra({ etiqueta, valor, max, unidad, decimales = 1 }) {
   const pct = max > 0 ? (valor / max) * 100 : 0;
-  const excede = valor > max;
-  const color = excede ? "#ef4444" : pct > 85 ? "#f59e0b" : "var(--green)";
+  const excede = max > 0 && valor > max;
+  const color = !(max > 0) ? "var(--text5)" : excede ? "#ef4444" : pct > 85 ? "#f59e0b" : "var(--green)";
   return (
     <div style={{ flex: "1 1 150px", minWidth: 140 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 800, marginBottom: 3 }}>
         <span style={{ color: "var(--text5)", textTransform: "uppercase", letterSpacing: ".05em" }}>{etiqueta}</span>
         <span style={{ color, fontFamily: "'JetBrains Mono',monospace" }}>
-          {fmt(valor, decimales)} / {fmt(max, decimales)} {unidad}
+          {max > 0 ? `${fmt(valor, decimales)} / ${fmt(max, decimales)} ${unidad}` : `${fmt(valor, decimales)} ${unidad} · sin capacidad informada`}
         </span>
       </div>
       <div style={{ height: 7, borderRadius: 999, background: "var(--bg4)", overflow: "hidden" }}>
@@ -73,8 +73,8 @@ function Barra({ etiqueta, valor, max, unidad, decimales = 1 }) {
   );
 }
 
-export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelect = null, seleccionadoId = "", onReorder = null }) {
-  const cap = useMemo(() => capacidadRemolque(vehiculo), [vehiculo]);
+export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelect = null, seleccionadoId = "", onReorder = null, capacidadEstricta = false }) {
+  const cap = useMemo(() => capacidadRemolque(vehiculo, { estricta: capacidadEstricta }), [vehiculo, capacidadEstricta]);
 
   const cargas = useMemo(() => pedidos.map((p, i) => ({
     pedido: p,
@@ -99,7 +99,7 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
   )], [pedidos]);
   const esMixto = tiposPalet.length > 1;
 
-  const excedeAlgo = totales.ml > cap.metros || totales.peso > cap.peso || totales.palets > cap.palets;
+  const excedeAlgo = (cap.metros > 0 && totales.ml > cap.metros) || (cap.peso > 0 && totales.peso > cap.peso) || (cap.palets > 0 && totales.palets > cap.palets);
   // La escala usa el mayor entre capacidad y carga, para que el exceso se VEA
   // saliendose del remolque en lugar de recortarse.
   const escala = Math.max(cap.metros, totales.ml) || 1;
@@ -109,11 +109,11 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
     <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg2)", padding: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)" }}>Ocupacion del remolque</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)" }}>Ocupación {String(vehiculo?.clase || "").toLowerCase().includes("rígido") || String(vehiculo?.clase || "").toLowerCase().includes("rigido") ? "del camión rígido" : "del remolque"}</div>
           <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 2 }}>
             {vehiculo?.matricula ? `${vehiculo.matricula} - ` : ""}
-            {fmt(cap.metros, 2)} m de carga, {fmt(cap.peso, 0)} kg, {cap.palets} palets
-            {cap.estimado ? " (medidas estimadas: completa la ficha del vehiculo)" : ""}
+            {cap.metros > 0 ? `${fmt(cap.metros, 2)} m de carga` : "Longitud sin informar"}, {cap.peso > 0 ? `${fmt(cap.peso, 0)} kg` : "carga máxima sin informar"}, {cap.palets > 0 ? `${cap.palets} palets` : "palets sin informar"}
+            {cap.estimado ? (capacidadEstricta ? " · completa la ficha para verificar la ocupación" : " (medidas estimadas)") : ""}
           </div>
         </div>
         {excedeAlgo && (
@@ -135,16 +135,17 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
             return (
               <div key={c.pedido.id || i}
                 draggable={!!onReorder}
-                onDragStart={event=>{if(onReorder)event.dataTransfer.setData('application/transgest-cargo',String(c.pedido.id));}}
+                onDragStart={event=>{if(onReorder){event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/transgest-cargo',String(c.pedido.id));event.dataTransfer.setData('text/plain',String(c.pedido.id));}}}
                 onDragOver={event=>{if(onReorder)event.preventDefault();}}
-                onDrop={event=>{if(!onReorder)return;event.preventDefault();const source=event.dataTransfer.getData('application/transgest-cargo');if(source)onReorder(source,c.pedido.id);}}
+                onDrop={event=>{if(!onReorder)return;event.preventDefault();event.stopPropagation();const source=event.dataTransfer.getData('application/transgest-cargo')||event.dataTransfer.getData('text/plain');if(source&&source!==String(c.pedido.id))onReorder(source,c.pedido.id);}}
                 onClick={() => onSelect && onSelect(c.pedido)}
+                aria-label={`${c.pedido.numero || `Carga ${i+1}`}. Posición ${i+1}${onReorder?'. Arrastra para cambiar la disposición.':''}`}
                 title={`${c.pedido.numero || "Viaje"} - ${c.pedido.cliente_nombre || ""} | ${fmt(c.ml)} ML, ${fmt(c.peso, 0)} kg, ${c.palets} palets`}
                 style={{
                   width: `${pct}%`, minWidth: pct > 0 ? 8 : 0,
                   background: c.color, opacity: sel ? 1 : 0.82,
                   borderRight: "1px solid rgba(255,255,255,.35)",
-                  cursor: onSelect ? "pointer" : "default",
+                  cursor: onReorder ? "grab" : onSelect ? "pointer" : "default",
                   display: "flex", flexDirection: "column", justifyContent: "center",
                   padding: "4px 5px", overflow: "hidden", color: "#fff",
                   outline: sel ? "2px solid #fff" : "none", outlineOffset: -3,

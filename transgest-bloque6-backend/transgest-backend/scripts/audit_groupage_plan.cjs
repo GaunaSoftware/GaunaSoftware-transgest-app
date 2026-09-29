@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),crypto=require('node:crypto');
-module.exports=async function({base,fetch,db,managerToken,driverToken,company}){
+module.exports=async function({base,fetch,db,managerToken,driverToken,company,vehicle,driver}){
  assert.match(base,/^http:\/\/127\.0\.0\.1:\d+\/api\/v1$/);let checks=0;
  async function call(path,token,status=200,body){const response=await fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
  const ids=[crypto.randomUUID(),crypto.randomUUID()],operation=crypto.randomUUID();
@@ -17,8 +17,7 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company}){
  const saved=await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,200,payload);
  assert.equal((await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,200,payload)).version,saved.version);
  await call(`/pedidos/grupaje/${group.grupaje_id}/plan`,managerToken,409,{...payload,client_operation_uuid:crypto.randomUUID()});
- const fleet=(await db.query('SELECT id FROM vehiculos WHERE empresa_id=$1 AND id<>$2 ORDER BY id LIMIT 1',[company,initialVehicle])).rows[0];
- const driver=(await db.query('SELECT id FROM choferes WHERE empresa_id=$1 ORDER BY id LIMIT 1',[company])).rows[0];
+ const fleet=vehicle;
  const assignment={client_operation_uuid:crypto.randomUUID(),asignacion:{vehiculo_id:fleet.id,chofer_id:driver.id,asignacion_revisada:true}};
  await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,driverToken,403,assignment);
  await call(`/pedidos/grupaje/${group.grupaje_id}/asignacion`,managerToken,409,{...assignment,asignacion:{...assignment.asignacion,chofer_id:crypto.randomUUID()}});

@@ -5,7 +5,7 @@ const orders = [
  { numero: 'PED-3', importe: 150, peso_kg: 1000, precio_unitario: 100 },
 ];
 const total = lines => lines.reduce((sum,l) => sum + Math.round(l.cantidad*l.precio_unit*100),0)/100;
-test.each(['linea','agrupada_linea','detalle','kg','agrupada_kg'])('%s separates fuel while preserving agreed totals and extras', mode => {
+test.each(['linea','agrupada_linea','detalle','detalle_combustible_agrupado','kg','agrupada_kg'])('%s separates fuel while preserving agreed totals and extras', mode => {
  const lines=build(orders,mode,'Transportes');
  expect(total(lines)).toBe(898);
  expect(total(lines.filter(l=>l.concepto.startsWith('Recargo de combustible')))).toBe(68);
@@ -16,7 +16,13 @@ test('one trip has transport and surcharge, not an added charge',()=>{
  expect.objectContaining({precio_unit:480,cantidad:1}),expect.objectContaining({concepto:'Recargo de combustible · PED-1',precio_unit:48,cantidad:1})]);
 });
 test('grouped trips have one separate fuel line',()=>expect(build(orders,'linea','Viajes')).toEqual([
- {concepto:'Viajes',cantidad:1,precio_unit:830},{concepto:'Recargo de combustible',cantidad:1,precio_unit:68}]));
+  {concepto:'Viajes',cantidad:1,precio_unit:830},{concepto:'Recargo de combustible',cantidad:1,precio_unit:68}]));
+test('one line per trip can keep a single aggregated fuel line', () => {
+ const lines = build(orders, 'detalle_combustible_agrupado');
+ expect(lines).toHaveLength(4);
+ expect(lines.filter(l => l.concepto.startsWith('Recargo de combustible'))).toEqual([{concepto:'Recargo de combustible',cantidad:1,precio_unit:68}]);
+ expect(lines.slice(0,3).map(l => l.precio_unit)).toEqual([480,200,150]);
+});
 test('weight invoices retain base rate, and preserve minimum charges',()=>{
  const lines=build(orders,'kg');expect(lines[0]).toEqual({concepto:'Transporte 34.000 kg (2 viajes)',cantidad:34,precio_unit:20});
  expect(lines[1].precio_unit).toBe(150);

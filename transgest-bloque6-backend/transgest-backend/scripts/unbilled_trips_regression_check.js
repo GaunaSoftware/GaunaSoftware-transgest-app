@@ -34,12 +34,14 @@ async function main() {
   }
   try {
     await pg.exec(`CREATE TABLE clientes(id UUID PRIMARY KEY,empresa_id UUID,nombre TEXT,activo BOOLEAN DEFAULT true);
-      CREATE TABLE facturas(id UUID PRIMARY KEY,empresa_id UUID,cliente_id UUID,estado TEXT);
+      CREATE TABLE facturas(id UUID PRIMARY KEY,empresa_id UUID,cliente_id UUID,estado TEXT,numero TEXT);
       CREATE TABLE factura_pedidos(factura_id UUID,pedido_id UUID);
       CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,cliente_id UUID,factura_id UUID,numero TEXT,estado TEXT,
-        importe NUMERIC,origen TEXT,destino TEXT,referencia_cliente TEXT,fecha_carga DATE,fecha_descarga DATE,fecha_entrega DATE);`);
+        importe NUMERIC,importe_revision_combustible NUMERIC,importe_paralizacion NUMERIC,peso_kg NUMERIC,
+        precio_unitario NUMERIC,precio_base_sin_combustible NUMERIC,
+        origen TEXT,destino TEXT,referencia_cliente TEXT,fecha_carga DATE,fecha_descarga DATE,fecha_entrega DATE);`);
     await pg.query("INSERT INTO clientes(id,empresa_id,nombre,activo) VALUES($1,$2,'Cliente compartido',true),($3,$2,'Cliente compartido',false),($4,$5,'Privado',true)", [a, empresa, b, foreign, other]);
-    await pg.query("INSERT INTO facturas VALUES($1,$2,$3,'borrador'),($4,$2,$3,'emitida'),($5,$6,$7,'borrador'),($8,$2,$9,'borrador')",
+    await pg.query("INSERT INTO facturas(id,empresa_id,cliente_id,estado) VALUES($1,$2,$3,'borrador'),($4,$2,$3,'emitida'),($5,$6,$7,'borrador'),($8,$2,$9,'borrador')",
       [draft, empresa, a, issued, foreignDraft, other, foreign, wrongCustomerDraft, b]);
     const own = await trip('OWN', 100.25);
     const draftTrip = await trip('DRAFT', 50, a, draft);
@@ -84,6 +86,12 @@ async function main() {
     assert.equal(details.find(row => row.numero === 'ZERO').estado_importe, 'cero');
     assert.equal(details.find(row => row.numero === 'ABSENT').importe_registrado, null);
     assert.equal(details.find(row => row.numero === 'DRAFT').borrador_id, draft);
+    assert.equal(details.find(row => row.numero === 'DRAFT').factura_estado, 'borrador');
+    await pg.query('UPDATE pedidos SET importe_revision_combustible=5,importe_paralizacion=12,peso_kg=24000 WHERE id=$1', [draftTrip]);
+    const fuelDetail = (await read({}, a)).data.data.find(row => row.numero === 'DRAFT');
+    assert.equal(Number(fuelDetail.importe_revision_combustible), 5);
+    assert.equal(Number(fuelDetail.importe_paralizacion), 12);
+    assert.equal(Number(fuelDetail.peso_kg), 24000);
     assert.ok(!JSON.stringify(details).includes('FOREIGN'));
     assert.deepEqual((await read({ page: '999' })).data.data, []);
     assert.equal((await read({ page: '999' })).data.resumen.viajes, 7);

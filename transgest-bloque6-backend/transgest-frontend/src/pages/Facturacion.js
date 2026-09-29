@@ -9,13 +9,14 @@ import { Page, PageHeader, Tabs, KpiCard, Card, Button, Badge, Drawer, FilterBar
 import InvoiceList from "./finance/InvoiceList";
 import TreasuryView from "./finance/TreasuryView";
 import FinanceSummary, { FinanceIncidents } from "./finance/FinanceSummary";
+import UnbilledTripsDrawer from "./finance/UnbilledTripsDrawer";
 import "./finance/finance.css";
 import "./finance/summary.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
 import { useState, useEffect, useCallback , useMemo } from "react";
 import { supplierInvoiceReview, registrarRevisionFactura } from '../services/api';
-import { getPedido, getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl,  getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getClientes, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
+import { getPedido, getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl,  getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getCliente, getClientes, getViajesSinFacturar, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { useEmpresaPerfil } from "../hooks/useEmpresaPerfil";
 import { confirmDialog, notify } from "../services/notify";
@@ -1445,14 +1446,15 @@ export function ModalRectificativa({facturaOriginal, onClose, onSaved, create=cr
 }
 
 // Modal: Facturar multiples pedidos de un cliente
-function ModalFacturarMultiple({ onClose }) {
+const EMPTY_INITIAL_ORDERS = [];
+function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = EMPTY_INITIAL_ORDERS }) {
   const empresa  = useEmpresaPerfil();
   const aiDisponible = planHasFeature(getEmpresaPlanLocal(), "ai");
   const [clientes,   setClientes]   = useState([]);
-  const [clienteSel, setClienteSel] = useState("");
-  const [pedidos,    setPedidos]    = useState([]);
+  const [clienteSel, setClienteSel] = useState(initialClientId);
+  const [pedidos,    setPedidos]    = useState(initialOrders);
   const [resumenClientes, setResumenClientes] = useState([]);
-  const [selIds,     setSelIds]     = useState(new Set());
+  const [selIds,     setSelIds]     = useState(new Set(initialOrders.map(p => p.id)));
   const [modo,       setModo]       = useState("linea"); // linea|detalle|kg
   const [concepto,   setConcepto]   = useState("");
   const [referenciaFactura, setReferenciaFactura] = useState("");
@@ -1461,7 +1463,7 @@ function ModalFacturarMultiple({ onClose }) {
   const [loading,    setLoading]    = useState(false);
   const [loadingResumen, setLoadingResumen] = useState(false);
   const [saving,     setSaving]     = useState(false);
-  const [paso,       setPaso]       = useState(1);
+  const [paso,       setPaso]       = useState(initialOrders.length ? 2 : 1);
   const [lineasEdit, setLineasEdit] = useState([]);
   const [confirmCantidades, setConfirmCantidades] = useState(false);
   const [confirmReferencias, setConfirmReferencias] = useState(false);
@@ -1472,11 +1474,18 @@ function ModalFacturarMultiple({ onClose }) {
 
   const hoy = new Date();
   const periodoInicial = monthBounds(hoy);
-  const [fechaDesde, setFechaDesde] = useState(periodoInicial.desde);
-  const [fechaHasta, setFechaHasta] = useState(periodoInicial.hasta);
+  const [fechaDesde, setFechaDesde] = useState(initialOrders.length ? "" : periodoInicial.desde);
+  const [fechaHasta, setFechaHasta] = useState(initialOrders.length ? "" : periodoInicial.hasta);
   useEffect(()=>{
-    getClientes().then(d=>setClientes(Array.isArray(d?.data)?d.data:Array.isArray(d)?d:[])).catch(()=>{});
-  },[]);
+    getClientes().then(d=>setClientes(previous => {
+      const loaded = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+      return [...loaded, ...previous.filter(c => !loaded.some(item => item.id === c.id))];
+    })).catch(()=>{});
+    if (initialClientId) getCliente(initialClientId).then(cliente => {
+      const resolved = cliente?.data || cliente;
+      if (resolved?.id) setClientes(previous => [...previous.filter(c => c.id !== resolved.id), resolved]);
+    }).catch(() => {});
+  },[initialClientId]);
 
   const pedidoFacturableEnPeriodo = useCallback((p) => {
     const tieneFacturaDefinitiva = p.factura_id && p.factura_estado !== "borrador";
@@ -1493,6 +1502,7 @@ function ModalFacturarMultiple({ onClose }) {
   }), []);
 
   useEffect(()=>{
+    if (initialOrders.length) return;
     setLoadingResumen(true);
     getPedidos({desde:fechaDesde, hasta:fechaHasta, facturado:"false", limit:1000}).then(d=>{
       const arr = ordenarPorFechaCarga((Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []).filter(pedidoFacturableEnPeriodo));
@@ -1513,10 +1523,11 @@ function ModalFacturarMultiple({ onClose }) {
       });
       setResumenClientes([...by.values()].sort((a,b) => b.total - a.total || a.cliente_nombre.localeCompare(b.cliente_nombre)));
     }).catch(()=>setResumenClientes([])).finally(()=>setLoadingResumen(false));
-  },[fechaDesde, fechaHasta, pedidoFacturableEnPeriodo, ordenarPorFechaCarga]);
+  },[fechaDesde, fechaHasta, pedidoFacturableEnPeriodo, ordenarPorFechaCarga, initialOrders]);
 
   useEffect(()=>{
     if (!clienteSel) { setPedidos([]); return; }
+    if (initialOrders.length && clienteSel === initialClientId && !fechaDesde && !fechaHasta) return;
     setLoading(true);
     getPedidos({cliente_id:clienteSel, desde:fechaDesde, hasta:fechaHasta, facturado:"false", limit:1000}).then(d=>{
       const arr = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
@@ -1525,12 +1536,12 @@ function ModalFacturarMultiple({ onClose }) {
       setPedidos(filt);
       setSelIds(new Set(filt.map(p=>p.id)));
     }).catch(()=>{}).finally(()=>setLoading(false));
-  },[clienteSel, fechaDesde, fechaHasta, pedidoFacturableEnPeriodo, ordenarPorFechaCarga]);
+  },[clienteSel, fechaDesde, fechaHasta, pedidoFacturableEnPeriodo, ordenarPorFechaCarga, initialClientId, initialOrders]);
 
   useEffect(()=>{
     const fmtD = d => d ? new Date(d).toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"}).toUpperCase() : "";
-    setConcepto(`VIAJES REALIZADOS DEL ${fmtD(fechaDesde)} AL ${fmtD(fechaHasta)}`);
-  },[fechaDesde, fechaHasta]);
+    setConcepto(fechaDesde && fechaHasta ? `VIAJES REALIZADOS DEL ${fmtD(fechaDesde)} AL ${fmtD(fechaHasta)}` : `TRANSPORTE REALIZADO · ${initialOrders.length} VIAJE(S)`);
+  },[fechaDesde, fechaHasta, initialOrders.length]);
 
   useEffect(() => {
     if (!clienteSel || fechaVencimiento) return;
@@ -1540,7 +1551,7 @@ function ModalFacturarMultiple({ onClose }) {
   }, [clienteSel, clientes, fechaFactura, fechaVencimiento]);
 
   const selArr   = pedidos.filter(p=>selIds.has(p.id));
-  const totalSel = selArr.reduce((s,p)=>s+Number(p.importe||0),0);
+  const totalSel = selArr.reduce((s,p)=>s+Number(p.importe||0)+Number(p.importe_paralizacion||0),0);
   const totalKg  = selArr.reduce((s,p)=>s+Number(p.peso_kg||p.kg||0),0);
   const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
   const tieneReferenciaCliente = p => String(p.referencia_cliente || p.ref_cliente || p.referencia_factura || "").trim().length > 0;
@@ -1589,6 +1600,7 @@ function ModalFacturarMultiple({ onClose }) {
       concepto: String(l.concepto || "").trim(),
       cantidad: Number(String(l.cantidad || 0).replace(",", ".")) || 0,
       precio_unit: Number(String(l.precio_unit || 0).replace(",", ".")) || 0,
+      ...(l.paralizacion_pedido_id ? { paralizacion_pedido_id: l.paralizacion_pedido_id } : {}),
     }))
     .filter(l => l.concepto && l.cantidad !== 0);
   const totalLineasEdit = lineasValidas.reduce((s,l)=>s+(Number(l.cantidad||0)*Number(l.precio_unit||0)),0);
@@ -1762,6 +1774,7 @@ function ModalFacturarMultiple({ onClose }) {
             {[
               ["linea",   "Portes agrupados",   "Transporte agrupado y recargo de combustible aparte"],
               ["detalle", "Detalle por viaje",  "Porte y recargo de combustible por pedido"],
+              ["detalle_combustible_agrupado", "Viaje por línea · gasoil agrupado", "Un porte por viaje y un recargo total aparte"],
               ["kg",      "Agrupado por kg/tarifa","Agrupa por tarifa, muestra kg y precio/tn"],
             ].map(([v,l,d])=>(
               <button key={v} onClick={()=>setModo(v)}
@@ -2098,6 +2111,7 @@ export default function Facturacion() {
   const [vistaFact,    setVistaFact]    = useState(null);
   const [modalRect,    setModalRect]    = useState(null);
   const [modalMulti,   setModalMulti]   = useState(false); // facturar multiples pedidos de un cliente
+  const [modalInitial, setModalInitial] = useState(null);
   const [pedidoCorreccion, setPedidoCorreccion] = useState(null);
   const [analizandoPedidoId, setAnalizandoPedidoId] = useState(null);
   const [clientes,     setClientes]     = useState([]); // needed for factura enrichment
@@ -2112,24 +2126,20 @@ export default function Facturacion() {
   const [pagoProveedorEdit, setPagoProveedorEdit] = useState(null);
   const [pagoProveedorForm, setPagoProveedorForm] = useState({});
   const [capitalActual, setCapitalActual] = useState(0);
-  // Viajes entregados sin facturar (todos los clientes), para verlos de un
-  // vistazo sin entrar a Pedidos. Seccion desplegable en el area de facturas.
-  const [sinFacturar, setSinFacturar] = useState([]);
-  const [sinFacturarLoad, setSinFacturarLoad] = useState(false);
+  // Los agregados vienen del servidor; el detalle se pagina dentro de cada cliente.
+  const [sinFacturarResumen, setSinFacturarResumen] = useState(null);
+  const [sinFacturarError, setSinFacturarError] = useState(false);
   const [sinFacturarOpen, setSinFacturarOpen] = useState(false);
+  const actualizarResumenSinFacturar = useCallback(resumen => {
+    setSinFacturarResumen(resumen);
+    setSinFacturarError(false);
+  }, []);
   const cargarSinFacturar = useCallback(() => {
-    setSinFacturarLoad(true);
-    getPedidos({ facturado: "false", estado: "entregado", limit: 1000 })
-      .then(d => setSinFacturar(Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : []))
-      .catch(() => setSinFacturar([]))
-      .finally(() => setSinFacturarLoad(false));
+    getViajesSinFacturar({ page: 1, limit: 1 })
+      .then(d => { setSinFacturarResumen(d.resumen); setSinFacturarError(false); })
+      .catch(() => { setSinFacturarResumen(null); setSinFacturarError(true); });
   }, []);
   useEffect(() => { cargarSinFacturar(); }, [cargarSinFacturar]);
-  const sinFacturarOrdenados = useMemo(() => [...sinFacturar].sort((a, b) =>
-    String(a.cliente_nombre || "").localeCompare(String(b.cliente_nombre || "")) ||
-    String(a.fecha_descarga || a.fecha_carga || "").localeCompare(String(b.fecha_descarga || b.fecha_carga || ""))
-  ), [sinFacturar]);
-  const sinFacturarTotal = useMemo(() => sinFacturar.reduce((s, p) => s + Number(p.importe || p.precio || 0), 0), [sinFacturar]);
   const [invoiceTotals,setInvoiceTotals]=useState(null);
   const [collectionHistory,setCollectionHistory]=useState([]);
   const [savingCollections,setSavingCollections]=useState(false);
@@ -2853,8 +2863,8 @@ export default function Facturacion() {
       </div>}
       <div id="finance-panel" role="tabpanel" aria-labelledby={`finance-${activeFacturacionTab}`} tabIndex={0}>
       {activeFacturacionTab === "facturas" && <InvoiceWorkflow clients={clientes} canEdit={canEdit} manager={esGerenteFacturacion} onInvoice={abrirFacturaPorId} onOrder={async row=>{try{setPedidoCorreccion(await getPedido(row.id));}catch(e){notify(e.message,"error");}}} />}
-      {isSummary && <FinanceSummary forecast={previsionTesoreria} money={fmt2} backlogCount={sinFacturar.length} backlogAmount={sinFacturarTotal} invoices={summaryInvoices} totalCount={totalCount} filters={invoiceFilters} renderInvoices={renderInvoiceList} canEdit={canEdit}
-        onBacklog={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }} onInvoice={() => setModalMulti(true)} onAllInvoices={() => setActiveFacturacionTab("facturas")} onExport={() => setExportOpen(true)}
+      {isSummary && <FinanceSummary forecast={previsionTesoreria} money={fmt2} backlogCount={sinFacturarResumen?.viajes ?? null} backlogAmount={sinFacturarResumen?.importe_registrado ?? null} invoices={summaryInvoices} totalCount={totalCount} filters={invoiceFilters} renderInvoices={renderInvoiceList} canEdit={canEdit}
+        onBacklog={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }} onInvoice={() => { setActiveFacturacionTab("facturas"); setSinFacturarOpen(true); }} onAllInvoices={() => setActiveFacturacionTab("facturas")} onExport={() => setExportOpen(true)}
         documents={Number(bloqueoDocResumen.pedidos_sin_soporte || 0)} reviews={Number(controlResumen.revisar_hoy || 0)} pending={Number(controlResumen.importe_pendiente || 0)}
         fiscalLabel={!fiscalResumen ? "Resumen no disponible" : fiscalNeedsSetup ? "Revisar configuración" : fiscalAttention ? `${fiscalAttention} incidencias` : "Sin incidencias"} fiscalMode={fiscalResumen ? `Modo ${String(fiscalResumen.config?.modo || "ninguno").toUpperCase()} · ${Number(fiscalInfo.total_registros || 0)} registros` : "Estado fiscal no disponible"}
         onDocuments={() => { setActiveFacturacionTab("cobros"); setDocumentosOpen(true); }} onCollections={() => setActiveFacturacionTab("cobros")} onFiscal={() => setActiveFacturacionTab("fiscal")} />}
@@ -3254,9 +3264,9 @@ export default function Facturacion() {
 
       {["facturas", "cobros"].includes(activeFacturacionTab) && (
       <>
-      {activeFacturacionTab === "facturas" && <Card className="finance-backlog finance-backlog--pending"><span className="finance-backlog-icon"><Icon name="truck" size={26} /></span><div className="finance-backlog-copy"><strong>{sinFacturar.length} viajes pendientes de facturar</strong><p><span className="tgui-number">{fmt2(sinFacturarTotal)} €</span> · Todos los períodos</p></div><Button onClick={() => setSinFacturarOpen(true)}>Revisar viajes <Icon name="chevron" size={16} /></Button></Card>}
+      {activeFacturacionTab === "facturas" && <Card className="finance-backlog finance-backlog--pending"><span className="finance-backlog-icon"><Icon name="truck" size={26} /></span><div className="finance-backlog-copy"><strong>{sinFacturarError ? "Pendientes no disponibles" : sinFacturarResumen ? `${sinFacturarResumen.viajes} viajes pendientes de emitir` : "Cargando viajes pendientes…"}</strong><p>{sinFacturarResumen ? <><span className="tgui-number">{fmt2(sinFacturarResumen.importe_registrado)} €</span> · {sinFacturarResumen.clientes} clientes · Todos los períodos</> : sinFacturarError ? "Revisa la conexión y vuelve a cargar." : ""}</p></div><Button onClick={() => setSinFacturarOpen(true)}>Revisar viajes <Icon name="chevron" size={16} /></Button></Card>}
       <Card as="section" className="finance-invoices" aria-label="Facturas de clientes">
-      <header className="finance-invoices-header"><div><h2>Facturas de clientes <span>({totalCount})</span></h2><p>Emisión, fiscalidad y seguimiento de facturas.</p></div></header>
+      <header className="finance-invoices-header"><div><h2>Facturas de clientes <span>({totalCount})</span></h2><p>Borradores y facturas emitidas, con su estado de cobro y registro fiscal.</p></div></header>
       {/* Filtros */}
       {invoiceFilters}
       <div className="finance-toolbar">
@@ -3268,15 +3278,8 @@ export default function Facturacion() {
         </button>
         <span style={{fontSize:12,color:"var(--text3)"}}>{nRect} rectificadas · Cobrado {fmt2(cobrado)} € · {totalCount} facturas en el período</span>
       </div>
-      <Drawer open={sinFacturarOpen} title="Viajes entregados sin facturar" width={620} onClose={() => setSinFacturarOpen(false)} footer={<><strong className="tgui-number">Total {fmt2(sinFacturarTotal)} €</strong><Button onClick={cargarSinFacturar}>Actualizar</Button>{canEdit && <Button variant="primary" onClick={() => { setSinFacturarOpen(false); setModalMulti(true); }}>Facturar pedidos</Button>}</>}>
-        <p>Todos los clientes y fechas. Se conserva el listado cargado de hasta 1.000 viajes.</p>
-        <DataTable rows={sinFacturarOrdenados} loading={sinFacturarLoad} emptyTitle="No hay viajes entregados pendientes de facturar" columns={[
-          {key:"fecha",label:"Fecha",render:p => fmtDate(p.fecha_descarga || p.fecha_carga)},
-          {key:"numero",label:"Nº"},{key:"cliente_nombre",label:"Cliente"},
-          {key:"ruta",label:"Ruta",render:p => `${p.origen || "?"} → ${p.destino || "?"}`},
-          {key:"importe",label:"Importe",render:p => `${fmt2(Number(p.importe || p.precio || 0))} €`},
-        ]} renderMobile={p => <MobileDataCard title={p.numero || "—"} amount={`${fmt2(Number(p.importe || p.precio || 0))} €`} subtitle={p.cliente_nombre}>{fmtDate(p.fecha_descarga || p.fecha_carga)} · {p.origen || "?"} → {p.destino || "?"}</MobileDataCard>} />
-      </Drawer>
+      <UnbilledTripsDrawer open={sinFacturarOpen} canEdit={canEdit} onClose={() => setSinFacturarOpen(false)} onSummary={actualizarResumenSinFacturar}
+        onInvoice={(clienteId, orders) => { setModalInitial({ clienteId, orders }); setSinFacturarOpen(false); setModalMulti(true); }} />
 
       {renderInvoiceList()}
       {canEdit && <details className="finance-accounting"><summary>Exportación contable</summary><ContabilidadExportPanel puedeConfigurar={esGerenteFacturacion} /><ClaveiconPanel canConfigure={esGerenteFacturacion}/></details>}
@@ -3425,7 +3428,8 @@ export default function Facturacion() {
         </Modal>
       )}
 
-      {modalMulti && <ModalFacturarMultiple onClose={()=>{setModalMulti(false);cargar();cargarSinFacturar();}}/>}
+      {modalMulti && <ModalFacturarMultiple initialClientId={modalInitial?.clienteId || ""} initialOrders={modalInitial?.orders || EMPTY_INITIAL_ORDERS}
+        onClose={()=>{setModalMulti(false);setModalInitial(null);cargar();cargarSinFacturar();}}/>}
       {pedidoCorreccion && (
         <ModalCorregirPedidoFactura
           pedido={pedidoCorreccion}

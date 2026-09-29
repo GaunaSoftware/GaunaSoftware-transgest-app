@@ -29,6 +29,12 @@ function transportLines(orders, mode, concept) {
       return exact ? { concepto: description, cantidad: g.kg / 1000, precio_unit: g.rate } : line(description, g.amount);
     }), ...(fuel ? [line('Recargo de combustible', fuel)] : [])];
   }
+  if (mode === 'detalle_combustible_agrupado') {
+    return [...parts.map(({ order: p, total, fuel: surcharge }) => {
+      const ref = `${p.numero || ''}${p.referencia_cliente ? ' / Ref. ' + p.referencia_cliente : ''}`;
+      return line(`${ref} - ${p.origen || ''}${p.destino ? ' → ' + p.destino : ''} (${p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString('es-ES') : '-'})`, total - surcharge);
+    }), ...(fuel ? [line('Recargo de combustible', fuel)] : [])];
+  }
   return parts.flatMap(({ order: p, total, fuel: surcharge }) => {
     const ref = `${p.numero || ''}${p.referencia_cliente ? ' / Ref. ' + p.referencia_cliente : ''}`;
     const description = `${ref} - ${p.origen || ''}${p.destino ? ' → ' + p.destino : ''} (${p.fecha_carga ? new Date(p.fecha_carga).toLocaleDateString('es-ES') : '-'})`;

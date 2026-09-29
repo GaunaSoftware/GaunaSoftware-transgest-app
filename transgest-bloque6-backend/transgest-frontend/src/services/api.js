@@ -627,6 +627,8 @@ export const guardarPlanDiarioOrden = (data) =>
 
 // ── Facturas ──────────────────────────────────────────
 export const getFacturas    = (params={}) => apiFetch(`/facturas?${new URLSearchParams(params)}`);
+export const getViajesSinFacturar = (params = {}) => apiFetch(`/facturas/pendientes-por-cliente?${new URLSearchParams(params)}`);
+export const getViajesSinFacturarCliente = (clienteId, params = {}) => apiFetch(`/facturas/pendientes-por-cliente/${encodeURIComponent(clienteId)}/pedidos?${new URLSearchParams(params)}`);
 // Trae TODAS las facturas paginando (mismo motivo que getPedidosTodos: el
 // endpoint pagina a 50 y los KPIs de ingresos necesitan el conjunto completo).
 export async function getFacturasTodas(params = {}, options = {}) {

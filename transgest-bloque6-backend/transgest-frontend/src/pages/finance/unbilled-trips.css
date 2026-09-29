@@ -1,0 +1,35 @@
+.unbilled-drawer { display:grid; gap:14px; min-width:0; }
+.unbilled-intro { margin:0; color:var(--text3); line-height:1.5; }
+.unbilled-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.unbilled-summary strong { padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--bg3); color:var(--text); text-align:center; font-size:13px; font-variant-numeric:tabular-nums; }
+.unbilled-groups { display:grid; gap:8px; }
+.unbilled-group { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--card-bg); }
+.unbilled-group-toggle { width:100%; min-height:60px; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; border:0; background:var(--bg3); color:var(--text); cursor:pointer; font:inherit; text-align:left; }
+.unbilled-group-toggle:hover, .unbilled-group-toggle[aria-expanded="true"] { background:var(--accent-soft); }
+.unbilled-group-toggle:focus-visible, .unbilled-trip:focus-within { outline:2px solid var(--accent); outline-offset:-2px; }
+.unbilled-group-name { min-width:0; overflow-wrap:anywhere; font-weight:700; }
+.unbilled-group-meta { flex-shrink:0; font-variant-numeric:tabular-nums; color:var(--text3); font-size:12px; }
+.unbilled-group-body { display:grid; gap:8px; padding:12px; }
+.unbilled-select-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; color:var(--text3); font-size:12px; }
+.unbilled-trip { display:flex; align-items:flex-start; gap:12px; padding:12px; border:1px solid var(--border); border-radius:9px; background:var(--card-bg); cursor:pointer; }
+.unbilled-trip:has(input:checked) { border-color:var(--accent); background:var(--accent-soft); }
+.unbilled-trip input { flex:none; width:18px; height:18px; margin:2px 0 0; }
+.unbilled-trip-main { flex:1; min-width:0; display:grid; gap:4px; overflow-wrap:anywhere; }
+.unbilled-trip-main strong { color:var(--link); }
+.unbilled-trip-main small { color:var(--text3); line-height:1.4; }
+.unbilled-trip-amount { flex:none; color:var(--text); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.unbilled-warning, .unbilled-error { margin:0; padding:10px 12px; border-radius:8px; background:color-mix(in srgb,var(--orange) 12%,var(--card-bg)); color:var(--text); line-height:1.4; }
+.unbilled-error { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.unbilled-empty { text-align:center; color:var(--text3); padding:20px 8px; }
+.unbilled-footer { width:100%; display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+.unbilled-footer span { margin-right:auto; font-weight:700; font-variant-numeric:tabular-nums; }
+@media (max-width:600px) {
+  .unbilled-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .unbilled-summary strong:last-child { grid-column:1 / -1; }
+  .unbilled-group-toggle { align-items:flex-start; flex-direction:column; }
+  .unbilled-group-meta { flex-shrink:1; }
+  .unbilled-trip { display:grid; grid-template-columns:18px minmax(0,1fr); }
+  .unbilled-trip-amount { grid-column:2; }
+  .unbilled-footer span { width:100%; margin:0; }
+  .unbilled-footer button { flex:1; }
+}

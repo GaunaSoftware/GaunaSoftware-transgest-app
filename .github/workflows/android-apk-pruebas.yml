@@ -1,0 +1,54 @@
+name: APK Android de pruebas
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - codex/android-debug-apk
+    paths:
+      - '.github/workflows/android-apk-pruebas.yml'
+      - 'transgest-bloque6-backend/transgest-frontend/**'
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: transgest-bloque6-backend/transgest-frontend
+    env:
+      CI: 'false'
+      GENERATE_SOURCEMAP: 'false'
+      TRANSGEST_ANDROID_VERSION_CODE: '6'
+      TRANSGEST_ANDROID_VERSION_NAME: '1.4.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: transgest-bloque6-backend/transgest-frontend/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - run: npm ci --no-audit --no-fund
+      - name: Empaquetar la web móvil con la API oficial
+        run: npm run mobile:android:prepare
+      - name: Compilar y verificar el APK de pruebas
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TransGest-Pruebas-1.4.0-${{ github.sha }}
+          path: transgest-bloque6-backend/transgest-frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

@@ -124,7 +124,7 @@ function normalizeFiscalConfig(raw = {}) {
   const cfg = base.facturacion_fiscal && typeof base.facturacion_fiscal === "object"
     ? base.facturacion_fiscal
     : base;
-  const modo = ["ninguno", "verifactu", "sii"].includes(String(cfg.modo || "").toLowerCase())
+  const modo = ["ninguno", "verifactu", "sii", "no_verifactu"].includes(String(cfg.modo || "").toLowerCase())
     ? String(cfg.modo).toLowerCase()
     : "ninguno";
   const entorno = String(cfg.entorno || "").toLowerCase() === "produccion" ? "produccion" : "pruebas";
@@ -264,7 +264,9 @@ function buildFiscalStatus(configInput = {}) {
     }
   };
 
-  addCheck("Modo fiscal seleccionado", config.modo !== "ninguno", "Selecciona si la empresa trabajara con VERIFACTU o SII.");
+  addCheck("Modo fiscal seleccionado", config.modo !== "ninguno", "Selecciona el modo fiscal aplicable a la empresa.");
+  if (config.modo === "no_verifactu") addCheck("Motor NO VERI*FACTU validado", false,
+    "NO VERI*FACTU todavía no está implantado: faltan registros firmados, registro de eventos, verificación, exportación, conservación y declaración responsable de la versión.");
   addCheck("NIF declarante", !!config.nif_declarante, "Falta el NIF del declarante.");
   addCheck("Razon social declarante", !!config.razon_social_declarante, "Falta la razon social del declarante.");
   addCheck("Email de alertas", !!config.email_alertas, "Conviene definir un email de alertas fiscales.", "warning");
@@ -660,6 +662,11 @@ async function testFiscalConnection(configInput = {}) {
     };
   }
 
+  if (config.modo === "no_verifactu") return {
+    ok: false, mode: config.modo, provider: "desarrollo_propio", tested_at: testedAt, status,
+    pending_connector: true, message: "NO VERI*FACTU pendiente de desarrollo y validación; no se ha probado un canal fiscal operativo.",
+  };
+
   if (config.modo === "verifactu") {
     if (config.verifactu.proveedor === "verifacti") {
       const transport = await probeVerifactiConnection(config);
@@ -913,6 +920,9 @@ async function ensureFacturaFiscalRecord({ facturaId, empresaId, actorUserId = n
   if (config.modo === "ninguno") {
     return { skipped: true, reason: "fiscal_mode_disabled" };
   }
+  if (config.modo === "no_verifactu") throw Object.assign(new Error(
+    "NO VERI*FACTU aún no dispone de un motor fiscal validado. No se puede emitir la factura en este modo."),
+    {status:409,code:"NO_VERIFACTU_NOT_READY"});
 
   const { rows: facturaRows } = await client.query(
     `SELECT f.*,

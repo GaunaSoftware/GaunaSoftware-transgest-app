@@ -1446,6 +1446,30 @@ export function ModalRectificativa({facturaOriginal, onClose, onSaved, create=cr
 }
 
 // Modal: Facturar multiples pedidos de un cliente
+export function ModalFacturaSinPedido({onClose,onSaved,create=crearFactura,loadClients=getClientes}) {
+  const empresa=useEmpresaPerfil();
+  const [clientes,setClientes]=useState([]),[clienteId,setClienteId]=useState(''),[referencia,setReferencia]=useState(''),[concepto,setConcepto]=useState(''),[importe,setImporte]=useState(''),[fecha,setFecha]=useState(localDateValue),[vencimiento,setVencimiento]=useState(''),[saving,setSaving]=useState(false),[error,setError]=useState('');
+  useEffect(()=>{let active=true;loadClients().then(data=>{if(active)setClientes(Array.isArray(data?.data)?data.data:Array.isArray(data)?data:[]);}).catch(e=>{if(active)setError(e.message||'No se pudieron cargar los clientes');});return()=>{active=false;};},[loadClients]);
+  const cliente=clientes.find(item=>String(item.id)===String(clienteId));
+  useEffect(()=>{if(cliente)setVencimiento(addDaysLocalDate(fecha,parsePaymentTermDays(cliente.vencimiento||cliente.dias_pago)));},[cliente,fecha]);
+  async function guardar(e){
+    e.preventDefault();const amount=Number(String(importe).trim().replace(',','.'));
+    if(!clienteId||!concepto.trim()||!Number.isFinite(amount)||amount<=0){setError('Selecciona el cliente, describe el concepto e indica un importe positivo.');return;}
+    setSaving(true);setError('');
+    try{const created=await create({cliente_id:clienteId,serie:['A','B','G'].includes(empresa.serie_facturas)?empresa.serie_facturas:'A',fecha,fecha_vencimiento:vencimiento||null,estado:'borrador',pedidos_ids:[],referencia_cliente:referencia.trim()||null,lineas:[{concepto:concepto.trim(),cantidad:1,precio_unit:amount}]});
+      broadcastFacturasChanged(normalizarDetalleCambioFactura(created,{factura_id:created?.id,estado_nuevo:'borrador',pedido_ids_afectados:[]}));notify('Borrador independiente creado. Revísalo antes de emitirlo.','success');onSaved(created);
+    }catch(err){setError(err.message||'No se pudo crear el borrador');}finally{setSaving(false);}
+  }
+  return <Modal title="Factura sin pedido" width={560} onClose={onClose}><form className="finance-dialog-content" onSubmit={guardar}>
+    <p>Factura un concepto independiente de un viaje. El IVA y las condiciones de pago se toman de la ficha del cliente; el borrador se revisa antes de emitir.</p>
+    <label style={S.lbl} htmlFor="independent-invoice-client">Cliente *</label><select id="independent-invoice-client" required style={S.inp} value={clienteId} onChange={e=>setClienteId(e.target.value)}><option value="">Seleccionar cliente</option>{clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}</select>
+    <label style={S.lbl} htmlFor="independent-invoice-reference">Referencia</label><input id="independent-invoice-reference" style={S.inp} value={referencia} maxLength={160} onChange={e=>setReferencia(e.target.value)} placeholder="Referencia del cliente o de la operación"/>
+    <label style={S.lbl} htmlFor="independent-invoice-concept">Concepto *</label><input id="independent-invoice-concept" required style={S.inp} value={concepto} maxLength={500} onChange={e=>setConcepto(e.target.value)} placeholder="Servicio o concepto facturado"/>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(145px,1fr))',gap:10}}><div><label style={S.lbl} htmlFor="independent-invoice-amount">Base sin IVA (€) *</label><input id="independent-invoice-amount" required inputMode="decimal" style={S.inp} value={importe} onChange={e=>setImporte(e.target.value)} placeholder="0,00"/></div><div><label style={S.lbl} htmlFor="independent-invoice-date">Fecha</label><input id="independent-invoice-date" required type="date" style={S.inp} value={fecha} onChange={e=>setFecha(e.target.value)}/></div><div><label style={S.lbl} htmlFor="independent-invoice-due">Vencimiento</label><input id="independent-invoice-due" type="date" style={S.inp} value={vencimiento} onChange={e=>setVencimiento(e.target.value)}/></div></div>
+    {error&&<p role="alert" style={{color:'var(--red,#b91c1c)'}}>{error}</p>}
+    <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:18}}><Button type="button" onClick={onClose}>Cancelar</Button><Button variant="primary" type="submit" disabled={saving}>{saving?'Guardando…':'Crear borrador'}</Button></div>
+  </form></Modal>;
+}
 const EMPTY_INITIAL_ORDERS = [];
 function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = EMPTY_INITIAL_ORDERS }) {
   const empresa  = useEmpresaPerfil();
@@ -1456,6 +1480,8 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   const [resumenClientes, setResumenClientes] = useState([]);
   const [selIds,     setSelIds]     = useState(new Set(initialOrders.map(p => p.id)));
   const [modo,       setModo]       = useState("linea"); // linea|detalle|kg
+  const [aplicarClausulaGasoil, setAplicarClausulaGasoil] = useState(false);
+  const [porcentajeGasoil, setPorcentajeGasoil] = useState('0');
   const [concepto,   setConcepto]   = useState("");
   const [referenciaFactura, setReferenciaFactura] = useState("");
   const [fechaFactura, setFechaFactura] = useState(() => localDateValue());
@@ -1551,7 +1577,12 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   }, [clienteSel, clientes, fechaFactura, fechaVencimiento]);
 
   const selArr   = pedidos.filter(p=>selIds.has(p.id));
-  const totalSel = selArr.reduce((s,p)=>s+Number(p.importe||0)+Number(p.importe_paralizacion||0),0);
+  const porcentajeGasoilNumero = Number(String(porcentajeGasoil).replace(',', '.'));
+  const porcentajeGasoilValido = String(porcentajeGasoil).trim() !== '' && Number.isFinite(porcentajeGasoilNumero) && porcentajeGasoilNumero >= 0 && porcentajeGasoilNumero <= 100 && Math.abs(porcentajeGasoilNumero * 100 - Math.round(porcentajeGasoilNumero * 100)) < 0.000001;
+  const basePortes = selArr.reduce((s,p)=>s+Math.round(Number(p.importe||0)*100)-Math.round(Number(p.importe_revision_combustible||0)*100),0);
+  const recargoActual = selArr.reduce((s,p)=>s+Math.round(Number(p.importe_revision_combustible||0)*100),0);
+  const recargoAplicado = aplicarClausulaGasoil && porcentajeGasoilValido ? Math.round(basePortes * porcentajeGasoilNumero / 100) : recargoActual;
+  const totalSel = (basePortes + recargoAplicado) / 100 + selArr.reduce((s,p)=>s+Number(p.importe_paralizacion||0),0);
   const totalKg  = selArr.reduce((s,p)=>s+Number(p.peso_kg||p.kg||0),0);
   const fmtN = n => Number(n||0).toLocaleString("es-ES",{maximumFractionDigits:0});
   const tieneReferenciaCliente = p => String(p.referencia_cliente || p.ref_cliente || p.referencia_factura || "").trim().length > 0;
@@ -1564,7 +1595,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   function buildLineas(){
     const cliente = clientes.find(c=>c.id===clienteSel);
     const modoFact = modo || cliente?.modo_facturacion || "linea";
-    return buildTransportInvoiceLines(selArr, modoFact, concepto);
+    return buildTransportInvoiceLines(selArr, modoFact, concepto, aplicarClausulaGasoil && porcentajeGasoilValido ? porcentajeGasoilNumero : null);
   }
 
   useEffect(() => {
@@ -1574,7 +1605,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
     setConfirmAlbaranes(false);
   // buildLineas depende del estado actual del modal; estos deps cubren los cambios que regeneran el borrador.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clienteSel, fechaDesde, fechaHasta, modo, concepto, pedidos, selIds]);
+  }, [clienteSel, fechaDesde, fechaHasta, modo, concepto, pedidos, selIds, aplicarClausulaGasoil, porcentajeGasoilNumero, porcentajeGasoilValido]);
 
   function updateLineaFactura(idx, key, value) {
     setLineasEdit(prev => prev.map((linea, i) => i === idx ? { ...linea, [key]: key === "concepto" ? value : value } : linea));
@@ -1619,7 +1650,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
     pedidosConAvisoIA.length ? `${pedidosConAvisoIA.length} pedido(s) con diferencias detectadas por IA documental` : null,
     diferenciaLineas > 0.01 ? `El total editado difiere ${fmt2(diferenciaLineas)} EUR del total de pedidos` : null,
   ].filter(Boolean);
-  const listoParaBorrador = clienteSel && selArr.length > 0 && lineasValidas.length > 0 && confirmCantidades && confirmReferencias && confirmAlbaranes;
+  const listoParaBorrador = clienteSel && selArr.length > 0 && lineasValidas.length > 0 && (!aplicarClausulaGasoil || porcentajeGasoilValido) && confirmCantidades && confirmReferencias && confirmAlbaranes;
 
   async function emitir(){
     if (!clienteSel)     { notify("Selecciona un cliente", "warning"); return; }
@@ -1635,6 +1666,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
         fecha_vencimiento: fechaVencimiento || null,
         estado:      "borrador",
         pedidos_ids: selArr.map(p=>p.id),
+        ...(aplicarClausulaGasoil ? {fuel_clause_percent: porcentajeGasoilNumero, fuel_clause_confirmed: true} : {}),
         lineas,
         referencia_cliente: referenciaFactura.trim() || null,
         observaciones: `Periodo ${fechaDesde} - ${fechaHasta}. ${selArr.length} viajes.`,
@@ -1787,6 +1819,21 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
               </button>
             ))}
           </div>
+        </div>}
+
+        {/* Cláusula pactada para esta factura */}
+        {paso===2 && <div style={{border:'1px solid var(--border)',borderRadius:9,padding:'12px 14px',background:'var(--bg3)',marginBottom:12}}>
+          <label style={{display:'flex',alignItems:'center',gap:8,fontWeight:700,color:'var(--text2)'}}>
+            <input type="checkbox" checked={aplicarClausulaGasoil} onChange={e=>setAplicarClausulaGasoil(e.target.checked)}/>
+            Aplicar cláusula de gasóleo al preparar esta factura
+          </label>
+          {aplicarClausulaGasoil && <div style={{marginTop:10,maxWidth:420}}>
+            <label style={lbl}>Porcentaje pactado sobre el porte sin recargo</label>
+            <input type="number" min="0" max="100" step="0.01" value={porcentajeGasoil} onChange={e=>setPorcentajeGasoil(e.target.value)} style={inp}/>
+            <div style={{fontSize:11,color:porcentajeGasoilValido?'var(--text4)':'#b45309',marginTop:5}}>
+              {porcentajeGasoilValido ? `Recargo actual: ${fmt2(recargoActual/100)} € · Cláusula aplicada: ${fmt2(recargoAplicado/100)} €. Se sustituye el recargo anterior, sin duplicarlo, y figura en línea separada.` : 'Indica un porcentaje entre 0 y 100 con hasta dos decimales.'}
+            </div>
+          </div>}
         </div>}
 
         {/* Concepto (solo modo linea) */}
@@ -2111,6 +2158,7 @@ export default function Facturacion() {
   const [vistaFact,    setVistaFact]    = useState(null);
   const [modalRect,    setModalRect]    = useState(null);
   const [modalMulti,   setModalMulti]   = useState(false); // facturar multiples pedidos de un cliente
+  const [modalSinPedido,setModalSinPedido] = useState(false);
   const [modalInitial, setModalInitial] = useState(null);
   const [pedidoCorreccion, setPedidoCorreccion] = useState(null);
   const [analizandoPedidoId, setAnalizandoPedidoId] = useState(null);
@@ -2823,7 +2871,7 @@ export default function Facturacion() {
 
   return (
     <Page className={`finance-page${isSummary ? " finance-page--summary" : ""}`}>
-      <PageHeader title="Gestión financiera" description="Controla la facturación, los cobros, los pagos y la tesorería de tu empresa." actions={<>{isSummary && !filtroFechasCustom && <input className="tgui-input finance-header-month" aria-label="Mes de facturación" type="month" value={periodoMes} onChange={e => cambiarMesPeriodo(e.target.value)} />}{canEdit && <Button variant="primary" onClick={() => setModalMulti(true)}>+ Nueva factura</Button>}</>} />
+      <PageHeader title="Gestión financiera" description="Controla la facturación, los cobros, los pagos y la tesorería de tu empresa." actions={<>{isSummary && !filtroFechasCustom && <input className="tgui-input finance-header-month" aria-label="Mes de facturación" type="month" value={periodoMes} onChange={e => cambiarMesPeriodo(e.target.value)} />}{canEdit && <><Button onClick={() => setModalSinPedido(true)}>Factura sin pedido</Button><Button variant="primary" onClick={() => setModalMulti(true)}>+ Facturar viajes</Button></>}</>} />
       <Tabs idPrefix="finance" label="Finanzas" value={activeFacturacionTab} onChange={setActiveFacturacionTab} items={FINANCE_TABS} />
       {focusFactura?.source === "control_tower" && !focusFactura?.factura_id && (
         <div style={{...S.card,marginBottom:14,borderColor:"var(--accent-a35)",background:"var(--accent-a07)"}}>
@@ -3430,6 +3478,7 @@ export default function Facturacion() {
 
       {modalMulti && <ModalFacturarMultiple initialClientId={modalInitial?.clienteId || ""} initialOrders={modalInitial?.orders || EMPTY_INITIAL_ORDERS}
         onClose={()=>{setModalMulti(false);setModalInitial(null);cargar();cargarSinFacturar();}}/>}
+      {modalSinPedido && <ModalFacturaSinPedido onClose={()=>setModalSinPedido(false)} onSaved={()=>{setModalSinPedido(false);cargar();}}/>}
       {pedidoCorreccion && (
         <ModalCorregirPedidoFactura
           pedido={pedidoCorreccion}

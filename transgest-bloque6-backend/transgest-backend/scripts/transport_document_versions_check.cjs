@@ -5,13 +5,17 @@ async function main(){
  const pg=new PGlite(),company=crypto.randomUUID(),other=crypto.randomUUID(),order=crypto.randomUUID();
  const db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
  try{
-  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz,descarga_real_at timestamptz);');
+  await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz,descarga_real_at timestamptz,estado TEXT,carga_real_at timestamptz);');
   for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_document_versions.sql'),'utf8'));
   await pg.query('INSERT INTO pedidos VALUES($1,$2,NOW())',[order,company]);
   const d={codigo_control:'SINTETICO',referencia_pedido:'QA-DeCA-001',fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético SL',nif:'SINTETICO-NO-VALIDO',domicilio:'Calle de ensayo 1, Madrid'},transportista_efectivo:{nombre:'Transportista de prueba',nif:'SINTETICO-NO-VALIDO'},empresa:{nombre:'DEMOSTRACIÓN SINTÉTICA'},origen:{nombre:'Almacén de ensayo',direccion:'Madrid, España'},destino:{nombre:'Destino sintético',direccion:'Valencia, España',destinatario:'Destinatario de prueba'},mercancia:{descripcion:'Cerámica de ensayo',peso_kg:1250,bultos:64,embalaje:'Paletizado'},vehiculo:{tractora:'QA-0000'},cargas:[],descargas:[],observaciones:'DATOS SINTÉTICOS. Documento de prueba sin valor para un transporte real.'};
   const args={empresaId:company,pedidoId:order,payload:{documento:d},baseUrl:'https://example.invalid',reason:'Ensayo inicial'};
   d.observaciones_publicas=d.observaciones;d.observaciones='NOTA INTERNA QUE NO SE PUBLICA';
+  await assert.rejects(service.issue(db,args),{code:'ORDER_NOT_CONFIRMED'});
+  await pg.query("UPDATE pedidos SET estado='confirmado' WHERE id=$1",[order]);
+  await assert.rejects(service.issue(db,args),{code:'LOAD_NOT_COMPLETED'});
+  await pg.query('UPDATE pedidos SET carga_real_at=NOW() WHERE id=$1',[order]);
   const first=await service.issue(db,args);assert.equal(first.created,true);
   const repeated=await service.issue(db,args);assert.equal(repeated.id,first.id);assert.equal(repeated.created,false);
   const initial=(await service.list(db,company,order))[0];const token=new URL(initial.public_url).searchParams.get('token');

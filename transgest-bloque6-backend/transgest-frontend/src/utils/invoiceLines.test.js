@@ -36,3 +36,9 @@ test.each(['linea','detalle','kg'])('%s adds the separate agreed detention charg
  const lines=build([{id:'p1',numero:'PED-1',importe:1000,importe_revision_combustible:50,importe_paralizacion:150}],mode,'Servicio');
  expect(total(lines)).toBe(1150);expect(lines.find(l=>l.paralizacion_pedido_id==='p1')).toEqual({concepto:'Paralización · PED-1',cantidad:1,precio_unit:150,paralizacion_pedido_id:'p1'});
 });
+test.each(['linea','detalle','detalle_combustible_agrupado','kg'])('%s replaces stored fuel with invoice-time clause without doubling it', mode=>{
+ const lines=build(orders,mode,'Transporte',10);
+ expect(total(lines)).toBe(913);
+ expect(total(lines.filter(l=>l.concepto.startsWith('Recargo de combustible')))).toBe(83);
+ expect(total(lines.filter(l=>!l.concepto.startsWith('Recargo de combustible')))).toBe(830);
+});

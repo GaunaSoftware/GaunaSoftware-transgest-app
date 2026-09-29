@@ -5,6 +5,7 @@
 import { fixMojibakePayload } from "../utils/mojibake";
 import { resolveApiBase } from "../utils/serverConfig";
 import { confirmDialog } from './notify';
+import * as nativeDocuments from './nativeDocuments';
 
 // El backend puede ser la nube (por defecto) o uno local/on-premise si el
 // usuario lo configura en Ajustes -> Servidor (ver utils/serverConfig.js).
@@ -341,8 +342,13 @@ export async function descargarArchivoProtegido(path, fallbackName = "documento"
   return { filename, size: blob.size };
 }
 
-export async function verArchivoProtegido(path, fallbackName = "documento") {
+export async function verArchivoProtegido(path, fallbackName = "documento", {inlineNative = false} = {}) {
   const token = getToken();
+  // Open during the user's click, before the asynchronous download. Browsers block
+  // windows first opened after fetch, which used to leave the signing form behind.
+  const native = nativeDocuments;
+  const previewTab = !native.hasNativeDocuments() ? window.open('', '_blank') : null;
+  if (previewTab) previewTab.opener = null;
   let res;
   try {
     res = await fetch(apiUrl(path), {
@@ -351,18 +357,21 @@ export async function verArchivoProtegido(path, fallbackName = "documento") {
       },
     });
   } catch (e) {
+    previewTab?.close();
     const message = friendlyApiError(e.message, 0, null, path);
     notifyError(message);
     throw new Error(message);
   }
 
   if (res.status === 401) {
+    previewTab?.close();
     removeToken();
     window.location.href = "/";
     return null;
   }
 
   if (!res.ok) {
+    previewTab?.close();
     const data = await parseApiResponse(res);
     const requestId = extractRequestId(res, data);
     const message = friendlyApiError(
@@ -382,19 +391,21 @@ export async function verArchivoProtegido(path, fallbackName = "documento") {
 
   const blob = await res.blob();
   const filename = filenameFromDisposition(res.headers.get("content-disposition")) || fallbackName || "documento";
-  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el documento.');
+  if(getToken()!==token){previewTab?.close();throw new Error('La sesión ha cambiado. Vuelve a abrir el documento.');}
   if(blob.type.includes('pdf')){
-    const native=await import('./nativeDocuments');
     if(getToken()!==token)throw new Error('La sesión ha cambiado.');
     if(native.hasNativeDocuments()){
       const saved=await native.saveNativePdf(blob,filename);
-      await native.openNativePdf(saved.id);
+      if(inlineNative)await native.previewNativePdf(saved.id);
+      else await native.openNativePdf(saved.id);
       return {filename,size:blob.size,savedOffline:true};
     }
   }
+  if (!blob.type.includes('pdf')) previewTab?.close();
   const objectUrl = URL.createObjectURL(blob);
-  const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
-  if (!opened) {
+  if (previewTab && blob.type.includes('pdf')) {
+    previewTab.location.replace(objectUrl);
+  } else {
     const a = document.createElement("a");
     a.href = objectUrl;
     a.target = "_blank";
@@ -404,7 +415,7 @@ export async function verArchivoProtegido(path, fallbackName = "documento") {
     a.click();
     a.remove();
   }
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 300000);
   return { filename, size: blob.size };
 }
 

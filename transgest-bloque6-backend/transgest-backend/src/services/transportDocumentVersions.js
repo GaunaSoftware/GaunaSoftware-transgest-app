@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { renderDeca } = require('./transportDocumentPdf');
+const { driverStops } = require('./driverStops');
 const fail = (message, code, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const canonical = value => JSON.stringify(value, function (key, v) {
   return v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v;
@@ -56,12 +57,14 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
   return db.transaction(async tx => {
     const order = (await tx.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2 FOR UPDATE', [empresaId, pedidoId])).rows[0];
     if (!order) fail('Pedido no encontrado', 'ORDER_NOT_FOUND', 404);
+    assertReadyToIssue(order);
     if (expectedUpdatedAt && new Date(order.updated_at).getTime() !== new Date(expectedUpdatedAt).getTime()) fail('El pedido ha cambiado. Recarga antes de emitir el documento.', 'ORDER_CHANGED');
     const shipments = (await tx.query('SELECT * FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at,id', [empresaId, pedidoId])).rows;
     if (envioId && !shipments.some(e => e.id === envioId)) fail('Envío no encontrado en este pedido', 'SHIPMENT_NOT_FOUND', 404);
     if(consolidated && (!consolidationAllowed||source!=='transgest'||envioId||shipments.length<2))fail('La consolidación requiere autorización de la empresa y al menos dos envíos explícitos.','CONSOLIDATION_NOT_ALLOWED',422);
     if (!envioId && shipments.length > 1&&!consolidated) fail('Selecciona el envío; cada envío tiene su DeCA.', 'SHIPMENT_REQUIRED', 422);
     const shipment = shipments.find(e => e.id === envioId) || shipments[0];
+    await assertShipmentLoadReady(tx, order, consolidated ? shipments : shipment ? [shipment] : []);
     const scope = consolidated?'consolidado':shipment?.id || 'pedido';
     const mixed=(await tx.query("SELECT scope_key FROM transport_document_versions WHERE empresa_id=$1 AND pedido_id=$2 AND (scope_key='consolidado' OR $3='consolidado') AND scope_key<>$3 LIMIT 1",[empresaId,pedidoId,scope])).rows[0];
     if(mixed)fail('Este pedido ya utiliza otra modalidad documental. Conserva esa modalidad para evitar coberturas duplicadas.','DOCUMENT_SCOPE_CONFLICT');
@@ -107,6 +110,29 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
     return { id, created: true, version };
   });
 }
+function assertReadyToIssue(order) {
+  const state = String(order?.estado || '').toLowerCase();
+  if (!['confirmado','en_curso','descarga','entregado','facturado'].includes(state)) {
+    fail('Confirma el pedido antes de emitir el DeCA.', 'ORDER_NOT_CONFIRMED');
+  }
+  if (!order?.carga_real_at && !order?.colaborador_carga_confirmada_at) {
+    fail('Finaliza y verifica la carga antes de emitir el DeCA.', 'LOAD_NOT_COMPLETED');
+  }
+}
+async function assertShipmentLoadReady(tx, order, shipments) {
+  const loads = driverStops(order).filter(stop => stop.tipo === 'carga');
+  if (loads.length <= 1) return;
+  const required = shipments.length
+    ? [...new Set(shipments.map(shipment => shipment.snapshot?.origen_stop_id))]
+    : loads.map(stop => stop.id);
+  if (required.some(id => !id || !loads.some(stop => stop.id === id))) {
+    fail('Asocia cada envío con su punto de carga antes de emitir el DeCA.', 'SHIPMENT_MAPPING_REQUIRED', 422);
+  }
+  const progress = (await tx.query('SELECT data FROM pedido_chofer_pasos WHERE empresa_id=$1 AND pedido_id=$2', [order.empresa_id, order.id])).rows[0]?.data || {};
+  if (required.some(id => progress.paradas?.[id]?.carga_ok !== true)) {
+    fail('Finaliza y verifica la carga correspondiente a este envío antes de emitir su DeCA.', 'SHIPMENT_LOAD_NOT_COMPLETED');
+  }
+}
 async function publicOriginal(db, id, token, now = new Date()) {
   if (!validId(id) || typeof token !== 'string' || token.length > 128) return null;
   const row = (await db.query('SELECT * FROM transport_document_versions WHERE id=$1 AND token_hash=$2', [id, hash(token)])).rows[0];
@@ -151,4 +177,4 @@ async function assertDeparture(db,empresaId,order,steps){
   if(!steps.dcd_revisado||!steps.dcd_disponible||active.some(v=>!steps.dcd_versiones_revisadas?.includes(v.id)))fail('Revisa y lleva disponibles las versiones vigentes del DeCA antes de salir.','DECA_REVIEW_REQUIRED');
   if(Math.abs(active.reduce((sum,v)=>sum+Number(v.payload.documento?.mercancia?.peso_kg||0),0)-Number(order.peso_kg))>.01)fail('El peso cargado difiere de los DeCA. Tráfico debe emitir o adjuntar su nueva versión.','DECA_GOODS_CHANGED');
 }
-module.exports = { issue, list, read, publicOriginal, legacyPublicOriginal, hasProtectedLegacyDeca, publicAccessEnded, requiredFields, documentSnapshot, available, canonical, hash, assertDeparture };
+module.exports = { issue, list, read, publicOriginal, legacyPublicOriginal, hasProtectedLegacyDeca, publicAccessEnded, requiredFields, documentSnapshot, available, canonical, hash, assertDeparture, assertReadyToIssue };

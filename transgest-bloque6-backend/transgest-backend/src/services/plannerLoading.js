@@ -86,6 +86,7 @@ async function act(db,company,user,id,input){
     const docId=crypto.randomUUID();
     await tx.query(`INSERT INTO pedido_docs(id,empresa_id,pedido_id,tipo,nombre,file_mime,file_base64,file_size_kb) VALUES($1,$2,$3,'foto_carga','Carga confirmada',$4,$5,$6)`,[docId,company,p.pedido_id,mime,photo.toString('base64'),Math.ceil(photo.length/1024)]);
     await tx.query("UPDATE planner_preparaciones SET carga_confirmada_at=now(),carga_foto_id=$3,carga_fin_at=now(),situacion_camion='cargado' WHERE id=$1 AND empresa_id=$2",[id,company,docId]);
+    await tx.query('UPDATE pedidos SET carga_real_at=COALESCE(carga_real_at,NOW()) WHERE id=$1 AND empresa_id=$2',[p.pedido_id,company]);
     await require('./plannerDocumentation').closedLoad(tx,company,user.id,p,process.env.PUBLIC_API_URL||process.env.API_PUBLIC_URL||process.env.RENDER_EXTERNAL_URL||process.env.PUBLIC_APP_URL||'');
     await tx.query(`INSERT INTO notificaciones_internas(empresa_id,usuario_id,tipo,titulo,mensaje,data,created_by)
      SELECT p.empresa_id,u.id,'planner.cargada','Carga terminada','Revisa la documentación antes de confirmar la salida.',jsonb_build_object('pedido_id',p.id),$3

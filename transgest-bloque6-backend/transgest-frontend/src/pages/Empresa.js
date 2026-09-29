@@ -1609,7 +1609,7 @@ export default function Empresa() {
               </div>
               <div>
                 <label style={S.lbl}>Serie órdenes de carga</label>
-                <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={empresa.serie_ordenes||"OC"} onChange={fe("serie_ordenes")} placeholder="OC" maxLength={5} disabled={!esGerente}/>
+                <input style={{ ...S.inp, fontFamily:"'JetBrains Mono',monospace" }} value={empresa.serie_ordenes??"OC"} onChange={fe("serie_ordenes")} placeholder="Sin serie" maxLength={5} disabled={!esGerente}/>
                 <div style={{ fontSize:10, color:"var(--text5)", marginTop:4 }}>Ej: OC -> genera OC-2026-0001, OC-2026-0002...</div>
               </div>
               <div>
@@ -1716,7 +1716,8 @@ export default function Empresa() {
           <div style={{...S.section, ...(esSuperadmin ? {} : {display:"none"})}}>
             <div style={S.secTitle}>AEAT - VERIFACTU / SII</div>
             <div style={S.info}>
-              Configura el modo fiscal de esta empresa. Al emitir facturas, TransGest ya deja creado el registro fiscal y la cola de envio correspondiente.
+              Configura el modo fiscal de esta empresa. Al emitir facturas, TransGest crea el registro y la cola solo para los modos integrados.
+              «Sin integrar» no significa NO VERI*FACTU: esa modalidad requiere registros firmados, conservación y registro de eventos propios, y no remite cada factura automáticamente a la AEAT. No selecciones VERI*FACTU ni SII para representar NO VERI*FACTU.
             </div>
             {fiscalStatus && (
               <div style={{
@@ -1756,7 +1757,7 @@ export default function Empresa() {
               <div>
                 <label style={S.lbl}>Modo fiscal</label>
                 <select value={fiscalCfg.modo} onChange={ff("modo")} disabled={!esGerente} style={{ ...S.inp, background:esGerente ? "var(--bg4)":"var(--bg2)" }}>
-                  <option value="ninguno">Sin integrar</option>
+                  <option value="ninguno">Sin integrar (NO VERI*FACTU no disponible)</option>
                   <option value="verifactu">VERIFACTU</option>
                   <option value="sii">SII</option>
                 </select>

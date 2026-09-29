@@ -125,6 +125,7 @@ async function transition(db,company,user,id,input){
     await tx.query("INSERT INTO planner_eventos(empresa_id,pedido_id,preparacion_id,tipo,datos,created_by) VALUES($1,$2,$3,'expedicion.salida',$4,$5)",[company,prep.pedido_id,id,JSON.stringify({confirmacion:'trafico',documentos:input.dcd_versiones_revisadas}),user]);
    }
   }else throw fail('Acción no reconocida.');
+  if(action==='camion' && input.situacion==='cargado')await tx.query('UPDATE pedidos SET carga_real_at=COALESCE(carga_real_at,NOW()) WHERE id=$1 AND empresa_id=$2',[prep.pedido_id,company]);
   if(action==='camion')await tx.query("INSERT INTO planner_eventos(empresa_id,pedido_id,preparacion_id,tipo,datos,created_by) VALUES($1,$2,$3,'camion.estado',$4,$5)",[company,prep.pedido_id,id,JSON.stringify({anterior:prep.situacion_camion,situacion:input.situacion}),user]);
   return (await tx.query(`UPDATE planner_preparaciones SET version=version+1,
     estado=CASE WHEN $3='lista' THEN 'lista' WHEN $3='expedir' THEN 'expedida' WHEN $3='cancelar' THEN 'cancelada' ELSE estado END,

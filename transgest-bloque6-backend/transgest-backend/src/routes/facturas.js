@@ -1098,10 +1098,11 @@ router.post("/", GERENTE_O_CONTABLE,
   async(req,res,next)=>{try{
     if(req.body.workflow_pedidos_ids!==undefined){
       const ids=req.body.workflow_pedidos_ids;
+      const clausePercent=req.body.fuel_clause_percent,clauseConfirmed=req.body.fuel_clause_confirmed;
       if(!Array.isArray(ids)||!ids.length||ids.length>200||ids.some(id=>typeof id!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)))return res.status(400).json({error:'Selecciona entre 1 y 200 pedidos válidos'});
       const rows=(await db.query('SELECT id,cliente_id FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[req.empresaId||req.user.empresa_id,ids])).rows;
       if(rows.length!==new Set(ids).size||new Set(rows.map(r=>r.cliente_id)).size!==1)return res.status(400).json({error:'El lote debe contener pedidos autorizados de un solo cliente'});
-      req.body={workflow_pedidos_ids:ids,cliente_id:rows[0].cliente_id,pedidos_ids:ids,serie:'A',estado:'borrador',lineas:[{concepto:'Preparando lote',cantidad:1,precio_unit:0}]};
+      req.body={workflow_pedidos_ids:ids,cliente_id:rows[0].cliente_id,pedidos_ids:ids,serie:'A',estado:'borrador',lineas:[{concepto:'Preparando lote',cantidad:1,precio_unit:0}],...(clausePercent!==undefined?{fuel_clause_percent:clausePercent,fuel_clause_confirmed:clauseConfirmed}:{})};
     }next();
   }catch(e){next(e);}},
   body("cliente_id").isUUID(),
@@ -1131,6 +1132,9 @@ router.post("/", GERENTE_O_CONTABLE,
     if(factura_original_id && (!/^[0-9a-f-]{36}$/i.test(String(factura_original_id)) || !String(motivo_rectificacion || '').trim() || !['diferencia','sustitucion'].includes(tipo_rectificacion)))return res.status(400).json({error:'Indica la factura original, el motivo y el tipo de rectificación.'});
     if(factura_original_id && pedidos_ids.length)return res.status(400).json({error:'Los pedidos conservan su factura original. No los vincules de nuevo a la rectificativa.'});
     const pedidosIdsUnicos = [...new Set((pedidos_ids || []).filter(Boolean))];
+    if (req.body.fuel_clause_percent !== undefined && (!pedidosIdsUnicos.length || req.body.fuel_clause_confirmed !== true)) {
+      return res.status(400).json({error:'Confirma la cláusula de gasóleo para los pedidos seleccionados.'});
+    }
     const borradoresPrevios = new Set();
 
     if (pedidosIdsUnicos.length) {
@@ -1170,6 +1174,7 @@ router.post("/", GERENTE_O_CONTABLE,
 
     const created = await db.transaction(async (client) => {
       let workflowHash=null;
+      let appliedFuelClause=null;
       if (pedidosIdsUnicos.length) {
         const { rows: fuelOrders } = await client.query(
           "SELECT * FROM pedidos WHERE id=ANY($1::uuid[]) AND empresa_id=$2 ORDER BY id FOR UPDATE",
@@ -1185,14 +1190,17 @@ router.post("/", GERENTE_O_CONTABLE,
           if(linked.some(f=>String(f.empresa_id)!==String(empresaId)||f.estado!=='borrador'||String(f.cliente_id)!==String(cliente_id)))throw Object.assign(new Error('El pedido ya tiene una factura no editable'),{status:409});
           linked.forEach(f=>borradoresPrevios.add(f.id));
         }
+        const fuelService=require('../services/invoiceFuelLines');
+        appliedFuelClause=fuelService.fuelClause(fuelOrders,req.body.fuel_clause_percent);
         if(req.body.workflow_pedidos_ids){
           if(readiness.some(r=>r.estado!=='listo'))throw Object.assign(new Error('Revisa los pedidos actuales antes de preparar el lote'),{status:409});
-          workflowHash=require('crypto').createHash('sha256').update(JSON.stringify(readiness.map(r=>[r.id,r.huella]))).digest('hex');
+          const baseRequest=readiness.map(r=>[r.id,r.huella]);
+          workflowHash=require('crypto').createHash('sha256').update(JSON.stringify(appliedFuelClause?{pedidos:baseRequest,clausula_gasoil:appliedFuelClause.percentage}:baseRequest)).digest('hex');
           const previous=(await client.query('SELECT f.* FROM invoice_workflow_operations o JOIN facturas f ON f.id=o.factura_id AND f.empresa_id=o.empresa_id WHERE o.empresa_id=$1 AND o.request_hash=$2',[empresaId,workflowHash])).rows[0];
           if(previous)return previous;
-          lineas=fuelOrders.flatMap(p=>require('../services/invoiceFuelLines').fuelInvoiceLines(p));
+          lineas=fuelService.fuelInvoiceLinesForOrders(fuelOrders,appliedFuelClause);
         }
-        require('../services/invoiceFuelLines').validateFuelInvoiceLines(fuelOrders, lineas);
+        fuelService.validateFuelInvoiceLines(fuelOrders, lineas, appliedFuelClause);
       }
       if(plannerPreparation) lineas=await require('../services/plannerInvoice').saleLines(client,empresaId,plannerPreparation,cliente_id);
       let original=null;
@@ -1254,13 +1262,14 @@ router.post("/", GERENTE_O_CONTABLE,
           (numero, serie, cliente_id, fecha, fecha_vencimiento, estado, forma_pago, vencimiento,
            base_imponible, tipo_iva, cuota_iva, tipo_irpf, cuota_irpf, total,
           iva_regimen, observaciones, notas_internas, created_by, empresa_id, revision_cobro_at, aviso_cobro_dias,
-          referencia_cliente)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+          referencia_cliente, fuel_clause)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb)
         RETURNING *`,
         [numero, serie, cliente_id, facturaFecha, fechaVencimientoFinal, estado || "borrador",
          forma_pago || cliRows[0]?.forma_pago || null, clienteVencimiento, base, tipoIva, cuotaIva, tipoIrpf, cuotaIrpf, total,
          ivaRegimen, observaciones, notas_internas, req.user.id, empresaId, revisionCobroAt,
-         cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null]
+         cobrosConfig.dias_entre_reclamaciones, String(referencia_cliente || "").trim() || null,
+         appliedFuelClause ? JSON.stringify({...appliedFuelClause,confirmed_by:req.user.id,confirmed_at:new Date().toISOString()}) : null]
       );
 
       if(plannerPreparation) await client.query('UPDATE facturas SET planner_preparacion_id=$1 WHERE id=$2 AND empresa_id=$3',[plannerPreparation,fac.id,empresaId]);

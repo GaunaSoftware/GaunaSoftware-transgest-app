@@ -11,8 +11,16 @@ module.exports=async({db,base,company,user,token,password})=>{
  const review=()=>call('POST',path+'/'+order+'/revisar',{confirmado:true,huella:row.huella});await review();await review();assert.equal((await db.query("SELECT count(*)::int n FROM invoice_operational_events WHERE pedido_id=$1 AND evento='revision'",[order])).rows[0].n,1);
  const other=(await call('POST','/auth/login',{email:'planner-b@example.invalid',password})).token;await call('POST',path+'/'+order+'/revisar',{confirmado:true,huella:row.huella},404,other);await call('PUT',path+'/reglas/'+client,rules,404,other);await call('POST','/facturas',{workflow_pedidos_ids:[order]},400,other);
  await db.query('UPDATE pedidos SET importe=120 WHERE id=$1',[order]);await call('POST','/facturas',{workflow_pedidos_ids:[order]},409);row=(await list()).data[0];await review();
- const invoice=await call('POST','/facturas',{workflow_pedidos_ids:[order]},201);assert.equal((await call('POST','/facturas',{workflow_pedidos_ids:[order]},201)).id,invoice.id);assert.equal(Number(invoice.base_imponible),120);assert.equal(Number(invoice.total),145.2);
+ let invoice=await call('POST','/facturas',{workflow_pedidos_ids:[order]},201);assert.equal((await call('POST','/facturas',{workflow_pedidos_ids:[order]},201)).id,invoice.id);assert.equal(Number(invoice.base_imponible),120);assert.equal(Number(invoice.total),145.2);
  const lines=(await db.query('SELECT concepto,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[invoice.id])).rows;assert.equal(lines.length,2);assert.equal(Number(lines[0].importe),110);assert.equal(Number(lines[1].importe),10);assert.match(lines[1].concepto,/combustible/i);
+ await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5},400);
+ const previousId=invoice.id;
+ invoice=await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5,fuel_clause_confirmed:true},201);
+ assert.notEqual(invoice.id,previousId);assert.equal(Number(invoice.base_imponible),123.75);
+ assert.equal((await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5,fuel_clause_confirmed:true},201)).id,invoice.id);
+ const clauseLines=(await db.query('SELECT concepto,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[invoice.id])).rows;
+ assert.equal(clauseLines.length,2);assert.equal(Number(clauseLines[0].importe),110);assert.equal(Number(clauseLines[1].importe),13.75);
+ assert.equal((await db.query('SELECT fuel_clause FROM facturas WHERE id=$1',[invoice.id])).rows[0].fuel_clause.percentage,12.5);
  await call('POST','/facturas/'+invoice.id+'/revision',{confirmado:true});
  // Client policy edits must invalidate old review before issue.
  await call('PUT',path+'/reglas/'+client,{...rules,exigir_deca:true});await call('PATCH','/facturas/'+invoice.id+'/estado',{estado:'emitida'},409);

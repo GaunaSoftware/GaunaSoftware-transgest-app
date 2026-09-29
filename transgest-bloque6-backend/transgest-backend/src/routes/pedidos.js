@@ -2376,7 +2376,7 @@ async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userI
 async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null }) {
   // Signatures, uploads and closing a journey must never regenerate its DeCA.
   const versions = await transportDocuments.list(db, empresaId, pedidoId);
-  if (!["generacion_manual", "creacion_app_chofer_dcd"].includes(motivo)) {
+  if (motivo !== "generacion_manual") {
     if (motivo === "viaje_finalizado" && versions.length) {
       await db.query(`INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,created_by,reason)
         SELECT d.empresa_id,d.id,'service_completed',GREATEST(p.descarga_real_at,NOW()),$3,'Cierre registrado del servicio'
@@ -2409,10 +2409,10 @@ async function ensurePedidoOrdenCargaSchema() {
 }
 
 function sanitizeSerieOrdenes(value) {
-  return String(value || "OC")
+  return String(value ?? "OC")
     .trim()
     .toUpperCase()
-    .replace(/[^A-Z0-9_-]+/g, "") || "OC";
+    .replace(/[^A-Z0-9_-]+/g, "");
 }
 
 async function ensurePedidoCartaPorteSchema() {
@@ -2458,10 +2458,10 @@ async function ensurePedidoOrdenCargaNumero(pedidoId, empresaId) {
           [empresaId]
         );
         const perfil = empresaRows[0]?.cfg_precios?.empresa_perfil || empresaRows[0]?.cfg_precios || {};
-        const serie = sanitizeSerieOrdenes(perfil?.serie_ordenes || "OC");
+        const serie = sanitizeSerieOrdenes(perfil?.serie_ordenes);
         const baseDate = pedido.fecha_carga || pedido.created_at || new Date().toISOString();
         const year = new Date(baseDate).getFullYear() || new Date().getFullYear();
-        const prefix = `${serie}-${year}-`;
+        const prefix = serie ? `${serie}-${year}-` : `${year}-`;
 
         const { rows: lastRows } = await client.query(
           `SELECT orden_carga_numero
@@ -2858,13 +2858,6 @@ async function aplicarAutomatismosEntrega(pedidoId, empresaId, userId = null, op
   await solicitarAlbaranesAdministracionSiFaltan(pedidoId, empresaId, userId)
     .catch(e => logger.warn("No se pudo solicitar albaranes a administracion:", e.message));
   await crearFacturaRecibidaColaborador(pedidoId, empresaId, userId);
-  await archivarDocumentoControlPedido({
-    pedidoId,
-    empresaId,
-    appBaseUrl: options.appBaseUrl || "",
-    userId,
-    motivo: "viaje_finalizado",
-  });
 }
 
 async function programarAutomatismosEntrega(pedidoId, empresaId, userId = null, options = {}) {
@@ -6385,7 +6378,7 @@ router.get("/resumen-lista", async (req, res) => {
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
-             v.matricula AS vehiculo_matricula,
+             v.matricula AS vehiculo_matricula, p.matricula_colaborador,
              r.matricula AS remolque_matricula,
              f.estado AS factura_estado,
              f.numero AS factura_numero,
@@ -6417,7 +6410,7 @@ router.get("/resumen-lista", async (req, res) => {
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
-             v.matricula AS vehiculo_matricula,
+             v.matricula AS vehiculo_matricula, p.matricula_colaborador,
              r.matricula AS remolque_matricula,
              f.estado AS factura_estado,
              f.numero AS factura_numero,
@@ -6795,9 +6788,15 @@ router.post('/:id/envios',GERENTE_O_TRAFICO,async(req,res)=>{
   }catch(e){res.status(e.status||500).json({error:e.message,code:e.code});}
 });
 
-router.post("/:id/documento-control-digital/generar", GERENTE_O_TRAFICO, async (req, res) => {
+router.post("/:id/documento-control-digital/generar", async (req, res) => {
   try {
+    if (!['gerente','trafico','chofer'].includes(req.user?.rol)) return res.status(403).json({error:'Solo tráfico, gerencia o el chófer asignado pueden emitir el DeCA.'});
     const empresaId = req.empresaId || req.user.empresa_id;
+    if (req.user.rol === 'chofer') {
+      const assigned = (await db.query('SELECT id,chofer_id,chofer2_id,vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2',[req.params.id,empresaId])).rows[0];
+      if (!assigned) return res.status(404).json({error:'Pedido no encontrado'});
+      if (!await usuarioPuedeGestionarPedido(req,assigned)) return res.status(403).json({error:'No puedes emitir el DeCA de este pedido'});
+    }
     const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
     const repo = await archivarDocumentoControlPedido({
@@ -7981,18 +7980,6 @@ router.post("/:id/chofer-docs", async (req, res) => {
       rows[0].metadata = {};
     }
     await logPedidoEvento(req.params.id, empresaId, "chofer_doc.subido", { documento_id: rows[0].id, tipo: tipoDoc, metadata: rows[0].metadata || {} }, req.user?.rol === "chofer" ? "chofer" : "usuario", req.user?.id || null);
-    const pedidoId = req.params.id;
-    const actorId = req.user?.id || null;
-    const appBaseUrl = publicBaseUrl(req);
-    setImmediate(() => {
-      archivarDocumentoControlPedido({
-        pedidoId,
-        empresaId,
-        appBaseUrl,
-        userId: actorId,
-        motivo: `documento_chofer_${tipoDoc}`,
-      }).catch(repoErr => logger.warn("No se pudo actualizar el repositorio DCD tras documento de chofer:", repoErr.message));
-    });
     res.status(201).json(rows[0]);
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
@@ -8720,21 +8707,11 @@ router.post("/chofer", async (req, res) => {
       }, "chofer", req.user?.id || null, client);
     });
 
-    const repo = await archivarDocumentoControlPedido({
-      pedidoId: pedido.id,
-      empresaId,
-      appBaseUrl: publicBaseUrl(req),
-      userId: req.user?.id || null,
-      motivo: "creacion_app_chofer_dcd",
-    }).catch(e => {
-      logger.warn("No se pudo prearchivar el DCD creado por chofer:", e.message);
-      return null;
-    });
     const ctx = await getPedidoDocumentoControlContext(pedido.id, empresaId);
     res.status(201).json({
       ok: true,
       pedido,
-      repositorio: repo,
+      repositorio: null,
       documento_control: ctx ? await buildPedidoDocumentoControlResponse(req, ctx, empresaId) : null,
     });
     webhooks.dispatch(empresaId, "pedido.creado", { pedido_id: pedido.id, numero: pedido.numero, cliente_id: pedido.cliente_id, origen: pedido.origen, destino: pedido.destino }).catch(() => {});

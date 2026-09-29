@@ -17,7 +17,7 @@ import OrderCostFields from "./orders/editor/OrderCostFields";
 import OrderAssignmentFields from "./orders/editor/OrderAssignmentFields";
 import OrderDocumentFields from "./orders/editor/OrderDocumentFields";
 import { formatCompanyPaymentTerms, calculateCompanyPaymentDate } from "../utils/companyPayment";
-import { driverName, stopSchedule } from "./orders/quickInfo";
+import { driverName, hasActiveIncident, stopSchedule } from "./orders/quickInfo";
 import { hasCustomerDependentValues, recoverExistingTripPrice, routesForCustomer, switchCustomerDraft } from "./orders/clientTariffDraft";
 import { tariffChanges, tariffDraftValues } from "./orders/tariffUpdate";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
@@ -6333,10 +6333,9 @@ function PedidoRentabilidadPredictiva({ pedido, ingresoLive }) {
 // La key prop asegura nuevo estado cuando cambia el pedido editado
 // ---------------------------------------------------------------------------
 function getPedidoIncidenciaResumen(pedido = {}) {
+  if (!hasActiveIncident(pedido)) return null;
   const descripcion = String(pedido.incidencia_descripcion || "").trim()
     || (String(pedido.notas || "").match(/INCIDENCIA(?: AUTO)?:\s*([^|]+)/i)?.[1] || "").trim();
-  const estadoIncidencia = String(pedido.estado || "").toLowerCase() === "incidencia";
-  if (!descripcion && !estadoIncidencia) return null;
   const minutos = Number(pedido.paralizacion_minutos || 0);
   const importe = Number(pedido.paralizacion_importe || 0);
   return {

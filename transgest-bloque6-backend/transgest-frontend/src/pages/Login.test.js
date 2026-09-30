@@ -44,7 +44,7 @@ test('login requires company code and remembers it with the user', async () => {
   await act(async () => root.render(<Login />));
   const codeInput = host.querySelector('#login-company-code');
   expect(codeInput.required).toBe(true);
-  expect(host.querySelector('a[href="/superadmin"]')?.textContent).toBe('Acceso SuperAdmin');
+  expect(host.querySelector('a[href="/superadmin"]')).toBeNull();
   expect(codeInput.placeholder).toMatch(/^Ej\.: TG-[A-F0-9]{16}$/);
   expect(host.textContent).not.toContain('Identifica tu empresa cuando otras');
   await type('#login-identifier', 'plg');

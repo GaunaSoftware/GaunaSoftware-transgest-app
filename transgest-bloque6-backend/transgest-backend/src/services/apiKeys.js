@@ -13,6 +13,7 @@ const PROVIDER_ENV = {
   movildata: "MOVILDATA_API_KEY",
   geotab: "GEOTAB_CONFIG_JSON",
   gps_generic: "GPS_API_KEY",
+  claveicon: null,
 };
 
 function encryptionKey(seed = process.env.API_KEYS_ENCRYPTION_SECRET || process.env.JWT_SECRET || "transgest-local-dev-key") {
@@ -108,6 +109,7 @@ async function ensureTables() {
 
 async function getGlobalApiKey(provider) {
   provider = normalizeProvider(provider);
+  if (provider === "claveicon") return { key: "", source: "none" };
   await ensureTables();
   const keyName = `${provider}_api_key`;
   const { rows } = await db.query("SELECT value FROM system_config WHERE key=$1 LIMIT 1", [keyName]);
@@ -135,6 +137,7 @@ async function setGlobalSetting(key, value) {
 
 async function setGlobalApiKey(provider, apiKey) {
   provider = normalizeProvider(provider);
+  if (provider === "claveicon") throw configError("La clave de ClaveiCon solo puede configurarse por empresa.");
   apiKey = validateApiKey(apiKey);
   await ensureTables();
   const keyName = `${provider}_api_key`;
@@ -178,7 +181,7 @@ async function setCompanyApiConfig(empresaId, provider, data, actorId = null) {
     for (const field of ['use_global', 'activo', 'clear_key']) {
       if (data[field] !== undefined && typeof data[field] !== 'boolean') throw configError(`${field} debe ser verdadero o falso.`);
     }
-    const useGlobal = clearKey ? true : (data.use_global ?? (apiKey ? false : current?.use_global ?? true));
+    const useGlobal = provider === "claveicon" ? false : (clearKey ? true : (data.use_global ?? (apiKey ? false : current?.use_global ?? true)));
     if (!useGlobal && !apiKey && !clearKey) {
       if (!current?.encrypted_key) {
         const err = new Error("Para usar una clave propia de empresa debes pegar una clave API.");

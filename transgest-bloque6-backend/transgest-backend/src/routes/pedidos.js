@@ -2563,7 +2563,7 @@ async function getPedidoColaboradorData(pedidoId, empresaId) {
   const { rows } = await db.query(`
     SELECT p.*,
            co.nombre AS colaborador_nombre,
-           co.email AS colaborador_email,
+           COALESCE(NULLIF(co.email_pedidos,''),co.email) AS colaborador_email,
            co.telefono AS colaborador_telefono,
            e.nombre AS empresa_nombre,
            e.email_admin AS empresa_email
@@ -3035,7 +3035,7 @@ async function getColaboradorTokenData(token, accion) {
            t.expires_at AS token_expires_at,
            p.*,
            co.nombre AS colaborador_nombre,
-           co.email AS colaborador_email,
+           COALESCE(NULLIF(co.email_pedidos,''),co.email) AS colaborador_email,
            e.nombre AS empresa_nombre,
            e.email_admin AS empresa_email
     FROM colaborador_pedido_tokens t
@@ -3266,7 +3266,6 @@ router.get("/colaborador/confirmar/:token", async (req, res) => {
     if (docControl?.documento) await logColaboradorDocumentoControl(data.pedido_id, data.empresa_id, "consultado", { accion: "confirmar", codigo_control: docControl.documento.codigo_control || null });
     res.send(colaboradorPage("Confirmar transporte", `
       <h1>Confirmar transporte</h1>
-      ${/^https?:\/\//.test(process.env.APP_URL||process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL||'')?`<p><a class="btn" href="${htmlEscape((process.env.APP_URL||process.env.FRONTEND_URL||process.env.PUBLIC_APP_URL).replace(/\/$/,''))}/transportistas/conexiones#encargo=${encodeURIComponent(req.params.token)}">Aceptar en mi TransGest Pro</a></p>`:''}
       <p><strong>${htmlEscape(data.empresa_nombre || "")}</strong> solicita confirmar el pedido <strong>${htmlEscape(data.numero)}</strong>.</p>
       ${renderColaboradorPedidoBox(data, { mostrarPrecio: true })}
       ${renderColaboradorDocumentoControlBox(docControl)}
@@ -3298,7 +3297,7 @@ router.post("/colaborador/confirmar/:token", async (req, res) => {
           remolque_matricula_colaborador=$2,
           colaborador_precio_confirmado=true,
           colaborador_precio_confirmado_at=NOW(),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $3))
+          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $3::text))
       WHERE id=$4 AND empresa_id=$5
     `, [matricula, String(req.body.remolque_matricula_colaborador || "").trim().toUpperCase() || null, notas ? `COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
     await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.precio_confirmado", {
@@ -3360,7 +3359,7 @@ router.post("/colaborador/carga/:token", async (req, res) => {
       SET estado='en_curso',
           colaborador_carga_confirmada_at=NOW(),
           carga_real_at=COALESCE(carga_real_at,NOW()),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
+          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1::text))
       WHERE id=$2 AND empresa_id=$3
     `, [notas ? `CARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
     await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.carga_confirmada", { notas: notas || null }, "colaborador");
@@ -3474,7 +3473,7 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
           colaborador_descarga_confirmada_at=NOW(),
           descarga_real_at=COALESCE(descarga_real_at,NOW()),
           fecha_entrega=COALESCE(fecha_entrega, CURRENT_DATE),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1))
+          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1::text))
       WHERE id=$2 AND empresa_id=$3
     `, [notas ? `DESCARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
     const documentos = Array.isArray(req.body.documentos) ? req.body.documentos.slice(0, 8) : [];
@@ -7430,7 +7429,7 @@ router.get("/:id/avisar-cliente/preflight", GERENTE_O_TRAFICO, async (req, res) 
     const { rows } = await db.query(`
       SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
              p.estado::text AS estado, p.cliente_id,
-             c.nombre AS cliente_nombre, c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion
+             c.nombre AS cliente_nombre, c.email AS cliente_email, c.email_pedidos AS cliente_email_pedidos, c.email_facturacion AS cliente_email_facturacion
         FROM pedidos p
         LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
        WHERE p.id=$1 AND p.empresa_id=$2
@@ -7441,7 +7440,7 @@ router.get("/:id/avisar-cliente/preflight", GERENTE_O_TRAFICO, async (req, res) 
     if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
       return res.status(403).json({ error: "No puedes avisar sobre este pedido" });
     }
-    const destinatario = String(req.query?.destinatario || pedido.cliente_email || pedido.cliente_email_facturacion || "").trim();
+    const destinatario = String(req.query?.destinatario || pedido.cliente_email_pedidos || pedido.cliente_email || pedido.cliente_email_facturacion || "").trim();
     const bloqueantes = [];
     if (!destinatario) bloqueantes.push("El cliente no tiene email configurado.");
     res.json({
@@ -7462,7 +7461,7 @@ router.post("/:id/avisar-cliente", GERENTE_O_TRAFICO, async (req, res) => {
     const { rows } = await db.query(`
       SELECT p.id, p.numero, p.origen, p.destino, p.fecha_carga, p.fecha_descarga, p.fecha_entrega,
              p.estado::text AS estado, p.mercancia, p.cliente_id,
-             c.nombre AS cliente_nombre, c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion
+             c.nombre AS cliente_nombre, c.email AS cliente_email, c.email_pedidos AS cliente_email_pedidos, c.email_facturacion AS cliente_email_facturacion
         FROM pedidos p
         LEFT JOIN clientes c ON c.id=p.cliente_id AND c.empresa_id=p.empresa_id
        WHERE p.id=$1 AND p.empresa_id=$2
@@ -7473,7 +7472,7 @@ router.post("/:id/avisar-cliente", GERENTE_O_TRAFICO, async (req, res) => {
     if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
       return res.status(403).json({ error: "No puedes avisar sobre este pedido" });
     }
-    const destinatario = String(req.body?.destinatario || pedido.cliente_email || pedido.cliente_email_facturacion || "").trim();
+    const destinatario = String(req.body?.destinatario || pedido.cliente_email_pedidos || pedido.cliente_email || pedido.cliente_email_facturacion || "").trim();
     if (!destinatario) return res.status(400).json({ error: "El cliente no tiene email configurado" });
 
     const estadoLabels = {

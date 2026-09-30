@@ -13,7 +13,8 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
  const [useSupplier,setUseSupplier]=React.useState(!!form.colaborador_id);
  React.useEffect(()=>{ if(form.colaborador_id) setUseSupplier(true); },[form.colaborador_id]);
  const committedSupplier=!!editando?.id && String(editando.colaborador_id||"")===String(form.colaborador_id||"") && !!form.colaborador_id;
- const canSend=committedSupplier && !draftDirty && calcImporte(form)>0 && (parseLocaleNumber(form.precio_colaborador,0)>0 || parseLocaleNumber(form.precio_colaborador_unitario,0)>0);
+ const supplierEmail=colaboradoresLocal.find(c=>String(c.id)===String(form.colaborador_id))?.email_pedidos || colaboradoresLocal.find(c=>String(c.id)===String(form.colaborador_id))?.email;
+ const canSend=!!form.colaborador_id && !!supplierEmail && (parseLocaleNumber(form.precio_colaborador,0)>0 || parseLocaleNumber(form.precio_colaborador_unitario,0)>0);
  return <><OrderSection title="Asignación de recursos" icon="truck">
 
             <label className="order-editor-mode"><span>Colaborador · transporte subcontratado</span><input type="checkbox" role="switch" checked={useSupplier} onChange={e=>{setUseSupplier(e.target.checked);setForm(p=>({...p,...clearAssignmentPatch(),remolque_id_manual:"",colaborador_nombre:"",precio_cliente_col:"",precio_colaborador:"",precio_colaborador_unitario:"",minimo_colaborador_unidades:""}));}}/><span>Usar colaborador en este viaje</span></label>
@@ -303,7 +304,7 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
                     )}
                     <div style={{gridColumn:"1/-1",display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",background:"rgba(15,118,110,.08)",border:"1px solid rgba(15,118,110,.22)",borderRadius:8,padding:"9px 12px",flexWrap:"wrap"}}>
                       <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
-                        {!canSend ? "Guarda la asignación y los precios para enviar el enlace. " : ""}Se enviara un enlace para que el colaborador confirme precio y matriculas. Despues recibira enlaces para marcar carga, en camino, descarga y subir albaranes.
+                        {!supplierEmail ? "Añade un correo de pedidos al colaborador para enviarle la orden. " : ""}Se enviará un enlace para que el colaborador confirme precio y matrículas. Después recibirá enlaces para marcar carga, en camino, descarga y subir albaranes.
                       </div>
                       {canSend && <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                         <button
@@ -316,11 +317,11 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
                         </button>
                         <button
                           type="button"
-                          disabled={notificandoColaborador || !editando?.id}
+                          disabled={notificandoColaborador}
                           onClick={()=>notificarColaborador(true)}
-                          style={{...S.btn,background:"var(--green)",color:"#fff",opacity:(notificandoColaborador || !editando?.id)?0.6:1}}
+                          style={{...S.btn,background:"var(--green)",color:"#fff",opacity:notificandoColaborador?0.6:1}}
                         >
-                          {notificandoColaborador ? "Enviando..." : editando?.id ? (form.workflow_colaborador_enviado_at ? "Reenviar enlace" : "Enviar enlace") : "Guarda para enviar"}
+                          {notificandoColaborador ? "Enviando..." : !editando?.id || draftDirty ? "Guardar y enviar" : form.workflow_colaborador_enviado_at ? "Reenviar enlace" : "Enviar enlace"}
                         </button>
                       </div>}
                     </div>

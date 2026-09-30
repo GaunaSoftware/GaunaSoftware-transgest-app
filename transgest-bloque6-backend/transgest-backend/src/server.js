@@ -723,6 +723,9 @@ WHERE lower(email)='gerente@empresa.com' AND rol='gerente'
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_usos_mes INTEGER DEFAULT 0").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE empresas ADD COLUMN IF NOT EXISTS ia_periodo_mes VARCHAR(7)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email_facturacion TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS email_pedidos TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS email_pedidos TEXT").catch(captureStartupMigrationError);
+    await db.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS email_facturacion TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS emails_albaranes TEXT").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS iban VARCHAR(50)").catch(captureStartupMigrationError);
     await db.query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS horario_carga VARCHAR(120)").catch(captureStartupMigrationError);

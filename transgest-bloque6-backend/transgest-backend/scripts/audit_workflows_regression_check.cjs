@@ -10,8 +10,8 @@ const {PGlite}=req('@electric-sql/pglite');const {uuid_ossp}=req('@electric-sql/
 let pg;const db=req('./services/db');
 const evidence={target:'audit remediation working tree',mode:'isolated PostgreSQL-compatible PGlite; no external delivery',schemaErrors:[],checks:[],outbound:[]};
 const adapt=x=>({query:async(sql,params)=>{try{let r;if(params?.length)r=await x.query(sql,params);else {const all=await x.exec(sql);r=all.at(-1)||{rows:[]};}return {...r,rowCount:r.rowCount??r.affectedRows??r.rows.length};}catch(e){e.auditSql=sql;throw e;}}});
-let failEmail=false;
-const email=req('./services/email');for(const name of ['enviarEmail','sendPlatformEmail'])email[name]=async()=>{evidence.outbound.push({name,simulatedFailure:failEmail});if(failEmail)throw Object.assign(Error('AUDIT_SMTP_FAILURE'),{code:'EAUTH'});return {ok:true,messageId:'isolated-sink'};};
+let failEmail=false;const outboundLinks=[];
+const email=req('./services/email');for(const name of ['enviarEmail','sendPlatformEmail'])email[name]=async(data)=>{evidence.outbound.push({name,simulatedFailure:failEmail});if(data?.datos?.url)outboundLinks.push(data);if(failEmail)throw Object.assign(Error('AUDIT_SMTP_FAILURE'),{code:'EAUTH'});return {ok:true,messageId:'isolated-sink'};};
 req('./services/accountingSync').pushFacturaToAccounting=async()=>({skipped:true});req('./services/webhooks').dispatch=async()=>{};
 const actualFetch=global.fetch;global.fetch=async(url,options)=>{if(!String(url).startsWith('http://127.0.0.1:'))throw Error('AUDIT_EXTERNAL_DISABLED');return actualFetch(url,options);};
 const logger={info(){},warn(){},error(message){evidence.schemaErrors.push(String(message));},debug(){}};
@@ -80,7 +80,14 @@ async function main(){
  const login=await call('Login gerente demo','POST','/auth/login',{email:'audit@example.invalid',password});token=login.token;
  if(!token)throw Error('No token on demo login');
  evidence.officeAttendance=await require('./audit_office_attendance.cjs')({db,base,company,token,password});
- const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
+ const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',email_pedidos:'orders-client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
+ require('node:assert/strict').ok(client.id,'Debe crearse el cliente de prueba');
+ require('node:assert/strict').equal((await db.query('SELECT email_pedidos FROM clientes WHERE id=$1 AND empresa_id=$2',[client.id,company])).rows[0]?.email_pedidos,'orders-client@example.invalid');
+ const contactSupplier=await call('Crear colaborador con correos por finalidad','POST','/colaboradores',{tipo:'empresa',nombre:'Proveedor de correos',cif:'B87654321',email:'general-supplier@example.invalid',email_pedidos:'orders-supplier@example.invalid',email_facturacion:'billing-supplier@example.invalid',pendiente_revision:false});
+ require('node:assert/strict').ok(contactSupplier.id,'Debe crearse el colaborador de prueba');
+ const supplierContact=(await db.query('SELECT email_pedidos,email_facturacion FROM colaboradores WHERE id=$1 AND empresa_id=$2',[contactSupplier.id,company])).rows[0];
+ require('node:assert/strict').equal(supplierContact?.email_pedidos,'orders-supplier@example.invalid');
+ require('node:assert/strict').equal(supplierContact?.email_facturacion,'billing-supplier@example.invalid');
  const driver=await call('Crear conductor','POST','/choferes',{nombre:'Conductor',apellidos:'de Pruebas',dni:'00000000T',telefono:'960000001',email:'driver@example.invalid',activo:true});
  const vehicle=await call('Crear tractora','POST','/vehiculos',{matricula:'1234AUD',tipo:'tractora',marca:'Prueba',modelo:'Auditoría',fecha_itv:'2027-09-16',km_actuales:10000,activo:true});
  const trailer=await call('Crear remolque con longitud útil','POST','/vehiculos',{matricula:'5678AUD',tipo:'remolque',metros_carga:12.4,activo:true});
@@ -288,7 +295,7 @@ async function main(){
   evidence.physicalBi=await require('./audit_physical_bi.cjs')({db,base,company,token});
   evidence.integrationRegistry=await require('./audit_integration_registry.cjs')({db,base,company,token});
   evidence.multiempresa=await require('./audit_multiempresa.cjs')({db,base,company,token,password});
-  evidence.supplierDeparture=await require('./audit_supplier_departure.cjs')({db,base,company,token});
+  evidence.supplierDeparture=await require('./audit_supplier_departure.cjs')({db,base,company,token,outbound:evidence.outbound,outboundLinks});
   const warehouse=await call('Crear almacén','POST','/palets/almacenes',{nombre:'Almacén auditoría'});
   await call('Crear producto stock','POST','/palets/mercancias',{nombre:'Producto auditoría',cliente_id:client.id,almacen_id:warehouse.id,stock_actual:20,stock_minimo:5,precio_compra:10,precio_venta:15});
   await call('Entrada palets cliente','POST','/palets/movimientos',{tipo:'entrada',propietario_cliente_id:client.id,cliente_movimiento_id:client.id,almacen_id:warehouse.id,cantidad:30,num_albaran:'AUD-001',fecha:'2026-09-16'});

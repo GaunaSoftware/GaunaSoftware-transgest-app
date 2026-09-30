@@ -1060,6 +1060,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               <div key={k}><label style={S.lbl}>{l}</label>
               <input style={S.inp} value={form[k]||""} onChange={f(k)} placeholder={ph||""}/></div>
             ))}
+            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Email para pedidos y órdenes de carga (si diferente)</label><input type="email" style={S.inp} value={form.email_pedidos||""} onChange={f("email_pedidos")} placeholder="pedidos@empresa.com"/></div>
             <div style={{gridColumn:"1/-1",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:6}}>
                 <div>

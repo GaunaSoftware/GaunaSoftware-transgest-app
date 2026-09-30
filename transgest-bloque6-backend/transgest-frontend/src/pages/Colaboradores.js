@@ -1229,7 +1229,7 @@ function DetalleColaborador({ colaborador, canEdit, onEditar, onBaja, onVolver }
 // ── Modal colaborador ─────────────────────────────────────────────────────
 function ModalColaborador({ editando, onClose, onSaved }) {
   const [form, setForm] = useState(editando ? {...editando} : {
-    tipo:"autonomo",nombre:"",cif:"",email:"",telefono:"",iban:"",notas:"",
+    tipo:"autonomo",nombre:"",cif:"",email:"",email_pedidos:"",email_facturacion:"",telefono:"",iban:"",notas:"",
     contacto_nombre:"",contacto_telefono:"",
     calle:"",num_ext:"",codigo_postal:"",ciudad:"",provincia:"",pais:"España",
     forma_pago:"Transferencia bancaria", tipo_iva:21, iva_regimen:"general",
@@ -1278,6 +1278,8 @@ function ModalColaborador({ editando, onClose, onSaved }) {
           <div><label style={S.lbl}>CIF / NIF</label><input style={S.inp} value={form.cif||""} onChange={f("cif")}/></div>
           <div><label style={S.lbl}>Teléfono</label><input style={S.inp} value={form.telefono||""} onChange={f("telefono")}/></div>
           <div><label style={S.lbl}>Email</label><input type="email" style={S.inp} value={form.email||""} onChange={f("email")}/></div>
+          <div><label style={S.lbl}>Email para pedidos y órdenes</label><input type="email" style={S.inp} value={form.email_pedidos||""} onChange={f("email_pedidos")} placeholder="Si es distinto del general"/></div>
+          <div><label style={S.lbl}>Email para facturación</label><input type="email" style={S.inp} value={form.email_facturacion||""} onChange={f("email_facturacion")} placeholder="Si es distinto del general"/></div>
           <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>IBAN</label><input style={S.inp} value={form.iban||""} onChange={f("iban")} placeholder="ES00 0000 0000 0000 0000 0000"/></div>
 
           <div style={{gridColumn:"1/-1",paddingTop:8,borderTop:"1px solid var(--border)",marginTop:4}}>

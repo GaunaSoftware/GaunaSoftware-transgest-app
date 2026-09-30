@@ -2972,7 +2972,9 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
         destino: (ruta.destino || p.destino || "").toUpperCase(),
         km_ruta: ruta.km || p.km_ruta || "",
         tipo_precio: tarifaTipo,
-        precio_unitario: precioFinal || p.precio_unitario,
+        precio_unitario: precioFinal,
+        precio_base_sin_combustible: precioBase,
+        recargo_combustible_pct: recargoPct,
         importe_minimo: tarifaTipo === "viaje" ? (ruta.minimo_facturable || "") : "",
         minimo_unidades: tarifaTipo !== "viaje" ? (minimoUnidades || "") : "",
       }, true);
@@ -7371,7 +7373,7 @@ async function maybeCrearRutaClienteDesdePedido() {
     )
     .sort((a,b) => routeDraftScore(form, b) - routeDraftScore(form, a))[0];
   if (rutaExistente) {
-    const cambios = tariffChanges(rutaExistente, form, form.tipo_precio === "viaje"
+    const cambios = tariffChanges(rutaExistente, form, (rutaExistente.tarifa_tipo || "viaje") === "viaje"
       ? rutaExistente.minimo_facturable
       : normalizeMinimoUnidadesRuta(rutaExistente, rutaExistente.tarifa_tipo));
     if (cambios.length) {

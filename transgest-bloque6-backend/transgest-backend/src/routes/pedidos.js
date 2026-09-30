@@ -5791,6 +5791,45 @@ router.post("/chofer/rutas", async (req, res) => {
   }
 });
 
+function pedidoListSearch(q, parameterIndex) {
+  const text = String(q || "").trim().toLowerCase();
+  const plate = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+  if (!plate) return { values: [], sql: "FALSE" };
+  const match = `$${parameterIndex}`;
+  const normalizedMatch = `$${parameterIndex + 1}`;
+  const plateFields = ["matricula_manual", "remolque_matricula_manual", "matricula_colaborador", "remolque_matricula_colaborador"];
+  const rawPlates = plateFields.map(field => `LOWER(COALESCE(p.${field},'')) LIKE ${match}`);
+  const normalizedPlates = plate.length >= 2
+    ? plateFields.map(field => `REGEXP_REPLACE(LOWER(COALESCE(p.${field},'')), '[^a-z0-9]', '', 'g') LIKE ${normalizedMatch}`)
+    : [];
+  const vehicleMatch = `EXISTS (
+    SELECT 1 FROM vehiculos search_vehicle
+    WHERE search_vehicle.empresa_id=p.empresa_id
+      AND search_vehicle.id IN (p.vehiculo_id, p.remolque_id)
+      AND (LOWER(COALESCE(search_vehicle.matricula,'')) LIKE ${match}${plate.length >= 2
+        ? ` OR REGEXP_REPLACE(LOWER(COALESCE(search_vehicle.matricula,'')), '[^a-z0-9]', '', 'g') LIKE ${normalizedMatch}`
+        : ""})
+  )`;
+  return {
+    values: [`%${text}%`, ...(plate.length >= 2 ? [`%${plate}%`] : [])],
+    sql: `(
+      LOWER(COALESCE(p.numero,'')) LIKE ${match}
+      OR LOWER(COALESCE(p.origen,'')) LIKE ${match}
+      OR LOWER(COALESCE(p.destino,'')) LIKE ${match}
+      OR LOWER(COALESCE(p.referencia_cliente,'')) LIKE ${match}
+      OR ${rawPlates.join(" OR ")}
+      ${normalizedPlates.length ? `OR ${normalizedPlates.join(" OR ")}` : ""}
+      OR ${vehicleMatch}
+      OR EXISTS (SELECT 1 FROM clientes search_client
+                 WHERE search_client.id=p.cliente_id AND search_client.empresa_id=p.empresa_id
+                   AND LOWER(COALESCE(search_client.nombre,'')) LIKE ${match})
+      OR EXISTS (SELECT 1 FROM colaboradores search_supplier
+                 WHERE search_supplier.id=p.colaborador_id AND search_supplier.empresa_id=p.empresa_id
+                   AND LOWER(COALESCE(search_supplier.nombre,'')) LIKE ${match})
+    )`,
+  };
+}
+
 // GET /pedidos
 router.get("/", async (req, res) => {
   await ensureColaboradorWorkflowSchema();
@@ -5872,22 +5911,10 @@ router.get("/", async (req, res) => {
   if (facturado === "false") { where.push("(p.factura_id IS NULL OR EXISTS (SELECT 1 FROM facturas fx WHERE fx.id=p.factura_id AND fx.empresa_id=p.empresa_id AND fx.estado='borrador'))"); }
   if (facturado === "true")  { where.push("p.factura_id IS NOT NULL AND EXISTS (SELECT 1 FROM facturas fx WHERE fx.id=p.factura_id AND fx.empresa_id=p.empresa_id AND fx.estado<>'borrador')"); }
   if (q) {
-    params.push(`%${String(q).trim().toLowerCase()}%`);
-    where.push(`(
-      LOWER(COALESCE(p.numero,'')) LIKE $${i}
-      OR LOWER(COALESCE(p.origen,'')) LIKE $${i}
-      OR LOWER(COALESCE(p.destino,'')) LIKE $${i}
-      OR LOWER(COALESCE(p.referencia_cliente,'')) LIKE $${i}
-      OR EXISTS (
-        SELECT 1 FROM clientes c2
-        WHERE c2.id=p.cliente_id AND LOWER(COALESCE(c2.nombre,'')) LIKE $${i}
-      )
-      OR EXISTS (
-        SELECT 1 FROM colaboradores co2
-        WHERE co2.id=p.colaborador_id AND co2.empresa_id=p.empresa_id AND LOWER(COALESCE(co2.nombre,'')) LIKE $${i}
-      )
-    )`);
-    i++;
+    const search = pedidoListSearch(q, i);
+    params.push(...search.values);
+    where.push(search.sql);
+    i += search.values.length;
   }
 
   const { rows } = await queryWithColaboradorFallback(`
@@ -6385,22 +6412,10 @@ router.get("/resumen-lista", async (req, res) => {
     if (facturado === "false") where.push("(p.factura_id IS NULL OR f.estado='borrador')");
     if (facturado === "true") where.push("p.factura_id IS NOT NULL AND COALESCE(f.estado,'')<>'borrador'");
     if (q) {
-      params.push(`%${String(q).trim().toLowerCase()}%`);
-      where.push(`(
-        LOWER(COALESCE(p.numero,'')) LIKE $${i}
-        OR LOWER(COALESCE(p.origen,'')) LIKE $${i}
-        OR LOWER(COALESCE(p.destino,'')) LIKE $${i}
-        OR LOWER(COALESCE(p.referencia_cliente,'')) LIKE $${i}
-        OR EXISTS (
-          SELECT 1 FROM clientes c2
-          WHERE c2.id=p.cliente_id AND c2.empresa_id=p.empresa_id AND LOWER(COALESCE(c2.nombre,'')) LIKE $${i}
-        )
-        OR EXISTS (
-          SELECT 1 FROM colaboradores co2
-          WHERE co2.id=p.colaborador_id AND co2.empresa_id=p.empresa_id AND LOWER(COALESCE(co2.nombre,'')) LIKE $${i}
-        )
-      )`);
-      i++;
+      const search = pedidoListSearch(q, i);
+      params.push(...search.values);
+      where.push(search.sql);
+      i += search.values.length;
     }
 
     const { rows } = await queryWithColaboradorFallback(`
@@ -6421,8 +6436,8 @@ router.get("/resumen-lista", async (req, res) => {
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              co.nombre AS colaborador_nombre, co.telefono AS colaborador_telefono, co.email AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
-             v.matricula AS vehiculo_matricula, p.matricula_colaborador,
-             r.matricula AS remolque_matricula,
+             v.matricula AS vehiculo_matricula, p.matricula_manual, p.matricula_colaborador,
+             r.matricula AS remolque_matricula, p.remolque_matricula_manual, p.remolque_matricula_colaborador,
              f.estado AS factura_estado,
              f.numero AS factura_numero,
              0::int AS documentos_count,
@@ -6453,8 +6468,8 @@ router.get("/resumen-lista", async (req, res) => {
              c.nombre AS cliente_nombre, c.telefono AS cliente_telefono, c.email AS cliente_email,
              NULL AS colaborador_nombre, NULL AS colaborador_telefono, NULL AS colaborador_email,
              ch.nombre AS chofer_nombre, to_jsonb(ch)->>'alias' AS chofer_alias, ch.apellidos AS chofer_apellidos,
-             v.matricula AS vehiculo_matricula, p.matricula_colaborador,
-             r.matricula AS remolque_matricula,
+             v.matricula AS vehiculo_matricula, p.matricula_manual, p.matricula_colaborador,
+             r.matricula AS remolque_matricula, p.remolque_matricula_manual, p.remolque_matricula_colaborador,
              f.estado AS factura_estado,
              f.numero AS factura_numero,
              0::int AS documentos_count,
@@ -10398,6 +10413,6 @@ router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
 router.getCartaPorte = getCartaPorte;
-router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox };
+router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox, pedidoListSearch };
 
 module.exports = router;

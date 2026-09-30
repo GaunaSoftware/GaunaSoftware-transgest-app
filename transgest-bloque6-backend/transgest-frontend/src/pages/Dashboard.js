@@ -96,10 +96,13 @@ function enfocarPedidos(focus) {
 
 export default function Dashboard() {
   const { user, puedeVer } = useAuth();
-  const biAllowed = planHasFeature(user?.plan, "kpis_avanzados") && (puedeVer("informes") || puedeVer("facturacion"));
+  const biAllowed = planHasFeature(user?.plan, "kpis_avanzados") && puedeVer("informes") && ["gerente", "contable"].includes(user?.rol);
   const [biOpen, setBiOpen] = useState(false);
   const [biLoading,setBiLoading]=useState(false);
   const [biError,setBiError]=useState("");
+  const [monthBiLoading,setMonthBiLoading]=useState(false);
+  const [monthBiError,setMonthBiError]=useState("");
+  const [monthBiResumen,setMonthBiResumen]=useState(null);
   const [loadErrors, setLoadErrors] = useState([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [period,    setPeriod]    = useState("mes");
@@ -156,7 +159,18 @@ export default function Dashboard() {
   }, [user?.id, user?.rol, reloadKey, puedeVer]);
 
   useEffect(() => {
-    if (!biAllowed) { setBiResumen(null); setBiLoading(false); return; }
+    if (!biAllowed) { setMonthBiResumen(null); setMonthBiLoading(false); return; }
+    let active = true;
+    setMonthBiResumen(null);setMonthBiLoading(true);setMonthBiError("");
+    getBiResumen("mes").then(bi => {
+      const data = bi?.data && typeof bi.data === "object" ? bi.data : bi;
+      if (active) setMonthBiResumen(data && typeof data === "object" ? data : null);
+    }).catch(() => {if(active)setMonthBiError("No se pudo consultar el resumen económico del servidor.");}).finally(()=>{if(active)setMonthBiLoading(false);});
+    return () => { active = false; };
+  }, [user?.id, user?.rol, biAllowed]);
+
+  useEffect(() => {
+    if (!biAllowed || !biOpen || period === "mes") { setBiResumen(null); setBiLoading(false); return; }
     let active = true;
     setBiResumen(null);setBiLoading(true);setBiError("");
     getBiResumen(dashboardPeriodToBi(period)).then(bi => {
@@ -164,7 +178,7 @@ export default function Dashboard() {
       if (active) setBiResumen(data && typeof data === "object" ? data : null);
     }).catch(() => {if(active)setBiError("No se pudo consultar el resumen BI del servidor.");}).finally(()=>{if(active)setBiLoading(false);});
     return () => { active = false; };
-  }, [period, user?.id, user?.rol, biAllowed]);
+  }, [period, biOpen, user?.id, user?.rol, biAllowed]);
 
   const { alertas, today } = useMemo(() => {
     // ── Alertas activas ──
@@ -288,9 +302,13 @@ export default function Dashboard() {
     return { alertas, today };
   }, [facturas, vehiculos, choferes, empresaCfg, tallerEstado, paletMovimientos]);
 
-  const biKpis = biResumen?.kpis || {};
+  const drawerBiResumen = period === "mes" ? monthBiResumen : biResumen;
+  const drawerBiLoading = period === "mes" ? monthBiLoading : biLoading;
+  const drawerBiError = period === "mes" ? monthBiError : biError;
+  const biKpis = drawerBiResumen?.kpis || {};
   const biNumber = key => biKpis[key] == null || !Number.isFinite(Number(biKpis[key])) ? null : Number(biKpis[key]);
   const kpiIngresoGestionado = biNumber('ingreso_gestionado');
+  const kpiVentaRealizada = biNumber('venta_realizada');
   const kpiFacturado = biNumber('facturado');
   const kpiCobrado = biNumber('cobrado');
   const kpiPendienteCobro = biNumber('saldo_al_corte');
@@ -308,10 +326,10 @@ export default function Dashboard() {
   const kpiPodPendiente = biNumber('pod_pendiente_realizados');
   const kpiFacturas = biNumber('facturas');
   const kpiCobroPct = biNumber('cobro_pct');
-  const clientesRanking = (biResumen?.clientes || []).map(c=>({id:c.id,name:c.nombre,total:c.ingreso_gestionado,facturado:c.facturado,pendiente:c.pendiente_facturar_realizado,share:c.participacion_pct}));
-  const metrics={ingreso:kpiIngresoGestionado,facturado:kpiFacturado,cobrado:kpiCobrado,pendiente:kpiPendienteCobro,sinFactura:kpiPendienteFacturar,pendientesCount:kpiPendientesFacturarCount,realizados:kpiRealizados,margen:kpiMargen,margenPct:kpiMargenPct,eurKm:kpiEurKm,km:kpiKmRealizados,ticket:kpiTicket,incidencias:kpiIncidencias,sinPrecio:kpiSinPrecio,sinKm:kpiSinKm,pod:kpiPodPendiente,facturas:kpiFacturas,cobroPct:kpiCobroPct};
+  const clientesRanking = (drawerBiResumen?.clientes || []).map(c=>({id:c.id,name:c.nombre,total:c.ingreso_gestionado,facturado:c.facturado,pendiente:c.pendiente_facturar_realizado,share:c.participacion_pct}));
+  const metrics={ingreso:kpiIngresoGestionado,ventaRealizada:kpiVentaRealizada,facturado:kpiFacturado,cobrado:kpiCobrado,pendiente:kpiPendienteCobro,sinFactura:kpiPendienteFacturar,pendientesCount:kpiPendientesFacturarCount,realizados:kpiRealizados,margen:kpiMargen,margenPct:kpiMargenPct,eurKm:kpiEurKm,km:kpiKmRealizados,ticket:kpiTicket,incidencias:kpiIncidencias,sinPrecio:kpiSinPrecio,sinKm:kpiSinKm,pod:kpiPodPendiente,facturas:kpiFacturas,cobroPct:kpiCobroPct};
   const canBI=biAllowed;
-  return <><DashboardWorkspace pedidos={pedidos} facturas={facturas} vehiculos={vehiculos} choferes={choferes} alertas={alertas} tareas={misTareas} loadErrors={loadErrors} reload={() => setReloadKey(k => k+1)} loading={loading} today={today} navigate={navegar} openOrder={enfocarPedidos} openAlert={abrirAlerta} advanced={() => setBiOpen(true)} showBI={canBI} onSnapshot={setPedidos} stateMeta={estadoPedidoMeta}/>
-    {biOpen&&canBI&&<DashboardBI onClose={()=>setBiOpen(false)} period={period} setPeriod={setPeriod} metrics={metrics} clients={clientesRanking} series={biResumen?.series || []} clientSummary={biResumen?.clientes_resumen} metadata={biResumen?.metadata} loading={biLoading} error={biError}/>}
+  return <><DashboardWorkspace pedidos={pedidos} facturas={facturas} vehiculos={vehiculos} choferes={choferes} alertas={alertas} tareas={misTareas} loadErrors={loadErrors} reload={() => setReloadKey(k => k+1)} loading={loading} today={today} navigate={navegar} openOrder={enfocarPedidos} openAlert={abrirAlerta} advanced={() => setBiOpen(true)} showBI={canBI} monthSummary={monthBiResumen} monthSummaryLoading={monthBiLoading} monthSummaryError={monthBiError} onSnapshot={setPedidos} stateMeta={estadoPedidoMeta}/>
+    {biOpen&&canBI&&<DashboardBI onClose={()=>setBiOpen(false)} period={period} setPeriod={setPeriod} metrics={metrics} clients={clientesRanking} series={drawerBiResumen?.series || []} clientSummary={drawerBiResumen?.clientes_resumen} metadata={drawerBiResumen?.metadata} loading={drawerBiLoading} error={drawerBiError}/>}
   </>;
 }

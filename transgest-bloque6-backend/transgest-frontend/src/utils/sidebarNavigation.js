@@ -27,11 +27,12 @@ export function organizeSidebar(modules, financeTabs, role) {
       take("pedidos", "Pedidos / tráfico"), take("gestion_trafico", "Mesa de tráfico"), take("control_tower", "Control Tower"),
       take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"), take("palets", "Gestión de almacén"),
     ]),
-    group("nav_clientes", "Clientes", "clientes", [
+    group("nav_clientes", "Clientes", "clientes_grupo", [
       take("clientes", "Clientes"),
       group("nav_rutas_tarifas", "Rutas y tarifas", "rutas", [take("rutas", "Rutas"), take("tarifas", "Tarifas")]),
+      take("colaboradores", "Colaboradores"),
     ]),
-    group("nav_flota", "Flota", "vehiculos", [take("choferes", "Conductores"), take("vehiculos", "Vehículos"), take("taller", "Taller"), take("colaboradores", "Colaboradores")]),
+    group("nav_flota", "Flota", "vehiculos", [take("choferes", "Conductores"), take("vehiculos", "Vehículos"), take("taller", "Taller")]),
     group("nav_finanzas", "Finanzas", "facturacion_grupo", [
       ...(finance ? financeTabs.map(tab => ({ id: `finance-${tab.value}`, label: tab.label, target: finance.id, financeTab: tab.value, icon: finance.icon })) : []),
       group("nav_informes", "Informes", "informes_grupo", [take("informes", "Informes de gestión"), take("explotacion", "Explotación"), take("objetivos", "Objetivos")]),

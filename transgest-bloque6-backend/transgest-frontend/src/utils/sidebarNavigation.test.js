@@ -15,6 +15,21 @@ test('the new navigation keeps only modules already granted to the user', () => 
   expect(clientGroup.children[1].children.map(entry => entry.id)).toEqual(['rutas', 'tarifas']);
 });
 
+test('Clientes keeps its icon and contains collaborators, never under Flota', () => {
+  const clientIcon = { type: 'client-icon' };
+  const modules = [{ items: [
+    { ...item('clientes_grupo', [item('clientes'), item('colaboradores')]), icon: clientIcon },
+    item('vehiculos'), item('choferes'),
+  ] }];
+  const result = organizeSidebar(modules, [], 'gerente')[0].items;
+  const clients = result.find(entry => entry.id === 'nav_clientes');
+  const fleet = result.find(entry => entry.id === 'nav_flota');
+  expect(clients.icon).toBe(clientIcon);
+  expect(clients.children.map(entry => entry.id)).toEqual(['clientes', 'colaboradores']);
+  expect(fleet.children.map(entry => entry.id)).not.toContain('colaboradores');
+  expect(flattenNavigation(result).filter(entry => entry.id === 'colaboradores')).toHaveLength(1);
+});
+
 test('Go, Pro, Intelligence and migrated Control can import, without enabling AI in Go', () => {
   for (const plan of ['lite', 'profesional', 'enterprise', 'basico']) expect(planHasFeature(plan, 'importacion')).toBe(true);
   expect(normalizePlan('control')).toBe('profesional');

@@ -58,3 +58,23 @@ test('today agenda shows the assigned supplier without an internal vehicle', () 
   const agenda=html.split('Cargas y descargas de hoy')[1].split('Acciones rápidas')[0];
   expect(agenda).toContain('Asignado a Proveedor Agenda');expect(agenda).not.toContain('Sin asignar');
 });
+
+test('dashboard separates realized trips and service income from issued invoices using server BI', () => {
+  const noop=()=>{};
+  const summary={periodo:{desde:'2026-09-01',hasta:'2026-09-30'},kpis:{realizados:12,venta_realizada:11000,facturado:840},clientes_top_facturacion:[{id:'client',nombre:'Cliente BI',facturado:840}]};
+  const html=renderToStaticMarkup(<DashboardWorkspace pedidos={[]} facturas={[{id:'local',estado:'emitida',fecha:new Date().toISOString().slice(0,10),base_imponible:9999}]} vehiculos={[]} choferes={[]} alertas={[]} tareas={[]} loadErrors={[]} onSnapshot={noop} openOrder={noop} navigate={noop} stateMeta={()=>({label:'Confirmado'})} showBI monthSummary={summary}/>);
+  expect(html).toContain('Viajes realizados · mes');
+  expect(html).toContain('Ingreso de servicios realizados');
+  expect(html).toContain('11.000,00');
+  expect(html).toContain('Facturación emitida · mes');
+  expect(html).toContain('840,00');
+  expect(html).not.toContain('9.999,00');
+});
+
+test('dashboard does not turn a failed BI query into zero activity', () => {
+  const noop=()=>{};
+  const html=renderToStaticMarkup(<DashboardWorkspace pedidos={[]} facturas={[]} vehiculos={[]} choferes={[]} alertas={[]} tareas={[]} loadErrors={[]} onSnapshot={noop} openOrder={noop} navigate={noop} stateMeta={()=>({label:'Confirmado'})} showBI monthSummaryError="No se pudo consultar el resumen económico del servidor."/>);
+  expect(html).toContain('No se pudo consultar el resumen económico del servidor.');
+  expect(html).toContain('Ingreso de servicios realizados');
+  expect(html).not.toContain('0,00');
+});

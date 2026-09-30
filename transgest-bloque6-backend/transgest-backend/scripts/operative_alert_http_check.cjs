@@ -5,6 +5,12 @@ const express = require('express');
 const { PGlite } = require('@electric-sql/pglite');
 const db = require('../src/services/db');
 const operativeRead = require('../src/services/operativeReadState');
+const { madridClock } = require('../src/services/operativeAlertTiming');
+const madridTomorrow = () => {
+  const day = new Date(`${madridClock().date}T12:00:00Z`);
+  day.setUTCDate(day.getUTCDate() + 1);
+  return day.toISOString().slice(0, 10);
+};
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',U='33333333-3333-4333-8333-333333333333',V='44444444-4444-4444-8444-444444444444',T='55555555-5555-4555-8555-555555555555';
 async function run(){
  const pg=new PGlite();let server;const original=db.query,originalTransaction=db.transaction;
@@ -136,10 +142,9 @@ async function run(){
   assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===webStatus.id && item.kind==='camino_sin_confirmar'),false,
     'web status alone does not imply an unconfirmed departure');
   const {rows:[earlyUnload]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at)
-    VALUES($1,'UNLOAD-NOT-DUE','descarga',CURRENT_DATE-1,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail]);
+    VALUES($1,'UNLOAD-NOT-DUE','descarga',CURRENT_DATE-1,$3::date,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail,madridTomorrow()]);
   assert.equal((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===earlyUnload.id && item.kind==='descarga_sin_confirmar'),false,
     'the descarga status does not anticipate the agreed delivery window');
-  const { madridClock }=require('../src/services/operativeAlertTiming');
   const {rows:[noHour]}=await pg.query(`INSERT INTO pedidos(empresa_id,numero,estado,fecha_carga,fecha_descarga,colaborador_id,colaborador_workflow_enviado_at)
     VALUES($1,'LOAD-NO-HOUR','confirmado',$3::date,CURRENT_DATE+1,$2,NOW()) RETURNING id`,[A,supplierWithoutEmail,madridClock().date]);
   assert.ok((await get('/operativas/colaboradores')).items.some(item=>item.pedido_id===noHour.id && item.kind==='carga_sin_confirmar'),

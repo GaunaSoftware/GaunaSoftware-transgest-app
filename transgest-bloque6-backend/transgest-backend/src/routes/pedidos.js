@@ -3316,16 +3316,22 @@ router.post("/colaborador/confirmar/:token", async (req, res) => {
     if (!matricula) return res.status(400).send(colaboradorPage("Falta matricula", `<h1>Falta matricula</h1><p>Introduce la matricula del vehiculo.</p>`));
     if (!req.body.acepta_precio) return res.status(400).send(colaboradorPage("Confirmacion pendiente", `<h1>Confirmacion pendiente</h1><p>Debes confirmar las condiciones de la orden para continuar.</p>`));
     const notas = String(req.body.notas || "").trim();
-    await db.query(`
-      UPDATE pedidos
-      SET estado=CASE WHEN estado::text='pendiente' THEN 'confirmado'::estado_pedido ELSE estado END,
-          matricula_colaborador=$1,
-          remolque_matricula_colaborador=$2,
-          colaborador_precio_confirmado=true,
-          colaborador_precio_confirmado_at=NOW(),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $3::text))
-      WHERE id=$4 AND empresa_id=$5
-    `, [matricula, String(req.body.remolque_matricula_colaborador || "").trim().toUpperCase() || null, notas ? `COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
+    const accepted = await db.transaction(async client => {
+      const claimed = await client.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1 AND usado_at IS NULL AND expires_at>NOW() RETURNING id", [data.token_id]);
+      if (!claimed.rows.length) return false;
+      await client.query(`
+        UPDATE pedidos
+        SET estado=CASE WHEN estado::text='pendiente' THEN 'confirmado'::estado_pedido ELSE estado END,
+            matricula_colaborador=$1,
+            remolque_matricula_colaborador=$2,
+            colaborador_precio_confirmado=true,
+            colaborador_precio_confirmado_at=NOW(),
+            notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $3::text))
+        WHERE id=$4 AND empresa_id=$5
+      `, [matricula, String(req.body.remolque_matricula_colaborador || "").trim().toUpperCase() || null, notas ? `COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
+      return true;
+    });
+    if (!accepted) return res.status(404).send(colaboradorPage("Enlace no disponible", `<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>`));
     await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.precio_confirmado", {
       matricula,
       remolque: String(req.body.remolque_matricula_colaborador || "").trim().toUpperCase() || null,
@@ -3337,8 +3343,6 @@ router.post("/colaborador/confirmar/:token", async (req, res) => {
         colaborador_id: data.colaborador_id || null,
       }, "colaborador");
     }
-    await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
-
     const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
     let ordenEnviada = false;
     if (pedido?.colaborador_email) {

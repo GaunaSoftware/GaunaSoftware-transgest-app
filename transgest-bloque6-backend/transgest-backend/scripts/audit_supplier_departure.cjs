@@ -67,8 +67,11 @@ module.exports=async({db,base,company,token,outbound=[],outboundLinks=[]})=>{
  const presetPage=await call('/pedidos/colaborador/confirmar/'+presetToken);
  assert.match(presetPage.data.text,/name="matricula_colaborador" required value="PRE-1234"/);
  assert.match(presetPage.data.text,/name="remolque_matricula_colaborador" value="REM-5678"/);
- const presetAccepted=await fetch(base+'/pedidos/colaborador/confirmar/'+presetToken,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({matricula_colaborador:'PRE-1234',remolque_matricula_colaborador:'REM-5678',acepta_precio:'on'})});
- assert.equal(presetAccepted.status,200,await presetAccepted.text());
+ const presetMailCount=outboundLinks.length;
+ const presetAccept=()=>fetch(base+'/pedidos/colaborador/confirmar/'+presetToken,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({matricula_colaborador:'PRE-1234',remolque_matricula_colaborador:'REM-5678',acepta_precio:'on'})});
+ const presetAccepted=await Promise.all([presetAccept(),presetAccept()]);
+ assert.deepEqual(presetAccepted.map(response=>response.status).sort(),[200,404],'Concurrent acceptance must send the order only once');
+ assert.equal(outboundLinks.length,presetMailCount+1);
  const presetPdf=(await pdfParse(outboundLinks.at(-1).attachments[0].content)).text;
  assert.match(presetPdf,/PRE-1234/);
  assert.match(presetPdf,/REM-5678/);

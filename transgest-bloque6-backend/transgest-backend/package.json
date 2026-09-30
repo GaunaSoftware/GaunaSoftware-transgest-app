@@ -69,7 +69,7 @@
     "mailparser": "3.9.28",
     "morgan": "^1.10.0",
     "node-cron": "^4.2.1",
-    "nodemailer": "^9.0.1",
+    "nodemailer": "^10.0.13",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.19.1",
     "pg": "^8.12.0",

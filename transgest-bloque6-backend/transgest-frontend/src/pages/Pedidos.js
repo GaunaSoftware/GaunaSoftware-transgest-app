@@ -7594,7 +7594,7 @@ async function notificarColaborador(force = false) {
       if (!userInteractedWithFormRef.current || pedidoDraftSignature(p) === initialFormRef.current) initialFormRef.current = pedidoDraftSignature(next);
       return next;
     });
-    notify(resp?.already ? "El colaborador ya tenia el flujo enviado." : "Email enviado al colaborador.", resp?.already ? "info" : "success");
+    notify(resp?.already ? "El colaborador ya tenía el flujo enviado." : resp?.action === "orden_carga" ? "Orden de carga reenviada al colaborador." : "Email enviado al colaborador.", resp?.already ? "info" : "success");
   } catch (e) {
     notify(e.message || "No se pudo enviar el email al colaborador.", "error");
   } finally {

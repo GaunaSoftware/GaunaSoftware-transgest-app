@@ -304,7 +304,7 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
                     )}
                     <div style={{gridColumn:"1/-1",display:"flex",gap:10,alignItems:"center",justifyContent:"space-between",background:"rgba(15,118,110,.08)",border:"1px solid rgba(15,118,110,.22)",borderRadius:8,padding:"9px 12px",flexWrap:"wrap"}}>
                       <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
-                        {!supplierEmail ? "Añade un correo de pedidos al colaborador para enviarle la orden. " : ""}Se enviará un enlace para que el colaborador confirme precio y matrículas. Después recibirá enlaces para marcar carga, en camino, descarga y subir albaranes.
+                        {!supplierEmail ? "Añade un correo de pedidos al colaborador para enviarle la orden. " : ""}El colaborador confirma el precio y las matrículas en el enlace. Al aceptar recibe automáticamente la orden de carga en PDF y el enlace para marcar la carga.
                       </div>
                       {canSend && <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
                         <button
@@ -321,7 +321,7 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
                           onClick={()=>notificarColaborador(true)}
                           style={{...S.btn,background:"var(--green)",color:"#fff",opacity:notificandoColaborador?0.6:1}}
                         >
-                          {notificandoColaborador ? "Enviando..." : !editando?.id || draftDirty ? "Guardar y enviar" : form.workflow_colaborador_enviado_at ? "Reenviar enlace" : "Enviar enlace"}
+                          {notificandoColaborador ? "Enviando..." : !editando?.id || draftDirty ? "Guardar y enviar" : form.colaborador_precio_confirmado ? "Reenviar orden de carga" : form.workflow_colaborador_enviado_at ? "Reenviar enlace" : "Enviar enlace"}
                         </button>
                       </div>}
                     </div>

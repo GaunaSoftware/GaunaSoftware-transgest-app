@@ -5,6 +5,7 @@ const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
+const { buildSupplierLoadOrderPdf } = require("../services/supplierLoadOrderPdf");
 const transportDocuments = require("../services/transportDocumentVersions");
 const orderInbox = require("../services/orderInbox");
 const { extractTabularLoadOrderPdf, applyTabularLoadOrder, taxId: normalizeOrderTaxId } = require('../services/orderPdfRoles');
@@ -2563,9 +2564,11 @@ async function getPedidoColaboradorData(pedidoId, empresaId) {
   const { rows } = await db.query(`
     SELECT p.*,
            co.nombre AS colaborador_nombre,
+           co.cif AS colaborador_cif,
            COALESCE(NULLIF(co.email_pedidos,''),co.email) AS colaborador_email,
            co.telefono AS colaborador_telefono,
            e.nombre AS empresa_nombre,
+           e.cif AS empresa_cif,
            e.email_admin AS empresa_email
     FROM pedidos p
     LEFT JOIN colaboradores co ON co.id = p.colaborador_id AND co.empresa_id = p.empresa_id
@@ -3222,6 +3225,21 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
   const plantilla = accion === "confirmar"
     ? "colaborador_confirmar"
     : accion === "carga" ? "colaborador_carga" : accion === "camino" ? "colaborador_camino" : "colaborador_descarga";
+  const precio = supplierPriceType(pedido) === "tonelada"
+    ? `${getColaboradorPrecioTonelada(pedido)?.precioTonelada || 0} EUR/tn; mínimo ${getColaboradorPrecioTonelada(pedido)?.minimoToneladas || 0} tn`
+    : `${Number(pedido.precio_colaborador || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 })} EUR`;
+  let orderNumber = "";
+  let orderPdf = null;
+  if (accion === "carga") {
+    const number = await ensurePedidoOrdenCargaNumero(pedido.id, pedido.empresa_id);
+    if (!number?.numero) throw new Error("No se pudo numerar la orden de carga confirmada.");
+    orderNumber = number.numero;
+    orderPdf = await buildSupplierLoadOrderPdf(pedido, {
+      orderNumber,
+      priceLabel: precio,
+      acceptedAt: pedido.colaborador_precio_confirmado_at || new Date(),
+    });
+  }
   const docControl = pedido?.id ? await getColaboradorDocumentoControlPayload(req, pedido.id, pedido.empresa_id) : null;
   const supportFromDownload = String(docControl?.remision?.download_url || "").replace(/([?&])download=1\b/, "").replace(/[?&]$/, "");
   if (docControl?.documento) {
@@ -3237,15 +3255,17 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
     destinatario: pedido.colaborador_email,
     plantilla,
     empresa_id: pedido.empresa_id,
+    attachments: orderPdf ? [{ filename: `orden-carga-${orderNumber.replace(/[^a-z0-9_-]/gi, "-")}.pdf`, content: orderPdf, contentType: "application/pdf" }] : [],
     datos: {
       empresa: pedido.empresa_nombre || "TransGest",
       colaborador: pedido.colaborador_nombre || "Colaborador",
       numero: pedido.numero,
       ruta: `${pedido.origen || ""} -> ${pedido.destino || ""}`,
       fecha_carga: pedido.fecha_carga || "",
-      precio: supplierPriceType(pedido) === "tonelada"
-        ? `${getColaboradorPrecioTonelada(pedido)?.precioTonelada || 0} EUR/tn. Liquidacion segun carga; minimo ${getColaboradorPrecioTonelada(pedido)?.minimoToneladas || 0} tn`
-        : Number(pedido.precio_colaborador || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 }),
+      precio,
+      orden_carga_numero: orderNumber,
+      matricula: pedido.matricula_colaborador || "",
+      remolque: pedido.remolque_matricula_colaborador || "",
       url: links[accion],
       map_links: buildColaboradorMapLinks(pedido),
       dcd_url: docControl?.soporte_url || docControl?.documento?.url_publica || supportFromDownload || "",
@@ -3256,6 +3276,12 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
     },
   });
   if (emailResult?.simulado || emailResult?.error) throw Object.assign(new Error("El correo al colaborador no se ha enviado. Revisa la configuración SMTP y utiliza la prueba de envío antes de reenviar la carga."),{status:503});
+  if (orderPdf) await logPedidoEvento(pedido.id, pedido.empresa_id, "colaborador.orden_carga_enviada", {
+    numero: orderNumber,
+    destinatario: pedido.colaborador_email,
+    pdf_sha256: crypto.createHash("sha256").update(orderPdf).digest("hex"),
+  }, "sistema").catch(error => logger.warn("No se pudo registrar el envío de la orden de carga:", error.message));
+  return { orderNumber };
 }
 
 router.get("/colaborador/confirmar/:token", async (req, res) => {
@@ -3314,14 +3340,20 @@ router.post("/colaborador/confirmar/:token", async (req, res) => {
     await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
 
     const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
+    let ordenEnviada = false;
     if (pedido?.colaborador_email) {
       const tokenCarga = await createColaboradorToken(pedido, "carga", 360);
-      await sendColaboradorEmail(req, pedido, "carga", tokenCarga).catch(e => logger.error("Email colaborador carga:", e.message));
+      try {
+        await sendColaboradorEmail(req, pedido, "carga", tokenCarga);
+        ordenEnviada = true;
+      } catch (error) {
+        logger.error("Email colaborador con orden de carga:", error.message);
+      }
     }
 
     res.send(colaboradorPage("Datos confirmados", `
       <h1>Datos confirmados</h1>
-      <div class="ok">Hemos registrado las matriculas y la confirmacion del precio. Recibiras otro email para confirmar la carga.</div>
+      <div class="ok">Hemos registrado las matrículas y la confirmación del precio. ${ordenEnviada ? "Te hemos enviado la orden de carga en PDF junto con el enlace para confirmar la carga." : "No hemos podido enviarte la orden de carga por correo. Contacta con tráfico para que la reenvíe."}</div>
       ${renderColaboradorAcuseBox("Acuse de confirmacion de transporte", data, {
         matricula,
         remolque: String(req.body.remolque_matricula_colaborador || "").trim().toUpperCase() || null,
@@ -6482,6 +6514,14 @@ router.post("/:id/colaborador/notificar", GERENTE_O_TRAFICO, async (req, res) =>
     if (!pedido.colaborador_id) return res.status(400).json({ error: "Este pedido no tiene colaborador asignado" });
     await assertSupplierOrder(db, pedido, empresaId);
     if (!pedido.colaborador_email) return res.status(400).json({ error: "El colaborador no tiene email configurado" });
+    if (pedido.colaborador_precio_confirmado) {
+      if (pedido.colaborador_carga_confirmada_at) return res.status(409).json({ error: "La carga ya está confirmada; no corresponde reenviar esta orden" });
+      if (!pedido.matricula_colaborador) return res.status(409).json({ error: "Falta la matrícula confirmada por el colaborador" });
+      const tokenCarga = await createColaboradorToken(pedido, "carga", 360);
+      const sent = await sendColaboradorEmail(req, pedido, "carga", tokenCarga);
+      await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2 AND accion='carga' AND usado_at IS NULL AND token_hash<>$3", [pedido.id, empresaId, crypto.createHash("sha256").update(tokenCarga).digest("hex")]);
+      return res.json({ ok: true, already: false, action: "orden_carga", orderNumber: sent.orderNumber });
+    }
     if (!Number(pedido.precio_colaborador || 0) && !getColaboradorPrecioTonelada(pedido)) return res.status(400).json({ error: "Indica el precio acordado con el colaborador antes de enviar el enlace" });
     if (pedido.colaborador_workflow_enviado_at && !req.body?.force) {
       return res.json({ ok: true, already: true, message: "El flujo del colaborador ya estaba enviado" });

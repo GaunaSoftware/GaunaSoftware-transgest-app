@@ -612,7 +612,7 @@ const PLANTILLAS = {
         <table style="width:100%;border-collapse:collapse;margin:16px 0;">
           <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;width:150px;">Ruta</td><td style="padding:8px 12px;">${data.ruta || ""}</td></tr>
           <tr><td style="padding:8px 12px;font-weight:600;">Fecha carga</td><td style="padding:8px 12px;">${data.fecha_carga || ""}</td></tr>
-          <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;">Precio acordado</td><td style="padding:8px 12px;font-weight:700;">${data.precio || "0,00"} EUR</td></tr>
+          <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;">Precio acordado</td><td style="padding:8px 12px;font-weight:700;">${data.precio || "Pendiente"}</td></tr>
         </table>
         <p>Confirma el precio acordado e introduce las matriculas del conjunto.</p>
         <p style="margin:20px 0;">
@@ -627,12 +627,14 @@ const PLANTILLAS = {
   }),
 
   colaborador_carga: (data) => ({
-    asunto: `Marcar carga realizada ${data.numero || ""}`,
+    asunto: `Orden de carga ${data.orden_carga_numero || data.numero || ""} · ${data.numero || ""}`,
     html: `<div style="${BASE_STYLE}">
-      ${HEADER("Marcar carga realizada")}
+      ${HEADER("Orden de carga confirmada")}
       <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
-        <p>Cuando el camion este cargado, pulsa el enlace para actualizar el pedido <strong>${data.numero || ""}</strong>.</p>
+        <p>Adjuntamos la orden de carga <strong>${htmlEscape(data.orden_carga_numero || data.numero || "")}</strong> del pedido <strong>${htmlEscape(data.numero || "")}</strong>, con el conjunto y el precio que acabas de confirmar.</p>
         <p><strong>Ruta:</strong> ${data.ruta || ""}</p>
+        <p><strong>Vehículo:</strong> ${htmlEscape(data.matricula || "Por confirmar")}${data.remolque ? ` · <strong>Remolque:</strong> ${htmlEscape(data.remolque)}` : ""}</p>
+        <p>Cuando el camión esté cargado, usa este enlace para actualizar el viaje:</p>
         <p style="margin:20px 0;">
           <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Marcar como cargado</a>
         </p>

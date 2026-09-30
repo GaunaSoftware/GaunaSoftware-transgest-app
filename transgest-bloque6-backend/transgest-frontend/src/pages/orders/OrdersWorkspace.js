@@ -52,7 +52,7 @@ export default function OrdersWorkspace({ inboxAction, inboxCount, vehicles = []
   const driver=p=>driverName(drivers.find(d=>String(d.id)===String(p.chofer_id)),p);
   function exportList(){
     const quote=v=>`"${String(v??"").replace(/^[=+@\-\t\r]/,"'$&").replace(/"/g,'""')}"`;
-    const data=[["Pedido","Cliente","Origen","Destino","Carga","Descarga","Matrícula","Conductor","Estado","Incidencia"],...items.map(({pedido:p})=>{const route=describe(p);return [p.numero,p.cliente_nombre,route.origin,route.destination,p.fecha_carga,p.fecha_descarga||p.fecha_entrega,p.vehiculo_matricula||p.matricula_manual,driver(p),labels[p.estado]||p.estado,incidentLabel(p)];})];
+    const data=[["Pedido","Cliente","Origen","Destino","Carga","Descarga","Matrícula","Conductor","Estado","Incidencia"],...items.map(({pedido:p})=>{const route=describe(p);return [p.numero,p.cliente_nombre,route.origin,route.destination,p.fecha_carga,p.fecha_descarga||p.fecha_entrega,p.vehiculo_matricula||p.matricula_manual||p.matricula_colaborador,driver(p),labels[p.estado]||p.estado,incidentLabel(p)];})];
     const url=URL.createObjectURL(new Blob(["\ufeff",data.map(row=>row.map(quote).join(";")).join("\r\n")],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download="pedidos-listado.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   function panel(p,kind){
@@ -87,7 +87,7 @@ export default function OrdersWorkspace({ inboxAction, inboxCount, vehicles = []
     {key:"actions",label:"Acciones",className:"orders-actions-cell",render:({pedido:p})=>rowActions(p)}];
   return <Page className="orders-workspace">{actionPanel&&<Modal title={actionPanel.title} onClose={()=>setActionPanel(null)}><div className="order-action-choices">{actionPanel.items.map(item=><Button key={item.label} onClick={()=>{setActionPanel(null);item.onClick();}}>{item.label}</Button>)}</div></Modal>}<PageHeader title="Pedidos / Tráfico" description="Control y seguimiento de tus pedidos de transporte." actions={<><span className="orders-today">{new Date().toLocaleDateString("es-ES",{day:"numeric",month:"long",year:"numeric"})}</span>{permissions.edit&&<Button variant="primary" onClick={actions.new}>+ Nuevo pedido</Button>}{inboxAction&&<Button onClick={inboxAction}>Bandeja IA [{inboxCount??"\u2014"}]</Button>}</>}/>
     <div className={`orders-layout ${asideCollapsed?"orders-layout--collapsed":""}`}><div className="orders-main"><div className="orders-kpis">{kpis.map(k=><KpiCard key={k.label} {...k} value={loading||error?"—":k.value} detail="En el listado cargado"/>)}</div>
-      <Card className="orders-list-card"><FilterBar search={<SearchInput label="Buscar pedidos" value={filters.q} onChange={e=>filters.setQ(e.target.value)} placeholder="Buscar por pedido, cliente, origen, destino…"/>} advanced={<>
+      <Card className="orders-list-card"><FilterBar search={<SearchInput label="Buscar pedidos" value={filters.q} onChange={e=>filters.setQ(e.target.value)} placeholder="Buscar por pedido, cliente, ruta o matrícula…"/>} advanced={<>
         <label>Fecha de carga desde<input className="tgui-input" type="date" value={filters.from} onChange={e=>filters.setFrom(e.target.value)}/></label>
         <label>Fecha de carga hasta<input className="tgui-input" type="date" value={filters.to} onChange={e=>filters.setTo(e.target.value)}/></label>
         <label><input type="checkbox" checked={filters.history} onChange={e=>filters.setHistory(e.target.checked)}/> Incluir meses anteriores</label>

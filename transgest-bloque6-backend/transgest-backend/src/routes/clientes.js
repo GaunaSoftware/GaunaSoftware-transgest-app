@@ -7,7 +7,7 @@ const logger = require("../services/logger");
 const crypto = require("crypto");
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
-const { authenticate, GERENTE_O_CONTABLE } = require("../middleware/auth");
+const { authenticate, requireRole, GERENTE_O_CONTABLE } = require("../middleware/auth");
 
 const { normalizeClientImage } = require("../services/clientImage");
 const router = express.Router();
@@ -1166,7 +1166,7 @@ router.get("/:id/rutas/salud", async (req, res) => {
 });
 
 // POST /clientes/:id/rutas — crear ruta vinculada a cliente
-router.post("/:id/rutas", invalidateCache("rutas", "clientes"), async (req,res) => {
+router.post("/:id/rutas", requireRole("gerente", "contable", "trafico", "administrativo"), invalidateCache("rutas", "clientes"), async (req,res) => {
   try {
     const empresaId = req.empresaId||req.user.empresa_id;
     const { origen, destino, km, precio_base, notas, tarifa_tipo, minimo_facturable, minimo_unidades, recargo_combustible_pct, tipo_vehiculo } = req.body;
@@ -1221,7 +1221,7 @@ router.post("/:id/rutas", invalidateCache("rutas", "clientes"), async (req,res) 
 });
 
 // PUT /clientes/:id/rutas/:rid - editar ruta asociada a cliente
-router.put("/:id/rutas/:rid", invalidateCache("rutas", "clientes"), async (req,res) => {
+router.put("/:id/rutas/:rid", requireRole("gerente", "contable", "trafico", "administrativo"), invalidateCache("rutas", "clientes"), async (req,res) => {
   try {
     const empresaId = req.empresaId||req.user.empresa_id;
     const { origen, destino, km, precio_base, notas, tarifa_tipo, minimo_facturable, minimo_unidades, recargo_combustible_pct, tipo_vehiculo } = req.body;
@@ -1231,31 +1231,57 @@ router.put("/:id/rutas/:rid", invalidateCache("rutas", "clientes"), async (req,r
     }
     if (!origen || !destino) return res.status(400).json({error:"Faltan origen y destino"});
 
-    const { rows: linked } = await db.query(`
-      SELECT r.id
-      FROM rutas r
-      JOIN ruta_precios_cliente rc ON rc.ruta_id = r.id
-      WHERE r.id=$1 AND rc.cliente_id=$2 AND (r.empresa_id=$3 OR r.empresa_id IS NULL)
-    `, [req.params.rid, req.params.id, empresaId]);
-    if (!linked[0]) return res.status(404).json({ error: "Ruta del cliente no encontrada" });
+    const ruta = await db.transaction(async client => {
+      const { rows: linked } = await client.query(`
+        SELECT r.*, EXISTS (
+          SELECT 1 FROM ruta_precios_cliente otro
+          WHERE otro.ruta_id=r.id AND otro.cliente_id<>$2
+        ) AS otros_clientes
+        FROM rutas r
+        JOIN ruta_precios_cliente rc ON rc.ruta_id=r.id AND rc.cliente_id=$2
+        WHERE r.id=$1 AND (r.empresa_id=$3 OR r.empresa_id IS NULL)
+        FOR UPDATE OF r, rc
+      `, [req.params.rid, req.params.id, empresaId]);
+      const actual = linked[0];
+      if (!actual) return null;
 
-    const { rows } = await db.query(`
-      UPDATE rutas
-      SET origen=$1, destino=$2, km=$3, notas=$4, empresa_id=COALESCE(empresa_id, $5),
-          tarifa_tipo=$7, precio_base=$8, minimo_facturable=$9, minimo_unidades=$10, recargo_combustible_pct=$11,
-          cliente_id=$12, tipo_vehiculo=$13
-      WHERE id=$6 AND (empresa_id=$5 OR empresa_id IS NULL)
-      RETURNING *
-    `, [origen.trim(), destino.trim(), numericOrNull(km), notas || null, empresaId, req.params.rid, minima.tarifaTipo, numericOrNull(precio_base) || 0, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0, req.params.id, tipo_vehiculo || "cualquiera"]);
-    if (!rows[0]) return res.status(404).json({ error: "Ruta no encontrada" });
-
-    const precio = numericOrNull(precio_base);
-    await db.query(
-      "UPDATE ruta_precios_cliente SET precio=$1, tarifa_tipo=$2, minimo_facturable=$3, minimo_unidades=$4, recargo_combustible_pct=$5 WHERE ruta_id=$6 AND cliente_id=$7",
-      [precio || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0, req.params.rid, req.params.id]
-    );
-    res.json({ ok: true, ruta: rows[0] });
-  } catch(e) { res.status(500).json({error:e.message}); }
+      const compartida = actual.empresa_id !== empresaId || actual.cliente_id !== req.params.id || actual.otros_clientes;
+      const cambiaRecorrido = actual.origen !== origen.trim() || actual.destino !== destino.trim()
+        || Number(actual.km || 0) !== Number(numericOrNull(km) || 0)
+        || (actual.tipo_vehiculo || "cualquiera") !== (tipo_vehiculo || "cualquiera");
+      if (compartida && cambiaRecorrido) {
+        const error = new Error("La ruta es compartida. Crea otra ruta para cambiar recorrido, km o tipo de vehículo.");
+        error.status = 409;
+        throw error;
+      }
+      if (!compartida) {
+        await client.query(`
+          UPDATE rutas SET origen=$1, destino=$2, km=$3, notas=$4, tipo_vehiculo=$5,
+            tarifa_tipo=$6, precio_base=$7, minimo_facturable=$8, minimo_unidades=$9,
+            recargo_combustible_pct=$10
+          WHERE id=$11 AND empresa_id=$12
+        `, [origen.trim(), destino.trim(), numericOrNull(km), notas || null,
+          tipo_vehiculo || "cualquiera", minima.tarifaTipo, numericOrNull(precio_base) ?? 0,
+          minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) ?? 0,
+          req.params.rid, empresaId]);
+      }
+      // El precio y su unidad pertenecen al cliente; nunca se propagan a otra tarifa vinculada.
+      await client.query(`
+        UPDATE ruta_precios_cliente SET precio=$1, tarifa_tipo=$2, minimo_facturable=$3,
+          minimo_unidades=$4, recargo_combustible_pct=$5
+        WHERE ruta_id=$6 AND cliente_id=$7
+      `, [numericOrNull(precio_base) ?? 0, minima.tarifaTipo, minima.minimoFacturable,
+        minima.minimoUnidades, numericOrNull(recargo_combustible_pct) ?? 0,
+        req.params.rid, req.params.id]);
+      return { ...actual, origen: origen.trim(), destino: destino.trim(), km: numericOrNull(km),
+        tipo_vehiculo: tipo_vehiculo || "cualquiera",
+        tarifa_tipo: minima.tarifaTipo, precio_base: numericOrNull(precio_base) ?? 0,
+        minimo_facturable: minima.minimoFacturable, minimo_unidades: minima.minimoUnidades,
+        recargo_combustible_pct: numericOrNull(recargo_combustible_pct) ?? 0 };
+    });
+    if (!ruta) return res.status(404).json({ error: "Ruta del cliente no encontrada" });
+    res.json({ ok: true, ruta });
+  } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
 
 // DELETE /clientes/:id/rutas/:rid - quitar asociacion de ruta del cliente

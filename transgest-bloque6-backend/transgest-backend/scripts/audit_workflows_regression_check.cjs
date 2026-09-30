@@ -159,6 +159,30 @@ async function main(){
   const otherOrderAfter=(await db.query('SELECT ruta_id,importe FROM pedidos WHERE id=$1 AND empresa_id=$2',[otherOrder.id,company])).rows[0];
   require('node:assert/strict').equal(otherOrderAfter.ruta_id,null);
   require('node:assert/strict').equal(Number(otherOrderAfter.importe),400);
+  const savedRoute=(await db.query('SELECT origen,destino,km,tipo_vehiculo,tarifa_tipo,precio_base FROM rutas WHERE id=$1',[foreignRoute.id])).rows[0];
+  await db.query('INSERT INTO ruta_precios_cliente(ruta_id,cliente_id,precio,tarifa_tipo) VALUES($1,$2,750,$3)',[foreignRoute.id,otherClient.id,'viaje']);
+  const newTariff=await call('Actualizar tarifa fija a toneladas solo para este cliente','PUT','/clientes/'+client.id+'/rutas/'+foreignRoute.id,{
+    origen:savedRoute.origen,destino:savedRoute.destino,km:savedRoute.km,tipo_vehiculo:savedRoute.tipo_vehiculo,
+    tarifa_tipo:'tonelada',precio_base:0,minimo_unidades:24,recargo_combustible_pct:5,
+  });
+  require('node:assert/strict').equal(newTariff.ok,true,JSON.stringify(newTariff));
+  const prices=(await db.query('SELECT cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct FROM ruta_precios_cliente WHERE ruta_id=$1 ORDER BY cliente_id',[foreignRoute.id])).rows;
+  const changed=prices.find(p=>p.cliente_id===client.id),unchanged=prices.find(p=>p.cliente_id===otherClient.id);
+  require('node:assert/strict').equal(changed.tarifa_tipo,'tonelada');
+  require('node:assert/strict').equal(Number(changed.precio),0,'La tarifa cero explícita no se ignora');
+  require('node:assert/strict').equal(Number(changed.minimo_unidades),24);
+  require('node:assert/strict').equal(changed.minimo_facturable,null);
+  require('node:assert/strict').equal(Number(changed.recargo_combustible_pct),5);
+  require('node:assert/strict').equal(unchanged.tarifa_tipo,'viaje');
+  require('node:assert/strict').equal(Number(unchanged.precio),750);
+  const baseUnchanged=(await db.query('SELECT tarifa_tipo,precio_base FROM rutas WHERE id=$1',[foreignRoute.id])).rows[0];
+  require('node:assert/strict').equal(baseUnchanged.tarifa_tipo,savedRoute.tarifa_tipo);
+  require('node:assert/strict').equal(Number(baseUnchanged.precio_base),Number(savedRoute.precio_base));
+  const unauthorizedGeometry=await call('No cambiar el recorrido compartido','PUT','/clientes/'+client.id+'/rutas/'+foreignRoute.id,{
+    origen:'Otra ciudad',destino:savedRoute.destino,km:savedRoute.km,tipo_vehiculo:savedRoute.tipo_vehiculo,
+    tarifa_tipo:'viaje',precio_base:1,
+  });
+  require('node:assert/strict').match(unauthorizedGeometry.error,/compartida/);
   const datedOrder=await call('Pedido con carga pactada anterior','POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2020-01-15',fecha_descarga:'2020-01-16',importe:400});
   await call('Confirmar carga pactada','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'confirmado'});
   const missingRealDateConfirmation=await call('Exigir confirmación de carga real en otro día','PATCH','/pedidos/'+datedOrder.id+'/estado',{estado:'en_curso'});
@@ -457,6 +481,7 @@ async function main(){
   ['Exigir decisión sobre descarga fuera de fecha',409],
   ['Rechazar recargo incluido en porte',409],
   ['Rechazar cláusula de gasóleo sin confirmación',400],
+  ['No cambiar el recorrido compartido',409],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],
   ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],

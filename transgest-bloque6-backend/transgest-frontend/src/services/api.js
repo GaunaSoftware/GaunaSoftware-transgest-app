@@ -543,6 +543,7 @@ export const desvincularPedidoRetorno = (id) => apiFetch(`/pedidos/${id}/ida-ret
 export const getPedidoRentabilidadPredictiva = (id) => apiFetch(`/pedidos/${id}/rentabilidad-predictiva`);
 export const getPedidoDocumentoControl = (id) => apiFetch(`/pedidos/${id}/documento-control-digital`);
 export const generarPedidoDocumentoControl = (id, data={}) => apiFetch(`/pedidos/${id}/documento-control-digital/generar`, { method:"POST", body:data, silentSuccess:true });
+export const solicitarDecaPedido = (id) => apiFetch(`/pedidos/${id}/documento-control-digital/solicitar`, { method:"POST", silentSuccess:true });
 export const adjuntarDecaExterno = (id,data) => apiFetch(`/pedidos/${id}/documento-control-digital/externo`, {method:"POST",body:data,silentSuccess:true});
 export const declararEnviosPedido = (id,data) => apiFetch(`/pedidos/${id}/envios`, {method:"POST",body:data,silentSuccess:true});
 export const prepararFirmaOperacion = (id,data) => apiFetch(`/pedidos/${id}/firma/preparar`, {method:"POST",body:data,silentSuccess:true});

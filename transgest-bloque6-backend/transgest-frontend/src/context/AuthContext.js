@@ -122,7 +122,7 @@ const PERMISOS = {
   },
   contable: {
     ver:    ["dashboard","agenda","clientes","vehiculos","choferes","facturacion","contabilidad","gastos_estructura","nominas","pedidos","documentos","informes","actividad","empresa"],
-    editar: ["clientes","facturacion","contabilidad","gastos_estructura","nominas","documentos"],
+    editar: ["agenda","clientes","facturacion","contabilidad","gastos_estructura","nominas","documentos"],
   },
   trafico: {
     ver:    ["dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","rutas","rutas_recomendadas","clientes","vehiculos","choferes","colaboradores","documentos","avisos","hojas_ruta","palets","grupajes","solicitudes"],
@@ -137,8 +137,8 @@ const PERMISOS = {
     editar: ["agenda","vehiculos","taller"],
   },
   mecanico: {
-    ver:    ["taller","vehiculos","avisos","mi_cuenta"],
-    editar: ["taller","avisos","mi_cuenta"],
+    ver:    ["agenda","taller","vehiculos","avisos","mi_cuenta"],
+    editar: ["agenda","taller","avisos","mi_cuenta"],
   },
   colaborador: {
     ver:    ["pedidos","documentos","mi_cuenta"],
@@ -146,7 +146,7 @@ const PERMISOS = {
   },
   visualizador: {
     ver:    ["dashboard","control_tower","agenda","pedidos","plan_diario","gestion_trafico","clientes","vehiculos","choferes","documentos"],
-    editar: [],
+    editar: ["agenda"],
   },
 };
 

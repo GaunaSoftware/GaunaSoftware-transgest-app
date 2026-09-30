@@ -438,6 +438,7 @@ export default function ControlTower() {
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:12,marginBottom:12}}>
           <div style={{display:"grid",gap:12}}>
             {data.flujo_alcance && <p style={{ color: 'var(--text4)', fontSize: 12 }}>{data.flujo_alcance.definicion} {data.flujo_alcance.sin_desglose > 0 && `${data.flujo_alcance.sin_desglose} viajes en curso sin eventos suficientes para distinguir carga de salida.`}</p>}
+            {Number(data.flujo_alcance?.cargas_finalizadas_sin_salida||0)>0 && <button type="button" onClick={()=>abrirEstadoFlujo({key:'cargado',label:'Cargas finalizadas, salida sin registrar',total:data.flujo_alcance.cargas_finalizadas_sin_salida})} style={{textAlign:'left',border:'1px solid var(--border)',borderRadius:8,background:'var(--bg3)',color:'var(--text)',padding:'9px 12px',cursor:'pointer'}}>Cargas finalizadas sin salida registrada: <strong>{data.flujo_alcance.cargas_finalizadas_sin_salida}</strong> · Ver viajes</button>}
             <FlowPanel flujo={flujo} selectedKey={statusPicker?.key || ""} onStatusClick={abrirEstadoFlujo} />
             {mapItem && <MapMovedPanel item={mapItem} />}
             <div style={{...S.card}}>

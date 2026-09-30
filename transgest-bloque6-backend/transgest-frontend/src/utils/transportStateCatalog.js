@@ -3,12 +3,12 @@
 import './transportStates.css';
 
 const states = {
-  pendiente: { label:'Pendiente', color:'#64748b', bg:'rgba(100,116,139,.15)', border:'rgba(100,116,139,.4)', icon:'clock', description:'Pendiente de confirmar', final:false },
+  pendiente: { label:'Pendiente de asignar', color:'#64748b', bg:'rgba(100,116,139,.15)', border:'rgba(100,116,139,.4)', icon:'clock', description:'Viaje pendiente de asignación', final:false },
   confirmado: { label:'Confirmado', color:'#2563eb', bg:'rgba(37,99,235,.15)', border:'rgba(37,99,235,.4)', icon:'check', description:'Viaje confirmado y pendiente de carga', final:false },
   espera_carga: { label:'Espera de carga', color:'#a16207', bg:'rgba(161,98,7,.15)', border:'rgba(161,98,7,.4)', icon:'clock', description:'Vehículo a la espera de iniciar la carga', final:false },
   cargando: { label:'Cargando', color:'#7c3aed', bg:'rgba(124,58,237,.15)', border:'rgba(124,58,237,.4)', icon:'box', description:'Carga en curso', final:false },
-  en_curso: { label:'En curso', color:'#c2410c', bg:'rgba(194,65,12,.15)', border:'rgba(194,65,12,.4)', icon:'truck', description:'Estado operativo registrado sin desglose suficiente de carga y salida', final:false },
-  cargado: { label:'Cargado', color:'#0f766e', border:'rgba(15,118,110,.4)', icon:'box', description:'Todas las cargas confirmadas; salida hacia la descarga aún sin registrar', final:false, readOnly:true },
+  cargado: { label:'Carga terminada', color:'#0f766e', bg:'rgba(15,118,110,.15)', border:'rgba(15,118,110,.4)', icon:'check', description:'Carga finalizada; todavía no consta salida hacia destino', final:false, readOnly:true },
+  en_curso: { label:'En tránsito', color:'#c2410c', bg:'rgba(194,65,12,.15)', border:'rgba(194,65,12,.4)', icon:'truck', description:'Viaje en tránsito hacia la descarga', final:false },
   en_transito: { label:'En tránsito', color:'#c2410c', border:'rgba(194,65,12,.4)', icon:'truck', description:'Salida hacia la descarga actual registrada por el chófer', final:false, readOnly:true },
   espera_descarga: { label:'Espera de descarga', color:'#a21caf', bg:'rgba(162,28,175,.15)', border:'rgba(162,28,175,.4)', icon:'clock', description:'Vehículo a la espera de descargar', final:false },
   descarga: { label:'Descargando', color:'#6d28d9', bg:'rgba(109,40,217,.15)', border:'rgba(109,40,217,.4)', icon:'box', description:'Descarga en curso', final:false },

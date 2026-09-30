@@ -59,7 +59,7 @@ function stopLines(input, fallback, fallbackDate, fallbackTime, fallbackMaps = "
     return {
       name: name || "Por confirmar",
       location: [address && address !== name ? address : "", stop.codigo_postal || stop.cp, stop.poblacion || stop.ciudad, stop.provincia, stop.pais].map(value).filter(Boolean).join(", "),
-      when: [dateLabel(stop.fecha || (index === 0 ? fallbackDate : "")), value(stop.hora || (index === 0 ? fallbackTime : "")), value(stop.ventana || [stop.ventana_inicio, stop.ventana_fin].filter(Boolean).join("–"))].filter(Boolean).join(" · "),
+      when: [dateLabel(stop.fecha || stop.fecha_descarga || stop.fecha_carga || stop.fecha_entrega || (index === 0 ? fallbackDate : "")), value(stop.hora || stop.hora_descarga || stop.hora_carga || (index === 0 ? fallbackTime : "")), value(stop.ventana || [stop.ventana_inicio, stop.ventana_fin].filter(Boolean).join("–"))].filter(Boolean).join(" · "),
       reference: value(stop.referencia || stop.referencia_cliente),
       quantities: [stop.bultos ? `${stop.bultos} bultos` : "", stop.peso_kg ? `${stop.peso_kg} kg` : ""].filter(Boolean).join(" · "),
       notes: value(stop.notas),

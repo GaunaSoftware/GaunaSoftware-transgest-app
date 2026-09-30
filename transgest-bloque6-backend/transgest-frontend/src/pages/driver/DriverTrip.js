@@ -10,7 +10,7 @@ import { openMobileDocument, shareMobileDocument } from '../../services/mobileRu
 import { hasNativeDocuments } from '../../services/nativeDocuments';
 import { restoreDriverSteps } from './driverSupport';
 import { useState, useEffect, useCallback } from "react";
-import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, getPedidoDocumentoControl, generarPedidoDocumentoControl, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
+import { getPedidos, cambiarEstadoPedido, guardarFirmaEntrega, getPedidoDocumentoControl, solicitarDecaPedido, registrarPedidoDocumentoControlEvento, getPedidoChoferPasos, guardarPedidoChoferPasos, getChoferPedidoDocs, verArchivoProtegido } from "../../services/api";
 
 import { buildTransportDocumentLine as adrDocLine, calcExencion1136 as adrExencion, adrRequisitos } from "../../utils/adr";
 import { confirmDialog, promptDialog, notify } from "../../services/notify";
@@ -219,14 +219,16 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
 
   async function confirmarDcdAntesDeSalir() {
     let data = await cargarDocumentoControl();
-    if (!data?.status?.ready && !(data?.versiones || []).some(v => v.estado === 'activa')) {
+    if (!data?.status?.ready) {
       try {
-        await generarPedidoDocumentoControl(pedido.id);
+        await solicitarDecaPedido(pedido.id);
         data = await cargarDocumentoControl();
       } catch (error) {
         notify(error.message || 'Tráfico debe completar los datos del DeCA antes de salir.', 'warning');
         return false;
       }
+      notify('Se ha solicitado el DeCA a tráfico. Espera a que esté disponible antes de salir.', 'warning');
+      return false;
     }
     if (!data?.status?.ready) {
       notify(data?.status?.summary||'No se ha podido comprobar el DeCA. Revisa la conexión o avisa a tráfico antes de salir.','warning');
@@ -788,6 +790,10 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               </div>
             </div>
             {docControlError&&<p role="alert">{docControlError} <button onClick={cargarDocumentoControl}>Reintentar</button></p>}
+            {!dcdReady && <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:8}}>
+              <span>{docControl?.solicitud_deca ? 'Solicitud enviada a tráfico. Pendiente del original del cargador o de su emisión.' : 'Si el cargador no te entrega el DeCA, solicítalo a tráfico.'}</span>
+              <button type="button" disabled={docControlLoading||!!docControl?.solicitud_deca} onClick={async()=>{try{await solicitarDecaPedido(pedido.id);await cargarDocumentoControl();notify('Solicitud de DeCA enviada a tráfico.','success');}catch(error){notify(error.message,'error');}}}>Solicitar DeCA</button>
+            </div>}
             {docControl?.documento && (
               <>
                 <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>

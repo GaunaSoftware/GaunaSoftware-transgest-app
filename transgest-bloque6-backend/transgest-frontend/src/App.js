@@ -214,6 +214,7 @@ const MODULOS_POR_PLAN = {
 };
 
 function planPermite(plan, moduloId) {
+  if (moduloId === "clientes_grupo") return planPermite(plan, "clientes");
   if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
   if (moduloId === "app_mecanico") return planPermite(plan, "taller");
   if (!Object.prototype.hasOwnProperty.call(MODULOS_POR_PLAN, plan)) return false;
@@ -321,11 +322,13 @@ const MODULOS_GERENTE = [
   { titulo:"Trafico", items:[
     { id:"solicitudes", icon:IC.docs, label:"Peticiones viaje" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
-    { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
   { titulo:"Comercial", items:[
-    { id:"clientes", icon:IC.clientes, label:"Clientes" },
-    { id:"rutas", icon:IC.rutas, label:"Rutas y tarifas" },
+    { id:"clientes_grupo", icon:IC.clientes, label:"Clientes", children:[
+      { id:"clientes", label:"Clientes" },
+      { id:"rutas", label:"Rutas y tarifas" },
+      { id:"colaboradores", label:"Colaboradores" },
+    ] },
     { id:"tarifas", icon:IC.facturacion, label:"Tarifas" },
     { id:"objetivos", icon:IC.rendimiento, label:"Objetivos" },
   ]},
@@ -384,6 +387,7 @@ const MODULOS_CONTABLE = [
 
 const MODULOS_RESPONSABLE_TALLER = [
   { titulo:"Taller", items:[
+    { id:"agenda", icon:IC.agenda, label:"Agenda" },
     { id:"app_mecanico", icon:IC.taller, label:"App mecanico" },
     { id:"mi_cuenta", icon:IC.usuarios, label:"Mi cuenta" },
   ]},
@@ -398,12 +402,14 @@ const MODULOS_TRAFICO = [
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
   ]},
   { titulo:"Comercial y red", items:[
-    { id:"clientes", icon:IC.clientes, label:"Clientes" },
-    { id:"rutas", icon:IC.rutas, label:"Rutas y tarifas" },
+    { id:"clientes_grupo", icon:IC.clientes, label:"Clientes", children:[
+      { id:"clientes", label:"Clientes" },
+      { id:"rutas", label:"Rutas y tarifas" },
+      { id:"colaboradores", label:"Colaboradores" },
+    ] },
     { id:"tarifas", icon:IC.facturacion, label:"Tarifas" },
     { id:"solicitudes", icon:IC.docs, label:"Peticiones viaje" },
     { id:"calculador_portes", icon:IC.calculadora, label:"Calculador de portes" },
-    { id:"colaboradores", icon:IC.colabor, label:"Colaboradores" },
   ]},
   { titulo:"Flota y almacen", items:[
     { id:"vehiculos", icon:IC.vehiculos, label:"Vehiculos", children:[
@@ -437,7 +443,6 @@ const MODULOS_VISUALIZADOR = [
     { id:"dashboard", icon:IC.dashboard, label:"Dashboard" },
     { id:"agenda", icon:IC.agenda, label:"Agenda" },
     { id:"pedidos", icon:IC.pedidos, label:"Pedidos" },
-    { id:"plan_diario", icon:IC.cuadrante, label:"Plan diario" },
     { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
     { id:"clientes", icon:IC.clientes, label:"Clientes" },
     { id:"rutas", icon:IC.rutas, label:"Rutas y Tarifas" },
@@ -1536,6 +1541,7 @@ function AppInner() {
   const [vehiculoAlertas,  setVehiculoAlertas]  = useState(0);
   const [excepcionesPendientes, setExcepcionesPendientes] = useState(0);
   const [notificacionesNoLeidas, setNotificacionesNoLeidas] = useState(0);
+  const agendaTaskNoticeIdsRef = useRef(new Set());
   const [solicitudesPendientes, setSolicitudesPendientes] = useState(0);
   const [colaboradoresPendientes, setColaboradoresPendientes] = useState(0);
   const [avisosOperativosColaboradores, setAvisosOperativosColaboradores] = useState({ items: [], resumen: {} });
@@ -1550,6 +1556,7 @@ function AppInner() {
     setAvisosOperativosColaboradores({ items: [], resumen: {} });
     setAvisosOperativosOpen(false);
     setNotificacionesNoLeidas(0);
+    agendaTaskNoticeIdsRef.current = new Set();
     setAvisosCriticos(0);
   }, [user?.id, user?.rol]);
 
@@ -1640,7 +1647,8 @@ function AppInner() {
       }).catch(()=>{});
     }
     function calcNotificacionesBadge(extraAvisos = null) {
-      if (!puedeVer("avisos")) {
+      const canSeeAlerts = puedeVer("avisos");
+      if (!canSeeAlerts && !puedeVer("agenda")) {
         setNotificacionesNoLeidas(0);
         setAvisosCriticos(0);
         return Promise.resolve(0);
@@ -1648,8 +1656,15 @@ function AppInner() {
       return getNotificaciones(20)
         .then(d => {
           const noLeidas = Number(d?.no_leidas || 0);
-          setNotificacionesNoLeidas(noLeidas);
-          setAvisosCriticos(noLeidas);
+          setNotificacionesNoLeidas(canSeeAlerts ? noLeidas : 0);
+          setAvisosCriticos(canSeeAlerts ? noLeidas : 0);
+          const actionable = (d?.data || []).filter(item => !item.leida &&
+            ((item.tipo === "agenda_tarea" && item.data?.evento_id) || (item.tipo === "deca_solicitado" && item.data?.pedido_id)));
+          const unseen = actionable.filter(item => !agendaTaskNoticeIdsRef.current.has(item.id));
+          actionable.forEach(item => agendaTaskNoticeIdsRef.current.add(item.id));
+          for (const item of unseen.slice(0, 3)) window.dispatchEvent(new CustomEvent("tms:notify", { detail: {
+            type:item.tipo === "deca_solicitado" ? "warning" : "info", message:`${item.titulo}: ${item.mensaje}`,
+          } }));
           return noLeidas;
         })
         .catch(() => 0);
@@ -1863,7 +1878,7 @@ function AppInner() {
   // Resolver IDs de grupos que no tienen vista propia
   function handleSetVista(id) {
     // Si es un grupo sin vista propia, ignorar (el Layout maneja el expand/collapse)
-    const GRUPOS_SIN_VISTA = ["cuadrante_grupo","facturacion_grupo","informes_grupo"];
+    const GRUPOS_SIN_VISTA = ["cuadrante_grupo","facturacion_grupo","informes_grupo","clientes_grupo"];
     if (GRUPOS_SIN_VISTA.includes(id)) return;
     if (!modulosVisibles.has(id)) return;
     setVista(id);

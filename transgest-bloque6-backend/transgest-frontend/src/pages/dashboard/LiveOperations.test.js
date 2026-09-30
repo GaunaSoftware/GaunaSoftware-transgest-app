@@ -42,9 +42,9 @@ test('dashboard and live operations use structured locations without rewriting t
 test('live operations reconciles the loaded badge with its counter without inventing departure', () => {
   const order={id:'loaded',numero:'QA-CARGADO',estado:'en_curso',estado_operativo:{codigo:'cargado',estado_legacy:'en_curso'},fecha_carga:'2099-01-01'};
   const html=renderToStaticMarkup(<LiveOperations initialItems={[order]} onSnapshot={()=>{}} openOrder={()=>{}}/>);
-  expect(html).toContain('Cargado');
-  expect(html).toContain('salida hacia la descarga aún sin registrar');
-  expect(html).toContain('<strong>1</strong><span>Cargado</span>');
+  expect(html).toContain('Carga terminada');
+  expect(html).toContain('sin salida registrada');
+  expect(html).not.toContain('<span>Carga terminada</span>');
   expect(html).toContain('<strong>0</strong><span>En tránsito</span>');
   expect(html).not.toContain('En ruta');
   expect(order.estado).toBe('en_curso');

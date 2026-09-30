@@ -2,9 +2,9 @@ import React,{useState,useEffect} from 'react';
 import TransportShipmentEditor from './TransportShipmentEditor';
 import OperationSignature from './driver/OperationSignature';
 import './TransportDocumentVersions.css';
-import {adjuntarDecaExterno,generarPedidoDocumentoControl,descargarArchivoProtegido,getFirmasOperacion,anularFirmaOperacion,guardarFirmaEntrega} from '../services/api';
+import {adjuntarDecaExterno,generarPedidoDocumentoControl,solicitarDecaPedido,getPedidoDocumentoControl,descargarArchivoProtegido,getFirmasOperacion,anularFirmaOperacion,guardarFirmaEntrega} from '../services/api';
 
-export default function TransportDocumentVersions({pedidoId,data,onChange}){
+export default function TransportDocumentVersions({pedidoId,pedido,data,onChange}){
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[reason,setReason]=useState(''),[native,setNative]=useState(false);
  const [permitChoice,setPermitChoice]=useState('mantener'),[permitReference,setPermitReference]=useState('');
  const [signatures,setSignatures]=useState([]),[shipment,setShipment]=useState(''),[correction,setCorrection]=useState(null);
@@ -18,11 +18,13 @@ export default function TransportDocumentVersions({pedidoId,data,onChange}){
  async function upload(file){if(!file)return;if(file.size>5*1024*1024){setError('El PDF no puede superar 5 MB.');return;}await run(async()=>{const pdf=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});return adjuntarDecaExterno(pedidoId,{pdf_base64:pdf,pdf_nativo:native,motivo:reason,envio_id:scope});});}
  const download=(url,name)=>run(async()=>{await descargarArchivoProtegido(url,name);});
  return <section className="deca-versions" aria-label="Originales y versiones del DeCA">
-  <div className="deca-versions-heading"><div><strong>Originales y versiones del DeCA</strong><p>Emite el documento del pedido confirmado con los datos conocidos antes de iniciar el transporte. Si la carga cambia los datos, genera una nueva versión y entrégala al conductor antes de salir.</p></div><span className="deca-versions-count">{versions.length} {versions.length===1?'versión':'versiones'}</span></div>
-  {!shipments.length&&!versions.length&&<TransportShipmentEditor pedidoId={pedidoId} points={data?.puntos_envio||[]} onChange={onChange}/>}
+  <div className="deca-versions-heading"><div><strong>Originales y versiones del DeCA</strong><p>Solicita primero el original al cargador. Si no lo facilita, tráfico puede generar la versión de TransGest tras recibir la solicitud. Si cambian los datos de carga, genera una nueva versión antes de salir.</p></div><span className="deca-versions-count">{versions.length} {versions.length===1?'versión':'versiones'}</span></div>
+  {data?.solicitud_deca&&<p role="status" className="deca-versions-hint">DeCA solicitado a tráfico el {new Date(data.solicitud_deca.created_at).toLocaleString('es-ES')}.</p>}
+  {!shipments.length&&!versions.length&&<TransportShipmentEditor pedidoId={pedidoId} pedido={pedido} points={data?.puntos_envio||[]} onChange={onChange}/>}
   {shipments.length>1&&<label className="deca-versions-field">Envío<select value={shipment} onChange={e=>setShipment(e.target.value)}><option value="">Selecciona un envío</option>{data?.consolidacion_permitida&&<option value="consolidado">Todos los envíos · DeCA consolidado</option>}{shipments.map((s,i)=><option key={s.id} value={s.id}>{s.referencia||`Envío ${i+1}`}</option>)}</select></label>}
   <div className="deca-versions-actions">
-   <button type="button" className="deca-action deca-action-primary" disabled={disabled||external||(needsReason&&!reason.trim())||(permitChoice==='si'&&!permitReference.trim())} onClick={()=>run(()=>generarPedidoDocumentoControl(pedidoId,{motivo:reason,envio_id:consolidated?null:scope,consolidado:consolidated,...(permitChoice==='mantener'?{}:{autorizacion_especial:{requerida:permitChoice==='si',referencia:permitReference.trim()}})}))}>{busy?'Procesando…':needsReason?'Generar nueva versión':'Generar DeCA'}</button>
+   {!data?.solicitud_deca&&!versions.length&&<button type="button" className="deca-action" disabled={busy} onClick={()=>run(async()=>{await solicitarDecaPedido(pedidoId);return getPedidoDocumentoControl(pedidoId);})}>Registrar que el cargador no entregó el DeCA</button>}
+   <button type="button" className="deca-action deca-action-primary" disabled={disabled||(!data?.solicitud_deca&&!versions.length)||external||(needsReason&&!reason.trim())||(permitChoice==='si'&&!permitReference.trim())} onClick={()=>run(()=>generarPedidoDocumentoControl(pedidoId,{motivo:reason,envio_id:consolidated?null:scope,consolidado:consolidated,...(permitChoice==='mantener'?{}:{autorizacion_especial:{requerida:permitChoice==='si',referencia:permitReference.trim()}})}))}>{busy?'Procesando…':needsReason?'Generar nueva versión':'Generar DeCA'}</button>
    <button type="button" className="deca-action" disabled={busy} onClick={()=>download(`/pedidos/${pedidoId}/expediente-transporte.zip`,'expediente-transporte.zip')}>Descargar expediente</button>
   </div>
   {needsReason&&<p className="deca-versions-hint">Para sustituir una versión, indica el motivo antes de generar.</p>}

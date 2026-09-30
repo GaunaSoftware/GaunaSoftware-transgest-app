@@ -25,3 +25,7 @@
 .traffic-location-pending button{display:grid;gap:4px;min-width:0;width:100%;text-align:left;border:0;background:transparent;color:var(--text);cursor:pointer}
 .traffic-location-pending button span,.traffic-location-pending button small{overflow-wrap:anywhere;font-size:11px}.traffic-location-pending button small{color:var(--text4)}
 @media(max-width:900px){.traffic-location-layout.sidebar-visible{grid-template-columns:minmax(0,1fr)}.traffic-location-sidebar{grid-row:1;max-height:35vh}}
+.traffic-weekly-detail{margin:0 18px 18px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);min-width:0;overflow:hidden}
+.traffic-weekly-detail>button{display:block;width:100%;padding:12px 16px;text-align:left;border:0;background:var(--bg2);color:var(--text);font:inherit;font-weight:700;cursor:pointer}
+.traffic-weekly-detail>button:hover{background:var(--bg3)}
+@media(max-width:600px){.traffic-weekly-detail{margin:0 10px 10px}}

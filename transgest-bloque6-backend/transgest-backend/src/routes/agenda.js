@@ -10,6 +10,7 @@ router.use(authenticate);
 
 const ROLES_INTERNOS = ["gerente", "contable", "administrativo", "trafico", "responsable_taller", "mecanico", "colaborador", "visualizador", "chofer"];
 const PUEDE_VER_EQUIPO = new Set(["gerente", "contable", "administrativo", "trafico", "responsable_taller", "mecanico"]);
+const PUEDE_TAREA_GRUPO = new Set([...PUEDE_VER_EQUIPO, "chofer", "visualizador"]);
 const PUEDE_EDITAR = requireRole(...ROLES_INTERNOS);
 
 function empresaId(req) {
@@ -123,7 +124,8 @@ router.get("/", async (req, res) => {
   const ownerIdx = qIdx();
   const own = `(e.asignado_a = ${ownerIdx}::uuid OR e.creado_por = ${ownerIdx}::uuid)`;
   const teamAuto = canManageAll(req) ? "(e.source_type IS NOT NULL AND e.visibilidad='equipo')" : "false";
-  const teamVisible = canManageAll(req) ? "e.visibilidad='equipo'" : "false";
+  const teamVisible = canManageAll(req) ? "e.visibilidad='equipo'" : PUEDE_TAREA_GRUPO.has(req.user?.rol)
+    ? "(e.visibilidad='equipo' AND e.metadata->>'tarea_grupo'='true')" : "false";
   where.push(req.query.modo === "mias" ? `(${own} OR ${teamAuto})` : `(${own} OR ${teamVisible})`);
 
 
@@ -152,9 +154,10 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
   if (!titulo) return res.status(400).json({ error: "Titulo obligatorio" });
   if (!fechaInicio) return res.status(400).json({ error: "Fecha de inicio obligatoria" });
 
-  // Solo el gerente puede asignar tareas a otros usuarios; el resto solo puede
-  // crear tareas para si mismo (no se permite asignar "a la inversa").
-  const asignadoA = (req.user?.rol === "gerente")
+  const groupTask = body.metadata?.tarea_grupo === true;
+  if (groupTask && !PUEDE_TAREA_GRUPO.has(req.user?.rol)) return res.status(403).json({ error: "La tarea de grupo es para usuarios de la empresa." });
+  // La tarea de grupo es visible al equipo; las personales mantienen su asignación.
+  const asignadoA = groupTask ? null : (req.user?.rol === "gerente")
     ? (cleanText(body.asignado_a) || req.user.id)
     : req.user.id;
   await validateAgendaReferences(db,req.user,{...body,asignado_a:asignadoA});
@@ -179,16 +182,28 @@ router.post("/", PUEDE_EDITAR, async (req, res) => {
       normalizeType(body.tipo),
       normalizePriority(body.prioridad),
       normalizeState(body.estado),
-      normalizeVisibility(body.visibilidad),
+      groupTask ? "equipo" : normalizeVisibility(body.visibilidad),
       cleanText(body.pedido_id),
       cleanText(body.vehiculo_id),
       metadata,
     ]
   );
   const creada = rows[0];
+  if (creada && groupTask) {
+    const recipients = await db.query(`SELECT DISTINCT m.usuario_id AS id FROM usuario_empresas m
+      JOIN usuarios u ON u.id=m.usuario_id
+      WHERE m.empresa_id=$1 AND m.activo=true AND u.activo=true AND m.usuario_id<>$2
+        AND m.rol IN ('gerente','contable','administrativo','trafico','responsable_taller','mecanico','chofer','visualizador')`, [empresaId(req), req.user.id]);
+    await Promise.allSettled(recipients.rows.map(({ id }) => crearNotificacion({
+      empresa_id: empresaId(req), usuario_id: id, tipo: "agenda_tarea",
+      titulo: "Nueva tarea de grupo", mensaje: titulo,
+      data: { evento_id: creada.id, fecha_inicio: fechaInicio, dedupe_key: `agenda_asign:${creada.id}` },
+      created_by: req.user.id,
+    })));
+  }
   // Aviso al usuario asignado (cuando el gerente le asigna una tarea): aparece en
   // la campana de notificaciones internas, como el resto de avisos.
-  if (creada && String(asignadoA) !== String(req.user.id)) {
+  if (creada && !groupTask && String(asignadoA) !== String(req.user.id)) {
     crearNotificacion({
       empresa_id: empresaId(req),
       usuario_id: asignadoA,

@@ -27,3 +27,13 @@ test('an old refresh completing after logout cannot restore its user',async()=>{
  let pending;act(()=>{pending=auth.refreshUser();});token=null;act(()=>auth.logout());
  await act(async()=>{resolve({id:'old'});await pending;});expect(auth.user).toBeNull();expect(api.setUser).not.toHaveBeenCalled();
 });
+test('internal office and workshop roles can create group agenda tasks without opening other edit modules',async()=>{
+ await mount();
+ for(const rol of ['contable','mecanico','visualizador']){
+  api.login.mockResolvedValueOnce({user:{id:rol,rol,productos:['transgest']}});
+  await act(async()=>{await auth.login(rol,'temporary');});
+  expect(auth.puedeVer('agenda')).toBe(true);
+  expect(auth.puedeEditar('agenda')).toBe(true);
+  if(rol==='visualizador')expect(auth.puedeEditar('pedidos')).toBe(false);
+ }
+});

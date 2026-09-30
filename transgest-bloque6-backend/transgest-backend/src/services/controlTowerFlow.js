@@ -1,9 +1,9 @@
 const { withTransportProgress } = require('./transportProgress');
 
 const FLOW_STATES = Object.freeze([
-  ['pendiente', 'Pendiente'], ['confirmado', 'Confirmado'], ['espera_carga', 'En espera de carga'],
-  ['cargando', 'Cargando'], ['cargado', 'Cargado'], ['en_transito', 'En tránsito'],
-  ['en_curso', 'En curso · sin desglose'], ['espera_descarga', 'En espera de descarga'],
+  ['pendiente', 'Pendiente de asignar'], ['confirmado', 'Confirmado'], ['espera_carga', 'En espera de carga'],
+  ['cargando', 'Cargando'], ['en_transito', 'En tránsito'],
+  ['en_curso', 'En tránsito · sin desglose'], ['espera_descarga', 'En espera de descarga'],
   ['descarga', 'Descargando'], ['entregado', 'Entregado'], ['incidencia', 'Incidencia'],
 ]);
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
@@ -33,18 +33,19 @@ function summarizeFlow(rows) {
   }
   const definitions = new Map(FLOW_STATES);
   // Preserve any future/legacy state rather than silently omitting its orders.
-  for (const key of count.keys()) if (!definitions.has(key)) definitions.set(key, key);
+  for (const key of count.keys()) if (!definitions.has(key) && key !== 'cargado') definitions.set(key, key);
   return {
     estados: [...definitions].map(([key, label]) => ({ key, label, total: count.get(key) || 0 })),
     legacy: [...legacy].map(([estado, total]) => ({ estado, total })),
     alcance: { total: rows.length, zona_horaria: 'Europe/Madrid', desde_dias: -2, hasta_dias: 10,
       definicion: 'Cola operativa: desde hace 2 días hasta dentro de 10 días, sin facturar ni cancelados.',
-      sin_desglose: rows.filter(row => row.estado_operativo.cobertura === 'sin_desglose').length },
+      sin_desglose: rows.filter(row => row.estado_operativo.cobertura === 'sin_desglose').length,
+      cargas_finalizadas_sin_salida: count.get('cargado') || 0 },
   };
 }
 
 async function readFlowPage(db, empresaId, { estado, page = 1, pageSize = 40 } = {}) {
-  if (!FLOW_STATES.some(([key]) => key === estado)) fail('Estado operativo no válido');
+  if (!FLOW_STATES.some(([key]) => key === estado) && estado !== 'cargado') fail('Estado operativo no válido');
   const number = Number(page), size = Number(pageSize);
   if (!Number.isSafeInteger(number) || number < 1 || !Number.isInteger(size) || size < 1 || size > 100) fail('Paginación no válida');
   const population = await readFlowPopulation(db, empresaId);

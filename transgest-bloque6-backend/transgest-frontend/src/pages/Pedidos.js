@@ -649,16 +649,16 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
     cmr_tipo: cmrTypeForPedidoStops(geoMerged),
     importe: calcImporte(merged),
     precio_colaborador: merged.colaborador_id ? (importeColaboradorCalculado(merged) ?? null) : merged.precio_colaborador,
-    puntos_carga: mergePrimaryStopSchedule(geoMerged.puntos_carga, {
+    puntos_carga: normalizeStopWeights(mergePrimaryStopSchedule(geoMerged.puntos_carga, {
       fecha: geoMerged.fecha_carga,
       hora: geoMerged.hora_carga,
       ventana: geoMerged.ventana_carga,
-    }),
-    puntos_descarga: mergePrimaryStopSchedule(geoMerged.puntos_descarga, {
+    })),
+    puntos_descarga: normalizeStopWeights(mergePrimaryStopSchedule(geoMerged.puntos_descarga, {
       fecha: geoMerged.fecha_descarga || geoMerged.fecha_entrega,
       hora: geoMerged.hora_descarga,
       ventana: geoMerged.ventana_descarga,
-    }),
+    })),
     extracostes_importe: toFiniteNumber(merged.extracostes ?? merged.extracostes_importe, 0),
     importe_revision_combustible: calcRevisionCombustible(merged),
     importe_minimo: merged.tipo_precio === "viaje" ? toNullableNumber(merged.importe_minimo) : null,
@@ -1209,6 +1209,13 @@ function normalizePesoKgInput(value) {
   const kg = parseLocaleNumber(raw, NaN);
   if ((raw.includes(",") || raw.includes(".")) && Number.isFinite(kg) && kg > 0 && kg < 1000) return Math.round(kg * 1000);
   return Number.isFinite(kg) ? kg : null;
+}
+
+function normalizeStopWeights(stops) {
+  return parseStops(stops).map(stop => {
+    const weight = normalizePesoKgInput(stop.peso_kg);
+    return weight == null ? stop : { ...stop, peso_kg: weight };
+  });
 }
 
 function compactNumberInput(value) {
@@ -1895,7 +1902,7 @@ function buildOperativaCargaLabels(pedido = {}) {
   const labels = [];
   if (pedido?.carga_lateral) labels.push("Carga lateral");
   if (pedido?.carga_trasera) labels.push("Carga trasera");
-  if (pedido?.carga_techo) labels.push("Techo");
+  if (pedido?.carga_techo) labels.push("Carga superior");
   if (pedido?.intercambio_palets) labels.push("Con intercambio de palets");
   else labels.push("Sin intercambio de palets");
   if (pedido?.requiere_cinchas) labels.push("Necesario llevar cinchas");
@@ -3355,7 +3362,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
             <select style={S.sel} value={form.tipo_descarga} onChange={f("tipo_descarga")}>
               <option value="trasera">Trasera</option>
               <option value="lateral">Lateral</option>
-              <option value="techo">Techo</option>
+              <option value="techo">Carga superior</option>
               <option value="muelle">Muelle</option>
               <option value="grua">Grua</option>
               <option value="indiferente">Indiferente</option>
@@ -4375,7 +4382,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
                     <input type="time" style={inp} disabled={disabled} value={d.hora || ""} onChange={e=>updateStop(i,{hora:e.target.value})} />
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
                     <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
-                    <input type="text" inputMode="decimal" style={inp} disabled={disabled} value={d.peso_kg ?? ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} placeholder="Peso kg (8,0 = 8.000)" />
+                    <input type="text" inputMode="decimal" style={inp} disabled={disabled} value={d.peso_kg ?? ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} onBlur={()=>{const kg=normalizePesoKgInput(d.peso_kg);if(kg!=null)updateStop(i,{peso_kg:kg});}} placeholder="Peso kg (8,0 = 8.000)" />
                     {(i > 0 || Number(d.precio||0) > 0) ? (
                       <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio extra ${label} EUR`} />
                     ) : (
@@ -4522,7 +4529,7 @@ compact ? <DropdownMenu data-pedido-mutation="true" label={`Acciones de ${label}
               onKeyDown={e=>completeOnTab(e, newStopRegions, newStop.provincia || "", value=>setNewStop(p=>({...p,provincia:value,provincia_manual:true})))}
             />
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
-            <input type="text" inputMode="decimal" style={inp} placeholder="Peso kg (8,0 = 8.000)" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))}/>
+            <input type="text" inputMode="decimal" style={inp} placeholder="Peso kg (8,0 = 8.000)" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))} onBlur={()=>{const kg=normalizePesoKgInput(newStop.peso_kg);if(kg!=null)setNewStop(p=>({...p,peso_kg:kg}));}}/>
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
             <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
             <input className="tg-stop-grid-wide" style={inp} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>
@@ -5233,7 +5240,7 @@ ${bloqueCombustible}
                 Consulta los documentos, las firmas y el estado de tramitación.
               </div>
             </div>
-            <TransportDocumentVersions pedidoId={pedido.id} data={docControl} onChange={setDocControl}/>
+            <TransportDocumentVersions pedidoId={pedido.id} pedido={pedido} data={docControl} onChange={setDocControl}/>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {docControlSupportUrl && (
                 <button
@@ -8923,7 +8930,7 @@ export default function Pedidos() {
   const [loading,    setLoading]    = useState(true);
   const [loadError,  setLoadError]  = useState("");
   const _rangoSemanaActual = currentWeekRangeLocal();
-  const [filtroEst,  setFiltroEst]  = useState(() => (focusPedido?.source && focusPedido?.estado && !focusPedido?.pedido_id) ? String(focusPedido.estado) : "todos");
+  const [filtroEst,  setFiltroEst]  = useState(() => (focusPedido?.estado && !focusPedido?.pedido_id) ? String(focusPedido.estado) : "todos");
   const [filtroMes,  setFiltroMes]  = useState("");
   const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
   const [mostrarHistorico, setMostrarHistorico] = useState(Boolean(focusPedido?.pedido_id));

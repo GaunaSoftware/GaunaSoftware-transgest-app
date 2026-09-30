@@ -7,6 +7,7 @@ const logger = require("../services/logger");
 const crypto = require("crypto");
 const { body, validationResult } = require("express-validator");
 const db      = require("../services/db");
+const { legacyUnbilledClientDelta } = require("../services/orderPriceReconciliation");
 const { authenticate, requireRole, GERENTE_O_CONTABLE } = require("../middleware/auth");
 
 const { normalizeClientImage } = require("../services/clientImage");
@@ -725,6 +726,8 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
     `, [req.params.id, empresaId]);
     const row = rows[0];
     if (!row) return res.status(404).json({ error: "Cliente no encontrado" });
+    const legacyDelta = await legacyUnbilledClientDelta(db, empresaId, req.params.id);
+    row.total_pedidos_confirmados = Math.round((Number(row.total_pedidos_confirmados || 0) + legacyDelta) * 100) / 100;
     const riesgo = buildClienteRiesgoAvisos(row);
     res.json({
       ...row,

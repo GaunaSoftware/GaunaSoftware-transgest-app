@@ -3,7 +3,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const pdfParse = require("pdf-parse");
-const { canonicalOrderAmount, correctedLegacyOrderAmount } = require("../src/services/orderPriceReconciliation");
+const { PGlite } = require("@electric-sql/pglite");
+const { canonicalOrderAmount, correctedLegacyOrderAmount, legacyUnbilledClientDelta } = require("../src/services/orderPriceReconciliation");
 const { pedidoConImporteVisible } = require("../src/routes/pedidos")._test;
 const { buildSupplierLoadOrderPdf, companyDataForSupplierOrder, stopLines } = require("../src/services/supplierLoadOrderPdf");
 const { PLANTILLAS } = require("../src/services/email");
@@ -34,6 +35,32 @@ async function main() {
     "una factura emitida conserva el precio histórico");
   assert.equal(canonicalOrderAmount({ ...order, puntos_descarga: [...order.puntos_descarga].reverse() }), 315);
   assert.equal(correctedLegacyOrderAmount({ ...order, importe: 310 }), null, "no cambiar importes negociados");
+  const pg = new PGlite();
+  try {
+    await pg.exec(`CREATE TABLE pedidos (
+      empresa_id uuid, cliente_id uuid, estado text, factura_id uuid,
+      importe numeric, precio_unitario numeric, tipo_precio text, cantidad numeric,
+      extracostes_importe numeric, importe_minimo numeric, minimo_unidades numeric,
+      puntos_descarga jsonb, puntos_carga jsonb
+    )`);
+    const companyA = "11111111-1111-4111-8111-111111111111";
+    const companyB = "22222222-2222-4222-8222-222222222222";
+    const clientA = "33333333-3333-4333-8333-333333333333";
+    const clientB = "44444444-4444-4444-8444-444444444444";
+    for (const [company, customer, amount, invoice] of [
+      [companyA, clientA, 275, null], [companyA, clientA, 310, null],
+      [companyA, clientA, 275, "55555555-5555-4555-8555-555555555555"],
+      [companyB, clientA, 275, null], [companyA, clientB, 275, null],
+    ]) {
+      await pg.query(`INSERT INTO pedidos (empresa_id,cliente_id,estado,factura_id,importe,precio_unitario,tipo_precio,cantidad,puntos_descarga,puntos_carga)
+        VALUES ($1,$2,'confirmado',$3,$4,275,'viaje',1,$5::jsonb,'[]'::jsonb)`,
+      [company, customer, invoice, amount, JSON.stringify(order.puntos_descarga)]);
+    }
+    assert.equal(await legacyUnbilledClientDelta(pg, companyA, clientA), 40,
+      "el aviso corrige solo el pedido facturable de la empresa y conserva el precio negociado");
+    assert.equal(await legacyUnbilledClientDelta(pg, companyB, clientA), 40);
+    assert.equal(await legacyUnbilledClientDelta(pg, companyA, clientB), 40);
+  } finally { await pg.close(); }
   assert.equal(stopLines(order.puntos_carga)[0].mapUrl, "https://maps.app.goo.gl/example");
   assert.equal(companyDataForSupplierOrder({
     empresa_cif: "B03486675",

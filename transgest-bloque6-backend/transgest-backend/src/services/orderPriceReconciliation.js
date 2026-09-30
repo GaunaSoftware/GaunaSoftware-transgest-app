@@ -36,4 +36,23 @@ function correctedLegacyOrderAmount(order = {}) {
   if (!Number.isFinite(current) || current <= 0 || !Number.isFinite(corrected) || firstStopPrice <= 0) return null;
   return Math.abs(corrected - current - firstStopPrice) <= 0.01 ? corrected : null;
 }
-module.exports = { canonicalOrderAmount, correctedLegacyOrderAmount, sumAdditionalStopPrices };
+
+async function legacyUnbilledClientDelta(db, empresaId, clienteId) {
+  // El riesgo ya agrega todos los pedidos en SQL. Solo se leen candidatos con
+  // suplemento en la primera parada para reconciliar el error histórico.
+  const { rows } = await db.query(`
+    SELECT p.* FROM pedidos p
+    WHERE p.empresa_id=$1 AND p.cliente_id=$2
+      AND p.estado::text IN ('confirmado','en_curso','descarga','entregado')
+      AND p.factura_id IS NULL
+      AND (
+        COALESCE(p.puntos_descarga->0->>'precio', p.puntos_descarga->0->>'importe', p.puntos_descarga->0->>'precio_cliente') IS NOT NULL
+        OR COALESCE(p.puntos_carga->0->>'precio', p.puntos_carga->0->>'importe', p.puntos_carga->0->>'precio_cliente') IS NOT NULL
+      )`, [empresaId, clienteId]);
+  return Math.round(rows.reduce((delta, order) => {
+    const corrected = correctedLegacyOrderAmount(order);
+    return delta + (corrected === null ? 0 : corrected - parseLocaleNumber(order.importe));
+  }, 0) * 100) / 100;
+}
+
+module.exports = { canonicalOrderAmount, correctedLegacyOrderAmount, sumAdditionalStopPrices, legacyUnbilledClientDelta };

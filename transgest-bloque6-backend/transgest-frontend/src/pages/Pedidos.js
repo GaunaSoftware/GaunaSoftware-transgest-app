@@ -5213,7 +5213,11 @@ ${bloqueCombustible}
             </div>
           </div>
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>imprimir(esColaborador?"colaborador":"chofer")}
+            <button onClick={async()=>{
+              if (!esColaborador) return imprimir("chofer");
+              try { await verArchivoProtegido(`/pedidos/${pedido.id}/orden-colaborador.pdf`, `orden-carga-${pedido.numero}.pdf`); }
+              catch (error) { notify(error.message || "No se pudo abrir la orden", "error"); }
+            }}
               style={{padding:"6px 14px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",display:"inline-flex",alignItems:"center",gap:5}}>
               {esColaborador?"Imprimir orden":"Imprimir"}
             </button>

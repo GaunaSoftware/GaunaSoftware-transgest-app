@@ -614,7 +614,7 @@ const PLANTILLAS = {
           <tr><td style="padding:8px 12px;font-weight:600;">Fecha carga</td><td style="padding:8px 12px;">${data.fecha_carga || ""}</td></tr>
           <tr style="background:#f1f5f9"><td style="padding:8px 12px;font-weight:600;">Precio acordado</td><td style="padding:8px 12px;font-weight:700;">${data.precio || "Pendiente"}</td></tr>
         </table>
-        <p>Confirma el precio acordado e introduce las matriculas del conjunto.</p>
+        <p><strong>Primer paso:</strong> confirma el precio acordado y las matrículas del conjunto. Después recibirás <strong>otro correo</strong> con la orden de carga en PDF y el enlace para marcar la carga. Más adelante te enviaremos enlaces distintos para la salida y la descarga con sus albaranes.</p>
         <p style="margin:20px 0;">
           <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Confirmar datos</a>
         </p>
@@ -627,14 +627,14 @@ const PLANTILLAS = {
   }),
 
   colaborador_carga: (data) => ({
-    asunto: `Orden de carga ${data.orden_carga_numero || data.numero || ""} · ${data.numero || ""}`,
+    asunto: `Acción pendiente: confirmar carga · ${data.orden_carga_numero || data.numero || ""}`,
     html: `<div style="${BASE_STYLE}">
       ${HEADER("Orden de carga confirmada")}
       <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
         <p>Adjuntamos la orden de carga <strong>${htmlEscape(data.orden_carga_numero || data.numero || "")}</strong> del pedido <strong>${htmlEscape(data.numero || "")}</strong>, con el conjunto y el precio que acabas de confirmar.</p>
         <p><strong>Ruta:</strong> ${data.ruta || ""}</p>
         <p><strong>Vehículo:</strong> ${htmlEscape(data.matricula || "Por confirmar")}${data.remolque ? ` · <strong>Remolque:</strong> ${htmlEscape(data.remolque)}` : ""}</p>
-        <p>Cuando el camión esté cargado, usa este enlace para actualizar el viaje:</p>
+        <p><strong>Ahora debes marcar la carga.</strong> Cuando el camión esté cargado, abre este enlace y confirma el estado. Después recibirás por separado el enlace para marcar la salida y, posteriormente, el de descarga y subida de albaranes.</p>
         <p style="margin:20px 0;">
           <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Marcar como cargado</a>
         </p>
@@ -651,7 +651,7 @@ const PLANTILLAS = {
     html: `<div style="${BASE_STYLE}">
       ${HEADER("Marcar en camino")}
       <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
-        <p>Cuando el viaje salga hacia destino, pulsa el enlace para actualizar el pedido <strong>${data.numero || ""}</strong>.</p>
+        <p>Cuando el viaje salga hacia destino, pulsa el enlace para actualizar el pedido <strong>${data.numero || ""}</strong>. Al confirmar la salida recibirás otro correo para marcar la descarga y subir los albaranes firmados.</p>
         <p><strong>Ruta:</strong> ${data.ruta || ""}</p>
         <p style="margin:20px 0;">
           <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Marcar como en camino</a>
@@ -669,10 +669,10 @@ const PLANTILLAS = {
     html: `<div style="${BASE_STYLE}">
       ${HEADER("Confirmar descarga")}
       <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
-        <p>Cuando el viaje este descargado, confirma la descarga y sube los albaranes firmados del pedido <strong>${data.numero || ""}</strong>.</p>
+        <p><strong>Último paso:</strong> cuando el viaje esté descargado, abre este enlace, confirma la entrega y sube los albaranes firmados del pedido <strong>${data.numero || ""}</strong>.</p>
         <p><strong>Ruta:</strong> ${data.ruta || ""}</p>
         <p style="margin:20px 0;">
-          <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Confirmar descarga</a>
+          <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Confirmar descarga y subir albaranes</a>
         </p>
         ${renderMapsEmailBox(data)}
         ${renderDcdEmailBox(data)}

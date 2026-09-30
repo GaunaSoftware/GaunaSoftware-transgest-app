@@ -3,7 +3,7 @@ const fs=require('node:fs');const path=require('node:path');const zlib=require('
 const pdfParse=require('pdf-parse');const {PGlite}=require('@electric-sql/pglite');
 const center=require('../src/services/biReportCenter');const reportExport=require('../src/services/biReportExport');
 const db=require('../src/services/db');const reportRoutes=require('../src/routes/biReportCenter');
-const root=path.resolve(__dirname,'../../..');const out=path.join(root,'output','pdf');const dataOut=path.join(root,'output','reports');
+const root=path.resolve(__dirname,'../../..');const outputRoot=process.env.BI_TEST_OUTPUT_ROOT||path.join(root,'output');const out=path.join(outputRoot,'pdf');const dataOut=path.join(outputRoot,'reports');
 const metric=(valor,unidad='EUR',estado='completo')=>({valor,unidad,estado,definicion:'Valor sintético para verificar la exportación; cálculo original del contrato BI.',
   cobertura:{evaluables:valor==null?0:1,total:1}});
 const a='00000000-0000-4000-8000-000000000001',b='00000000-0000-4000-8000-000000000002';

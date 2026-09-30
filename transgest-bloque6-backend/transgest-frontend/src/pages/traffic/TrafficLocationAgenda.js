@@ -1,7 +1,7 @@
 import {useCallback,useEffect,useMemo,useState} from 'react';
 import {getPedidosResumenLista,getEmpresaConfig} from '../../services/api';
 import {setRuntimeFocus} from '../../services/runtimeFocus';
-import {projectedLocation} from './trafficLocationProjection';
+import {projectedLocation,locationAgendaRows} from './trafficLocationProjection';
 import './trafficLocationAgenda.css';
 
 const iso=date=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -21,7 +21,7 @@ export default function TrafficLocationAgenda(){
   return()=>{active=false;};
  },[week,revision]);
  const days=useMemo(()=>Array.from({length:7},(_,i)=>add(week,i)),[week]);
- const rows=useMemo(()=>{const by=new Map();for(const order of orders){if(['cancelado','borrador'].includes(String(order.estado||'').toLowerCase()))continue;const plate=String(order.matricula_colaborador||'').trim(),own=!!order.vehiculo_id;if(!own&&!plate)continue;const key=own?`propio:${order.vehiculo_id}`:`colaborador:${order.colaborador_id||''}:${plate}`,label=own?(order.vehiculo_matricula||'Vehículo asignado'):`${plate} · ${order.colaborador_nombre||'Colaborador'}`,item=by.get(key)||{id:key,label,orders:[]};item.orders.push(order);by.set(key,item);}return [...by.values()].sort((a,b)=>a.label.localeCompare(b.label,'es'));},[orders]);
+ const rows=useMemo(()=>locationAgendaRows(orders,days,settings),[orders,days,settings]);
  function open(order){setRuntimeFocus('tms_pedidos_focus',{source:'agenda_trafico',pedido_id:order.id});window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'}));}
  return <section className="traffic-location-agenda" aria-label="Agenda de ubicación prevista de vehículos">
   <header><div><h2>Ubicación prevista de la flota</h2><p>Proyección orientativa según cargas, descargas y kilómetros del viaje. No representa posición GPS ni garantiza la hora de entrega.</p></div><div className="traffic-location-controls"><button onClick={()=>setWeek(add(week,-7))}>← Semana anterior</button><input type="date" aria-label="Semana a consultar" value={week} onChange={e=>e.target.value&&setWeek(e.target.value)}/><button onClick={()=>setWeek(add(week,7))}>Semana siguiente →</button><button onClick={reload}>Actualizar</button></div></header>

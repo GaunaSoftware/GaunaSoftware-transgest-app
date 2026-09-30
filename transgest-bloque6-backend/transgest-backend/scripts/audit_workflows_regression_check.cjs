@@ -519,4 +519,4 @@ async function main(){
  }
  }finally{await new Promise(r=>server.close(r));}
 }
-main().catch(e=>{evidence.fatal=e.stack;process.exitCode=1;}).finally(async()=>{fs.writeFileSync(path.join(__dirname,process.env.AUDIT_PG_PORT?'audit-workflows-native-results.json':'audit-workflows-results.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));await pg?.close();await db.pool.end();});
+main().catch(e=>{evidence.fatal=e.stack;process.exitCode=1;}).finally(async()=>{fs.writeFileSync(process.env.AUDIT_RESULTS_PATH || path.join(__dirname,process.env.AUDIT_PG_PORT?'audit-workflows-native-results.json':'audit-workflows-results.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));await pg?.close();await db.pool.end();});

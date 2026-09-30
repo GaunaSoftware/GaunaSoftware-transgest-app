@@ -25,3 +25,18 @@ export function projectedLocation(order,date,settings={}){
  const phase=date===load?'salida':date===finalDay?'descarga':arrivalDay&&date<=arrivalDay?'ruta':'destino';
  return {direction,phase,arrival,plannedDay:planned,origin:order.origen||'Origen pendiente',destination:order.destino||'Destino pendiente',estimate:!!arrival};
 }
+
+export function locationAgendaRows(orders=[],days=[],settings={}){
+ const by=new Map();
+ for(const order of orders){
+  if(['cancelado','borrador'].includes(String(order.estado||'').toLowerCase()))continue;
+  const plate=String(order.matricula_colaborador||'').trim(),own=!!order.vehiculo_id;
+  // Los colaboradores solo ocupan una fila si tienen carga proyectada esta semana.
+  if(!own&&(!plate||!order.colaborador_id||!days.some(date=>projectedLocation(order,date,settings))))continue;
+  const key=own?`propio:${order.vehiculo_id}`:`colaborador:${order.colaborador_id}:${plate}`;
+  const label=own?(order.vehiculo_matricula||'Vehículo asignado'):`${plate} · ${order.colaborador_nombre||'Colaborador'}`;
+  const item=by.get(key)||{id:key,label,orders:[]};
+  item.orders.push(order);by.set(key,item);
+ }
+ return [...by.values()].sort((a,b)=>a.label.localeCompare(b.label,'es'));
+}

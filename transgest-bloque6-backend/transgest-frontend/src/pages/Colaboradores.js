@@ -1337,6 +1337,7 @@ export default function Colaboradores() {
   const [editando, setEditando] = useState(null);
   const [detalle, setDetalle]   = useState(null);
   const [soloPendientes, setSoloPendientes] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
   const [revisandoLiquidaciones, setRevisandoLiquidaciones] = useState(false);
 
   const cargar = async () => {
@@ -1363,7 +1364,11 @@ export default function Colaboradores() {
     window.dispatchEvent(new CustomEvent("tms:notificaciones-refresh"));
   };
   const pendientesRevision = colaboradores.filter(c => c.pendiente_revision);
-  const colaboradoresVisibles = soloPendientes ? pendientesRevision : colaboradores;
+  const searchKey = String(busqueda || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const colaboradoresVisibles = (soloPendientes ? pendientesRevision : colaboradores).filter(c =>
+    !searchKey || [c.nombre, c.cif, c.telefono, c.email, c.email_pedidos, c.email_facturacion]
+      .some(value => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(searchKey))
+  );
 
   const revisarColaborador = async (colaborador) => {
     const ok = await confirmDialog({
@@ -1474,6 +1479,11 @@ export default function Colaboradores() {
       )}
 
       <div style={S.card}>
+        <div style={{padding:"12px 14px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <label htmlFor="buscar-colaboradores" style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>Buscar colaborador</label>
+          <input id="buscar-colaboradores" type="search" style={{...S.inp,maxWidth:380,flex:"1 1 240px"}} value={busqueda} onChange={e=>setBusqueda(e.target.value)} placeholder="Nombre, CIF, correo o teléfono" />
+          <span style={{fontSize:12,color:"var(--text4)"}}>{colaboradoresVisibles.length} de {colaboradores.length}</span>
+        </div>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
           <thead><tr>
             {["Nombre","CIF","Tipo","IVA","Teléfono","Estado","Acciones"].map(h=><th key={h} style={S.th}>{h}</th>)}
@@ -1481,6 +1491,7 @@ export default function Colaboradores() {
           <tbody>
             {loading ? <tr><td colSpan={7} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Cargando...</td></tr>
             : colaboradores.length===0 ? <tr><td colSpan={7} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>Sin colaboradores.{canEdit?" Añade el primero.":""}</td></tr>
+            : colaboradoresVisibles.length===0 ? <tr><td colSpan={7} style={{...S.td,textAlign:"center",color:"var(--text4)"}}>No hay colaboradores que coincidan con la búsqueda.</td></tr>
             : colaboradoresVisibles.map(c=>(
               <tr key={c.id} style={{cursor:"pointer",background:c.pendiente_revision?"rgba(245,158,11,.06)":"transparent",borderLeft:c.pendiente_revision?"3px solid #f59e0b":"3px solid transparent"}} onClick={()=>setDetalle(c)}>
                 <td style={{...S.td,fontWeight:600}}>{c.nombre}</td>

@@ -5,7 +5,8 @@ const { calculateCompanyPaymentDate } = require("../services/companyPayment");
 const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
-const { buildSupplierLoadOrderPdf } = require("../services/supplierLoadOrderPdf");
+const { buildSupplierLoadOrderPdf, companyDataForSupplierOrder } = require("../services/supplierLoadOrderPdf");
+const { canonicalOrderAmount, correctedLegacyOrderAmount, sumAdditionalStopPrices } = require("../services/orderPriceReconciliation");
 const transportDocuments = require("../services/transportDocumentVersions");
 const orderInbox = require("../services/orderInbox");
 const { extractTabularLoadOrderPdf, applyTabularLoadOrder, taxId: normalizeOrderTaxId } = require('../services/orderPdfRoles');
@@ -2569,13 +2570,15 @@ async function getPedidoColaboradorData(pedidoId, empresaId) {
            co.telefono AS colaborador_telefono,
            e.nombre AS empresa_nombre,
            e.cif AS empresa_cif,
-           e.email_admin AS empresa_email
+           e.email_admin AS empresa_email,
+           e.cfg_precios AS empresa_cfg_precios,
+           e.logo_base64 AS empresa_logo_base64
     FROM pedidos p
     LEFT JOIN colaboradores co ON co.id = p.colaborador_id AND co.empresa_id = p.empresa_id
     LEFT JOIN empresas e ON e.id = p.empresa_id
     WHERE p.id=$1 AND p.empresa_id=$2
   `, [pedidoId, empresaId]);
-  return rows[0] || null;
+  return rows[0] ? companyDataForSupplierOrder(rows[0]) : null;
 }
 
 function facturaVencimientoDesdeCliente(cliente) {
@@ -3225,9 +3228,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
   const plantilla = accion === "confirmar"
     ? "colaborador_confirmar"
     : accion === "carga" ? "colaborador_carga" : accion === "camino" ? "colaborador_camino" : "colaborador_descarga";
-  const precio = supplierPriceType(pedido) === "tonelada"
-    ? `${getColaboradorPrecioTonelada(pedido)?.precioTonelada || 0} EUR/tn; mínimo ${getColaboradorPrecioTonelada(pedido)?.minimoToneladas || 0} tn`
-    : `${Number(pedido.precio_colaborador || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 })} EUR`;
+  const precio = colaboradorPrecioLabel(pedido);
   let orderNumber = "";
   let orderPdf = null;
   if (accion === "carga") {
@@ -3282,6 +3283,12 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
     pdf_sha256: crypto.createHash("sha256").update(orderPdf).digest("hex"),
   }, "sistema").catch(error => logger.warn("No se pudo registrar el envío de la orden de carga:", error.message));
   return { orderNumber };
+}
+
+function colaboradorPrecioLabel(pedido) {
+  return supplierPriceType(pedido) === "tonelada"
+    ? `${getColaboradorPrecioTonelada(pedido)?.precioTonelada || 0} EUR/tn; mínimo ${getColaboradorPrecioTonelada(pedido)?.minimoToneladas || 0} tn`
+    : `${Number(pedido.precio_colaborador || 0).toLocaleString("es-ES", { minimumFractionDigits: 2 })} EUR`;
 }
 
 router.get("/colaborador/confirmar/:token", async (req, res) => {
@@ -3402,13 +3409,15 @@ router.post("/colaborador/carga/:token", async (req, res) => {
     await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
 
     const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
+    let caminoEnviado = false;
     if (pedido?.colaborador_email) {
       const tokenCamino = await createColaboradorToken(pedido, "camino", 360);
-      await sendColaboradorEmail(req, pedido, "camino", tokenCamino).catch(e => logger.error("Email colaborador camino:", e.message));
+      try { await sendColaboradorEmail(req, pedido, "camino", tokenCamino); caminoEnviado = true; }
+      catch (e) { logger.error("Email colaborador camino:", e.message); }
     }
     res.send(colaboradorPage("Carga registrada", `
       <h1>Carga registrada</h1>
-      <div class="ok">El pedido queda marcado como cargado. Se ha enviado el enlace para confirmar que va en camino.</div>
+      <div class="ok">El pedido queda marcado como cargado. ${caminoEnviado ? "Te hemos enviado otro correo para confirmar la salida hacia destino." : "No se pudo enviar el siguiente enlace; solicita a tráfico que revise el correo."}</div>
       ${renderColaboradorAcuseBox("Acuse de carga registrada", data, { notas })}
     `));
   } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
@@ -3443,13 +3452,15 @@ router.post("/colaborador/camino/:token", async (req, res) => {
     const departure=await require('../services/supplierTransportDocuments').emailDeparture(db,{tokenHash:hashToken(req.params.token),notes:notas,body:{deca_revisado:req.body.deca_revisado==='true',document_versions:versions}});
 
     const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
+    let descargaEnviada = false;
     if (!departure.replayed && pedido?.colaborador_email) {
       const tokenDescarga = await createColaboradorToken(pedido, "descarga", 720);
-      await sendColaboradorEmail(req, pedido, "descarga", tokenDescarga).catch(e => logger.error("Email colaborador descarga:", e.message));
+      try { await sendColaboradorEmail(req, pedido, "descarga", tokenDescarga); descargaEnviada = true; }
+      catch (e) { logger.error("Email colaborador descarga:", e.message); }
     }
     res.send(colaboradorPage("Viaje en camino", `
       <h1>Viaje en camino</h1>
-      <div class="ok">Hemos registrado que el transporte va en camino. Conserva los DeCA revisados durante el viaje.</div>
+      <div class="ok">Hemos registrado que el transporte va en camino. ${descargaEnviada ? "Te hemos enviado otro correo para confirmar la descarga y subir los albaranes." : departure.replayed ? "Este paso ya estaba registrado." : "No se pudo enviar el enlace de descarga; solicita a tráfico que revise el correo."} Conserva los DeCA revisados durante el viaje.</div>
       ${renderColaboradorAcuseBox("Acuse de salida hacia destino", data, { notas })}
     `));
   } catch(e) { res.status(e.status||500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
@@ -3783,12 +3794,7 @@ function roundMoney(value) {
 }
 
 function sumAdditionalDescargaPrices(stops) {
-  return normalizePedidoJsonList(stops)
-    .slice(1)
-    .reduce((total, stop) => {
-      const n = parseLocaleNumber(stop?.precio ?? stop?.importe ?? stop?.precio_cliente);
-      return total + (Number.isFinite(n) && n > 0 ? n : 0);
-    }, 0);
+  return sumAdditionalStopPrices(stops);
 }
 
 function normalizePedidoTarifaFields(fieldMap = {}) {
@@ -3835,28 +3841,13 @@ function hasPedidoTarifaCalcInput(source = {}) {
 }
 
 function calcPedidoImporteCanonical(payload = {}) {
-  const tipo = String(payload.tipo_precio || "viaje").trim().toLowerCase();
-  const precio = parseLocaleNumber(payload.precio_unitario);
-  if (!Number.isFinite(precio) || precio < 0) return null;
-  const cantidadRaw = parseLocaleNumber(payload.cantidad);
-  const extra = Math.max(0, parseLocaleNumber(payload.extracostes_importe ?? payload.extracostes) || 0);
-  const descargasExtra = sumAdditionalDescargaPrices(payload.puntos_descarga);
-  const cargasExtra = sumAdditionalDescargaPrices(payload.puntos_carga);
-  const stopsExtra = descargasExtra + cargasExtra;
-  const minEur = Math.max(0, parseLocaleNumber(payload.importe_minimo) || 0);
-  const minUnits = Math.max(0, parseLocaleNumber(payload.minimo_unidades) || 0);
-  let cantidad = Number.isFinite(cantidadRaw) ? cantidadRaw : 0;
-  if (tipo === "viaje") {
-    return roundMoney(Math.max(precio, minEur) + extra + stopsExtra);
-  }
-  cantidad = Math.max(cantidad, minUnits);
-  if (!Number.isFinite(cantidad) || cantidad <= 0) return null;
-  const base = tipo === "kg" ? (cantidad / 100) * precio : cantidad * precio;
-  return roundMoney(base + extra + stopsExtra);
+  return canonicalOrderAmount(payload);
 }
 
 function pedidoConImporteVisible(pedido) {
   // Recupera tarifas antiguas sin escribir durante la lectura ni cambiar facturas.
+  const legacy = !pedido.factura_id || pedido.factura_estado === "borrador" ? correctedLegacyOrderAmount(pedido) : null;
+  if (legacy !== null) return { ...pedido, importe: legacy, precio_cliente_col: legacy, importe_reconciliado: true };
   if (Number(pedido.importe) || pedido.factura_id) return pedido;
   const calculado = calcPedidoImporteCanonical(pedido);
   const importe = calculado ?? parseLocaleNumber(pedido.precio_cliente_col);
@@ -6525,6 +6516,27 @@ router.get("/:id/orden-colaborador", GERENTE_O_TRAFICO, async (req, res) => {
   }
 });
 
+router.get("/:id/orden-colaborador.pdf", GERENTE_O_TRAFICO, async (req, res) => {
+  try {
+    const empresaId = req.empresaId || req.user.empresa_id;
+    const pedido = await getPedidoColaboradorData(req.params.id, empresaId);
+    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
+    await assertSupplierOrder(db, pedido, empresaId);
+    const order = await ensurePedidoOrdenCargaNumero(pedido.id, empresaId);
+    if (!order?.numero) return res.status(409).json({ error: "No se pudo numerar la orden de carga" });
+    const pdf = await buildSupplierLoadOrderPdf(pedido, {
+      orderNumber: order.numero,
+      priceLabel: colaboradorPrecioLabel(pedido),
+      acceptedAt: pedido.colaborador_precio_confirmado_at || null,
+    });
+    res.set("Cache-Control", "private, no-store");
+    res.type("application/pdf").set("Content-Disposition", `inline; filename="orden-carga-${order.numero.replace(/[^a-z0-9_-]/gi, "-")}.pdf"`).send(pdf);
+  } catch (error) {
+    logger.error("Error preparando orden de carga para colaborador:", error.message);
+    res.status(error.status || 500).json({ error: error.status ? error.message : "No se pudo preparar la orden de carga" });
+  }
+});
+
 router.post("/:id/colaborador/notificar", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
@@ -7859,7 +7871,7 @@ router.get("/:id", async (req, res) => {
     [req.params.id, empresaId]
   );
   const [withProgress] = await require('../services/transportProgress').withTransportProgress(db, empresaId, rows);
-  res.json(normalizePedidoForClient({ ...withProgress, extracostes: extras.rows }));
+  res.json(normalizePedidoForClient({ ...pedidoConImporteVisible(withProgress), extracostes: extras.rows }));
 });
 
 // POST /pedidos

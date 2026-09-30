@@ -1190,6 +1190,19 @@ router.post("/", GERENTE_O_CONTABLE,
           if(linked.some(f=>String(f.empresa_id)!==String(empresaId)||f.estado!=='borrador'||String(f.cliente_id)!==String(cliente_id)))throw Object.assign(new Error('El pedido ya tiene una factura no editable'),{status:409});
           linked.forEach(f=>borradoresPrevios.add(f.id));
         }
+        // Una versión anterior omitía el suplemento de la primera parada.
+        // Reconciliar solo pedidos todavía editables y solo cuando la diferencia
+        // coincide exactamente con ese suplemento; nunca tocar facturas emitidas.
+        const { correctedLegacyOrderAmount } = require('../services/orderPriceReconciliation');
+        for (const p of fuelOrders) {
+          const corrected = correctedLegacyOrderAmount(p);
+          if (corrected === null) continue;
+          await client.query(`UPDATE pedidos
+            SET importe=$1,
+                precio_cliente_col=CASE WHEN precio_cliente_col=$3 THEN $1 ELSE precio_cliente_col END
+            WHERE id=$2 AND empresa_id=$4 AND importe=$3`, [corrected, p.id, p.importe, empresaId]);
+          p.importe = corrected;
+        }
         const fuelService=require('../services/invoiceFuelLines');
         appliedFuelClause=fuelService.fuelClause(fuelOrders,req.body.fuel_clause_percent);
         if(req.body.workflow_pedidos_ids){

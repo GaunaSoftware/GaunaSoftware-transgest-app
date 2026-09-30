@@ -4093,7 +4093,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
     setPoiDraft({
       ...newStop,
       nombre: newStop.cliente_nombre || texto,
-      direccion: newStop.direccion || "",
+      direccion: "",
       tipo,
       cliente_id: form.cliente_id || "",
     });
@@ -7582,8 +7582,8 @@ async function requestClose() {
 }
 
 async function notificarColaborador(force = false) {
-  if (!editando?.id) {
-    notify("Guarda el pedido antes de enviar el enlace al colaborador.", "warning");
+  if (!editando?.id || pedidoDraftSignature(form) !== initialFormRef.current) {
+    await guardar({forceWorkflow:force});
     return;
   }
   setNotificandoColaborador(true);
@@ -7673,7 +7673,7 @@ async function revocarAccesoTemporalColaborador() {
   }
 }
 
-async function guardar() {
+async function guardar({forceWorkflow = false} = {}) {
   if (!form.cliente_id) { setEditorStep(1); notify("Selecciona un cliente", "warning"); return; }
   if (!form.fecha_carga) { setEditorStep(1); notify("La fecha de carga es obligatoria.", "warning"); return; }
   try {
@@ -7766,6 +7766,8 @@ async function guardar() {
     if(payload.ai_metadata?.inbox_id)notifyInboxChanged();
     const pedidoId = pedidoGuardado?.id || editando?.id;
     const esNuevoPedido = !editando?.id;
+    const colaboradorAsignado = colaboradoresLocal.find(c => String(c.id) === String(payload.colaborador_id));
+    const tieneCorreoColaborador = !!String(colaboradorAsignado?.email_pedidos || colaboradorAsignado?.email || "").trim();
 
     // La ruta/tarifa debe persistirse tambien en el alta. Antes este bloque se
     // ejecutaba despues del return de los pedidos nuevos y solo funcionaba al editar.
@@ -7799,8 +7801,13 @@ async function guardar() {
           });
         setPendingDocs([]);
       }
-      if (colaboradorId && (precioColaborador || supplierTonneAgreement(payload))) {
-        enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
+      if (colaboradorId && tieneCorreoColaborador && (precioColaborador || supplierTonneAgreement(payload))) {
+        try {
+          const envio = await enviarWorkflowColaborador(pedidoId, forceWorkflow);
+          if (!envio?.already) notify("Enlace enviado al colaborador.", "success");
+        } catch (e) {
+          notify(`Pedido guardado, pero el enlace no se envió: ${e.message}`, "error");
+        }
       }
       notify("Pedido creado correctamente.", "success");
       // Si esta mercancia ya se repite bastante en este cliente, ofrecer fijarla como habitual
@@ -7836,8 +7843,13 @@ async function guardar() {
       setPendingDocs([]);
     }
 
-    if (pedidoId && payload.colaborador_id && (Number(payload.precio_colaborador || 0) || supplierTonneAgreement(payload))) {
-      enviarWorkflowColaborador(pedidoId, false).catch(e => console.warn("No se pudo iniciar flujo de colaborador:", e.message));
+    if (pedidoId && payload.colaborador_id && tieneCorreoColaborador && (Number(payload.precio_colaborador || 0) || supplierTonneAgreement(payload))) {
+      try {
+        const envio = await enviarWorkflowColaborador(pedidoId, forceWorkflow);
+        if (!envio?.already) notify("Enlace enviado al colaborador.", "success");
+      } catch (e) {
+        notify(`Pedido guardado, pero el enlace no se envió: ${e.message}`, "error");
+      }
     }
 
     initialFormRef.current = pedidoDraftSignature(form);

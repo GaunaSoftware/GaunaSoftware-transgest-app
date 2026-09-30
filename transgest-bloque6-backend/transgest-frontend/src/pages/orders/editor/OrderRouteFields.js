@@ -4,11 +4,11 @@ import EndpointAutocomplete from "../../../components/EndpointAutocomplete";
 import { confirmDialog } from "../../../services/notify";
 import { hasCustomerDependentValues, switchCustomerDraft } from "../clientTariffDraft";
 
-function pointDraft(form,side) {
+export function pointDraft(form,side) {
  let stops=form[side==="carga"?"puntos_carga":"puntos_descarga"];
  try { if(typeof stops==="string") stops=JSON.parse(stops); } catch { stops=[]; }
  const point=Array.isArray(stops)?stops[0]||{}:{};
- return {...point,nombre:point.cliente_nombre||form[side==="carga"?"origen":"destino"],direccion:point.direccion||"",tipo:side,cliente_id:form.cliente_id||"",ventana:point.ventana||form[side==="carga"?"ventana_carga":"ventana_descarga"]||"",pais:point.pais||"España"};
+ return {...point,nombre:point.cliente_nombre||form[side==="carga"?"origen":"destino"],direccion:"",tipo:side,cliente_id:form.cliente_id||"",ventana:point.ventana||form[side==="carga"?"ventana_carga":"ventana_descarga"]||"",pais:point.pais||"España"};
 }
 export default function OrderRouteFields({ S, nombreBusqueda, form, clientes, setNombreBusqueda, setForm, setShowSuggestions, showSuggestions, setModalNuevoCliente, ivaOptionValue, editando, bloqueoClienteModal, clienteRiesgoLoading, clienteRiesgo, clienteRiesgoPedido, formatRiskPct, rutas, cmrInternacionalModal, tarifasCoincidentes, syncPrecioClienteCol, aplicarTarifaRutaADraft, rutaTarifaSugerida, applyRouteEndpointsFromSavedPoints, setShowCostes, calcularCosteGasoil, groupRutasByOrigen, rutaCompatibleConConjunto, rutasCompatibles, rutaIncompatible, rutaSeleccionada, tipoRemolqueActual, remolquesCompatiblesRuta, f, aplicarEndpointText, resolverEndpointEnFormulario, puntosCargaSugeridosModal, direccionCompletaPunto, applyPuntoCargaToDraft, puntosCargaClienteModal, PuntoInteresPicker, puntosCargaClienteLoading, setPoiDraft, setManagePointsMode, setManagePointsOpen, puntosDescargaSugeridosModal, applyPuntoDescargaToDraft }) {
  async function changeCustomer(customer = null) {

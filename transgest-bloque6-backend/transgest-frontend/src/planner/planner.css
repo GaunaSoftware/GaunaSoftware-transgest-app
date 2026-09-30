@@ -43,3 +43,14 @@
 
 /* Keep full tab labels while scrolling narrow screens. */
 .planner-app>nav button,.pl-tabs>button{flex:0 0 auto}
+
+/* Network uses the same surfaces and spacing as the rest of TransGest. */
+.network-view{color:var(--text);font-family:'DM Sans',Arial,sans-serif}
+.network-layout{max-width:1500px;margin:auto;padding:24px}
+.network-guide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.network-guide>div{display:flex;flex-direction:column;gap:7px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;line-height:1.45}
+.network-guide strong{color:var(--accent);font-size:13px}
+.network-guide span{color:var(--text3);font-size:12px}
+.network-view .pl-panel{border-radius:12px;overflow:hidden}
+.network-view .planner-form{max-width:none}
+@media(max-width:768px){.network-guide{grid-template-columns:1fr}.network-layout{padding:12px}.network-view .planner-table{overflow-x:auto}}

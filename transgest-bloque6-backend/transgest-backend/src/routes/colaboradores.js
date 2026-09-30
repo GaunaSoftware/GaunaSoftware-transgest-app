@@ -32,6 +32,8 @@ async function ensureColaboradorOpsSchema() {
       await db.query("CREATE INDEX IF NOT EXISTS idx_colaborador_pagos_empresa_colaborador_fecha ON colaborador_pagos(empresa_id, colaborador_id, fecha DESC)").catch(()=>{});
       await db.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS pendiente_revision BOOLEAN DEFAULT false").catch(()=>{});
       await db.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS origen_creacion VARCHAR(60)").catch(()=>{});
+      await db.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS email_pedidos TEXT");
+      await db.query("ALTER TABLE colaboradores ADD COLUMN IF NOT EXISTS email_facturacion TEXT");
       await db.query(`
         CREATE TABLE IF NOT EXISTS colaborador_documentos (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2678,7 +2680,7 @@ router.post("/liquidaciones/revisar-alertas", GERENTE_O_TRAFICO, async (req,res)
 router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureColaboradorOpsSchema();
-    const {tipo,nombre,cif,email,telefono,iban,valoracion,notas,tipo_iva,iva_regimen,
+    const {tipo,nombre,cif,email,email_pedidos,email_facturacion,telefono,iban,valoracion,notas,tipo_iva,iva_regimen,
            calle,num_ext,codigo_postal,ciudad,provincia,pais,
            contacto_nombre,contacto_telefono,forma_pago,pendiente_revision,origen_creacion}=req.body;
     const empresaId=req.empresaId||req.user.empresa_id;
@@ -2689,15 +2691,15 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
       `INSERT INTO colaboradores
         (tipo,nombre,cif,email,telefono,iban,valoracion,notas,tipo_iva,iva_regimen,
          calle,num_ext,codigo_postal,ciudad,provincia,pais,contacto_nombre,contacto_telefono,forma_pago,empresa_id,
-         pendiente_revision,origen_creacion)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+         pendiente_revision,origen_creacion,email_pedidos,email_facturacion)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
        RETURNING *`,
       [
         tipo||"autonomo",nombre,cif||null,email||null,telefono||null,iban||null,valoracion||5,notas||null,
         iva.tipo_iva,iva.iva_regimen,
         calle||null,num_ext||null,codigo_postal||null,ciudad||null,provincia||null,pais||null,
         contacto_nombre||null,contacto_telefono||null,forma_pago||null,empresaId,
-        requiereRevision, origen_creacion || (requiereRevision ? "pedidos" : null)
+        requiereRevision, origen_creacion || (requiereRevision ? "pedidos" : null),email_pedidos||null,email_facturacion||null
       ]
     );
     if (requiereRevision) {
@@ -2707,7 +2709,7 @@ router.post("/", GERENTE_O_TRAFICO, async (req,res)=>{
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
-  const {tipo,nombre,cif,email,telefono,iban,activo,notas,
+  const {tipo,nombre,cif,email,email_pedidos,email_facturacion,telefono,iban,activo,notas,
          calle,num_ext,codigo_postal,ciudad,provincia,
          contacto_nombre,contacto_telefono,forma_pago,tipo_iva,iva_regimen,pendiente_revision}=req.body;
   const empresaId = req.empresaId || req.user.empresa_id;
@@ -2719,13 +2721,13 @@ router.put("/:id", GERENTE_O_TRAFICO, async (req,res)=>{
         tipo=$1,nombre=$2,cif=$3,email=$4,telefono=$5,iban=$6,activo=$7,notas=$8,
         calle=$9,num_ext=$10,codigo_postal=$11,ciudad=$12,provincia=$13,
         contacto_nombre=$14,contacto_telefono=$15,forma_pago=$16,tipo_iva=$17,iva_regimen=$18,
-        pendiente_revision=$19
+        pendiente_revision=$19,email_pedidos=$22,email_facturacion=$23
        WHERE id=$20 AND empresa_id=$21 RETURNING *`,
       [tipo,nombre,cif||null,email||null,telefono||null,iban||null,
        activo!==undefined?activo:true,notas||null,
        calle||null,num_ext||null,codigo_postal||null,ciudad||null,provincia||null,
        contacto_nombre||null,contacto_telefono||null,forma_pago||null,
-       iva.tipo_iva,iva.iva_regimen,pendiente_revision !== undefined ? pendiente_revision : false,req.params.id,empresaId]);
+       iva.tipo_iva,iva.iva_regimen,pendiente_revision !== undefined ? pendiente_revision : false,req.params.id,empresaId,email_pedidos||null,email_facturacion||null]);
     if(!rows[0])return res.status(404).json({error:"No encontrado"});
     if (rows[0].pendiente_revision) {
       await notificarColaboradorPendienteRevision(empresaId, rows[0], req.user?.id || null).catch(() => null);
@@ -2879,12 +2881,12 @@ router.post("/:id/liquidacion-email", GERENTE_O_TRAFICO, async (req,res) => {
     await ensureColaboradorOpsSchema();
     const empresaId = req.empresaId || req.user?.empresa_id;
     const col = await db.query(
-      "SELECT id,nombre,email FROM colaboradores WHERE id=$1 AND empresa_id=$2 AND activo=true",
+      "SELECT id,nombre,email,email_facturacion FROM colaboradores WHERE id=$1 AND empresa_id=$2 AND activo=true",
       [req.params.id, empresaId]
     );
     const colaborador = col.rows[0];
     if (!colaborador) return res.status(404).json({ error: "Colaborador no encontrado" });
-    const destinatario = String(req.body?.destinatario || colaborador.email || "").trim();
+    const destinatario = String(req.body?.destinatario || colaborador.email_facturacion || colaborador.email || "").trim();
     if (!destinatario) return res.status(400).json({ error: "El colaborador no tiene email configurado" });
     const dias = Math.min(Math.max(Number(req.body?.dias || 30), 1), 90);
     const token = crypto.randomBytes(32).toString("hex");

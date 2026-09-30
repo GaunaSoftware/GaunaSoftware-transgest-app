@@ -1,5 +1,19 @@
 [
   {
+    "id": "2026-09-collaborator-contact-flow",
+    "date": "2026-09-30",
+    "title": "Órdenes y contactos más claros",
+    "intro": "Estas novedades reúnen los cambios operativos realizados desde el último aviso.",
+    "items": [
+      { "title": "Enviar una orden al colaborador", "text": "Puedes guardar el pedido y enviar el enlace de aceptación en una misma acción. El colaborador confirma desde el enlace recibido, sin necesitar una cuenta de TransGest. Si falla el correo, verás que el pedido sí se guardó y podrás reenviarlo.", "module": "pedidos" },
+      { "title": "Un correo para cada tarea", "text": "En clientes y colaboradores puedes indicar un correo para pedidos u órdenes y otro para facturación. Si no añades uno específico, se usa el correo general.", "module": "clientes" },
+      { "title": "Puntos de carga y descarga", "text": "Al guardar un punto nuevo, la dirección aparece vacía para que escribas la ubicación real sin repetir el nombre del punto.", "module": "pedidos" },
+      { "title": "Grupajes y ubicación prevista", "text": "El grupaje utiliza las características del conjunto seleccionado. La agenda de tráfico muestra una previsión de dónde estarán los camiones según los viajes planificados; sigue siendo una estimación.", "module": "pedidos" },
+      { "title": "Facturación y documentos", "text": "La factura separa el recargo de gasoil del transporte. También se han mejorado la revisión de documentos de transporte y su visualización en Android.", "module": "facturacion" },
+      { "title": "TransGest Network explicado", "text": "La pantalla muestra los pasos para invitar a otra empresa TransGest, aceptar permisos y seguir encargos compartidos. Las órdenes normales por email siguen funcionando sin Network." }
+    ]
+  },
+  {
     "id": "2026-09-dashboard-resolved-incidents",
     "date": "2026-09-29",
     "title": "Seguimiento sin avisos de incidencias cerradas",

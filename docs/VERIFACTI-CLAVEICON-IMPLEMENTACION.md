@@ -189,3 +189,53 @@ Clavei. No se activa ni se comparte su configuración con otras empresas.
 ## Continuación 27/09/2026
 
 La integración y validación vigentes, la autorización posterior de ampliación y los límites de publicación se documentan en `ANDROID_DETENTION_RELEASE_20260927.md`. Se conserva este historial.
+
+## Continuación 30/09/2026: API ClaveiCon y aislamiento por cliente
+
+El cliente aportó la documentación OpenAPI 0.2.3 y la URL del gateway
+`https://gateway.claveicowork.com/api/v1`. Por ahora solo está habilitado
+`PRUEB` para pruebas. La documentación define `GET /config/companies` y las
+importaciones XML por `POST /accounting/{companyCode}/import/...`. El correo
+de Clavei confirma que la clave va en el encabezado `apikey`. La respuesta 200
+de la lista de empresas no incluye un esquema concreto en el OpenAPI adjunto.
+
+La clave se guarda cifrada en `empresa_api_configs` para **una empresa de
+TransGest**; no se configura en Render ni se hereda como clave global. Solo
+SuperAdmin puede guardarla y probar `List ERP companies`. La respuesta al
+navegador informa del estado y de si aparece el código esperado, sin devolver
+la clave ni el listado completo de empresas. El código ClaveiCon se configura
+en esa misma ficha, conservando el resto de la configuración contable. Los
+datos de TLM no se activan para otras empresas.
+
+La prueba `GET` es de solo lectura. La importación automática permanece
+bloqueada: ClaveiCon confirmó que una segunda petición importaría de nuevo.
+Antes de permitir `POST`, hay que probar con `PRUEB` la respuesta real, la
+conciliación tras timeout y la consulta de asientos; después autorizar el
+código real de TLM. La exportación XML manual y su conciliación siguen
+disponibles según el flujo anterior. No se ha realizado una petición real a
+ClaveiCon desde el entorno de desarrollo sin credencial.
+
+ClaveiCon es integración **contable**, separada del modo fiscal NO VERI*FACTU.
+Para este último faltan el ciclo íntegro de registros y eventos, firma XAdES
+Enveloped con certificado cualificado, verificación, conservación y exportación,
+además de la validación fiscal del producto/versión y de la declaración
+responsable de su productora. La declaración responsable escrita no exige por
+sí misma firma electrónica, pero los registros de NO VERI*FACTU sí deben
+firmarse. El certificado de la autónoma titular de Gauna no debe confundirse
+automáticamente con la identidad de TLM para sus facturas. No se activa ese
+modo ni se presenta como listo para producción por haber conectado ClaveiCon.
+
+Fuentes AEAT para esta distinción:
+
+- https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/firma.html
+- https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/cuestiones-generales/modalidades-cumplimiento-obligaciones.html
+- https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/certificacion-sistemas-informaticos-declaracion-responsable.html
+
+Verificación local de esta continuación: `npm run claveicon:regression`,
+`node --check src/routes/superadminCore.js` y análisis sintáctico de los tres
+archivos React modificados, correctos. `git diff --check`, correcto. La prueba
+existente con PGlite no pudo ejecutarse porque esta instalación local carece
+de `@electric-sql/pglite`; el build frontend llegó a Webpack y se detuvo por
+la ausencia local de `@capacitor/share`. No se considera que la compilación
+completa haya pasado. Falta probar el `GET` real con la clave de TLM introducida
+por SuperAdmin y verificar el formato exacto de la respuesta 200.

@@ -298,9 +298,6 @@ export default function Login() {
         </button>
 
         </form>
-        <div style={{textAlign:"center",marginTop:14}}>
-          <a href="/superadmin" style={S.linkBtn}>Acceso SuperAdmin</a>
-        </div>
         <button className="login-theme" onClick={toggle}>{isDark ? "Usar tema claro" : "Usar tema oscuro"}</button>
 
         {/* Panel demo - solo en modo demo */}

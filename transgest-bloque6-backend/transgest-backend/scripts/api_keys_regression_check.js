@@ -43,6 +43,13 @@ async function main() {
     await keys.setCompanyApiConfig(a,'movildata',{api_key:'qa-fake-gps-two',use_global:false});
     assert.equal((await keys.getCompanyApiConfig(a,'locatel')).activo,false);
     assert.equal((await keys.getCompanyApiConfig(a,'movildata')).activo,true);
+    await assert.rejects(keys.setGlobalApiKey('claveicon','qa-fake-global-clavei'),{status:400});
+    await keys.setCompanyApiConfig(a,'claveicon',{api_key:'qa-fake-tlm-clavei',use_global:true});
+    assert.equal((await keys.resolveApiKey(a,'claveicon')).key,'qa-fake-tlm-clavei');
+    assert.equal((await keys.getCompanyApiConfig(a,'claveicon')).use_global,false);
+    assert.equal((await keys.resolveApiKey(b,'claveicon')).key,'');
+    assert.equal((await keys.publicStatusForProvider('claveicon',b)).company_configured,false);
+    assert.ok(!(await keys.getCompanyApiConfig(a,'claveicon')).encrypted_key.includes('qa-fake-tlm-clavei'));
     console.log('OK claves: cifrado, aislamiento, upsert sin duplicados, modo explicito, borrado persistente y GPS unico.');
   } finally {
     Object.assign(db,original);

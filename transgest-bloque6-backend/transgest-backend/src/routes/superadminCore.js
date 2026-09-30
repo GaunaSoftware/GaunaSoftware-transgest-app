@@ -2473,8 +2473,39 @@ router.get('/integraciones/fiscal/:empresaId/claveicon',superAuth,async(req,res,
   const cfg=empresa.rows[0].configuracion?.claveicon || {};
   const config=Object.fromEntries(['mode','enabled','codemp','sales_account','vat_account','withholding_account','customer_root','codtipopre','codban','ivagenast'].map(key=>[key,cfg[key]]));
   const result=await db.query("SELECT COUNT(*) FILTER(WHERE status IN ('pending','processing'))::int AS pending,COUNT(*) FILTER(WHERE status IN ('failed','unknown'))::int AS errors,MAX(processed_at) AS last_synced_at FROM accounting_invoice_outbox WHERE empresa_id=$1 AND provider='claveicon'",[req.params.empresaId]);
-  res.json({config,...result.rows[0]});
+  const credential=await publicStatusForProvider('claveicon',req.params.empresaId);
+  res.json({config,...result.rows[0],credential_configured:credential.company_configured && credential.activo,credential_mask:credential.company_masked});
  }catch(e){next(e);}
+});
+
+router.put('/integraciones/fiscal/:empresaId/claveicon/credencial',superAuth,async(req,res,next)=>{
+ try {
+  const exists=await db.query('SELECT id FROM empresas WHERE id=$1',[req.params.empresaId]);
+  if(!exists.rows.length)return res.status(404).json({error:'Empresa no encontrada'});
+  const code=String(req.body?.codemp || '').trim().toUpperCase();
+  if(!/^[A-Z0-9]{1,5}$/.test(code))return res.status(422).json({error:'Indica el código de empresa de ClaveiCon (1–5 letras o números).'});
+  await setCompanyApiConfig(req.params.empresaId,'claveicon',{api_key:req.body?.api_key,use_global:false,activo:true},req.superadmin?.id||null);
+  await db.query("UPDATE empresas SET configuracion=jsonb_set(COALESCE(configuracion,'{}'::jsonb),'{claveicon}',COALESCE(configuracion->'claveicon','{}'::jsonb) || jsonb_build_object('codemp',$1::text),true) WHERE id=$2",[code,req.params.empresaId]);
+  await audit(req,'integracion.claveicon.credencial_actualizada',{provider:'claveicon',scope:'company',codemp:code},req.params.empresaId);
+  res.json({ok:true,credential_configured:true});
+ }catch(e){next(e);}
+});
+
+router.post('/integraciones/fiscal/:empresaId/claveicon/probar-conexion',superAuth,async(req,res,next)=>{
+ try {
+  const empresa=await db.query('SELECT configuracion FROM empresas WHERE id=$1',[req.params.empresaId]);
+  if(!empresa.rows.length)return res.status(404).json({error:'Empresa no encontrada'});
+  const resolved=await resolveApiKey(req.params.empresaId,'claveicon');
+  if(!resolved.key || resolved.source!=='company')return res.status(422).json({error:'Configura primero la clave privada de esta empresa en SuperAdmin.'});
+  const expectedCode=empresa.rows[0].configuracion?.claveicon?.codemp;
+  if(!expectedCode)return res.status(422).json({error:'Configura primero el código de empresa de ClaveiCon.'});
+  const result=await require('../services/claveicon/transport').listCompanies({apiKey:resolved.key,expectedCode});
+  await audit(req,'integracion.claveicon.conexion_probada',{http_status:result.http_status,company_visible:result.company_visible,expected_code:expectedCode},req.params.empresaId);
+  res.json({...result,expected_code:expectedCode});
+ }catch(e){
+  if(e.name==='AbortError')return res.status(504).json({error:'La conexión con ClaveiCon agotó el tiempo de espera.'});
+  next(e);
+ }
 });
 
 router.get("/integraciones/fiscal/:empresaId/queue-summary", superAuth, async (req, res, next) => {

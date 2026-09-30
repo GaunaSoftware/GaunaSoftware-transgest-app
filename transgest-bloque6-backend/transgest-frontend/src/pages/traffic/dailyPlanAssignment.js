@@ -12,6 +12,24 @@ export function pendingOrdersForWeek(orders = [], days = []) {
   return [...byId.values()].sort((a, b) => String(a.fecha_carga || '').localeCompare(String(b.fecha_carga || '')) || String(a.numero || '').localeCompare(String(b.numero || ''), 'es'));
 }
 
+export function groupPendingOrders(orders = [], search = '') {
+  const term = String(search).trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const groups = new Map();
+  for (const order of orders) {
+    const searchable = [order.numero, order.cliente_nombre, order.origen, order.destino, order.vehiculo_matricula]
+      .join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (term && !searchable.includes(term)) continue;
+    const date = String(order.fecha_carga || order.fecha_pedido || '').slice(0, 10);
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(order);
+  }
+  return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => ({
+    date,
+    orders: items.sort((a, b) => String(a.hora_carga || '23:59').localeCompare(String(b.hora_carga || '23:59'))
+      || String(a.numero || '').localeCompare(String(b.numero || ''), 'es', { numeric: true })),
+  }));
+}
+
 export async function assignPendingOrders({ ids, pending, vehicle, save }) {
   const eligible = new Map(pending.map(order => [String(order.id), order]));
   const ok = [], failed = [];

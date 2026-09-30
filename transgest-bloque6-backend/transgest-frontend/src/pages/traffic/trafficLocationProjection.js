@@ -38,5 +38,14 @@ export function locationAgendaRows(orders=[],days=[],settings={}){
   const item=by.get(key)||{id:key,label,orders:[]};
   item.orders.push(order);by.set(key,item);
  }
- return [...by.values()].sort((a,b)=>a.label.localeCompare(b.label,'es'));
+ return sortTrafficLocationRows([...by.values()]);
+}
+
+export function sortTrafficLocationRows(rows=[]){
+ return [...rows].sort((a,b)=>{
+  const aSupplier=String(a.id||'').startsWith('colaborador:');
+  const bSupplier=String(b.id||'').startsWith('colaborador:');
+  if(aSupplier!==bSupplier)return aSupplier?1:-1;
+  return String(a.label||'').localeCompare(String(b.label||''),'es',{numeric:true,sensitivity:'base'});
+ });
 }

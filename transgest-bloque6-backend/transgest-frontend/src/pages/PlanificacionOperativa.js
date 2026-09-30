@@ -6,7 +6,7 @@ import GestionTrafico from "./GestionTrafico";
 import TrafficLocationAgenda from './traffic/TrafficLocationAgenda';
 
 const TABS = [
-  { id: "cuadrante", label: "Ubicación y asignación" },
+  { id: "cuadrante", label: "Mesa de tráfico" },
   { id: "grupajes", label: "Grupajes" },
   { id: "optimizacion", label: "Optimización de rutas" },
 ];

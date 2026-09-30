@@ -1,4 +1,4 @@
-import {estimateArrival,projectedLocation,locationAgendaRows} from './trafficLocationProjection';
+import {estimateArrival,projectedLocation,locationAgendaRows,sortTrafficLocationRows} from './trafficLocationProjection';
 
 const trip={id:'synthetic',vehiculo_id:'truck',estado:'confirmado',fecha_carga:'2026-09-29',hora_carga:'08:00',fecha_descarga:'2026-10-01',km_ruta:1200,origen:'Madrid',destino:'A Coruña',tipo_viaje:'salida'};
 test('a long route remains in transit next day and planned destination is explicit',()=>{
@@ -26,4 +26,13 @@ test('collaborators without a trip in the displayed week do not occupy empty row
  expect(locationAgendaRows([old],days)).toEqual([]);
  expect(locationAgendaRows([old,active],days)).toHaveLength(1);
  expect(locationAgendaRows([old,active],days)[0].orders).toHaveLength(1);
+});
+test('own fleet plates are ordered before supplier plates, using numeric plate order',()=>{
+ const rows=sortTrafficLocationRows([
+  {id:'colaborador:a:1000',label:'1000-AAA · Colaborador'},
+  {id:'propio:b',label:'2000-BBB'},
+  {id:'propio:a',label:'900-AAA'},
+  {id:'colaborador:b:200',label:'200-BBB · Colaborador'},
+ ]);
+ expect(rows.map(row=>row.id)).toEqual(['propio:a','propio:b','colaborador:b:200','colaborador:a:1000']);
 });

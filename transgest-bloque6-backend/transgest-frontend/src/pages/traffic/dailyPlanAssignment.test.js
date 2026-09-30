@@ -1,4 +1,4 @@
-import { assignPendingOrders, pendingOrdersForWeek } from './dailyPlanAssignment';
+import { assignPendingOrders, groupPendingOrders, pendingOrdersForWeek } from './dailyPlanAssignment';
 
 test('solo expone pedidos operativos propios de la semana sin asignación completa', () => {
   const days = ['2026-09-30'];
@@ -23,4 +23,16 @@ test('asigna varios pedidos una sola vez, conserva fallos individuales y usa el 
   ]);
   expect(result.ok).toEqual(['a']);
   expect(result.failed).toEqual([{ numero: 'B', error: 'Conflicto' }]);
+});
+
+test('groups pending loads by day and scheduled hour, and filters within the week', () => {
+  const orders = [
+    { id:'late',numero:'PED-10',fecha_carga:'2026-10-02',hora_carga:'17:00',cliente_nombre:'Cliente A' },
+    { id:'early',numero:'PED-2',fecha_carga:'2026-10-02',hora_carga:'08:00',cliente_nombre:'Cliente A' },
+    { id:'first',numero:'PED-1',fecha_carga:'2026-10-01',cliente_nombre:'Cementos' },
+  ];
+  expect(groupPendingOrders(orders).map(group=>[group.date,group.orders.map(order=>order.id)]))
+    .toEqual([['2026-10-01',['first']],['2026-10-02',['early','late']]]);
+  expect(groupPendingOrders(orders,'CEMENTOS').map(group=>group.orders.map(order=>order.id)))
+    .toEqual([['first']]);
 });

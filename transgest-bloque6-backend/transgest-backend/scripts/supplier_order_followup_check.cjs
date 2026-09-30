@@ -28,6 +28,8 @@ async function main() {
     mercancia: "Mercancía de prueba", peso_kg: 12000, bultos: 10,
     condiciones_adicionales: "Llamar antes de entrar.", destino: "Cádiz",
   };
+  const scheduledStops = stopLines([{nombre:'Primera',fecha:'2026-10-01'},{nombre:'Segunda',fecha_descarga:'2026-10-02',hora_descarga:'11:30'}]);
+  assert.match(scheduledStops[1].when,/02\/10\/2026.*11:30/, 'La segunda descarga confirma fecha y hora propias del pedido');
   assert.equal(canonicalOrderAmount(order), 315);
   assert.equal(correctedLegacyOrderAmount(order), 315);
   assert.equal(pedidoConImporteVisible(order).importe, 315);

@@ -53,7 +53,7 @@ export default function OrderDistanceFields({ S, getRoutePlaces, form, calcularK
                   {[
                     ["carga_lateral","Carga lateral"],
                     ["carga_trasera","Carga trasera"],
-                    ["carga_techo","Techo"],
+                    ["carga_techo","Carga superior"],
                     ["intercambio_palets","Intercambio de palets"],
                     ["requiere_cinchas","Necesario llevar cinchas"],
                   ].map(([key,label])=>(

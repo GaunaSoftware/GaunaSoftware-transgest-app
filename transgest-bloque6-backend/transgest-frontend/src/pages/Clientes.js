@@ -136,7 +136,7 @@ const TIPO_VEHICULO_RUTA = [
   {v:"adr",l:"ADR"},
 ];
 const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",espera_carga:"#eab308",cargando:"var(--accent-l)",en_curso:"#22d3ee",espera_descarga:"#d946ef",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
-const LABEL_ESTADO = {pendiente:"Pendiente",confirmado:"Confirmado",espera_carga:"Espera carga",cargando:"Cargando",en_curso:"En curso",espera_descarga:"Espera descarga",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
+const LABEL_ESTADO = {pendiente:"Pendiente de asignar",confirmado:"Confirmado",espera_carga:"Espera carga",cargando:"Cargando",en_curso:"En tránsito",espera_descarga:"Espera descarga",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const GRUPO_COLORES = ["#3b6ef5","#10b981","#f59e0b","#a855f7","#ef4444","#06b6d4","#ec4899","#84cc16"];
 // Ordena las tarifas dejando juntas las de un mismo grupo (asociadas, comparten

@@ -22,7 +22,7 @@ export default function TrafficLocationAgenda(){
   (async()=>{const [cfg,plan]=await Promise.all([getEmpresaConfig(),getPlanDiario({fecha:week})]);const found=[];let page=1,more=true;
    while(more&&page<=12){const result=await getPedidosResumenLista({desde:add(week,-14),hasta:add(week,6),limit:500,page},{silentError:true});found.push(...(result.data||[]));more=result.pagination?.hasNext===true;page++;}
    if(active){setSettings(cfg?.cfg_trafico||{});setOrders(found);setFleet(plan?.rows||[]);setPartial(more);setSelected([]);}
-  })().catch(e=>{if(active)setError(e.message||'No se pudo cargar el plan diario.');}).finally(()=>{if(active)setLoading(false);});
+  })().catch(e=>{if(active)setError(e.message||'No se pudo cargar la ubicación prevista.');}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
  },[week,revision]);
  const days=useMemo(()=>Array.from({length:7},(_,i)=>add(week,i)),[week]);
@@ -40,8 +40,8 @@ export default function TrafficLocationAgenda(){
  }
  function startDrag(event,order){const ids=selected.includes(order.id)?selected:[order.id];event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('application/transgest-pedidos',JSON.stringify(ids));event.dataTransfer.setData('text/plain',ids.join(','));}
  function onDrop(event,row){event.preventDefault();let ids;try{ids=JSON.parse(event.dataTransfer.getData('application/transgest-pedidos'));}catch{return;}if(Array.isArray(ids))assign(row,ids);}
- return <section className="traffic-location-agenda" aria-label="Plan diario y ubicación prevista de vehículos">
-  <header><div><h2>Plan diario</h2><p>Ubicación y llegada orientativas según viajes y kilómetros. La posición real puede variar.</p></div><div className="traffic-location-controls">
+ return <section className="traffic-location-agenda" aria-label="Ubicación prevista y asignación de vehículos">
+  <header><div><h2>Ubicación prevista y asignación</h2><p>Cargas, descargas y llegada orientativas según los viajes y kilómetros. La posición real puede variar.</p></div><div className="traffic-location-controls">
    <button type="button" onClick={()=>setWeek(add(week,-7))}>← Semana anterior</button><input type="date" aria-label="Semana a consultar" value={week} onChange={e=>e.target.value&&setWeek(e.target.value)}/>
    <button type="button" onClick={()=>setWeek(add(week,7))}>Semana siguiente →</button><button type="button" onClick={reload}>Actualizar</button>
    <button type="button" aria-expanded={sidebarOpen} aria-controls="plan-pendientes" onClick={()=>setSidebarOpen(value=>!value)}>{sidebarOpen?'Ocultar pendientes':`Mostrar pendientes (${pending.length})`}</button>

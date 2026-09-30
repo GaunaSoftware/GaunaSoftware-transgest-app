@@ -53,6 +53,17 @@ async function assignGroupage(tx, { empresaId, groupId, actorId, operationId, pa
     aggregate.fecha_carga = orders.map(p => day(p.fecha_carga || p.fecha_pedido)).sort()[0];
     aggregate.fecha_descarga = orders.map(p => day(p.fecha_descarga || p.fecha_entrega || p.fecha_carga)).sort().at(-1);
     await validateTrafficAssignment(tx, empresaId, aggregate, { ...assignment, asignar_solo_si_libre: true, asignacion_revisada: patch.asignacion_revisada === true }, actorId);
+    if (patch.sync_conjunto === true) {
+      if (assignment.chofer_id && String(assignment.chofer_id) !== String(truck.chofer_id || '')) {
+        const current = (await tx.query('SELECT matricula FROM vehiculos WHERE empresa_id=$1 AND chofer_id=$2 AND id<>$3 AND activo=true LIMIT 1', [empresaId, assignment.chofer_id, truck.id])).rows[0];
+        if (current) fail(`El chófer ya tiene el conjunto ${current.matricula}. Revisa la asignación antes de cambiarlo.`, 'DRIVER_CONJUNTO_CONFLICT');
+      }
+      if (assignment.remolque_id && String(assignment.remolque_id) !== String(truck.remolque_id || '')) {
+        const current = (await tx.query('SELECT matricula FROM vehiculos WHERE empresa_id=$1 AND remolque_id=$2 AND id<>$3 AND activo=true LIMIT 1', [empresaId, assignment.remolque_id, truck.id])).rows[0];
+        if (current) fail(`El remolque ya forma parte del conjunto ${current.matricula}. Revisa la asignación antes de cambiarlo.`, 'TRAILER_CONJUNTO_CONFLICT');
+      }
+      await tx.query('UPDATE vehiculos SET chofer_id=$3, remolque_id=$4 WHERE empresa_id=$1 AND id=$2', [empresaId, truck.id, assignment.chofer_id, assignment.remolque_id]);
+    }
   }
   for (const order of orders) authorize?.({ ...order, ...assignment });
   assignment.remolque_id=assignment.remolque_id_manual||assignment.remolque_id;

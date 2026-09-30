@@ -18,9 +18,9 @@ test('shared transport states keep incident and execution separate', () => {
 test('recorded progress distinguishes loading from departure without changing legacy state', () => {
   const order = { estado:'en_curso', estado_operativo:{codigo:'cargado',estado_legacy:'en_curso',fuente:'pasos_chofer'} };
   expect(transportStateKey(order)).toBe('cargado');
-  expect(transportStateMeta(order).label).toBe('Cargado');
+  expect(transportStateMeta(order).label).toBe('Carga terminada');
   expect(transportStateMeta({...order,estado_operativo:{codigo:'en_transito',estado_legacy:'en_curso'}}).label).toBe('En tránsito');
-  expect(transportStateMeta({estado:'en_curso'}).label).toBe('En curso');
+  expect(transportStateMeta({estado:'en_curso'}).label).toBe('En tránsito');
   expect(transportStateKey({...order,estado_operativo:{codigo:'unknown'}})).toBe('en_curso');
   expect(TRANSPORT_STATES.cargado.readOnly).toBe(true);
   expect(order.estado).toBe('en_curso');

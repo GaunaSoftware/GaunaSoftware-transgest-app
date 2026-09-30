@@ -1,12 +1,12 @@
 import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import TransportDocumentVersions from './TransportDocumentVersions';
-import {getFirmasOperacion,generarPedidoDocumentoControl} from '../services/api';
+import {getFirmasOperacion,generarPedidoDocumentoControl,solicitarDecaPedido,getPedidoDocumentoControl} from '../services/api';
 
 jest.mock('./TransportShipmentEditor',()=>()=>null);
 jest.mock('./driver/OperationSignature',()=>()=>null);
 jest.mock('../services/api',()=>({
- getFirmasOperacion:jest.fn(),generarPedidoDocumentoControl:jest.fn(),
+ getFirmasOperacion:jest.fn(),generarPedidoDocumentoControl:jest.fn(),solicitarDecaPedido:jest.fn(),getPedidoDocumentoControl:jest.fn(),
  adjuntarDecaExterno:jest.fn(),descargarArchivoProtegido:jest.fn(),
  anularFirmaOperacion:jest.fn(),guardarFirmaEntrega:jest.fn(),
 }));
@@ -33,5 +33,22 @@ test('a replacement DeCA keeps the issue action visible but requires its reason'
   expect(issue.disabled).toBe(false);
   await act(async()=>issue.click());
   expect(generarPedidoDocumentoControl).toHaveBeenLastCalledWith('pedido-1',expect.objectContaining({autorizacion_especial:{requerida:true,referencia:'AUT-123'}}));
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
+test('first TransGest DeCA requires a registered request after asking for the shipper original',async()=>{
+ global.IS_REACT_ACT_ENVIRONMENT=true;
+ getFirmasOperacion.mockResolvedValue([]);
+ solicitarDecaPedido.mockResolvedValue({ok:true});
+ getPedidoDocumentoControl.mockResolvedValue({solicitud_deca:{created_at:'2026-09-30T10:00:00Z'},envios:[{id:'envio-1'}],versiones:[]});
+ const host=document.createElement('div');document.body.appendChild(host);const root=createRoot(host),onChange=jest.fn();
+ try{
+  await act(async()=>root.render(<TransportDocumentVersions pedidoId="pedido-1" data={{envios:[{id:'envio-1'}],versiones:[]}} onChange={onChange}/>));
+  const issue=[...host.querySelectorAll('button')].find(button=>button.textContent==='Generar DeCA');
+  expect(issue.disabled).toBe(true);
+  const request=[...host.querySelectorAll('button')].find(button=>button.textContent==='Registrar que el cargador no entregó el DeCA');
+  await act(async()=>request.click());
+  expect(solicitarDecaPedido).toHaveBeenCalledWith('pedido-1');
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({solicitud_deca:expect.any(Object)}));
  }finally{await act(async()=>root.unmount());host.remove();}
 });

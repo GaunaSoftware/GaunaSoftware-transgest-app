@@ -21,7 +21,7 @@ module.exports=async function({base,fetch,db,managerToken,driverToken,company,pa
   assert.equal((await call(path+'&empresa_id='+company,bToken)).items.length,0,'User parameters never select another tenant');
   await call(path,driverToken,403);
   const summary=await call('/informes/control-tower',managerToken);
-  assert.ok(summary.flujo_operativo_v2.find(row=>row.key==='cargado').total>=1);
+  assert.ok(summary.flujo_alcance.cargas_finalizadas_sin_salida>=1,'La carga finalizada se conserva como dato, sin ofrecerla como estado seleccionable');
   assert.equal((await call('/informes/control-tower?empresa_id='+company,bToken)).flujo_alcance.total,0,'Cached aggregates stay tenant-scoped');
   await call('/informes/control-tower/flujo?estado=cargado&page=0',managerToken,400);
   return {checks,status:'passed',mode:'synthetic HTTP and production module/plan gates'};

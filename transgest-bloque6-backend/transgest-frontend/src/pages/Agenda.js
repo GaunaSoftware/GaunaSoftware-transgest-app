@@ -266,7 +266,7 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
     prioridad: evento?.prioridad || "media",
     estado: evento?.estado || "pendiente",
     visibilidad: evento?.visibilidad || "personal",
-    asignado_a: evento?.asignado_a || "",
+    asignado_a: evento?.metadata?.tarea_grupo ? "__equipo__" : evento?.asignado_a || "",
   });
 
   function f(key) {
@@ -288,9 +288,11 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
       ...form,
       fecha_inicio: fromDateTimeLocal(form.fecha_inicio, form.todo_dia),
       fecha_fin: form.fecha_fin ? fromDateTimeLocal(form.fecha_fin, form.todo_dia) : null,
-      asignado_a: form.asignado_a || user?.id || null,
+      asignado_a: form.asignado_a === "__equipo__" ? null : form.asignado_a || user?.id || null,
+      visibilidad: form.asignado_a === "__equipo__" ? "equipo" : form.visibilidad,
+      metadata: { ...(form.metadata || {}), tarea_grupo: form.asignado_a === "__equipo__" },
     };
-    if (!esGerente && payload.asignado_a && String(payload.asignado_a) !== String(user?.id || "")) {
+    if (!esGerente && form.asignado_a !== "__equipo__" && payload.asignado_a && String(payload.asignado_a) !== String(user?.id || "")) {
       payload.visibilidad = "equipo";
       payload.estado = "pendiente";
       payload.metadata = { ...(payload.metadata || {}), solicitud_tarea: true };
@@ -325,12 +327,13 @@ function ModalAgenda({ evento, usuarios, fechaBase, canEdit, user, onClose, onSa
           </div>
           <div style={{gridColumn:'1/-1'}}><label style={S.label}>Tipo de evento</label><div className="agenda-type-picker">{Object.entries(AGENDA_TYPES).map(([value,type])=><button type="button" style={agendaStyle(value)} key={value} aria-pressed={form.tipo===value} onClick={()=>setForm(p=>({...p,tipo:value}))}>{type.label}</button>)}</div></div>
           <AgendaNotices />
-      {esGerente && (
+      {canEdit && (
             <div>
               <label style={S.label}>Agenda de / responsable</label>
               <select style={S.input} value={form.asignado_a} onChange={f("asignado_a")}>
                 <option value="">Mi agenda</option>
-                {usuarios
+                <option value="__equipo__">Todo el equipo · tarea de grupo</option>
+                {esGerente && usuarios
                   .filter(u => String(u.rol || "").toLowerCase() !== "chofer")
                   .map(u => <option key={u.id} value={u.id}>{u.nombre || u.username || u.email} · {u.rol}</option>)}
               </select>

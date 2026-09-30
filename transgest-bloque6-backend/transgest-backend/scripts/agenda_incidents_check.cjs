@@ -22,7 +22,7 @@ const { driverStops } = require('../src/services/driverStops');
       CREATE TABLE agenda_eventos (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), empresa_id uuid NOT NULL,
         titulo text NOT NULL, descripcion text, fecha_inicio timestamptz, fecha_fin timestamptz, todo_dia boolean,
         tipo text, prioridad text, estado text, visibilidad text, pedido_id uuid,
-        creado_por uuid, asignado_a uuid,
+        creado_por uuid, asignado_a uuid, metadata jsonb DEFAULT '{}'::jsonb,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
     `);
     const migration = fs.readFileSync(path.join(__dirname, 'migrations/20260925_agenda_incident_lifecycle.sql'), 'utf8');
@@ -52,6 +52,15 @@ const { driverStops } = require('../src/services/driverStops');
       const driver = response();
       await get({ user:{ id:companyB, empresa_id:companyA, rol:'chofer' }, query:{} }, driver);
       assert.equal(driver.data.length, 0, 'Driver must not see unrelated team incidents');
+      const groupTask=(await db.query(`INSERT INTO agenda_eventos(empresa_id,titulo,fecha_inicio,estado,visibilidad,creado_por,metadata)
+        VALUES($1,'Revisar entrega',NOW(),'pendiente','equipo',$2,'{"tarea_grupo":true}'::jsonb) RETURNING id`,[companyA,companyA])).rows[0];
+      const assignedDriver=response();
+      await get({user:{id:companyB,empresa_id:companyA,rol:'chofer'},query:{}},assignedDriver);
+      assert.deepEqual(assignedDriver.data.map(item=>item.titulo),['Revisar entrega'], 'Driver sees group task but not automatic management incidents');
+      const external=response();
+      await get({user:{id:companyB,empresa_id:companyA,rol:'colaborador'},query:{}},external);
+      assert.equal(external.data.length,0,'External collaborator does not see internal group tasks');
+      await db.query('DELETE FROM agenda_eventos WHERE id=$1',[groupTask.id]);
       const otherTenant = response();
       await get({ user:{ id:companyB, empresa_id:companyB, rol:'gerente' }, query:{} }, otherTenant);
       assert.equal(otherTenant.data.length, 0);

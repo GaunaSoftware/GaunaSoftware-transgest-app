@@ -2,13 +2,11 @@ import { PageHeader } from "../ui";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import "./traffic/traffic.css";
 import { useEffect, useState } from "react";
-import PlanDiario from "./PlanDiario";
 import GestionTrafico from "./GestionTrafico";
 import TrafficLocationAgenda from './traffic/TrafficLocationAgenda';
 
 const TABS = [
   { id: "cuadrante", label: "Cuadrante semanal" },
-  { id: "ubicacion", label: "Ubicación prevista" },
   { id: "plan_diario", label: "Plan diario" },
   { id: "grupajes", label: "Grupajes" },
   { id: "optimizacion", label: "Optimización de rutas" },
@@ -17,6 +15,7 @@ const TABS = [
 function normalizarTab(value) {
   if (value === "cuadrante_semana" || value === "gestion_trafico") return "cuadrante";
   if (value === "rutas_recomendadas") return "optimizacion";
+  if (value === "ubicacion") return "plan_diario";
   return TABS.some(t => t.id === value) ? value : "cuadrante";
 }
 
@@ -71,9 +70,8 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {tab === "plan_diario" && <PlanDiario />}
+        {tab === "plan_diario" && <TrafficLocationAgenda />}
         {tab === "cuadrante" && <GestionTrafico initialVista="cuadrante" hideInternalTabs onViewChange={setTab} />}
-        {tab === "ubicacion" && <TrafficLocationAgenda />}
         {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs onViewChange={setTab} />}
         {tab === "optimizacion" && <GestionTrafico initialVista="optimizacion" hideInternalTabs />}
       </div>

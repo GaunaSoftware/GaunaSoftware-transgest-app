@@ -10,6 +10,19 @@ function empresaId(req) {
   return req.user?.empresa_id || req.empresaId || null;
 }
 
+function scopePlanData(vehicles, orders, user) {
+  const config = user?.rol === 'trafico' ? user.trafico_config || {} : {};
+  const vehicleIds = Array.isArray(config.vehiculo_ids) ? config.vehiculo_ids.map(String) : [];
+  const types = Array.isArray(config.tipos_viaje) ? config.tipos_viaje.map(String) : [];
+  return {
+    vehicles: vehicles.filter(v => !vehicleIds.length || vehicleIds.includes(String(v.id))),
+    orders: orders.filter(p =>
+      (!vehicleIds.length || vehicleIds.includes(String(p.vehiculo_id || ''))) &&
+      (!types.length || types.includes(String(p.tipo_viaje || 'normal')))
+    ),
+  };
+}
+
 function dateOnly(value) {
   if (!value) return "";
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
@@ -319,7 +332,10 @@ router.get("/", async (req, res, next) => {
     ]);
 
     const tallerData = tallerEstadoRes.rows[0]?.data || {};
-    const pedidos = (await require('../services/transportProgress').withTransportProgress(db, empresa, pedidosRes.rows)).map(p => buildPedidoResumen(p, fecha));
+    // Respeta el mismo alcance de tráfico aplicado por /pedidos/resumen-lista.
+    // El plan no debe revelar vehículos o pedidos de otra cartera de tráfico.
+    const { vehicles: scopedVehicles, orders: scopedPedidos } = scopePlanData(vehiculosRes.rows, pedidosRes.rows, req.user);
+    const pedidos = (await require('../services/transportProgress').withTransportProgress(db, empresa, scopedPedidos)).map(p => buildPedidoResumen(p, fecha));
     const pedidosByVehicle = new Map();
     pedidos.forEach(p => {
       if (!p.vehiculo_id) return;
@@ -349,12 +365,12 @@ router.get("/", async (req, res, next) => {
     });
 
     const remolqueIds = new Set(
-      vehiculosRes.rows
+      scopedVehicles
         .map(v => v.remolque_id)
         .filter(Boolean)
         .map(String)
     );
-    const rows = vehiculosRes.rows.filter(v => isTractora(v, remolqueIds)).map(v => {
+    const rows = scopedVehicles.filter(v => isTractora(v, remolqueIds)).map(v => {
       const alerts = [];
       if (["taller", "inactivo"].includes(String(v.estado || "").toLowerCase())) {
         alerts.push(alertLevel({
@@ -564,3 +580,4 @@ router.post('/enviar', async (req,res,next)=>{
   }catch(error){next(error);}
 });
 module.exports = router;
+module.exports.scopePlanData = scopePlanData;

@@ -53,7 +53,8 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   await patch(load, { firma_cargador: true });
   await patch(load, { carga_ok: true });
   const loadedTrip = await request('GET', `/pedidos/${order.id}`);
-  await request('POST',`/pedidos/${order.id}/documento-control-digital/generar`,{motivo:'Emisión del ensayo sintético'},409,managerToken);
+  // The driver may request the missing original, but that request is not a
+  // legal precondition for traffic to issue the administrative document.
   const decaRequest = await request('POST',`/pedidos/${order.id}/documento-control-digital/solicitar`,{});
   assert.equal(decaRequest.ok,true,'El chófer puede solicitar el DeCA cuando el cargador no lo entrega');
   const emitted = await request('POST',`/pedidos/${order.id}/documento-control-digital/generar`,{motivo:'Emisión del ensayo sintético'},200,managerToken);

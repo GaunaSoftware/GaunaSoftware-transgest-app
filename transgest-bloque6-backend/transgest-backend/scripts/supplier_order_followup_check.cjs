@@ -72,17 +72,31 @@ async function main() {
   const output = path.join(os.tmpdir(), "transgest-orden-colaborador-sintetica.pdf");
   fs.writeFileSync(output, pdf);
   const parsed = await pdfParse(pdf);
+  const pageTexts = [];
+  await pdfParse(pdf, { pagerender: async page => {
+    const content = await page.getTextContent();
+    const text = content.items.map(item => item.str).join(" ");
+    pageTexts.push(text);
+    return text;
+  } });
   for (const text of ["ORDEN DE CARGA", "Descarga 2", "Condiciones para el colaborador", "Cláusula de revisión del combustible",
     "albaranes@example.invalid", "290,00 EUR", "Calle Prueba 1", "Llamar antes de entrar."]) {
     assert.ok(parsed.text.toLocaleLowerCase("es-ES").includes(text.toLocaleLowerCase("es-ES")), `Falta en el PDF: ${text}`);
   }
   assert.equal(parsed.numpages, 2, "la orden sintética no debe añadir páginas vacías");
+  assert.match(pageTexts[0], /290,00 EUR/, "el precio del colaborador debe verse ya en la primera página");
+  assert.match(pageTexts[0], /Conserva y remite\s+todas las páginas/i, "la primera página avisa de las condiciones que continúan");
+  assert.match(pageTexts[1], /Condiciones para el colaborador/i, "las condiciones deben estar completas en el PDF adjunto");
   assert.ok(pdf.toString("latin1").includes("https://www.google.com/maps"), "Falta enlace de Maps");
   assert.ok(!parsed.text.includes("315,00 EUR"), "No mostrar el precio cobrado al cliente al colaborador");
   for (const template of ["colaborador_confirmar", "colaborador_carga", "colaborador_camino", "colaborador_descarga"]) {
-    const rendered = PLANTILLAS[template]({ numero: order.numero, url: "https://example.invalid/paso", colaborador: order.colaborador_nombre });
+    const rendered = PLANTILLAS[template]({ numero: order.numero, url: "https://example.invalid/paso", colaborador: order.colaborador_nombre, precio: "290,00 EUR" });
     assert.match(rendered.html, template === "colaborador_descarga" ? /albaranes firmados/i : /otro correo|recibirás|por separado/i);
     assert.match(rendered.html, /https:\/\/example.invalid\/paso/);
+    if (template === "colaborador_carga") {
+      assert.match(rendered.html, /290,00 EUR/, "el correo muestra el precio acordado del colaborador");
+      assert.match(rendered.html, /todas las páginas/i, "el correo pide revisar la orden completa");
+    }
   }
   console.log(`PASS suplementos 275 + 40 = 315, orden PDF (${parsed.numpages} páginas), Maps, precio privado y correos por etapas: ${output}`);
 }

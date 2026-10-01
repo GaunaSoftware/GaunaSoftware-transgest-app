@@ -27,6 +27,12 @@ test('collaborators without a trip in the displayed week do not occupy empty row
  expect(locationAgendaRows([old,active],days)).toHaveLength(1);
  expect(locationAgendaRows([old,active],days)[0].orders).toHaveLength(1);
 });
+test('own-fleet trip counters include only journeys projected into the seven visible days',()=>{
+ const days=['2026-09-28','2026-09-29','2026-09-30','2026-10-01','2026-10-02','2026-10-03','2026-10-04'];
+ const old={...trip,id:'old',fecha_carga:'2026-09-14',fecha_descarga:'2026-09-16',km_ruta:30};
+ expect(locationAgendaRows([old],days)).toEqual([]);
+ expect(locationAgendaRows([old,trip],days)[0].orders.map(order=>order.id)).toEqual(['synthetic']);
+});
 test('own fleet plates are ordered before supplier plates, using numeric plate order',()=>{
  const rows=sortTrafficLocationRows([
   {id:'colaborador:a:1000',label:'1000-AAA · Colaborador'},

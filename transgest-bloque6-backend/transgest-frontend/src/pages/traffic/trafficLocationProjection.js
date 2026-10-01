@@ -31,8 +31,10 @@ export function locationAgendaRows(orders=[],days=[],settings={}){
  for(const order of orders){
   if(['cancelado','borrador'].includes(String(order.estado||'').toLowerCase()))continue;
   const plate=String(order.matricula_colaborador||'').trim(),own=!!order.vehiculo_id;
-  // Los colaboradores solo ocupan una fila si tienen carga proyectada esta semana.
-  if(!own&&(!plate||!order.colaborador_id||!days.some(date=>projectedLocation(order,date,settings))))continue;
+  // El contador de la fila y las celdas deben usar los mismos siete días visibles.
+  // La consulta incluye dos semanas anteriores para proyectar viajes largos.
+  if(!days.some(date=>projectedLocation(order,date,settings)))continue;
+  if(!own&&(!plate||!order.colaborador_id))continue;
   const key=own?`propio:${order.vehiculo_id}`:`colaborador:${order.colaborador_id}:${plate}`;
   const label=own?(order.vehiculo_matricula||'Vehículo asignado'):`${plate} · ${order.colaborador_nombre||'Colaborador'}`;
   const item=by.get(key)||{id:key,label,orders:[]};

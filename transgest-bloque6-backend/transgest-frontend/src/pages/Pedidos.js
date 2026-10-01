@@ -61,6 +61,7 @@ import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeC
 import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
+import { mergePointGeoDraft } from "../utils/pointGeoDraft";
 import RutaMapa from "../components/RutaMapa";
 import VehicleTrackingPanel from "../components/VehicleTrackingPanel";
 import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
@@ -3472,21 +3473,13 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     const requestId = geoRequestRef.current + 1;
     geoRequestRef.current = requestId;
     const next = await resolveGeoDraft({ ...draft, nombre:"", cliente_nombre:"" }, draft.pais || "España", draft.ciudad, draft.direccion);
-    let merged = next;
+    // El geocodificador recibe el nombre vacio para no confundirlo con una
+    // poblacion. El resultado debe recuperar los datos originales antes de
+    // guardarse: React puede ejecutar el updater de setForm mas tarde.
+    const merged = mergePointGeoDraft(draft, next);
     setForm(current => {
-      if (requestId !== geoRequestRef.current) {
-        merged = current;
-        return current;
-      }
-      merged = {
-        ...current,
-        ciudad: current.ciudad || next.ciudad || "",
-        pais: current.pais || next.pais || "España",
-        provincia: current.provincia || next.provincia || "",
-        lat: current.lat || next.lat || "",
-        lng: current.lng || next.lng || "",
-      };
-      return merged;
+      if (requestId !== geoRequestRef.current) return current;
+      return mergePointGeoDraft(current, next);
     });
     return merged;
   }

@@ -9,7 +9,7 @@ import { formatMatricula } from "../../../utils/formatos";
 import { getEmpresaPerfilSync } from "../../../hooks/useEmpresaPerfil";
 import { formatDni } from "../../../utils/formatos";
 
-export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEtiquetasVehiculo, etiquetasCatalogo, setForm, choferesLocal, mergeEtiquetas, isMeaningfulVehicleNotice, setAvisoVehiculo, avisoCargaExcedeRemolque, cargaMetrosLineales, remolqueActual, remolqueMetrosCarga, f, colaboradorBusqueda, setColaboradorBusqueda, setShowColaboradorSuggestions, showColaboradorSuggestions, colaboradoresLocal, creandoColaborador, crearColaboradorDesdePedido, aplicarColaborador, importeClienteColCalculado, importeColaboradorCalculado, sumAdditionalStopPrices, syncPrecioColaboradorCalc, calcImporte, unidadesFacturablesPedido, previsualizandoColaborador, editando, previsualizarColaborador, notificandoColaborador, notificarColaborador, generandoAccesoTemporal, generarAccesoTemporalColaborador, accesoTemporalColaborador, copiarAccesoTemporalColaborador, revocarAccesoTemporalColaborador, formatPaymentTerms, draftDirty }) {
+export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEtiquetasVehiculo, etiquetasCatalogo, setForm, choferesLocal, mergeEtiquetas, isMeaningfulVehicleNotice, setAvisoVehiculo, avisoCargaExcedeRemolque, cargaMetrosLineales, remolqueActual, remolqueMetrosCarga, f, colaboradorBusqueda, setColaboradorBusqueda, setShowColaboradorSuggestions, showColaboradorSuggestions, colaboradoresLocal, creandoColaborador, crearColaboradorDesdePedido, aplicarColaborador, importeClienteColCalculado, importeColaboradorCalculado, sumAdditionalStopPrices, syncPrecioColaboradorCalc, calcImporte, unidadesFacturablesPedido, previsualizandoColaborador, editando, previsualizarColaborador, notificandoColaborador, notificarColaborador, saving, generandoAccesoTemporal, generarAccesoTemporalColaborador, accesoTemporalColaborador, copiarAccesoTemporalColaborador, revocarAccesoTemporalColaborador, formatPaymentTerms, draftDirty }) {
  const [useSupplier,setUseSupplier]=React.useState(!!form.colaborador_id);
  React.useEffect(()=>{ if(form.colaborador_id) setUseSupplier(true); },[form.colaborador_id]);
  const committedSupplier=!!editando?.id && String(editando.colaborador_id||"")===String(form.colaborador_id||"") && !!form.colaborador_id;
@@ -317,11 +317,11 @@ export default function OrderAssignmentFields({ S, form, vehiculosLocal, autoEti
                         </button>
                         <button
                           type="button"
-                          disabled={notificandoColaborador}
+                          disabled={notificandoColaborador || saving}
                           onClick={()=>notificarColaborador(true)}
-                          style={{...S.btn,background:"var(--green)",color:"#fff",opacity:notificandoColaborador?0.6:1}}
+                          style={{...S.btn,background:"var(--green)",color:"#fff",opacity:(notificandoColaborador || saving)?0.6:1}}
                         >
-                          {notificandoColaborador ? "Enviando..." : !editando?.id || draftDirty ? "Guardar y enviar" : form.colaborador_precio_confirmado ? "Reenviar orden de carga" : form.workflow_colaborador_enviado_at ? "Reenviar enlace" : "Enviar enlace"}
+                          {notificandoColaborador ? "Enviando..." : saving ? "Guardando..." : !editando?.id || draftDirty ? "Guardar y enviar" : form.colaborador_precio_confirmado ? "Reenviar orden de carga" : form.workflow_colaborador_enviado_at ? "Reenviar enlace" : "Enviar enlace"}
                         </button>
                       </div>}
                     </div>

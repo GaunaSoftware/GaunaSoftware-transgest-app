@@ -62,6 +62,7 @@ import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import { mergePointGeoDraft } from "../utils/pointGeoDraft";
+import { shouldSendSupplierWorkflow } from "../utils/supplierWorkflowPolicy";
 import RutaMapa from "../components/RutaMapa";
 import VehicleTrackingPanel from "../components/VehicleTrackingPanel";
 import BulkOrderReasonDialog from "./orders/BulkOrderReasonDialog";
@@ -7622,7 +7623,7 @@ async function requestClose() {
 
 async function notificarColaborador(force = false) {
   if (!editando?.id || pedidoDraftSignature(form) !== initialFormRef.current) {
-    await guardar({forceWorkflow:force});
+    await guardar({sendWorkflow:true,forceWorkflow:force});
     return;
   }
   setNotificandoColaborador(true);
@@ -7712,7 +7713,7 @@ async function revocarAccesoTemporalColaborador() {
   }
 }
 
-async function guardar({forceWorkflow = false} = {}) {
+async function guardar({sendWorkflow = false, forceWorkflow = false} = {}) {
   if (!form.cliente_id) { setEditorStep(1); notify("Selecciona un cliente", "warning"); return; }
   if (!form.fecha_carga) { setEditorStep(1); notify("La fecha de carga es obligatoria.", "warning"); return; }
   try {
@@ -7806,7 +7807,6 @@ async function guardar({forceWorkflow = false} = {}) {
     const pedidoId = pedidoGuardado?.id || editando?.id;
     const esNuevoPedido = !editando?.id;
     const colaboradorAsignado = colaboradoresLocal.find(c => String(c.id) === String(payload.colaborador_id));
-    const tieneCorreoColaborador = !!String(colaboradorAsignado?.email_pedidos || colaboradorAsignado?.email || "").trim();
 
     // La ruta/tarifa debe persistirse tambien en el alta. Antes este bloque se
     // ejecutaba despues del return de los pedidos nuevos y solo funcionaba al editar.
@@ -7840,7 +7840,7 @@ async function guardar({forceWorkflow = false} = {}) {
           });
         setPendingDocs([]);
       }
-      if (colaboradorId && tieneCorreoColaborador && (precioColaborador || supplierTonneAgreement(payload))) {
+      if (shouldSendSupplierWorkflow({ requested:sendWorkflow, supplierId:colaboradorId, email:colaboradorAsignado?.email_pedidos || colaboradorAsignado?.email, hasPrice:precioColaborador || supplierTonneAgreement(payload) })) {
         try {
           const envio = await enviarWorkflowColaborador(pedidoId, forceWorkflow);
           if (!envio?.already) notify("Enlace enviado al colaborador.", "success");
@@ -7882,7 +7882,7 @@ async function guardar({forceWorkflow = false} = {}) {
       setPendingDocs([]);
     }
 
-    if (pedidoId && payload.colaborador_id && tieneCorreoColaborador && (Number(payload.precio_colaborador || 0) || supplierTonneAgreement(payload))) {
+    if (pedidoId && shouldSendSupplierWorkflow({ requested:sendWorkflow, supplierId:payload.colaborador_id, email:colaboradorAsignado?.email_pedidos || colaboradorAsignado?.email, hasPrice:Number(payload.precio_colaborador || 0) || supplierTonneAgreement(payload) })) {
       try {
         const envio = await enviarWorkflowColaborador(pedidoId, forceWorkflow);
         if (!envio?.already) notify("Enlace enviado al colaborador.", "success");
@@ -8411,6 +8411,7 @@ useEffect(() => {
               previsualizarColaborador={previsualizarColaborador}
               notificandoColaborador={notificandoColaborador}
               notificarColaborador={notificarColaborador}
+              saving={saving}
               generandoAccesoTemporal={generandoAccesoTemporal}
               generarAccesoTemporalColaborador={generarAccesoTemporalColaborador}
               accesoTemporalColaborador={accesoTemporalColaborador}

@@ -632,6 +632,7 @@ const PLANTILLAS = {
       ${HEADER("Orden de carga confirmada")}
       <div style="background:#fff;border-radius:0 0 10px 10px;padding:24px 28px;border:1px solid #e2e8f0;border-top:none;">
         <p>Adjuntamos la orden de carga <strong>${htmlEscape(data.orden_carga_numero || data.numero || "")}</strong> del pedido <strong>${htmlEscape(data.numero || "")}</strong>, con el conjunto y el precio que acabas de confirmar.</p>
+        <p><strong>Precio pactado con el colaborador, sin IVA:</strong> ${htmlEscape(data.precio || "Por confirmar")}. Lee y conserva todas las páginas del PDF adjunto: incluye las condiciones económicas y generales del servicio.</p>
         <p><strong>Ruta:</strong> ${data.ruta || ""}</p>
         <p><strong>Vehículo:</strong> ${htmlEscape(data.matricula || "Por confirmar")}${data.remolque ? ` · <strong>Remolque:</strong> ${htmlEscape(data.remolque)}` : ""}</p>
         <p><strong>Ahora debes marcar la carga.</strong> Cuando el camión esté cargado, abre este enlace y confirma el estado. Después recibirás por separado el enlace para marcar la salida y, posteriormente, el de descarga y subida de albaranes.</p>

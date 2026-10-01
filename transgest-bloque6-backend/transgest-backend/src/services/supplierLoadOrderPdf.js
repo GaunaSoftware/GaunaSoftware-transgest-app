@@ -114,7 +114,7 @@ async function buildSupplierLoadOrderPdf(pedido, { orderNumber, priceLabel, acce
 
   const limit = () => document.page.height - 90;
   const ensure = height => { if (document.y + height > limit()) document.addPage(); };
-  const textHeight = (content, size = 9, width = WIDTH) => document.font("regular").fontSize(size).heightOfString(value(content), { width, lineGap: 2 });
+  const textHeight = (content, size = 9, width = WIDTH, lineGap = 2) => document.font("regular").fontSize(size).heightOfString(value(content), { width, lineGap });
   const section = title => {
     ensure(44);
     document.moveDown(0.7).font("bold").fontSize(10).fillColor(COLOR.teal).text(title.toUpperCase());
@@ -128,11 +128,11 @@ async function buildSupplierLoadOrderPdf(pedido, { orderNumber, priceLabel, acce
     document.font("regular").fillColor(COLOR.ink).text(value(content), { lineGap: 2 });
     document.y += 4;
   };
-  const paragraph = (content, size = 8.5) => {
+  const paragraph = (content, size = 8.2) => {
     if (!value(content)) return;
-    ensure(Math.min(textHeight(content, size) + 8, limit() - 42));
-    document.font("regular").fontSize(size).fillColor(COLOR.ink).text(value(content), { width: WIDTH, lineGap: 2 });
-    document.y += 7;
+    ensure(Math.min(textHeight(content, size, WIDTH, 1) + 6, limit() - 42));
+    document.font("regular").fontSize(size).fillColor(COLOR.ink).text(value(content), { width: WIDTH, lineGap: 1 });
+    document.y += 5;
   };
   const stopBlock = (stop, index, type) => {
     const lines = [stop.name, stop.location, stop.when, stop.reference && `Referencia: ${stop.reference}`, stop.quantities, stop.notes].filter(Boolean);
@@ -169,9 +169,24 @@ async function buildSupplierLoadOrderPdf(pedido, { orderNumber, priceLabel, acce
   line("Confirmación", acceptedAt ? new Date(acceptedAt).toLocaleString("es-ES", { timeZone: "Europe/Madrid" }) : "Pendiente de aceptación");
   line("Referencia de carga", pedido.referencia_cliente || pedido.referencia_carga);
 
+  section("Condiciones económicas");
+  line("Precio pactado con el colaborador, sin IVA", priceLabel || "Por confirmar");
+  line("Forma de pago", formatCompanyPaymentTerms(pedido.empresa_perfil || {}, "colaboradores"));
+  paragraph("El documento completo incluye las condiciones generales, la revisión del combustible y las firmas en las páginas siguientes. Conserva y remite todas las páginas.", 8);
+
   section("Conjunto confirmado");
   line("Vehículo / tractora", pedido.matricula_colaborador || "Por confirmar");
   line("Remolque", pedido.remolque_matricula_colaborador || "No indicado");
+  section("Mercancía y operativa");
+  line("Mercancía", pedido.mercancia || pedido.descripcion_carga || "Por confirmar");
+  if (pedido.peso_kg != null) line("Peso previsto", `${Number(pedido.peso_kg).toLocaleString("es-ES")} kg`);
+  if (pedido.bultos != null) line("Bultos / palés", pedido.bultos);
+  const modes = [pedido.carga_lateral && "Carga lateral", pedido.carga_trasera && "Carga trasera", pedido.carga_techo && "Techo",
+    pedido.intercambio_palets ? "Con intercambio de palets" : "Sin intercambio de palets", pedido.requiere_cinchas && "Necesario llevar cinchas"].filter(Boolean);
+  line("Instrucciones operativas", modes.join(" · "));
+  if (pedido.notas) line("Instrucciones especiales", pedido.notas);
+  if (Number(pedido.km_ruta) > 0) line("Distancia prevista", `${Number(pedido.km_ruta).toLocaleString("es-ES")} km`);
+
   section("Cargas");
   stopLines(pedido.puntos_carga, pedido.origen, pedido.fecha_carga, pedido.hora_carga, pedido.google_maps_carga).forEach((stop, index) => stopBlock(stop, index, "Carga"));
   section("Descargas");
@@ -183,20 +198,7 @@ async function buildSupplierLoadOrderPdf(pedido, { orderNumber, priceLabel, acce
     document.y += 4;
   }
 
-  section("Mercancía y operativa");
-  line("Mercancía", pedido.mercancia || pedido.descripcion_carga || "Por confirmar");
-  if (pedido.peso_kg != null) line("Peso previsto", `${Number(pedido.peso_kg).toLocaleString("es-ES")} kg`);
-  if (pedido.bultos != null) line("Bultos / palés", pedido.bultos);
-  const modes = [pedido.carga_lateral && "Carga lateral", pedido.carga_trasera && "Carga trasera", pedido.carga_techo && "Techo",
-    pedido.intercambio_palets ? "Con intercambio de palets" : "Sin intercambio de palets", pedido.requiere_cinchas && "Necesario llevar cinchas"].filter(Boolean);
-  line("Instrucciones operativas", modes.join(" · "));
-  if (pedido.notas) line("Instrucciones especiales", pedido.notas);
-  if (Number(pedido.km_ruta) > 0) line("Distancia prevista", `${Number(pedido.km_ruta).toLocaleString("es-ES")} km`);
-
-  ensure(82);
-  section("Condiciones económicas");
-  line("Precio pactado con el colaborador, sin IVA", priceLabel || "Por confirmar");
-  line("Forma de pago", formatCompanyPaymentTerms(pedido.empresa_perfil || {}, "colaboradores"));
+  ensure(90);
   section("Condiciones para el colaborador");
   for (const [title, content] of SUPPLIER_TERMS) paragraph(`${title}: ${content}`);
   paragraph(`Facturación: las facturas deben emitirse a ${value(pedido.empresa_nombre) || "la empresa contratante"} · CIF/NIF: ${value(pedido.empresa_cif) || "pendiente de configurar"}.`);

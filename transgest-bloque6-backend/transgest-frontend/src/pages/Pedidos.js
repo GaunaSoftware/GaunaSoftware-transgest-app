@@ -1598,8 +1598,8 @@ function coordsFromMapsUrl(value) {
   })();
   const patterns = [
     /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/,
-    /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
     /[?&](?:q|ll|query)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+    ...(/\/maps\//i.test(decoded) ? [] : [/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/]),
   ];
   for (const pattern of patterns) {
     const match = decoded.match(pattern);
@@ -3574,8 +3574,8 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
     try {
       saved = payload.id ? await editarPuntoInteres(payload.id, payload) : await crearPuntoInteres(payload);
     } catch (e) {
-      saved = { ...payload, id: payload.id || `poi_${Date.now()}`, synced:false };
-      notify("Punto guardado solo en este navegador; no se sincronizó con la base de datos: " + e.message, "warning");
+      notify("No se pudo guardar el punto: " + e.message, "error");
+      return;
     }
     const next = savePuntoInteres(saved || payload);
     onSave?.(next, saved || payload);
@@ -3626,10 +3626,11 @@ function PuntoInteresModal({ initial, onClose, onSave }) {
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Enlace Google Maps</label><input style={inp} value={form.google_maps_url} onChange={e=>setForm(p=>{
             const google_maps_url = e.target.value;
             const coords = coordsFromMapsUrl(google_maps_url);
-            return {...p, google_maps_url, lat: p.lat || coords?.lat || "", lng: p.lng || coords?.lng || ""};
+            geoRequestRef.current += 1;
+            return {...p, google_maps_url, lat: coords?.lat ?? "", lng: coords?.lng ?? "", metadata:{...p.metadata, lat:null, lng:null}};
           })} onBlur={()=>setForm(p=>{
             const coords = coordsFromMapsUrl(p.google_maps_url);
-            return coords ? {...p, lat: p.lat || coords.lat, lng: p.lng || coords.lng} : p;
+            return coords ? {...p, lat:coords.lat, lng:coords.lng} : p;
           })} placeholder="https://maps.google.com/..." /></div>
           <div style={{gridColumn:"1/-1",border:"1px solid var(--border)",background:"var(--bg3)",borderRadius:8,padding:"9px 11px",fontSize:11,color:"var(--text4)",lineHeight:1.45}}>
             <strong style={{color:"var(--text)",display:"block",marginBottom:2}}>Criterio de ubicacion para mapas y km</strong>
@@ -4099,13 +4100,38 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
   };
   const abrirCrearPunto = () => {
     const texto = (puntoQuery || newStop.cliente_nombre || newStop.direccion || "").trim();
+    const mapsUrl = newStop.google_maps_url || "";
+    const pin = coordsFromMapsUrl(mapsUrl);
     setPoiDraft({
       ...newStop,
+      id: "",
       nombre: newStop.cliente_nombre || texto,
       direccion: "",
+      lat: pin?.lat ?? "",
+      lng: pin?.lng ?? "",
+      latitud: "",
+      longitud: "",
+      google_maps_url: mapsUrl,
+      metadata: {},
       tipo,
       cliente_id: form.cliente_id || "",
     });
+  };
+  const abrirEditarPunto = index => {
+    const stop = stopsOrdenados[index];
+    if (!stop) return;
+    const stored = puntosInteres.find(point => String(point.id) === String(stop.punto_interes_id || ""));
+    const initial = stored ? {
+      ...stored,
+      id: String(stored.id || "").startsWith("poi_") ? "" : stored.id,
+    } : {
+      ...stop,
+      id: stop.punto_interes_id && !String(stop.punto_interes_id).startsWith("poi_") ? stop.punto_interes_id : "",
+      nombre: stop.cliente_nombre || stop.nombre || "",
+      tipo,
+      cliente_id: form.cliente_id || "",
+    };
+    setPoiDraft({ mode:"edit", index, initial });
   };
 
   useEffect(() => {
@@ -4313,7 +4339,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
               onDragEnd={()=>setDragIdx(null)}
               onClick={e=>{
                 if (disabled || e.target.closest("input,select,textarea,button")) return;
-                setEditingStopIndex(current => current === i ? null : i);
+                abrirEditarPunto(i);
               }}
               style={{
                 background:"var(--bg4)",
@@ -4397,14 +4423,16 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
               </div>
               {!disabled && (
 compact ? <DropdownMenu data-pedido-mutation="true" label={`Acciones de ${label} ${i+1}`} items={[
- {label:editingStopIndex === i ? "Cerrar edición" : "Editar punto",onClick:()=>setEditingStopIndex(current=>current===i?null:i)},
+ {label:"Editar punto",onClick:()=>abrirEditarPunto(i)},
+ {label:editingStopIndex === i ? "Cerrar datos del viaje" : "Editar datos del viaje",onClick:()=>setEditingStopIndex(current=>current===i?null:i)},
  ...(i>0 ? [{label:"Subir",onClick:()=>moveStop(i,-1)}] : []),
  ...(i<stopsOrdenados.length-1 ? [{label:"Bajar",onClick:()=>moveStop(i,1)}] : []),
  ...(stopsOrdenados.length>1 ? [{label:"Eliminar punto",danger:true,onClick:()=>removeStop(i)}] : []),
  ]}/> : (                <div className="tg-stop-card-actions" style={{display:"flex",gap:2,alignItems:"center"}}>
-                  <button type="button" onClick={() => setEditingStopIndex(current => current === i ? null : i)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,fontWeight:800,padding:"2px 5px"}}>
-                    {editingStopIndex === i ? "Cerrar" : "Editar"}
+                  <button type="button" onClick={() => abrirEditarPunto(i)} style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,fontWeight:800,padding:"2px 5px"}}>
+                    Editar punto
                   </button>
+                  <button type="button" onClick={() => setEditingStopIndex(current => current === i ? null : i)} style={{background:"none",border:"none",color:"var(--text4)",cursor:"pointer",fontSize:12,padding:"2px 5px"}}>{editingStopIndex === i ? "Cerrar datos" : "Datos del viaje"}</button>
                   <span title="Arrastra para reordenar" style={{color:"var(--text5)",fontSize:14,padding:"0 3px"}}>::</span>
                   <button data-pedido-mutation="true" type="button" onClick={() => moveStop(i, -1)} disabled={i===0} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===0?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Subir</button>
                   <button data-pedido-mutation="true" type="button" onClick={() => moveStop(i, 1)} disabled={i===stopsOrdenados.length-1} style={{background:"none",border:"none",color:"var(--text5)",cursor:i===stopsOrdenados.length-1?"not-allowed":"pointer",fontSize:13,padding:"2px 4px"}}>Bajar</button>
@@ -4546,12 +4574,22 @@ compact ? <DropdownMenu data-pedido-mutation="true" label={`Acciones de ${label}
       ))}
       {poiDraft && (
         <PuntoInteresModal
-          initial={poiDraft}
+          initial={poiDraft.mode === "edit" ? poiDraft.initial : poiDraft}
           onClose={()=>setPoiDraft(null)}
           onSave={(next, saved)=>{
             setPuntosInteres(next);
-            setNewStop(p=>({...p,...puntoToStop(saved)}));
-            setPuntoQuery(saved?.nombre || saved?.direccion || "");
+            if (poiDraft.mode === "edit") {
+              const index = poiDraft.index;
+              const stop = latestStopsRef.current[index];
+              if (stop) setStopsOrdenados(latestStopsRef.current.map((item, i) => i === index ? {
+                ...item, ...puntoToStop(saved),
+                fecha:stop.fecha, hora:stop.hora, bultos:stop.bultos,
+                peso_kg:stop.peso_kg, precio:stop.precio, referencia:stop.referencia,
+              } : item), { infer:false });
+            } else {
+              setNewStop(p=>({...p,...puntoToStop(saved)}));
+              setPuntoQuery(saved?.nombre || saved?.direccion || "");
+            }
           }}
         />
       )}
@@ -7136,13 +7174,8 @@ function GestionPuntosInteresModal({ onClose, onApply, onSelectPoint, clienteId 
         saved = await crearPuntoInteres(payload);
       }
     } catch (e) {
-      saved = {
-        ...point,
-        ...payload,
-        id: clone ? `poi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : (point.id || `poi_${Date.now()}`),
-        synced: false,
-      };
-      notify(e.message || "No se pudo guardar el punto en servidor; se aplicara en local.", "warning");
+      notify(e.message || "No se pudo guardar el punto en servidor.", "error");
+      return null;
     }
 
     const base = normalizePuntoInteresForForm(saved || payload);

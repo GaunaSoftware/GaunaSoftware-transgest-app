@@ -1,4 +1,8 @@
 const { stateFromProgress, assertTransportTransition } = require('./transportTransitions');
+const crypto=require('node:crypto');
+const supplierDriverKey=order=>crypto.createHash('sha256').update(JSON.stringify([
+  order?.conductor_efectivo_dni,order?.matricula_colaborador,order?.remolque_matricula_colaborador,
+].map(value=>String(value||'').trim().toUpperCase()))).digest('hex');
 
 // Called only after portal authentication. Recheck assignment under lock so a
 // token read before traffic reassigns the trip cannot alter its new assignment.
@@ -8,6 +12,12 @@ async function saveSupplierProgress(db, { pedidoId, empresaId, colaboradorId, pa
     if (!pedido || !colaboradorId || pedido.colaborador_id !== colaboradorId) throw Object.assign(new Error('Viaje no disponible para este colaborador'), {status:403});
     const current = (await client.query('SELECT data FROM pedido_chofer_pasos WHERE pedido_id=$1 AND empresa_id=$2', [pedidoId,empresaId])).rows[0]?.data || {};
     const data = { ...current };
+    const documents=require('./transportDocumentVersions');
+    if(current.viaje_iniciado===true&&patch.dcd_revisado!==true){
+      if(current.dcd_supplier_driver_key!==supplierDriverKey(pedido))
+        throw Object.assign(new Error('El conductor o conjunto ha cambiado. Entrega y revisa los DeCA vigentes antes de continuar.'),{status:409,code:'DECA_HANDOVER_REQUIRED'});
+      await documents.assertDeparture(client,empresaId,pedido,current);
+    }
     const required = { carga_proceso:['carga_iniciada'], carga_ok:['carga_proceso'],
       viaje_iniciado:['carga_ok','albaran_carga'], posicionado_descarga:['viaje_iniciado'],
       descarga_iniciada:['posicionado_descarga'], descarga_ok:['descarga_iniciada'] };
@@ -16,7 +26,8 @@ async function saveSupplierProgress(db, { pedidoId, empresaId, colaboradorId, pa
         throw Object.assign(new Error('Completa primero el paso operativo anterior.'), {status:409,code:'SUPPLIER_STEP_SEQUENCE'});
       }
     }
-    if(patch.viaje_iniciado===true&&current.viaje_iniciado!==true) await require('./transportDocumentVersions').assertDeparture(client,empresaId,pedido,{...current,...patch});
+    if((patch.viaje_iniciado===true&&current.viaje_iniciado!==true)||patch.dcd_revisado===true)
+      await documents.assertDeparture(client,empresaId,pedido,{...current,...patch});
     const now = new Date().toISOString();
     let changed = false;
     for (const [key,value] of Object.entries(patch)) {
@@ -27,8 +38,14 @@ async function saveSupplierProgress(db, { pedidoId, empresaId, colaboradorId, pa
       if (value === true) data[`${key}_at`] = now;
       changed = true;
     }
+    if(patch.dcd_revisado===true){
+      const key=supplierDriverKey(pedido);
+      if(data.dcd_supplier_driver_key!==key){data.dcd_supplier_driver_key=key;changed=true;}
+    }
     if (!changed) return { data:current, estado:pedido.estado, sin_cambios:true };
-    const estado = stateFromProgress(data, { deliveryComplete: data.descarga_ok === true && data.albaran_descarga === true }) || pedido.estado;
+    const documentReviewOnly=Object.keys(patch).length>0&&Object.keys(patch).every(key=>key.startsWith('dcd_'));
+    const estado = documentReviewOnly ? pedido.estado
+      : stateFromProgress(data, { deliveryComplete: data.descarga_ok === true && data.albaran_descarga === true }) || pedido.estado;
     assertTransportTransition(pedido.estado, estado, {actor:'colaborador'});
     if (['facturado','entregado','cancelado'].includes(pedido.estado)) throw Object.assign(new Error('El viaje ya está cerrado'), {status:409});
     data.updated_at = now;
@@ -45,4 +62,4 @@ async function saveSupplierProgress(db, { pedidoId, empresaId, colaboradorId, pa
     return { data, estado, sin_cambios:false };
   });
 }
-module.exports = { saveSupplierProgress };
+module.exports = { saveSupplierProgress, supplierDriverKey };

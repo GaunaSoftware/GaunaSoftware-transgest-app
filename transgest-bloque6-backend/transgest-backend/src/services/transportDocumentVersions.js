@@ -6,6 +6,42 @@ const canonical = value => JSON.stringify(value, function (key, v) {
   return v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v;
 });
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+// A driver's acknowledgement belongs to that driver and the assigned set,
+// never to the order as a whole. The administrative DeCA itself has no driver field.
+function assignmentKey(order) {
+  return hash(canonical(['vehiculo_id','remolque_id','matricula_colaborador','remolque_matricula_colaborador','matricula_manual','remolque_matricula_manual','vehiculo_matricula','remolque_matricula']
+    .map(key=>String(order?.[key]||'').trim().toUpperCase())));
+}
+function driverReviewFor(steps, order, driverId) {
+  const review=driverId&&steps?.dcd_revisiones_chofer?.[String(driverId)];
+  const valid=review?.assignment_key===assignmentKey(order);
+  return {...steps,dcd_revisado:valid&&review.dcd_revisado===true,
+    dcd_disponible:valid&&review.dcd_disponible===true,
+    dcd_versiones_revisadas:valid&&Array.isArray(review.dcd_versiones_revisadas)?review.dcd_versiones_revisadas:[]};
+}
+async function acknowledgeDriverReview(db, empresaId, order, steps, driverId, versionIds) {
+  if(!driverId||![order.chofer_id,order.chofer2_id].some(id=>String(id||'')===String(driverId)))
+    fail('La asignación del viaje ha cambiado.','DRIVER_ASSIGNMENT_CHANGED',403);
+  const active=(await list(db,empresaId,order.id)).filter(v=>v.estado==='activa');
+  if(!Array.isArray(versionIds)||!active.length||active.some(v=>!versionIds.includes(v.id)))
+    fail('Revisa las versiones vigentes del DeCA.','DECA_REVIEW_REQUIRED');
+  await assertVehicleMatches(db,empresaId,order,active);
+  return {...steps,dcd_revisiones_chofer:{...(steps.dcd_revisiones_chofer||{}),[String(driverId)]:{
+    assignment_key:assignmentKey(order),dcd_revisado:true,dcd_disponible:true,
+    dcd_versiones_revisadas:active.map(v=>v.id),revisado_at:new Date().toISOString(),
+  }}};
+}
+async function assertVehicleMatches(db,empresaId,order,relevant){
+  const tractor=order.vehiculo_id?(await db.query('SELECT matricula,remolque_id FROM vehiculos WHERE id=$1 AND empresa_id=$2',[order.vehiculo_id,empresaId])).rows[0]:null;
+  const trailerId=order.remolque_id||tractor?.remolque_id;
+  const expectedTractor=order.matricula_colaborador||order.matricula_manual||order.vehiculo_matricula||tractor?.matricula;
+  const expectedTrailer=order.remolque_matricula_colaborador||order.remolque_matricula_manual||order.remolque_matricula||
+    (trailerId?(await db.query('SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2',[trailerId,empresaId])).rows[0]?.matricula:null);
+  const samePlate=(a,b)=>String(a||'').replace(/[\s-]/g,'').toUpperCase()===String(b||'').replace(/[\s-]/g,'').toUpperCase();
+  if((expectedTractor&&relevant.some(v=>!samePlate(v.payload.documento?.vehiculo?.tractora,expectedTractor)))||
+     (expectedTrailer&&relevant.some(v=>!samePlate(v.payload.documento?.vehiculo?.remolque,expectedTrailer))))
+    fail('El conjunto asignado difiere del DeCA. Emite una nueva versión y entrégala al conductor.','DECA_VEHICLE_CHANGED');
+}
 const validId = v => /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(String(v || ''));
 // The 2026 resolution permits closing the road-inspection URL after seven
 // days, but the other party must be able to obtain the generated file for a
@@ -43,7 +79,7 @@ function requiredFields(d) {
     ['cargador_contractual.nombre','Razón social del cargador contractual'], ['cargador_contractual.nif','NIF del cargador contractual'],
     ['cargador_contractual.domicilio','Domicilio completo del cargador contractual'], ['transportista_efectivo.nombre','Razón social del transportista efectivo'],
     ['transportista_efectivo.nif','NIF del transportista efectivo'], ['origen.direccion','Dirección de origen'], ['destino.direccion','Dirección de destino'],
-    ['destino.destinatario','Destinatario'], ['mercancia.descripcion','Naturaleza de la mercancía'], ['fecha_transporte','Fecha de transporte'], ['vehiculo.tractora','Matrícula de la tractora'],
+    ['mercancia.descripcion','Naturaleza de la mercancía'], ['fecha_transporte','Fecha de transporte'], ['vehiculo.tractora','Matrícula de la tractora'],
   ].filter(([path]) => !String(path.split('.').reduce((v, k) => v?.[k], d) || '').trim()).map(([, label]) => label)
     .concat(Number(d.mercancia?.peso_kg) > 0 ? [] : ['Peso del envío (kg)'])
     .concat(d.autorizacion_especial?.requerida && !d.autorizacion_especial.referencia ? ['Referencia de la autorización especial de circulación'] : []);
@@ -105,7 +141,7 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
           const p=s.snapshot;
           for(const party of ['cargador_contractual','transportista_efectivo'])if(p[party]&&canonical(p[party])!==canonical(d[party]))fail('Los envíos deben compartir cargador contractual y transportista efectivo.','CONSOLIDATION_PARTIES',422);
           const item={...d,origen:p.origen,destino:p.destino,mercancia:{descripcion:p.mercancia,peso_kg:p.peso_kg,bultos:p.bultos,embalaje:p.embalaje}};
-          if(!p.origen_stop_id||!p.destino_stop_id||requiredFields(item).length)fail('Identifica origen, destino, destinatario y mercancía de cada envío antes de consolidar.','CONSOLIDATION_FIELDS',422);
+          if(!p.origen_stop_id||!p.destino_stop_id||requiredFields(item).length)fail('Identifica origen, destino y mercancía de cada envío antes de consolidar.','CONSOLIDATION_FIELDS',422);
           const siblings=shipments.filter(other=>other.snapshot?.origen_stop_id===p.origen_stop_id);
           const actual=progressByStop[p.origen_stop_id];
           if(actual?.mercancia_confirmada){
@@ -223,8 +259,12 @@ async function assertDeparture(db,empresaId,order,steps){
   const active=(await list(db,empresaId,order.id)).filter(v=>v.estado==='activa');
   const shipments=(await db.query('SELECT id,snapshot FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,order.id])).rows;
   const scoped=shipments.length&&steps.paradas&&Object.keys(steps.paradas).length>0;
-  const carried=scoped?shipments.filter(s=>steps.paradas[s.snapshot?.origen_stop_id]?.carga_ok===true):shipments;
-  if(scoped&&!carried.length)fail('Confirma la carga de este envío antes de iniciar el transporte.','DECA_LOAD_REQUIRED');
+  const carried=scoped?shipments.filter(s=>steps.paradas[s.snapshot?.origen_stop_id]?.carga_ok===true
+    && steps.paradas[s.snapshot?.destino_stop_id]?.descarga_ok!==true):shipments;
+  if(scoped&&!carried.length){
+    if(shipments.some(s=>steps.paradas[s.snapshot?.origen_stop_id]?.carga_ok===true))return; // All goods have been unloaded.
+    fail('Confirma la carga de este envío antes de iniciar el transporte.','DECA_LOAD_REQUIRED');
+  }
   const relevant=shipments.length?active.filter(v=>carried.some(s=>v.envio_id===s.id||v.payload.envio_ids?.includes(s.id))):active;
   if(!relevant.length||carried.some(s=>!relevant.some(v=>v.envio_id===s.id||v.payload.envio_ids?.includes(s.id))))fail('Falta el DeCA de la mercancía cargada antes de iniciar el transporte.','DECA_REQUIRED');
   if(!steps.dcd_revisado||!steps.dcd_disponible||relevant.some(v=>!steps.dcd_versiones_revisadas?.includes(v.id)))fail('Revisa y lleva disponibles las versiones vigentes del DeCA antes de salir.','DECA_REVIEW_REQUIRED');
@@ -234,8 +274,14 @@ async function assertDeparture(db,empresaId,order,steps){
     : Number(v.payload.documento?.mercancia?.peso_kg||0)),0);
   const stopIds=[...new Set(carried.map(s=>s.snapshot?.origen_stop_id).filter(Boolean))];
   const actualWeight=scoped?stopIds.reduce((sum,id)=>{
+    const atStop=carried.filter(s=>s.snapshot?.origen_stop_id===id);
+    const allAtStop=shipments.filter(s=>s.snapshot?.origen_stop_id===id);
     const actual=Number(steps.paradas[id]?.mercancia_peso_kg);
-    return sum+(actual>0?actual:carried.filter(s=>s.snapshot?.origen_stop_id===id).reduce((n,s)=>n+Number(s.snapshot?.peso_kg||0),0));
+    // Once one of several consignments has been unloaded, the original load
+    // weight no longer represents what the vehicle carries. Use only the
+    // declared weights of the consignments still aboard; never invent a split.
+    return sum+(atStop.length===allAtStop.length&&actual>0?actual:
+      atStop.reduce((n,s)=>n+Number(s.snapshot?.peso_kg||0),0));
   },0):Number(order.peso_kg);
   if(!(actualWeight>0)||Math.abs(documentedWeight-actualWeight)>.01)fail('El peso cargado difiere de los DeCA. Tráfico debe emitir o adjuntar su nueva versión.','DECA_GOODS_CHANGED');
   // A change of cargo description or assigned set also invalidates the copy
@@ -250,6 +296,7 @@ async function assertDeparture(db,empresaId,order,steps){
      canonical(distinctGoods(actualGoods))!==canonical(distinctGoods(recordedGoods)))
     fail('La mercancía cargada difiere del DeCA. Tráfico debe emitir o adjuntar una nueva versión.','DECA_GOODS_CHANGED');
   if(scoped)for(const id of stopIds){
+    if(carried.filter(s=>s.snapshot?.origen_stop_id===id).length<shipments.filter(s=>s.snapshot?.origen_stop_id===id).length)continue;
     const actual=String(steps.paradas[id]?.mercancia_cargada||'').trim();
     if(!actual)continue;
     const atStop=carried.filter(s=>s.snapshot?.origen_stop_id===id).flatMap(s=>{
@@ -261,14 +308,6 @@ async function assertDeparture(db,empresaId,order,steps){
     if(canonical(distinctGoods(declared))!==canonical(distinctGoods(atStop)))
       fail('La mercancía cargada difiere del DeCA. Tráfico debe emitir o adjuntar una nueva versión.','DECA_GOODS_CHANGED');
   }
-  const tractor=order.vehiculo_id?(await db.query('SELECT matricula,remolque_id FROM vehiculos WHERE id=$1 AND empresa_id=$2',[order.vehiculo_id,empresaId])).rows[0]:null;
-  const trailerId=order.remolque_id||tractor?.remolque_id;
-  const expectedTractor=order.matricula_colaborador||order.vehiculo_matricula||tractor?.matricula;
-  const expectedTrailer=order.remolque_matricula_colaborador||order.remolque_matricula||
-    (trailerId?(await db.query('SELECT matricula FROM vehiculos WHERE id=$1 AND empresa_id=$2',[trailerId,empresaId])).rows[0]?.matricula:null);
-  const samePlate=(a,b)=>String(a||'').replace(/[\s-]/g,'').toUpperCase()===String(b||'').replace(/[\s-]/g,'').toUpperCase();
-  if((expectedTractor&&relevant.some(v=>!samePlate(v.payload.documento?.vehiculo?.tractora,expectedTractor)))||
-     (expectedTrailer&&relevant.some(v=>!samePlate(v.payload.documento?.vehiculo?.remolque,expectedTrailer))))
-    fail('El conjunto asignado difiere del DeCA. Emite una nueva versión y entrégala al conductor.','DECA_VEHICLE_CHANGED');
+  await assertVehicleMatches(db,empresaId,order,relevant);
 }
-module.exports = { issue, list, read, publicOriginal, legacyPublicOriginal, hasProtectedLegacyDeca, publicAccessEnded, requiredFields, documentSnapshot, available, canonical, hash, assertDeparture, assertReadyToIssue };
+module.exports = { issue, list, read, publicOriginal, legacyPublicOriginal, hasProtectedLegacyDeca, publicAccessEnded, requiredFields, documentSnapshot, available, canonical, hash, assertDeparture, assertReadyToIssue, assignmentKey, driverReviewFor, acknowledgeDriverReview };

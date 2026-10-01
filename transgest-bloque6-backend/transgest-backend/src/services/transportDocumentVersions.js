@@ -7,10 +7,15 @@ const canonical = value => JSON.stringify(value, function (key, v) {
 });
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const validId = v => /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(String(v || ''));
-const PUBLIC_MINIMUM_AFTER_COMPLETION_MS = 7 * 24 * 60 * 60 * 1000;
+// The 2026 resolution permits closing the road-inspection URL after seven
+// days, but the other party must be able to obtain the generated file for a
+// year. Keep the opaque QR URL available for that entire period.
 function publicAccessEnded(completedAt, now = new Date()) {
   const completion = completedAt && new Date(completedAt).getTime();
-  return Number.isFinite(completion) && new Date(now).getTime() >= completion + PUBLIC_MINIMUM_AFTER_COMPLETION_MS;
+  if (!Number.isFinite(completion)) return false;
+  const oneYearLater = new Date(completion);
+  oneYearLater.setUTCFullYear(oneYearLater.getUTCFullYear() + 1);
+  return new Date(now).getTime() >= oneYearLater.getTime();
 }
 async function available(db) { return !!(await db.query("SELECT to_regclass('public.transport_document_versions') AS name")).rows[0]?.name; }
 const columns = 'id,empresa_id,pedido_id,envio_id,viaje_id,scope_key,version,source,payload,payload_hash,material_hash,pdf_hash,filename,reason,created_by,created_at,public_url,retention_until,metadata';
@@ -175,13 +180,17 @@ function assertShipmentMapped(order, shipments) {
 }
 async function publicOriginal(db, id, token, now = new Date()) {
   if (!validId(id) || typeof token !== 'string' || token.length > 128) return null;
-  const row = (await db.query('SELECT * FROM transport_document_versions WHERE id=$1 AND token_hash=$2', [id, hash(token)])).rows[0];
+  const row = (await db.query(`SELECT d.*,p.descarga_real_at FROM transport_document_versions d
+    JOIN pedidos p ON p.empresa_id=d.empresa_id AND p.id=d.pedido_id
+    WHERE d.id=$1 AND d.token_hash=$2`, [id, hash(token)])).rows[0];
   if (!row) return null;
   const events = (await db.query('SELECT event,effective_at FROM transport_document_events WHERE empresa_id=$1 AND document_id=$2 ORDER BY created_at DESC,id DESC', [row.empresa_id,row.id])).rows;
   const completion = events.find(e => e.event === 'service_completed');
-  // A manual disable must never make a road-inspection QR unusable before
-  // seven full natural days have elapsed after actual service completion.
-  if (publicAccessEnded(completion?.effective_at, now)) fail('La consulta pública ha finalizado. Solicita el original a la empresa.', 'PUBLIC_EXPIRED', 410);
+  // The recorded completion may precede a later correction of the actual
+  // unloading time. Use the later verified timestamp, never a planned date.
+  const completedAt = [completion?.effective_at, row.descarga_real_at]
+    .filter(Boolean).reduce((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, null);
+  if (publicAccessEnded(completedAt, now)) fail('La consulta pública ha finalizado. Solicita el original a la empresa.', 'PUBLIC_EXPIRED', 410);
   const pdf = Buffer.from(row.pdf);
   if (hash(pdf) !== row.pdf_hash) fail('Fallo de integridad del documento conservado', 'DOCUMENT_INTEGRITY', 500);
   return { ...row, pdf };

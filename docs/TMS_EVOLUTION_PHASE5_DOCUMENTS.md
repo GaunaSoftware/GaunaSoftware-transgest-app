@@ -21,7 +21,7 @@
 
 Fuentes consultadas: [Orden FOM/2861/2012 consolidada](https://www.boe.es/buscar/act.php?id=BOE-A-2013-154) y [Resolución de 5 de junio de 2026](https://www.boe.es/buscar/act.php?id=BOE-A-2026-12784). Se retiró la exigencia informativa obsoleta de comunicar previamente el dominio y la firma avanzada como requisito general del documento administrativo. No se presenta la firma local de conformidad como AdES, QES ni firma certificada.
 
-El PDF TransGest es nativo, tiene metadatos de creación/modificación y QR por versión. La apertura pública no caduca por una fecha planificada: se utiliza la finalización efectiva registrada y siete días posteriores. No se eliminan archivos automáticamente; deben conservarse como mínimo un año después de finalizar el transporte y nunca antes de `retention_until`. La conservación privada continúa aunque expire la consulta pública. TLS y acceso real desde inspección precisan validación del alojamiento antes de publicar.
+El PDF TransGest es nativo, tiene metadatos de creación/modificación y QR por versión. La apertura pública no caduca por una fecha planificada: la resolución permite desactivarla a los siete días de la finalización, pero la política posterior descrita en [DECA_ACCESS_AND_RETENTION.md](DECA_ACCESS_AND_RETENTION.md) mantiene el QR un año desde el fin real para que la otra parte pueda obtener el original. No se eliminan archivos automáticamente; deben conservarse como mínimo un año después de finalizar el transporte y nunca antes de `retention_until`. La conservación privada continúa aunque expire la consulta pública. TLS, recuperación de backups y acceso real desde inspección precisan validación del alojamiento.
 
 ## Compatibilidad y decisión de seguridad
 

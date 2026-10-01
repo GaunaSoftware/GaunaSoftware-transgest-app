@@ -8,6 +8,7 @@ const { assertSupplierOrder } = require("../services/supplierOrder");
 const { buildSupplierLoadOrderPdf, companyDataForSupplierOrder } = require("../services/supplierLoadOrderPdf");
 const { canonicalOrderAmount, correctedLegacyOrderAmount, sumAdditionalStopPrices } = require("../services/orderPriceReconciliation");
 const transportDocuments = require("../services/transportDocumentVersions");
+const { publicDocumentApiUrl } = require('../services/documentPublicUrl');
 const orderInbox = require("../services/orderInbox");
 const { extractTabularLoadOrderPdf, applyTabularLoadOrder, taxId: normalizeOrderTaxId } = require('../services/orderPdfRoles');
 const { reviewDocumentInterpretation } = require('../services/orderDocumentInterpretation');
@@ -2380,7 +2381,7 @@ async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userI
   return rows[0] || null;
 }
 
-async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null, specialPermit = null }) {
+async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", documentApiUrl = appBaseUrl, userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null, specialPermit = null }) {
   // Signatures, uploads and closing a journey must never regenerate its DeCA.
   const versions = await transportDocuments.list(db, empresaId, pedidoId);
   if (motivo !== "generacion_manual") {
@@ -2399,7 +2400,7 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
   const activeVersion = versions.find(version => version.estado === 'activa' && (consolidated ? version.scope_key === 'consolidado' : !envioId || version.envio_id === envioId));
   const previousPermit = activeVersion?.payload?.documento?.autorizacion_especial;
   if (specialPermit || previousPermit) payload.documento.autorizacion_especial = specialPermit || previousPermit;
-  return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:appBaseUrl,expectedUpdatedAt:ctx.pedido.updated_at});
+  return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:documentApiUrl,expectedUpdatedAt:ctx.pedido.updated_at});
 }
 
 async function ensurePedidoOrdenCargaSchema() {
@@ -6612,7 +6613,7 @@ router.get("/documento-control-repositorio", GERENTE_O_TRAFICO, async (req, res)
         tenant_isolation: "empresa_id",
         storage: "repositorio propio TransGest por empresa",
         external_provider_required: false,
-        finalized_trip_policy: "El QR descarga el PDF durante todo el servicio y al menos siete días naturales tras finalizarlo. El PDF y sus versiones se conservan al menos un año.",
+        finalized_trip_policy: "El QR descarga el PDF durante todo el servicio y durante un año desde su finalización real para facilitar la copia al otro obligado. El PDF y sus versiones se conservan en el expediente.",
       },
     });
   } catch (e) {
@@ -6696,11 +6697,11 @@ router.patch("/documento-control-repositorio/:repoId/publico", GERENTE_O_TRAFICO
       WHERE r.id=$1 AND r.empresa_id=$2`,[req.params.repoId,empresaId])).rows[0];
     if (!completion) return res.status(404).json({error:'DCD no encontrado en el repositorio'});
     if (!activo && !transportDocuments.publicAccessEnded(completion.descarga_real_at)) {
-      return res.status(409).json({error:'El QR debe seguir descargando el PDF durante el transporte y siete días naturales después de su finalización real.'});
+      return res.status(409).json({error:'El QR debe seguir descargando el PDF durante el transporte y un año desde su finalización real para facilitar la copia al otro obligado.'});
     }
     if (expiresAtRaw && (!expiresAt || Number.isNaN(expiresAt.getTime()) || !completion.descarga_real_at ||
-        expiresAt.getTime() < new Date(completion.descarga_real_at).getTime() + 7*24*60*60*1000)) {
-      return res.status(422).json({error:'La caducidad pública no puede anticiparse al fin del servicio más siete días naturales.'});
+        !transportDocuments.publicAccessEnded(completion.descarga_real_at, expiresAt))) {
+      return res.status(422).json({error:'La caducidad pública no puede anticiparse al fin del servicio más un año.'});
     }
     const { rows } = await db.query(`
       UPDATE documento_control_repositorio
@@ -6884,7 +6885,7 @@ router.post('/:id/documento-control-digital/externo',GERENTE_O_TRAFICO,async(req
     const ctx=await getPedidoDocumentoControlContext(req.params.id,empresaId);
     if(!ctx)return res.status(404).json({error:'Pedido no encontrado'});
     const payload=buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl:publicBaseUrl(req)});
-    await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId:req.body.envio_id,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicBaseUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt:ctx.pedido.updated_at});
+    await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId:req.body.envio_id,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicDocumentApiUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt:ctx.pedido.updated_at});
     res.json(await buildPedidoDocumentoControlResponse(req,ctx,empresaId));
   }catch(e){res.status(e.status||500).json({error:e.message,code:e.code,fields:e.fields});}
 });
@@ -6913,6 +6914,7 @@ router.post("/:id/documento-control-digital/generar", async (req, res) => {
     }
     const repo = await archivarDocumentoControlPedido({
       pedidoId: req.params.id,
+      documentApiUrl: publicDocumentApiUrl(req),
       empresaId,
       appBaseUrl: publicBaseUrl(req),
       userId: req.user?.id || null,

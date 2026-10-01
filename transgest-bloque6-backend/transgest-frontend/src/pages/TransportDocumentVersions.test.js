@@ -36,7 +36,7 @@ test('a replacement DeCA keeps the issue action visible but requires its reason'
  }finally{await act(async()=>root.unmount());host.remove();}
 });
 
-test('first TransGest DeCA requires a registered request after asking for the shipper original',async()=>{
+test('traffic can issue the first DeCA and optionally record a request for the shipper original',async()=>{
  global.IS_REACT_ACT_ENVIRONMENT=true;
  getFirmasOperacion.mockResolvedValue([]);
  solicitarDecaPedido.mockResolvedValue({ok:true});
@@ -45,7 +45,7 @@ test('first TransGest DeCA requires a registered request after asking for the sh
  try{
   await act(async()=>root.render(<TransportDocumentVersions pedidoId="pedido-1" data={{envios:[{id:'envio-1'}],versiones:[]}} onChange={onChange}/>));
   const issue=[...host.querySelectorAll('button')].find(button=>button.textContent==='Generar DeCA');
-  expect(issue.disabled).toBe(true);
+  expect(issue.disabled).toBe(false);
   const request=[...host.querySelectorAll('button')].find(button=>button.textContent==='Registrar que el cargador no entregó el DeCA');
   await act(async()=>request.click());
   expect(solicitarDecaPedido).toHaveBeenCalledWith('pedido-1');

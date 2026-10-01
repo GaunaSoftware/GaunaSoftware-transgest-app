@@ -1,10 +1,14 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {PGlite}=require('@electric-sql/pglite');
 const service=require('../src/services/transportDocumentVersions');
+const {publicDocumentApiUrl}=require('../src/services/documentPublicUrl');
 async function main(){
  const pg=new PGlite(),company=crypto.randomUUID(),other=crypto.randomUUID(),order=crypto.randomUUID();
  const db={query:(...a)=>pg.query(...a),transaction:fn=>pg.transaction(tx=>fn(tx))};
  try{
+  const apiRequest={protocol:'https',get:name=>name==='host'?'api.transgest.app':''};
+  assert.equal(publicDocumentApiUrl(apiRequest,{PUBLIC_APP_URL:'https://transgest.app'}),'https://api.transgest.app');
+  assert.equal(publicDocumentApiUrl(apiRequest,{PUBLIC_API_URL:'https://api.transgest.app/ignored-path'}),'https://api.transgest.app');
   await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,updated_at timestamptz,descarga_real_at timestamptz,estado TEXT,carga_real_at timestamptz,remolque_id UUID);');
   for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_document_versions.sql'),'utf8'));
@@ -52,8 +56,10 @@ async function main(){
   await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'public_disabled',NOW(),'Disable requested too early')",[company,initial.id]);
   assert.deepEqual((await service.publicOriginal(db,initial.id,token)).pdf,original.pdf,'Manual disable cannot break a QR during transport');
   const completedAt=new Date('2026-09-25T12:00:00Z');
-  assert.equal(service.publicAccessEnded(completedAt,new Date('2026-10-02T11:59:59Z')),false);
-  assert.equal(service.publicAccessEnded(completedAt,new Date('2026-10-02T12:00:00Z')),true);
+  assert.equal(service.publicAccessEnded(completedAt,new Date('2026-10-02T12:00:00Z')),false,'QR remains available after the optional seven-day cutoff');
+  assert.equal(service.publicAccessEnded(completedAt,new Date('2027-09-25T11:59:59Z')),false);
+  assert.equal(service.publicAccessEnded(completedAt,new Date('2027-09-25T12:00:00Z')),true);
+  assert.equal(service.publicAccessEnded(new Date('2028-02-29T12:00:00Z'),new Date('2029-02-28T12:00:00Z')),false,'Leap-day completion is not shortened');
   await pg.exec('CREATE TABLE documento_control_repositorio(empresa_id UUID,pedido_id UUID,pdf_base64 TEXT,pdf_hash_sha256 TEXT,pdf_filename TEXT,filename TEXT,created_at timestamptz,retencion_minima_hasta date);');
   const legacyOrder=crypto.randomUUID();
   await pg.query('INSERT INTO pedidos(id,empresa_id,updated_at,descarga_real_at) VALUES($1,$2,NOW(),NULL)',[legacyOrder,company]);
@@ -67,8 +73,8 @@ async function main(){
   assert.equal(await service.hasProtectedLegacyDeca(db,company,legacyOrder,new Date('2027-09-24T12:00:00Z')),true);
   assert.equal(await service.hasProtectedLegacyDeca(db,company,legacyOrder,new Date('2027-09-25T12:00:00Z')),false);
   assert.equal(await service.hasProtectedLegacyDeca(db,other,legacyOrder,new Date('2027-01-01T00:00:00Z')),false);
-  assert.ok(await service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder,now:new Date('2026-10-02T11:59:59Z')}));
-  await assert.rejects(service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder,now:new Date('2026-10-02T12:00:00Z')}),{code:'PUBLIC_EXPIRED'});
+  assert.ok(await service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder,now:new Date('2027-09-25T11:59:59Z')}));
+  await assert.rejects(service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder,now:new Date('2027-09-25T12:00:00Z')}),{code:'PUBLIC_EXPIRED'});
   await pg.query('UPDATE pedidos SET descarga_real_at=NULL WHERE id=$1',[legacyOrder]);
   await pg.query('UPDATE documento_control_repositorio SET pdf_hash_sha256=$2 WHERE pedido_id=$1',[legacyOrder,'wrong']);
   await assert.rejects(service.legacyPublicOriginal(db,{empresaId:company,pedidoId:legacyOrder}),{code:'DOCUMENT_INTEGRITY'});
@@ -79,14 +85,17 @@ async function main(){
   const stored=await service.read(db,company,order,external.id);assert.deepEqual(Buffer.from(stored.pdf),original.pdf);
   await assert.rejects(service.issue(db,args),{code:'EXTERNAL_DECA_ACTIVE'});
   await assert.rejects(service.issue(db,{...args,source:'external',externalPdf:original.pdf.toString('base64'),nativeConfirmed:false}),{code:'NATIVE_PDF_REQUIRED'});
-  await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'service_completed',NOW()-INTERVAL '8 days','Fin real sintético')",[company,initial.id]);
-  await assert.rejects(service.publicOriginal(db,initial.id,token),{code:'PUBLIC_EXPIRED'});
+  await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'service_completed',$3,'Fin real sintético')",[company,initial.id,'2025-08-01T12:00:00Z']);
+  await assert.rejects(service.publicOriginal(db,initial.id,token,new Date('2026-08-01T12:00:00Z')),{code:'PUBLIC_EXPIRED'});
+  await pg.query('UPDATE pedidos SET descarga_real_at=$2 WHERE id=$1',[order,'2025-09-01T12:00:00Z']);
+  assert.ok(await service.publicOriginal(db,initial.id,token,new Date('2026-08-15T12:00:00Z')),'Later actual completion extends availability');
+  await assert.rejects(service.publicOriginal(db,initial.id,token,new Date('2026-09-01T12:00:00Z')),{code:'PUBLIC_EXPIRED'});
   assert.ok((await service.read(db,company,order,initial.id)).pdf,'Authenticated retention survives public expiry');
   const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-deca-synthetic.pdf'),original.pdf);
   const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/Formato carta de porte|firma certificada|AdES|QES/);
   const longPdf=await require('../src/services/transportDocumentPdf').renderDeca({documento:{...d,cargador_contractual:{...d.cargador_contractual,domicilio:`${'AVENIDA LARGA '.repeat(45)}FIN DE DIRECCION`},observaciones:''},version:1,generatedAt:new Date().toISOString(),url:'https://example.invalid/original'});
   const longParsed=await require('pdf-parse')(longPdf);assert.ok(longParsed.numpages>1);assert.match(longParsed.text,/ANEXO · DATOS ÍNTEGROS/);assert.match(longParsed.text,/FIN DE DIRECCION/);
-  console.log('PASS document versions: old QR direct original bytes, seven-day access after actual completion, manual disable guard, external originals, hashes, tenant isolation and retained private access. PDF pages:',parsed.numpages);
+  console.log('PASS document versions: old QR direct original bytes, one-year access after actual completion, manual disable guard, external originals, hashes, tenant isolation and retained private access. PDF pages:',parsed.numpages);
  }finally{await pg.close();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

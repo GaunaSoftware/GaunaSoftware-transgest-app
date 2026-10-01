@@ -13,8 +13,8 @@ const COORD_PATTERNS = [
   /^\s*(-?\d{1,3}(?:\.\d+)?),\s*(-?\d{1,3}(?:\.\d+)?)\s*$/,
 ];
 
-function matchCoords(raw) {
-  for (const re of COORD_PATTERNS) {
+function matchCoords(raw, patterns = COORD_PATTERNS) {
+  for (const re of patterns) {
     const m = raw.match(re);
     if (!m) continue;
     const lat = Number(m[1]);
@@ -32,12 +32,16 @@ function matchCoords(raw) {
 function coordsFromText(text) {
   const raw = String(text || "");
   if (!raw) return null;
+  // En Google Maps el segmento @ indica el centro de la vista, no el pin.
+  // Usarlo como destino puede situar un punto en otra ciudad.
+  const mapUrl = /\/maps\//i.test(raw);
+  const patterns = mapUrl ? COORD_PATTERNS.filter(re => !re.source.startsWith('@')) : COORD_PATTERNS;
   try {
     const decoded = decodeURIComponent(raw.replace(/\+/g, " "));
-    const parsed = matchCoords(decoded);
+    const parsed = matchCoords(decoded, patterns);
     if (parsed) return parsed;
   } catch { /* URI mal formada: ignoramos */ }
-  return matchCoords(raw);
+  return matchCoords(raw, patterns);
 }
 
 function isMapsUrl(url) {

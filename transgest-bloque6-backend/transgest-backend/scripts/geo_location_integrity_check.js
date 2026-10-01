@@ -34,6 +34,8 @@ async function main() {
     assert.equal(parsePlaceRequest('Ctra de la Estacion s/n, Cojobar, Burgos, Espana','Espana','Burgos').locality,'Cojobar');
     assert.deepEqual(coordsFromText('https://www.google.com/maps/place/test/@40.4168,-3.7038,6z/data=!3d42.25!4d-3.66'),{lat:42.25,lng:-3.66});
     assert.deepEqual(coordsFromText('https://www.google.com/maps/place/test/@40.4168,-3.7038,6z/data=%213d42.25%214d-3.66'),{lat:42.25,lng:-3.66});
+    assert.equal(coordsFromText('https://www.google.com/maps/place/test/@39.4699,-0.3763,8z'),null,'El centro del mapa no es el pin del punto');
+    assert.equal(coordsFromText('https://www.google.com/maps/@39.4699,-0.3763,8z'),null,'El centro del mapa sin ficha tampoco es un pin');
     assert.equal(await resolveMapsCoords('https://maps.app.goo.gl/test'),null,'El centro del HTML nunca es el pin');
     const skretting = await resolvePlace({empresaId:'qa',q:'Carretera de la Estacion s/n, Cojobar, Burgos',...context,raw:{...context,label:'Skretting',lat:40.4168,lng:-3.7038,google_maps_url:'https://maps.app.goo.gl/test'}});
     assert.equal(skretting.municipio,'Cojobar');
@@ -47,6 +49,10 @@ async function main() {
     assert.equal(point.lng,null);
     assert.equal(point.ciudad,'Cojobar');
     assert.equal(normalizeMetadata({lat:40.4168,lng:-3.7038},null,point).lat,null);
+    await assert.rejects(normalizeLocationFields({cleanDireccion:'Nave 1',cleanCiudad:'Murcia',cleanProvincia:'Murcia',pais:'España',google_maps_url:'https://www.google.com/maps/place/test/@39.4699,-0.3763,8z'}),/No se pudo identificar el pin/);
+    await assert.rejects(normalizeLocationFields({cleanDireccion:'Nave 1',cleanCiudad:'Murcia',cleanProvincia:'Murcia',pais:'España',google_maps_url:'https://www.google.com/maps/place/test/data=!3d39.4699!4d-0.3763'}),/no coincide/);
+    const exactPin = await normalizeLocationFields({cleanDireccion:'Nave 1',cleanCiudad:'Murcia',cleanProvincia:'Murcia',pais:'España',lat:39.4699,lng:-0.3763,google_maps_url:'https://www.google.com/maps/place/test/data=!3d37.9922!4d-1.1307'});
+    assert.equal(exactPin.lat,37.9922,'El pin debe prevalecer sobre las coordenadas anteriores');
     await assert.rejects(normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'',pais:'España'},null),/poblacion|incompleto/i);
     const incomplete=await normalizePointLocation({nombre:'Kerahome Tiles, S.A.',direccion:'',pais:'España',allow_incomplete_location:true},null);
     assert.equal(incomplete.locationIncomplete,true);

@@ -139,17 +139,21 @@ async function normalizeLocationFields({
   if (!coordinatesCompatible({ lat: nextLat, lng: nextLng }, context)) nextLat = nextLng = null;
 
   const inlineCoords = coordsFromText(googleMapsUrl || "");
-  if (inlineCoords && coordinatesCompatible(inlineCoords, context)) {
-    nextLat = inlineCoords.lat;
-    nextLng = inlineCoords.lng;
-    coordsSource = "maps_inline";
-  } else if (googleMapsUrl) {
-    const resolvedCoords = await resolveMapsCoords(googleMapsUrl).catch(() => null);
-    if (resolvedCoords && coordinatesCompatible(resolvedCoords, context)) {
-      nextLat = resolvedCoords.lat;
-      nextLng = resolvedCoords.lng;
-      coordsSource = "maps_shortlink";
+  if (googleMapsUrl) {
+    const resolvedCoords = inlineCoords || await resolveMapsCoords(googleMapsUrl).catch(() => null);
+    if (!resolvedCoords) {
+      const err = new Error("No se pudo identificar el pin del enlace de Google Maps. Comparte un enlace con coordenadas exactas o elimina el enlace y completa la dirección.");
+      err.status = 400;
+      throw err;
     }
+    if (!coordinatesCompatible(resolvedCoords, context)) {
+      const err = new Error("El pin de Google Maps no coincide con la población o provincia. Revisa el enlace y los datos del punto.");
+      err.status = 400;
+      throw err;
+    }
+    nextLat = resolvedCoords.lat;
+    nextLng = resolvedCoords.lng;
+    coordsSource = inlineCoords ? "maps_inline" : "maps_shortlink";
   }
 
   // Sin coordenadas de enlace/manual: geocodificar con el proveedor (Google) para

@@ -11,7 +11,7 @@ function validate(order, rows) {
     const origin=stops.find(p=>p.id===row.origen_id && p.tipo==='carga');
     const destination=stops.find(p=>p.id===row.destino_id && p.tipo==='descarga');
     if(!origin || !destination) fail(`Envío ${index+1}: selecciona sus puntos de carga y descarga.`, 'SHIPMENT_STOPS',422);
-    if(!text(row.mercancia) || !text(row.destinatario) || text(row.mercancia).length>500 || text(row.destinatario).length>300) fail(`Envío ${index+1}: indica naturaleza de mercancía y destinatario.`, 'SHIPMENT_PARTIES',422);
+    if(!text(row.mercancia) || text(row.mercancia).length>500 || text(row.destinatario).length>300) fail(`Envío ${index+1}: indica la naturaleza de la mercancía.`, 'SHIPMENT_PARTIES',422);
     const weight=Number(row.peso_kg),units=row.bultos==null||row.bultos===''?null:Number(row.bultos);
     if(!Number.isFinite(weight)||weight<=0||weight>1000000||units!==null&&(!Number.isFinite(units)||units<0||units>1000000))fail(`Envío ${index+1}: revisa peso y bultos.`, 'SHIPMENT_GOODS',422);
     const point=p=>({nombre:p.nombre||p.label,direccion:p.direccion||p.label,ciudad:p.ciudad||p.poblacion||null,pais:p.pais||null});

@@ -1111,6 +1111,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         box.innerHTML = '<div class="trip-badges" style="margin-bottom:12px"><span class="' + statusClass(workflow.status) + '">' + escapeHtml(String(workflow.status || "pendiente").replace("_"," ")) + '</span><span class="badge badge-neutral">' + escapeHtml(String(pedido.estado || "pendiente").replace("_"," ")) + '</span></div>'
           + decision
           + driverForm
+          + (workflow.deca_revisable ? '<div class="card"' + (workflow.deca_relevo_pendiente ? ' role="alert"' : '') + '><strong>' + (workflow.deca_relevo_pendiente ? 'Revisa el DeCA vigente antes de continuar' : 'DeCA vigente') + '</strong><p>' + (workflow.deca_relevo_pendiente ? 'Ha cambiado el conductor o el conjunto. El nuevo conductor debe recibir el original vigente.' : 'Si tráfico emite una nueva versión, revísala antes de continuar.') + '</p><button type="button" class="btn" data-action="open-dcd" data-pedido-id="' + escapeHtml(tripId) + '">Abrir DeCA</button> <button type="button" class="btn btn-primary" data-run-action="revisar_deca" data-pedido-id="' + escapeHtml(tripId) + '">Confirmar revisión</button></div>' : '')
           + '<div class="progress">'
           + steps.map((step) => {
             const done = !!step.done;
@@ -1143,7 +1144,7 @@ function renderPortalProveedorOperativaHtml({ token = "", colaborador = {}, viaj
         // Rechazar deja el viaje sin transportista: se confirma antes.
         if (action === 'rechazar_viaje' && !window.confirm('Vas a rechazar este viaje. La empresa tendra que reasignarlo. Continuar?')) return;
         let review = {};
-        if (action === 'iniciar_viaje') {
+        if (action === 'iniciar_viaje' || action === 'revisar_deca') {
           const checked = panel(tripId)?.querySelector('input[data-deca-reviewed]');
           if (!checked?.checked) { await openDcd(tripId); return; }
           review = {deca_revisado:true,document_versions:JSON.parse(checked.getAttribute('data-deca-ids'))};
@@ -1579,6 +1580,7 @@ function normalizePortalChoferPasosPayload(value = {}) {
     if (Number.isFinite(d.getTime())) next[key] = d.toISOString();
   });
   if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(id=>/^[0-9a-f-]{36}$/i.test(String(id)));
+  if(typeof source.dcd_supplier_driver_key==='string')next.dcd_supplier_driver_key=source.dcd_supplier_driver_key;
   return next;
 }
 
@@ -1621,6 +1623,8 @@ function buildPortalProveedorOperativa(pedido = {}, pasos = {}) {
   else if (String(pedido.estado || "") === "en_curso") status = "en_curso";
   return {
     status,
+    deca_revisable: pasos.viaje_iniciado===true&&!['entregado','facturado','cancelado'].includes(String(pedido.estado||'')),
+    deca_relevo_pendiente: pasos.viaje_iniciado===true&&pasos.dcd_supplier_driver_key!==require('../services/supplierProgress').supplierDriverKey(pedido),
     completed: steps.filter((step) => step.done).length,
     total: steps.length,
     next,
@@ -1731,6 +1735,10 @@ async function ejecutarPortalProveedorAccionOperativa(ctx, body = {}) {
     case "iniciar_viaje":
       if (!pasos.albaran_carga) throw Object.assign(new Error("Sube el albaran de carga antes de iniciar el viaje."), { status: 409 });
       patch = { viaje_iniciado: true, viaje_iniciado_at: now, ...require('../services/supplierTransportDocuments').review(body) };
+      break;
+    case "revisar_deca":
+      if(!pasos.viaje_iniciado)throw Object.assign(new Error('El viaje aún no ha comenzado.'),{status:409});
+      patch=require('../services/supplierTransportDocuments').review(body);
       break;
     case "posicionar_descarga":
       if (!pasos.carga_ok) throw Object.assign(new Error("Primero finaliza la carga."), { status: 409 });

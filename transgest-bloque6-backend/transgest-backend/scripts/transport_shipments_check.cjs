@@ -9,7 +9,7 @@ async function main(){
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_shipment_declarations.sql'),'utf8'));
   await pg.query("INSERT INTO pedidos(id,empresa_id,estado,numero,origen,destino,peso_kg,puntos_carga,puntos_descarga) VALUES($1,$2,'confirmado','QA-ENVIOS','Madrid','Valencia',1000,$3,$4)",[id,company,JSON.stringify([{id:'load',direccion:'Madrid'}]),JSON.stringify([{id:'a',direccion:'Valencia'},{id:'b',direccion:'Alicante'}])]);
   const order=(await pg.query('SELECT * FROM pedidos')).rows[0],stops=require('../src/services/driverStops').driverStops(order);
-  const rows=[0,1].map(i=>({origen_id:stops[0].id,destino_id:stops[i+1].id,referencia:'REF-'+i,destinatario:'Cliente sintético '+i,mercancia:'Cerámica '+i,peso_kg:i?600:400,bultos:i?6:4,embalaje:'Cajas'}));
+  const rows=[0,1].map(i=>({origen_id:stops[0].id,destino_id:stops[i+1].id,referencia:'REF-'+i,destinatario:i?'':'Cliente sintético '+i,mercancia:'Cerámica '+i,peso_kg:i?600:400,bultos:i?6:4,embalaje:'Cajas'}));
   const args={empresaId:company,pedidoId:id,operationId:crypto.randomUUID(),rows};
   await assert.rejects(shipments.declare(db,{...args,empresaId:crypto.randomUUID()}),{code:'ORDER_NOT_FOUND'});
   await assert.rejects(shipments.declare(db,{...args,rows:[{...rows[0],peso_kg:300}]}),{code:'SHIPMENT_WEIGHT_TOTAL'});
@@ -26,6 +26,18 @@ async function main(){
   assert.deepEqual(versions.map(v=>Number(v.payload.documento.mercancia.peso_kg)).sort((a,b)=>a-b),[400,600]);
   assert.deepEqual(versions.map(v=>v.payload.documento.destino.direccion).sort(),['Alicante','Valencia']);
   await documents.assertDeparture(db,company,order,{dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:versions.map(v=>v.id)});
+  const changedPlatePayload={documento:{...payload.documento,vehiculo:{tractora:'QA-NEW'}}};
+  const secondAfterChange=await documents.issue(db,{...issue,payload:changedPlatePayload,envioId:result.envio_ids[1],reason:'Cambio de tractora tras la primera descarga'});
+  const remaining={paradas:{[stops[0].id]:{carga_ok:true},[stops[1].id]:{descarga_ok:true}},
+    dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[secondAfterChange.id]};
+  await documents.assertDeparture(db,company,{...order,matricula_colaborador:'QA-NEW'},remaining);
+  const replacementDriver=crypto.randomUUID(),reassigned={...order,chofer_id:replacementDriver,matricula_colaborador:'QA-NEW'};
+  const handover=await documents.acknowledgeDriverReview(db,company,reassigned,remaining,replacementDriver,[secondAfterChange.id]);
+  assert.deepEqual(documents.driverReviewFor(handover,reassigned,replacementDriver).dcd_versiones_revisadas,[secondAfterChange.id]);
+  await documents.assertDeparture(db,company,reassigned,documents.driverReviewFor(handover,reassigned,replacementDriver));
+  assert.equal((await documents.list(db,company,id)).filter(v=>v.estado==='activa').length,2,'The first consignment keeps its historical original');
+  await documents.assertDeparture(db,company,{...order,matricula_colaborador:'QA-NEW'},
+    {...remaining,paradas:{...remaining.paradas,[stops[2].id]:{descarga_ok:true}}});
   await assert.rejects(documents.issue(db,{...issue,consolidated:true,consolidationAllowed:true}),{code:'DOCUMENT_SCOPE_CONFLICT'});
   const otherId=crypto.randomUUID();
   await pg.query("INSERT INTO pedidos SELECT $1,empresa_id,estado,'QA-CONSOLIDADO',origen,destino,peso_kg,puntos_carga,puntos_descarga,carga_real_at FROM pedidos WHERE id=$2",[otherId,id]);

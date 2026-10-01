@@ -850,7 +850,7 @@ function buildAiInboxOperationalSummary(run = {}) {
   };
 }
 
-function normalizeChoferPasosPayload(value = {}) {
+function normalizeChoferPasosPayload(value = {}, { includeServerFields = false } = {}) {
   const source = value && typeof value === "object" ? value : {};
   const boolKeys = [
     "carga_iniciada",
@@ -871,6 +871,8 @@ function normalizeChoferPasosPayload(value = {}) {
     "dcd_disponible",
   ];
   const next = {};
+  if(includeServerFields && source.dcd_revisiones_chofer && typeof source.dcd_revisiones_chofer==='object')
+    next.dcd_revisiones_chofer=source.dcd_revisiones_chofer;
   if(Array.isArray(source.dcd_versiones_revisadas))next.dcd_versiones_revisadas=source.dcd_versiones_revisadas.filter(v=>typeof v==='string'&&UUID_RE.test(v)).slice(0,100);
   for (const key of boolKeys) {
     if (source[key] !== undefined) next[key] = Boolean(source[key]);
@@ -1729,7 +1731,7 @@ function normalizeColaboradorPagoPayload(value = {}) {
   };
 }
 
-async function getPedidoChoferPasos(pedidoId, empresaId) {
+async function getPedidoChoferPasos(pedidoId, empresaId, { driverId = null, order = null } = {}) {
   await ensureColaboradorWorkflowSchema();
   const { rows } = await db.query(
     `SELECT data, chofer_id, updated_at
@@ -1742,7 +1744,9 @@ async function getPedidoChoferPasos(pedidoId, empresaId) {
   return {
     chofer_id: row?.chofer_id || null,
     updated_at: row?.updated_at || null,
-    data: normalizeChoferPasosPayload(row?.data || {}),
+    data: driverId && order
+      ? normalizeChoferPasosPayload(require('../services/transportDocumentVersions').driverReviewFor(row?.data || {},order,driverId))
+      : normalizeChoferPasosPayload(row?.data || {},{includeServerFields:true}),
   };
 }
 
@@ -1764,30 +1768,36 @@ async function savePedidoChoferPasos({
     if(result.state==='entregado')await programarAutomatismosEntrega(pedidoId,empresaId,actorId,{});
     stopResult=result;
   }
-  const current = await getPedidoChoferPasos(pedidoId, empresaId);
-  const nextData = stopResult ? stopResult.data.paradas[patch.parada_id] : {
-    ...current.data,
-    ...normalizeChoferPasosPayload(patch),
-    updated_at: new Date().toISOString(),
-  };
+  let current = stopResult ? await getPedidoChoferPasos(pedidoId, empresaId) : null;
+  let nextData = stopResult ? stopResult.data.paradas[patch.parada_id] : null;
   if(!stopResult){
+  const saved=await db.transaction(async tx=>{
+    const order=(await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2 FOR UPDATE',[pedidoId,empresaId])).rows[0];
+    if(!order)throw Object.assign(new Error('Pedido no encontrado'),{status:404});
+    if(actorTipo==='chofer' && choferId && ![order.chofer_id,order.chofer2_id].some(id=>String(id||'')===String(choferId)))
+      throw Object.assign(new Error('La asignación del viaje ha cambiado.'),{status:403,code:'DRIVER_ASSIGNMENT_CHANGED'});
+    const row=(await tx.query('SELECT data,chofer_id FROM pedido_chofer_pasos WHERE pedido_id=$1 AND empresa_id=$2 FOR UPDATE',[pedidoId,empresaId])).rows[0];
+    const before=normalizeChoferPasosPayload(row?.data||{},{includeServerFields:true});
+    let after={...before,...normalizeChoferPasosPayload(patch),updated_at:new Date().toISOString()};
+    if(actorTipo==='chofer'&&choferId&&patch.dcd_revisado===true&&patch.dcd_disponible===true&&Array.isArray(patch.dcd_versiones_revisadas)&&patch.dcd_versiones_revisadas.length){
+      after=await require('../services/transportDocumentVersions').acknowledgeDriverReview(tx,empresaId,order,after,choferId,patch.dcd_versiones_revisadas);
+    }
+    if(patch.carga_ok&&after.carga_iniciada_at&&after.carga_ok_at
+      &&minutosEntreIso(after.carga_iniciada_at,after.carga_ok_at)>60){
+      after.aviso_espera_carga=true;
+      after.aviso_espera_carga_at ||= after.carga_ok_at;
+    }
+    await tx.query(`INSERT INTO pedido_chofer_pasos (pedido_id, empresa_id, chofer_id, data, updated_at)
+      VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT (pedido_id) DO UPDATE
+      SET chofer_id=COALESCE(EXCLUDED.chofer_id,pedido_chofer_pasos.chofer_id),data=EXCLUDED.data,updated_at=NOW()`,
+      [pedidoId,empresaId,choferId||row?.chofer_id||null,JSON.stringify(after)]);
+    return {before,row,after};
+  });
+  current={chofer_id:saved.row?.chofer_id||null,data:saved.before};
+  nextData=saved.after;
   // The driver's timer may be closed before its 60-minute notification fires.
   // Record the same episode when completion itself proves the threshold was
   // exceeded, so traffic can acknowledge it and review detention afterwards.
-  if (patch.carga_ok && nextData.carga_iniciada_at && nextData.carga_ok_at
-    && minutosEntreIso(nextData.carga_iniciada_at,nextData.carga_ok_at)>60) {
-    nextData.aviso_espera_carga=true;
-    nextData.aviso_espera_carga_at ||= nextData.carga_ok_at;
-  }
-  await db.query(
-    `INSERT INTO pedido_chofer_pasos (pedido_id, empresa_id, chofer_id, data, updated_at)
-     VALUES ($1,$2,$3,$4,NOW())
-     ON CONFLICT (pedido_id) DO UPDATE
-       SET chofer_id = COALESCE(EXCLUDED.chofer_id, pedido_chofer_pasos.chofer_id),
-           data = EXCLUDED.data,
-           updated_at = NOW()`,
-    [pedidoId, empresaId, choferId || current.chofer_id || null, JSON.stringify(nextData)]
-  );
   await logPedidoEvento(
     pedidoId,
     empresaId,
@@ -1952,7 +1962,7 @@ async function savePedidoChoferPasos({
   }
   await syncOrderIncidents({ empresaId, pedidoId })
     .catch(e => logger.warn("No se pudieron reconciliar incidencias de agenda desde app chofer:", e.message));
-  return stopResult?.data || nextData;
+  return stopResult?.data || normalizeChoferPasosPayload(nextData);
 }
 
 function addDays(date, days) {
@@ -6900,7 +6910,7 @@ router.post('/:id/envios',GERENTE_O_TRAFICO,async(req,res)=>{
 
 router.post("/:id/documento-control-digital/generar", async (req, res) => {
   try {
-    if (!['gerente','trafico'].includes(req.user?.rol)) return res.status(403).json({error:'Solo tráfico o gerencia pueden emitir el DeCA cuando no lo entrega el cargador.'});
+    if (!['gerente','trafico'].includes(req.user?.rol)) return res.status(403).json({error:'Solo tráfico o gerencia pueden emitir el DeCA.'});
     if (req.body?.autorizacion_especial) {
       if (!['gerente','trafico'].includes(req.user.rol)) return res.status(403).json({error:'Solo tráfico o gerencia pueden declarar la autorización especial de circulación.'});
       if (typeof req.body.autorizacion_especial !== 'object' || typeof req.body.autorizacion_especial.requerida !== 'boolean') return res.status(422).json({error:'Declara expresamente si la autorización especial es requerida.'});
@@ -6908,10 +6918,6 @@ router.post("/:id/documento-control-digital/generar", async (req, res) => {
     const empresaId = req.empresaId || req.user.empresa_id;
     const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    const requested = (await db.query("SELECT id FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.solicitado' LIMIT 1",[empresaId,req.params.id])).rows.length>0;
-    if (!requested && !(await transportDocuments.list(db,empresaId,req.params.id)).some(version=>version.source==='transgest')) {
-      return res.status(409).json({error:'Registra primero que el cargador no ha entregado el DeCA. Después tráfico podrá emitirlo.'});
-    }
     const repo = await archivarDocumentoControlPedido({
       pedidoId: req.params.id,
       documentApiUrl: publicDocumentApiUrl(req),
@@ -7941,7 +7947,7 @@ router.get("/:id/chofer-pasos", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user.empresa_id;
     const { rows: pedidoRows } = await db.query(
-      "SELECT id, chofer_id, chofer2_id, vehiculo_id FROM pedidos WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, chofer_id, chofer2_id, vehiculo_id, remolque_id, matricula_manual, remolque_matricula_manual, matricula_colaborador, remolque_matricula_colaborador FROM pedidos WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     const pedido = pedidoRows[0];
@@ -7949,7 +7955,10 @@ router.get("/:id/chofer-pasos", async (req, res) => {
     if (!(await usuarioPuedeGestionarPedido(req, pedido))) {
       return res.status(403).json({ error: "No puedes acceder a este pedido" });
     }
-    const payload = await getPedidoChoferPasos(req.params.id, empresaId);
+    const driverAccess=req.user?.rol==='chofer'?await getChoferAccessForUser(req.user,empresaId):null;
+    const driverId=driverAccess?.choferIds.find(id=>[pedido.chofer_id,pedido.chofer2_id].some(assigned=>String(assigned||'')===String(id)))||null;
+    const payload = await getPedidoChoferPasos(req.params.id, empresaId,{driverId,order:pedido});
+    if(!driverId)payload.data=normalizeChoferPasosPayload(payload.data);
     payload.viaje_operativo=await require('../services/driverJourney').driverJourneyContext(db,empresaId,req.params.id,order=>usuarioPuedeGestionarPedido(req,order));
     res.json(payload);
   } catch (e) {

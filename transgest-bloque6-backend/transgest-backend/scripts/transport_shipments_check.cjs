@@ -31,6 +31,10 @@ async function main(){
   const remaining={paradas:{[stops[0].id]:{carga_ok:true},[stops[1].id]:{descarga_ok:true}},
     dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[secondAfterChange.id]};
   await documents.assertDeparture(db,company,{...order,matricula_colaborador:'QA-NEW'},remaining);
+  const replacementDriver=crypto.randomUUID(),reassigned={...order,chofer_id:replacementDriver,matricula_colaborador:'QA-NEW'};
+  const handover=await documents.acknowledgeDriverReview(db,company,reassigned,remaining,replacementDriver,[secondAfterChange.id]);
+  assert.deepEqual(documents.driverReviewFor(handover,reassigned,replacementDriver).dcd_versiones_revisadas,[secondAfterChange.id]);
+  await documents.assertDeparture(db,company,reassigned,documents.driverReviewFor(handover,reassigned,replacementDriver));
   assert.equal((await documents.list(db,company,id)).filter(v=>v.estado==='activa').length,2,'The first consignment keeps its historical original');
   await documents.assertDeparture(db,company,{...order,matricula_colaborador:'QA-NEW'},
     {...remaining,paradas:{...remaining.paradas,[stops[2].id]:{descarga_ok:true}}});

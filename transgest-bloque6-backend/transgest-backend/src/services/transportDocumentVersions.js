@@ -23,12 +23,18 @@ async function acknowledgeDriverReview(db, empresaId, order, steps, driverId, ve
   if(!driverId||![order.chofer_id,order.chofer2_id].some(id=>String(id||'')===String(driverId)))
     fail('La asignación del viaje ha cambiado.','DRIVER_ASSIGNMENT_CHANGED',403);
   const active=(await list(db,empresaId,order.id)).filter(v=>v.estado==='activa');
-  if(!Array.isArray(versionIds)||!active.length||active.some(v=>!versionIds.includes(v.id)))
+  const shipments=(await db.query('SELECT id,snapshot FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,order.id])).rows;
+  // A delivered consignment stays in the historical expediente, but its old
+  // vehicle plate does not constrain a replacement driver or tractor.
+  const outstanding=shipments.length&&steps.paradas&&Object.keys(steps.paradas).length
+    ?shipments.filter(s=>steps.paradas[s.snapshot?.destino_stop_id]?.descarga_ok!==true):shipments;
+  const relevant=shipments.length?active.filter(v=>outstanding.some(s=>v.envio_id===s.id||v.payload.envio_ids?.includes(s.id))):active;
+  if(!Array.isArray(versionIds)||!relevant.length||relevant.some(v=>!versionIds.includes(v.id)))
     fail('Revisa las versiones vigentes del DeCA.','DECA_REVIEW_REQUIRED');
-  await assertVehicleMatches(db,empresaId,order,active);
+  await assertVehicleMatches(db,empresaId,order,relevant);
   return {...steps,dcd_revisiones_chofer:{...(steps.dcd_revisiones_chofer||{}),[String(driverId)]:{
     assignment_key:assignmentKey(order),dcd_revisado:true,dcd_disponible:true,
-    dcd_versiones_revisadas:active.map(v=>v.id),revisado_at:new Date().toISOString(),
+    dcd_versiones_revisadas:relevant.map(v=>v.id),revisado_at:new Date().toISOString(),
   }}};
 }
 async function assertVehicleMatches(db,empresaId,order,relevant){

@@ -54,9 +54,16 @@ module.exports=async({db,base,company,token,outbound=[],outboundLinks=[]})=>{
  assert.equal((await call('/pedidos/colaborador/carga/'+firstLoadToken)).status,404,'Resending revokes the prior load link');
  const loadToken=outboundLinks.at(-1).datos.url.split('/').at(-1);
  assert.equal((await call('/pedidos/colaborador/carga/'+loadToken)).status,200);
+ const sentBeforeLoad=outboundLinks.length;
  const loaded=await fetch(base+'/pedidos/colaborador/carga/'+loadToken,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({notas:'Carga sintética confirmada'})});
- assert.equal(loaded.status,200,await loaded.text());
+ const loadedPage=await loaded.text();
+ assert.equal(loaded.status,200,loadedPage);
+ assert.match(loadedPage,/name="deca_origen"/,'tras la carga debe preguntar si el cargador facilitó el DeCA');
  assert.equal((await db.query('SELECT estado::text AS estado,colaborador_carga_confirmada_at IS NOT NULL AS cargado FROM pedidos WHERE id=$1',[confirmOrder])).rows[0].cargado,true);
+ assert.equal(outboundLinks.length,sentBeforeLoad,'el correo de salida espera a la respuesta sobre el DeCA');
+ const decaDecision=await fetch(base+'/pedidos/colaborador/carga/'+loadToken+'/deca',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({deca_origen:'solicitar'})});
+ assert.equal(decaDecision.status,200,await decaDecision.text());
+ assert.equal((await db.query("SELECT count(*)::int n FROM pedido_eventos WHERE pedido_id=$1 AND tipo='documento_control.solicitado'",[confirmOrder])).rows[0].n,1);
  assert.equal(outboundLinks.at(-1).plantilla,'colaborador_camino');
  assert.equal(outboundLinks.at(-1).destinatario,'orders@example.invalid');
  assert.equal((await call('/pedidos/colaborador/camino/'+outboundLinks.at(-1).datos.url.split('/').at(-1))).status,200);

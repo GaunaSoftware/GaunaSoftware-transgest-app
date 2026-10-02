@@ -46,5 +46,11 @@ test('traffic board keeps own fleet first, groups pending loads, and folds rows 
   expect(localStorage.getItem('tg_traffic_pending_collapsed')).toBe('1');
   await act(async()=>host.querySelector('[aria-label="Mostrar cargas pendientes"]').click());
   expect(host.querySelector('#plan-pendientes').hidden).toBe(false);
+  const nextDay=host.querySelector('[aria-label="Día siguiente"]');
+  const previousDay=host.querySelector('[aria-label="Día anterior"]');
+  expect(previousDay.disabled).toBe(true);
+  await act(async()=>nextDay.click());
+  expect(previousDay.disabled).toBe(false);
+  expect(host.querySelector('thead th.traffic-mobile-selected').textContent).toContain('mar');
  }finally{await act(async()=>root.unmount());host.remove();localStorage.removeItem('tg_traffic_pending_collapsed');}
 });

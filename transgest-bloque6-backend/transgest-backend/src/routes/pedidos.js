@@ -2026,9 +2026,11 @@ async function getPedidoDocumentoControlContext(pedidoId, empresaId) {
   const operationalStops=require('../services/driverStops').driverStops(pedido);
   for(const type of ['carga','descarga']) {
     const key=type==='carga'?'puntos_carga':'puntos_descarga';
+    const stored=normalizePedidoJsonList(pedido[key]);
     pedido[key]=operationalStops.filter(s=>s.tipo===type).map(stop=>{
       const real=progress.data?.paradas?.[stop.id];
-      return real?.mercancia_confirmada?{...stop,mercancia:real.mercancia_cargada,bultos:real.mercancia_palets,peso_kg:real.mercancia_peso_kg,confirmacion_chofer:real,firma_parada:pedido.firma_evidencia?.paradas?.[stop.id]||null}:stop;
+      const source=stored[stop.index]||{direccion:stop.direccion||stop.label};
+      return real?.mercancia_confirmada?{...source,mercancia:real.mercancia_cargada,bultos:real.mercancia_palets,peso_kg:real.mercancia_peso_kg,confirmacion_chofer:real,firma_parada:pedido.firma_evidencia?.paradas?.[stop.id]||null}:source;
     });
   }
   const ordenCarga = await ensurePedidoOrdenCargaNumero(pedido.id, empresaId).catch((error) => {
@@ -2192,7 +2194,15 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const repositorio = await getDocumentoControlRepositorioByPedido(ctx.pedido.id, empresaId).catch(() => null);
   const regulatoryCore = await getPedidoRegulatoryCoreSummary(ctx.pedido.id, empresaId).catch(() => null);
   const versions = await transportDocuments.list(db,empresaId,ctx.pedido.id);
-  const shipments = (await db.query('SELECT id,referencia FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at,id',[empresaId,ctx.pedido.id])).rows;
+  const shipments = (await db.query("SELECT id,referencia FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY COALESCE((snapshot->>'pedido_envio_indice')::int,1000),created_at,id",[empresaId,ctx.pedido.id])).rows;
+  let expectedShipments=[];
+  if(!shipments.length){
+    try{
+      expectedShipments=require('../services/transportShipments').fromOrder(ctx.pedido).map((row,index)=>({
+        index,referencia:row.referencia||`Envío ${index+1}`,destino:require('../services/driverStops').driverStops(ctx.pedido).find(stop=>stop.id===row.destino_id)?.label||'',
+      }));
+    }catch(_){/* Los datos pendientes se muestran al intentar emitir; la consulta no modifica el pedido. */}
+  }
   const decaRequest = (await db.query("SELECT created_at FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.solicitado' ORDER BY created_at DESC LIMIT 1", [empresaId,ctx.pedido.id])).rows[0] || null;
   const decaReceived = (await db.query("SELECT created_at FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.recibido_cargador' ORDER BY created_at DESC LIMIT 1", [empresaId,ctx.pedido.id])).rows[0] || null;
   const current = versions.find(v=>v.estado==='activa');
@@ -2217,6 +2227,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
     ...payload,
     versiones: versions.map(({payload: archivedPayload,...metadata})=>metadata),
     envios: shipments,
+    envios_previstos: expectedShipments,
     solicitud_deca: decaRequest ? { created_at: decaRequest.created_at } : null,
     recepcion_cargador: decaReceived ? { created_at: decaReceived.created_at } : null,
     consolidacion_permitida:ctx.empresa?.documento_control?.permitir_consolidado===true,
@@ -2395,7 +2406,7 @@ async function insertDocumentoControlRepoHistory(repo = {}, metadata = {}, userI
   return rows[0] || null;
 }
 
-async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", documentApiUrl = appBaseUrl, userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null, specialPermit = null }) {
+async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl = "", documentApiUrl = appBaseUrl, userId = null, motivo = "viaje_finalizado", envioId = null, consolidated = false, versionReason = null, specialPermit = null, expectedUpdatedAt = null }) {
   // Signatures, uploads and closing a journey must never regenerate its DeCA.
   const versions = await transportDocuments.list(db, empresaId, pedidoId);
   if (motivo !== "generacion_manual") {
@@ -2414,7 +2425,7 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
   const activeVersion = versions.find(version => version.estado === 'activa' && (consolidated ? version.scope_key === 'consolidado' : !envioId || version.envio_id === envioId));
   const previousPermit = activeVersion?.payload?.documento?.autorizacion_especial;
   if (specialPermit || previousPermit) payload.documento.autorizacion_especial = specialPermit || previousPermit;
-  return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:documentApiUrl,expectedUpdatedAt:ctx.pedido.updated_at});
+  return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:documentApiUrl,expectedUpdatedAt:expectedUpdatedAt||ctx.pedido.updated_at});
 }
 
 async function ensurePedidoOrdenCargaSchema() {
@@ -4804,9 +4815,9 @@ function isValidMapsUrl(value) {
   return /^(https?:\/\/|geo:)/i.test(raw);
 }
 
-function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "", fallbackSchedule = {}) {
+function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCountry = "España", fallbackRegion = "", fallbackSchedule = {}, existingStops = []) {
   const parsed = normalizePedidoJsonList(value);
-  return parsed.map((stop, idx) => {
+  return require('../services/transportShipments').stableStopUids(parsed.map((stop, idx) => {
     const source = stop && typeof stop === "object" ? stop : {};
     const rawMaps = String(source.google_maps_url || source.googleMapsUrl || source.maps_url || "").trim();
     const cleanMaps = isValidMapsUrl(rawMaps) ? rawMaps : "";
@@ -4835,7 +4846,7 @@ function normalizePedidoStopsForStorage(value, fallbackAddress = "", fallbackCou
     // (antes se colapsaban por clave direccion+cliente y se perdia la 3a descarga).
     if (!stop.direccion && !stop.google_maps_url && !stop.cliente_nombre && (stop.lat == null || stop.lng == null)) return false;
     return true;
-  });
+  }), existingStops);
 }
 
 function mergePrimaryStopScheduleForStorage(stops = [], schedule = {}) {
@@ -6922,10 +6933,19 @@ router.get('/:id/documento-control-digital/versiones/:versionId/pdf',async(req,r
 router.post('/:id/documento-control-digital/externo',GERENTE_O_TRAFICO,async(req,res)=>{
   try {
     const empresaId=req.empresaId||req.user.empresa_id;
-    const ctx=await getPedidoDocumentoControlContext(req.params.id,empresaId);
+    let ctx=await getPedidoDocumentoControlContext(req.params.id,empresaId);
     if(!ctx)return res.status(404).json({error:'Pedido no encontrado'});
+    let envioId=req.body.envio_id,expectedUpdatedAt=ctx.pedido.updated_at;
+    if(req.body.envio_indice!=null){
+      if(!Number.isInteger(req.body.envio_indice)||req.body.envio_indice<0||req.body.envio_indice>99)
+        return res.status(422).json({error:'Selecciona el envío del pedido al que pertenece el original.'});
+      const prepared=await require('../services/transportShipments').ensureFromOrder(db,{empresaId,pedidoId:req.params.id,actorId:req.user.id,reason:req.body.motivo});
+      envioId=prepared.envioIds[req.body.envio_indice];expectedUpdatedAt=prepared.updatedAt;
+      if(!envioId)return res.status(422).json({error:'El envío seleccionado ha cambiado. Recarga el pedido.'});
+      ctx=await getPedidoDocumentoControlContext(req.params.id,empresaId);
+    }
     const payload=buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl:publicBaseUrl(req)});
-    await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId:req.body.envio_id,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicDocumentApiUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt:ctx.pedido.updated_at});
+    await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicDocumentApiUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt});
     res.json(await buildPedidoDocumentoControlResponse(req,ctx,empresaId));
   }catch(e){res.status(e.status||500).json({error:e.message,code:e.code,fields:e.fields});}
 });
@@ -6948,21 +6968,44 @@ router.post("/:id/documento-control-digital/generar", async (req, res) => {
     const empresaId = req.empresaId || req.user.empresa_id;
     const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    const repo = await archivarDocumentoControlPedido({
+    if(!['confirmado','en_curso','descarga','entregado','facturado'].includes(String(ctx.pedido.estado||'').toLowerCase()))
+      return res.status(409).json({error:'Confirma el pedido antes de emitir el DeCA.',code:'ORDER_NOT_CONFIRMED'});
+    const stops=require('../services/driverStops').driverStops(ctx.pedido);
+    const multiStop=stops.filter(stop=>stop.tipo==='carga').length>1||stops.filter(stop=>stop.tipo==='descarga').length>1;
+    if(multiStop){
+      const candidate=buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl:publicBaseUrl(req)});
+      const shipment=require('../services/transportShipments').fromOrder(ctx.pedido)[0];
+      const origin=stops.find(stop=>stop.id===shipment.origen_id),destination=stops.find(stop=>stop.id===shipment.destino_id);
+      candidate.documento.origen={direccion:origin?.direccion||origin?.label};
+      candidate.documento.destino={direccion:destination?.direccion||destination?.label};
+      candidate.documento.mercancia={descripcion:shipment.mercancia,peso_kg:shipment.peso_kg};
+      const missing=transportDocuments.requiredFields(candidate.documento);
+      if(missing.length)return res.status(422).json({error:`Completa en el pedido: ${missing.join('; ')}`,code:'DECA_FIELDS_REQUIRED',fields:missing});
+    }
+    const existing=(await db.query('SELECT id FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at,id',[empresaId,req.params.id])).rows;
+    const prepared=multiStop
+      ? await require('../services/transportShipments').ensureFromOrder(db,{empresaId,pedidoId:req.params.id,actorId:req.user.id,reason:req.body?.motivo})
+      : {envioIds:existing.map(row=>row.id),updatedAt:ctx.pedido.updated_at};
+    const shipmentIds=prepared.envioIds;
+    const issueOptions={
       pedidoId: req.params.id,
       documentApiUrl: publicDocumentApiUrl(req),
       empresaId,
       appBaseUrl: publicBaseUrl(req),
       userId: req.user?.id || null,
       motivo: "generacion_manual",
-      envioId: req.body?.envio_id || null,
+      expectedUpdatedAt:prepared.updatedAt,
       consolidated: req.body?.consolidado === true,
       versionReason: req.body?.motivo || null,
       specialPermit: req.body?.autorizacion_especial && typeof req.body.autorizacion_especial === 'object' ? {
         requerida: req.body.autorizacion_especial.requerida === true,
         referencia: String(req.body.autorizacion_especial.referencia || '').trim().slice(0, 120),
       } : null,
-    });
+    };
+    const targets=req.body?.envio_id?[req.body.envio_id]
+      : !issueOptions.consolidated&&shipmentIds.length>1?shipmentIds:[null];
+    let repo=null;
+    for(const envioId of targets)repo=await archivarDocumentoControlPedido({...issueOptions,envioId});
     const refreshed = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     res.json({
       ok: true,
@@ -9740,7 +9783,8 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         body.puntos_carga,
         body.origen ?? pedidoActualRows[0].origen,
         body.origen_pais ?? body.pais_origen ?? pedidoActualRows[0].origen_pais ?? "España",
-        body.origen_provincia ?? body.provincia_origen ?? pedidoActualRows[0].origen_provincia ?? ""
+        body.origen_provincia ?? body.provincia_origen ?? pedidoActualRows[0].origen_provincia ?? "",
+        {},pedidoActualRows[0].puntos_carga
       )
     : normalizePedidoJsonList(pedidoActualRows[0].puntos_carga);
   const puntosDescargaNormUpdate = body.puntos_descarga !== undefined
@@ -9748,7 +9792,8 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         body.puntos_descarga,
         body.destino ?? pedidoActualRows[0].destino,
         body.destino_pais ?? body.pais_destino ?? pedidoActualRows[0].destino_pais ?? "España",
-        body.destino_provincia ?? body.provincia_destino ?? pedidoActualRows[0].destino_provincia ?? ""
+        body.destino_provincia ?? body.provincia_destino ?? pedidoActualRows[0].destino_provincia ?? "",
+        {},pedidoActualRows[0].puntos_descarga
       )
     : normalizePedidoJsonList(pedidoActualRows[0].puntos_descarga);
   if ((body.puntos_carga !== undefined || body.puntos_descarga !== undefined) &&

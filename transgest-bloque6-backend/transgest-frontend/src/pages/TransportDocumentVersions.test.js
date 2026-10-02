@@ -3,7 +3,6 @@ import {createRoot} from 'react-dom/client';
 import TransportDocumentVersions from './TransportDocumentVersions';
 import {getFirmasOperacion,generarPedidoDocumentoControl,solicitarDecaPedido,getPedidoDocumentoControl} from '../services/api';
 
-jest.mock('./TransportShipmentEditor',()=>()=>null);
 jest.mock('./driver/OperationSignature',()=>()=>null);
 jest.mock('../services/api',()=>({
  getFirmasOperacion:jest.fn(),generarPedidoDocumentoControl:jest.fn(),solicitarDecaPedido:jest.fn(),getPedidoDocumentoControl:jest.fn(),
@@ -50,5 +49,20 @@ test('traffic can issue the first DeCA and optionally record a request for the s
   await act(async()=>request.click());
   expect(solicitarDecaPedido).toHaveBeenCalledWith('pedido-1');
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({solicitud_deca:expect.any(Object)}));
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
+test('multiple stops are generated from the saved order without a shipment entry form',async()=>{
+ global.IS_REACT_ACT_ENVIRONMENT=true;
+ getFirmasOperacion.mockResolvedValue([]);generarPedidoDocumentoControl.mockClear();
+ generarPedidoDocumentoControl.mockResolvedValue({envios:[{id:'a'},{id:'b'}],versiones:[]});
+ const host=document.createElement('div');document.body.appendChild(host);const root=createRoot(host),onChange=jest.fn();
+ try{
+  await act(async()=>root.render(<TransportDocumentVersions pedidoId="multi" pedido={{puntos_carga:[{direccion:'A'}],puntos_descarga:[{direccion:'B'},{direccion:'C'}]}} data={{envios:[],versiones:[]}} onChange={onChange}/>));
+  expect(host.querySelector('fieldset')).toBeNull();
+  expect(host.textContent).toContain('se toman del pedido');
+  await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent==='Generar DeCA').click());
+  expect(generarPedidoDocumentoControl).toHaveBeenCalledWith('multi',expect.objectContaining({envio_id:null,consolidado:false}));
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({envios:[{id:'a'},{id:'b'}]}));
  }finally{await act(async()=>root.unmount());host.remove();}
 });

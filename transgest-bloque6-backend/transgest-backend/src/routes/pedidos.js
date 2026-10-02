@@ -6,6 +6,7 @@ const { confirmWorkshopAssignment } = require("../services/workshopAssignment");
 const { supplierPriceType, supplierTonneAgreement, applySupplierPricing } = require("../services/supplierPricing");
 const { assertSupplierOrder } = require("../services/supplierOrder");
 const { buildSupplierLoadOrderPdf, companyDataForSupplierOrder } = require("../services/supplierLoadOrderPdf");
+const { supplierEmailData } = require("../services/transportEmailData");
 const { canonicalOrderAmount, correctedLegacyOrderAmount, sumAdditionalStopPrices } = require("../services/orderPriceReconciliation");
 const transportDocuments = require("../services/transportDocumentVersions");
 const { publicDocumentApiUrl } = require('../services/documentPublicUrl');
@@ -3286,7 +3287,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
       acceptedAt: pedido.colaborador_precio_confirmado_at || new Date(),
     });
   }
-  const docControl = pedido?.id ? await getColaboradorDocumentoControlPayload(req, pedido.id, pedido.empresa_id) : null;
+  const docControl = accion === "camino" && pedido?.id ? await getColaboradorDocumentoControlPayload(req, pedido.id, pedido.empresa_id) : null;
   const supportFromDownload = String(docControl?.remision?.download_url || "").replace(/([?&])download=1\b/, "").replace(/[?&]$/, "");
   if (docControl?.documento) {
     await logColaboradorDocumentoControl(pedido.id, pedido.empresa_id, "remitido", {
@@ -3303,6 +3304,7 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
     empresa_id: pedido.empresa_id,
     attachments: orderPdf ? [{ filename: `orden-carga-${orderNumber.replace(/[^a-z0-9_-]/gi, "-")}.pdf`, content: orderPdf, contentType: "application/pdf" }] : [],
     datos: {
+      ...supplierEmailData(pedido),
       empresa: pedido.empresa_nombre || "TransGest",
       colaborador: pedido.colaborador_nombre || "Colaborador",
       numero: pedido.numero,

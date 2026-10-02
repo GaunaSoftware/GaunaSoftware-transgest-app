@@ -1,4 +1,5 @@
 const { formatCompanyPaymentTerms } = require("./companyPayment");
+const { documentOrderWeight } = require("./stopWeights");
 ﻿const crypto = require("crypto");
 
 const DOC_CONTROL_DEFAULTS = {
@@ -994,7 +995,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
 
   const matriculaTractora = pedido?.matricula_colaborador || pedido?.vehiculo_matricula || pedido?.veh_matricula || pedido?.matricula || "";
   const matriculaRemolque = pedido?.remolque_matricula_colaborador || pedido?.remolque_matricula || pedido?.rem_matricula || pedido?.remolque_mat || "";
-  const pesoKg = Number(pedido?.peso_kg || pedido?.kg || 0);
+  const pesoKg = documentOrderWeight(pedido);
   // Huella de CO2 estimada del viaje: km x consumo medio / 100 x factor diesel.
   // Mismos valores que el informe de emisiones (cfg_precios.sostenibilidad).
   const kmRutaDcd = Number(String(pedido?.km_ruta ?? pedido?.km ?? "").replace(",", ".")) || 0;

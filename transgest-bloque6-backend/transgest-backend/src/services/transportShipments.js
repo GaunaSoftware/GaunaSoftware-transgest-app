@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const {driverStops} = require('./driverStops');
+const {weightKg,documentOrderWeight} = require('./stopWeights');
 const {canonical, hash} = require('./transportDocumentVersions');
 const fail = (message, code, status=409) => { throw Object.assign(Error(message),{code,status}); };
 const text = value => String(value ?? '').trim();
@@ -36,9 +37,12 @@ function fromOrder(order) {
     if(!text(origin.direccion||origin.ciudad||origin.nombre||order.origen)||!text(destination.direccion||destination.ciudad||destination.nombre||order.destino))
       fail('Completa los puntos de carga y descarga en el pedido.','ORDER_STOPS_REQUIRED',422);
     const source=manyUnloads?destination:origin;
-    const weight=Number(source.peso_kg||(manyLoads||manyUnloads?NaN:order.peso_kg));
+    const weight=source.peso_kg?weightKg(source.peso_kg):(!manyLoads&&!manyUnloads
+      ? (destination.peso_kg?weightKg(destination.peso_kg):documentOrderWeight(order)):null);
     if(!Number.isFinite(weight)||weight<=0)
-      fail(`${manyUnloads?'Descarga':'Carga'} ${index+1}: indica el peso en el pedido.`, 'ORDER_SHIPMENT_WEIGHT',422);
+      fail(manyLoads||manyUnloads
+        ? `${manyUnloads?'Descarga':'Carga'} ${index+1}: indica el peso de esta parada en el pedido. El peso total no define su reparto.`
+        : 'Indica el peso total o el peso de la carga o descarga en el pedido.', 'ORDER_SHIPMENT_WEIGHT',422);
     const goods=text(source.mercancia||origin.mercancia||destination.mercancia||order.mercancia);
     if(!goods)fail(`${manyUnloads?'Descarga':'Carga'} ${index+1}: indica la mercancía en el pedido.`, 'ORDER_SHIPMENT_GOODS',422);
     return {

@@ -1,3 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- T from the current TransGest wordmark. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"><group android:scaleX="0.216" android:scaleY="0.216" android:translateX="27" android:translateY="27.216"><path android:fillColor="#FFFFFF" android:pathData="M11,0 L250,0 L234,59 L156,60 L156,248 L85,247 L86,60 L0,59 Z"/></group></vector>
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"><group android:scaleX="0.27979274611398963" android:scaleY="0.27979274611398963" android:translateX="27" android:translateY="27.55958549222798"><path android:fillColor="#FFFFFF" android:pathData="M0,0 L193,1 L186,41 L119,42 L119,189 L66,189 L66,42 L0,41 Z"/></group></vector>

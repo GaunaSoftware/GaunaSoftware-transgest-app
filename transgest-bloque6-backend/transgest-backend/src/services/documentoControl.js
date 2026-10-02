@@ -60,8 +60,8 @@ function firstStopInfo(stops = [], fallbackName = "") {
   return {
     nombre: stop.nombre || stop.name || fallbackName || "",
     direccion: fullStopAddress(stop),
-    codigo_postal: stop.codigo_postal || stop.cp || '',
-    ciudad: stop.ciudad || stop.poblacion || '',
+    codigo_postal: stop.codigo_postal || stop.cp || stop.postal_code || '',
+    ciudad: stop.ciudad || stop.poblacion || stop.localidad || '',
     cliente_nombre: stop.cliente_nombre || stop.clienteNombre || "",
     destinatario: stop.destinatario || "",
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || "",
@@ -82,8 +82,8 @@ function normalizeStopList(stops = [], fallback = {}) {
     firma_parada: stop.firma_parada || null,
     nombre: stop.nombre || stop.name || stop.cliente_nombre || "",
     direccion: fullStopAddress(stop),
-    codigo_postal: stop.codigo_postal || stop.cp || '',
-    ciudad: stop.ciudad || stop.poblacion || '',
+    codigo_postal: stop.codigo_postal || stop.cp || stop.postal_code || '',
+    ciudad: stop.ciudad || stop.poblacion || stop.localidad || '',
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || fallback.fecha || "",
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || fallback.hora || "",
     ventana: stop.ventana || fallback.ventana || "",
@@ -997,8 +997,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const codigoControl = buildCodigoControl({ empresaId, pedidoId: pedido?.id });
   const publicUrl = buildPublicUrl({ empresaId, pedidoId: pedido?.id, config, appBaseUrl });
   const verificationCode = buildPublicVerificationCode({ empresaId, pedidoId: pedido?.id });
-  const origenPais = pedido?.origen_pais || carga.pais || "España";
-  const destinoPais = pedido?.destino_pais || descarga.pais || "España";
+  const origenPais = carga.pais || pedido?.origen_pais || "España";
+  const destinoPais = descarga.pais || pedido?.destino_pais || "España";
   const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || shouldUseInternationalCmr(origenPais, destinoPais)
     ? "internacional"
     : "nacional";
@@ -1054,7 +1054,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       direccion: carga.direccion || pedido?.origen || "",
       codigo_postal: carga.codigo_postal || '',
       ciudad: carga.ciudad || '',
-      provincia: pedido?.origen_provincia || carga.provincia || "",
+      provincia: carga.provincia || pedido?.origen_provincia || "",
       pais: origenPais,
       google_maps_url: carga.google_maps_url || "",
       referencia: carga.referencia || "",
@@ -1065,7 +1065,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       codigo_postal: descarga.codigo_postal || '',
       ciudad: descarga.ciudad || '',
       destinatario: descarga.destinatario || descarga.cliente_nombre || descarga.nombre || pedido?.destino || "",
-      provincia: pedido?.destino_provincia || descarga.provincia || "",
+      provincia: descarga.provincia || pedido?.destino_provincia || "",
       pais: destinoPais,
       google_maps_url: descarga.google_maps_url || "",
       referencia: descarga.referencia || "",

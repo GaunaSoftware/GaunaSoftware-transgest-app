@@ -13,6 +13,11 @@ const { buildDocumentoControlPayload, buildDocumentoControlHtml } = require('../
   assert.equal(snapshot.documento.origen.ciudad,'Castellón');
   assert.equal(snapshot.documento.origen.direccion,'Polígono Norte 4, 12006 Castellón, España');
   assert.equal(snapshot.documento.destino.destinatario,'Almacén receptor','Se conserva el nombre del punto receptor aunque el pedido tenga otro destino general');
+  const pointPriority=buildDocumentoControlPayload({pedido:{...pedido,origen_provincia:'Provincia antigua',destino_provincia:'Provincia antigua',origen_pais:'Portugal',destino_pais:'Portugal'}}).documento;
+  for(const place of [pointPriority.origen,pointPriority.destino]){
+    assert.equal(place.provincia,'Castellón','La provincia de cada punto prevalece sobre el dato general del pedido');
+    assert.equal(place.pais,'España');
+  }
   const {fullStopAddress}=require('../src/services/stopAddress');
   assert.equal(fullStopAddress(snapshot.documento.origen),snapshot.documento.origen.direccion,'Una dirección ya completa no duplica componentes');
   assert.equal(fullStopAddress({direccion:'CALLE 2, 12006 CASTELLON, ESPANA',codigo_postal:'12006',ciudad:'Castellón',provincia:'Castellón',pais:'España'}),'CALLE 2, 12006 CASTELLON, ESPANA');

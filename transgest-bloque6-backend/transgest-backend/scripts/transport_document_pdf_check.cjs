@@ -13,6 +13,7 @@ const d = {
   destino:{nombre:'CTRA. DEL RECINTO, 15 - NAVE 2.3 MÓDULO 1',direccion:'CTRA. DEL RECINTO, 15 - NAVE 2.3 MÓDULO 1',destinatario:'DESTINATARIO SINTÉTICO'},
   mercancia:{descripcion:'1 grupo + 1 palet de ensayo',peso_kg:5857,bultos:2},
   vehiculo:{tractora:'QA-TRACTORA',remolque:'QA-REMOLQUE'},
+  chofer:{nombre:'CONDUCTOR SINTÉTICO DE ENSAYO'},
   firmas:{cargador:{nombre:'FIRMA AJENA A ESTE ORIGINAL',imagen:'data:image/png;base64,NOT-AN-ADVANCED-SIGNATURE'}},
 };
 const args = {version:1,generatedAt:'2026-10-02T14:00:00.000Z',url:'https://example.invalid/deca/qa'};
@@ -45,6 +46,15 @@ async function main() {
   assert.equal(regular.text.split(d.destino.direccion).length-1,1,'La dirección de entrega se imprime una sola vez');
   assert.doesNotMatch(regular.text,/Ver texto íntegro|Firma contractual|FIRMA AJENA A ESTE ORIGINAL/);
   assert.match(regular.text,/justificantes operativos/);
+  assert.ok(regular.text.includes(`Conductor: ${d.chofer.nombre}`),'El conductor asignado aparece con las matrículas');
+  const complete = {...d,origen:{...d.origen,nombre:'ALMACÉN SINTÉTICO',codigo_postal:'30100',ciudad:'Murcia',provincia:'Murcia',pais:'España'},
+    destino:{...d.destino,codigo_postal:'23400',ciudad:'Úbeda',provincia:'Jaén',pais:'España'}};
+  const completePdf = await check(complete,'deca-direcciones-completas');
+  assert.ok(completePdf.text.includes('ALMACÉN SINTÉTICO C/ ALMACÉN DE ENSAYO 1, 30100 Murcia, España'));
+  assert.ok(completePdf.text.includes('DESTINATARIO SINTÉTICO CTRA. DEL RECINTO, 15 - NAVE 2.3 MÓDULO 1, 23400 Úbeda, Jaén, España'));
+  assert.equal(completePdf.parsed.numpages,1);
+  const formatted = await check({...complete,origen:{...complete.origen,direccion:'C/ ALMACÉN DE ENSAYO 1, 30100 Murcia, España'}},'deca-direccion-ya-completa');
+  assert.equal(formatted.text.split('30100 Murcia').length-1,1,'El renderer no duplica una dirección que ya viene completa');
   const distinctName = await check({...d,origen:{nombre:'ALMACEN',direccion:'ALMACENES DE ENSAYO, CALLE 2'}},'deca-nombre-de-punto');
   assert.ok(distinctName.text.includes('ALMACEN ALMACENES DE ENSAYO, CALLE 2'),'No se elimina un nombre diferente que solo comparte el prefijo de la dirección');
   const long = await check({...d,cargador_contractual:{...d.cargador_contractual,domicilio:`${'AVENIDA DE ENSAYO '.repeat(300)}FIN DEL DOMICILIO ÍNTEGRO`}},'deca-textos-largos');
@@ -52,9 +62,9 @@ async function main() {
   assert.match(long.text,/FIN DEL DOMICILIO ÍNTEGRO/);
   const longFirst = normalized(long.pages[0].map(item=>item.str).join(' '));
   assert.ok(longFirst.includes(d.cargador_contractual.nombre)&&longFirst.includes(d.cargador_contractual.nif),'Incluso un domicilio excepcionalmente largo no oculta la identidad de la parte');
-  const envios = Array.from({length:5},(_,i)=>({id:`QA-${i+1}`,referencia:`REPARTO ${i+1}`,origen:d.origen,destino:{...d.destino,destinatario:`DESTINATARIO ${i+1}`},mercancia:{descripcion:'Palets de ensayo',peso_kg:1000,bultos:1}}));
+  const envios = Array.from({length:5},(_,i)=>({id:`QA-${i+1}`,referencia:`REPARTO ${i+1}`,origen:complete.origen,destino:{...complete.destino,destinatario:`DESTINATARIO ${i+1}`,codigo_postal:`2340${i+1}`,ciudad:`Localidad ${i+1}`},mercancia:{descripcion:'Palets de ensayo',peso_kg:1000,bultos:1}}));
   const consolidated = await check({...d,envios},'deca-varios-envios');
-  for (let i=1;i<=5;i++) assert.ok(consolidated.text.includes(`REPARTO ${i}`)&&consolidated.text.includes(`DESTINATARIO ${i}`));
-  console.log('PASS DeCA PDF: partes completas en portada, direcciones sin duplicados, textos largos íntegros, envíos paginados y firmas operativas diferenciadas.');
+  for (let i=1;i<=5;i++) assert.ok(consolidated.text.includes(`REPARTO ${i}`)&&consolidated.text.includes(`DESTINATARIO ${i}`)&&consolidated.text.includes(`2340${i} Localidad ${i}, Jaén, España`));
+  console.log('PASS DeCA PDF: partes completas en portada, destinatarios y direcciones completas sin duplicados, conductor, textos largos íntegros y envíos paginados.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

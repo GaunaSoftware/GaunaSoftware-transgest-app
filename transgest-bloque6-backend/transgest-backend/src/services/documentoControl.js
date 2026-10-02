@@ -1,5 +1,6 @@
 const { formatCompanyPaymentTerms } = require("./companyPayment");
 const { documentOrderWeight } = require("./stopWeights");
+const { fullStopAddress } = require("./stopAddress");
 ﻿const crypto = require("crypto");
 
 const DOC_CONTROL_DEFAULTS = {
@@ -54,27 +55,15 @@ function parseStops(raw) {
   return [];
 }
 
-function fullStopAddress(stop = {}) {
-  const street = String(stop.direccion || stop.address || '').trim();
-  const postal = String(stop.codigo_postal || stop.cp || stop.postal_code || '').trim();
-  const city = String(stop.ciudad || stop.poblacion || stop.localidad || '').trim();
-  const province = String(stop.provincia || stop.region || '').trim();
-  const country = String(stop.pais || stop.country || '').trim();
-  if (!street && !city && !postal) return '';
-  const has = value => value && street.toLocaleLowerCase('es').includes(value.toLocaleLowerCase('es'));
-  const locality = [has(postal) ? '' : postal, has(city) ? '' : city].filter(Boolean).join(' ');
-  return [street, locality, province && province.toLocaleLowerCase('es') !== city.toLocaleLowerCase('es') && !has(province) ? province : '',
-    country && !has(country) ? country : ''].filter(Boolean).join(', ');
-}
-
 function firstStopInfo(stops = [], fallbackName = "") {
   const stop = Array.isArray(stops) ? stops[0] || {} : {};
   return {
     nombre: stop.nombre || stop.name || fallbackName || "",
     direccion: fullStopAddress(stop),
-    codigo_postal: stop.codigo_postal || stop.cp || '',
-    ciudad: stop.ciudad || stop.poblacion || '',
+    codigo_postal: stop.codigo_postal || stop.cp || stop.postal_code || '',
+    ciudad: stop.ciudad || stop.poblacion || stop.localidad || '',
     cliente_nombre: stop.cliente_nombre || stop.clienteNombre || "",
+    destinatario: stop.destinatario || "",
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || "",
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || "",
     ventana: stop.ventana || "",
@@ -93,8 +82,8 @@ function normalizeStopList(stops = [], fallback = {}) {
     firma_parada: stop.firma_parada || null,
     nombre: stop.nombre || stop.name || stop.cliente_nombre || "",
     direccion: fullStopAddress(stop),
-    codigo_postal: stop.codigo_postal || stop.cp || '',
-    ciudad: stop.ciudad || stop.poblacion || '',
+    codigo_postal: stop.codigo_postal || stop.cp || stop.postal_code || '',
+    ciudad: stop.ciudad || stop.poblacion || stop.localidad || '',
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || fallback.fecha || "",
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || fallback.hora || "",
     ventana: stop.ventana || fallback.ventana || "",
@@ -1008,8 +997,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
   const codigoControl = buildCodigoControl({ empresaId, pedidoId: pedido?.id });
   const publicUrl = buildPublicUrl({ empresaId, pedidoId: pedido?.id, config, appBaseUrl });
   const verificationCode = buildPublicVerificationCode({ empresaId, pedidoId: pedido?.id });
-  const origenPais = pedido?.origen_pais || carga.pais || "España";
-  const destinoPais = pedido?.destino_pais || descarga.pais || "España";
+  const origenPais = carga.pais || pedido?.origen_pais || "España";
+  const destinoPais = descarga.pais || pedido?.destino_pais || "España";
   const cmrTipo = String(pedido?.cmr_tipo || "").toLowerCase() === "internacional" || shouldUseInternationalCmr(origenPais, destinoPais)
     ? "internacional"
     : "nacional";
@@ -1065,7 +1054,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       direccion: carga.direccion || pedido?.origen || "",
       codigo_postal: carga.codigo_postal || '',
       ciudad: carga.ciudad || '',
-      provincia: pedido?.origen_provincia || carga.provincia || "",
+      provincia: carga.provincia || pedido?.origen_provincia || "",
       pais: origenPais,
       google_maps_url: carga.google_maps_url || "",
       referencia: carga.referencia || "",
@@ -1075,8 +1064,8 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       direccion: descarga.direccion || pedido?.destino || "",
       codigo_postal: descarga.codigo_postal || '',
       ciudad: descarga.ciudad || '',
-      destinatario: descarga.cliente_nombre || pedido?.destino || "",
-      provincia: pedido?.destino_provincia || descarga.provincia || "",
+      destinatario: descarga.destinatario || descarga.cliente_nombre || descarga.nombre || pedido?.destino || "",
+      provincia: descarga.provincia || pedido?.destino_provincia || "",
       pais: destinoPais,
       google_maps_url: descarga.google_maps_url || "",
       referencia: descarga.referencia || "",

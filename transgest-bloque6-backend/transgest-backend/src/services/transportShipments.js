@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const {driverStops} = require('./driverStops');
 const {weightKg,documentOrderWeight} = require('./stopWeights');
+const {fullStopAddress} = require('./stopAddress');
 const {canonical, hash} = require('./transportDocumentVersions');
 const fail = (message, code, status=409) => { throw Object.assign(Error(message),{code,status}); };
 const text = value => String(value ?? '').trim();
@@ -136,7 +137,10 @@ function validate(order, rows) {
     if(!text(row.mercancia) || text(row.mercancia).length>500 || text(row.destinatario).length>300) fail(`Envío ${index+1}: indica la naturaleza de la mercancía.`, 'SHIPMENT_PARTIES',422);
     const weight=Number(row.peso_kg),units=row.bultos==null||row.bultos===''?null:Number(row.bultos);
     if(!Number.isFinite(weight)||weight<=0||weight>1000000||units!==null&&(!Number.isFinite(units)||units<0||units>1000000))fail(`Envío ${index+1}: revisa peso y bultos.`, 'SHIPMENT_GOODS',422);
-    const point=p=>({nombre:p.nombre||p.label,direccion:p.direccion||p.label,ciudad:p.ciudad||p.poblacion||null,pais:p.pais||null});
+    const point=p=>({nombre:p.nombre||p.name||p.label,direccion:fullStopAddress(p),
+      codigo_postal:p.codigo_postal||p.cp||p.postal_code||null,
+      ciudad:p.ciudad||p.poblacion||p.localidad||null,
+      provincia:p.provincia||p.region||null,pais:p.pais||p.country||null});
     return {referencia:text(row.referencia).slice(0,200)||null,snapshot:{origen:point(origin),destino:{...point(destination),destinatario:text(row.destinatario)},origen_stop_id:origin.id,destino_stop_id:destination.id,...(row.pedido_envio_uid?{pedido_envio_uid:row.pedido_envio_uid}:{}),mercancia:text(row.mercancia),peso_kg:weight,bultos:units,embalaje:text(row.embalaje).slice(0,200),origen_dato:'revision_trafico'}};
   });
   if(Number(order.peso_kg)>0 && Math.abs(shipments.reduce((n,s)=>n+s.snapshot.peso_kg,0)-Number(order.peso_kg))>.01)fail('La suma de los pesos debe coincidir con el peso del pedido. Corrige el pedido o el desglose.','SHIPMENT_WEIGHT_TOTAL',422);

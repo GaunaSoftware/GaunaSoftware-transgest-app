@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {fromOrder,stableStopUids} = require('../src/services/transportShipments');
+const {fromOrder,stableStopUids,validate} = require('../src/services/transportShipments');
 
 const point=(direccion,peso_kg,extra={})=>({direccion,peso_kg,...extra});
 const base={numero:'PED-TEST',estado:'confirmado',origen:'Almacén A',destino:'Cliente B',mercancia:'Cemento',peso_kg:8000,bultos:8};
@@ -36,6 +36,16 @@ const split=fromOrder({...base,puntos_carga:[point('Almacén A',8000)],puntos_de
 assert.equal(split.length,2);
 assert.equal(split[0].origen_id,split[1].origen_id);
 assert.equal(split[1].mercancia,'Cemento blanco');
+const addresses={...base,puntos_carga:[point('Calle de ensayo 1',8000,{nombre:'Almacén sintético',codigo_postal:'30100',ciudad:'Murcia',provincia:'Murcia',pais:'España'})],
+  puntos_descarga:[point('Calle de entrega 2',3000,{nombre:'Destinatario uno',codigo_postal:'23400',ciudad:'Úbeda',provincia:'Jaén',pais:'España'}),
+    point('Calle de entrega 3',5000,{nombre:'Destinatario dos',cp:'03100',poblacion:'Ciudad de ensayo',region:'Provincia de ensayo',country:'España'})]};
+const addressSnapshots=validate(addresses,fromOrder(addresses));
+assert.equal(addressSnapshots[0].snapshot.origen.direccion,'Calle de ensayo 1, 30100 Murcia, España');
+assert.equal(addressSnapshots[0].snapshot.destino.direccion,'Calle de entrega 2, 23400 Úbeda, Jaén, España');
+assert.equal(addressSnapshots[0].snapshot.destino.destinatario,'Destinatario uno');
+assert.equal(addressSnapshots[0].snapshot.destino.codigo_postal,'23400');
+assert.equal(addressSnapshots[0].snapshot.destino.provincia,'Jaén');
+assert.equal(addressSnapshots[1].snapshot.destino.direccion,'Calle de entrega 3, 03100 Ciudad de ensayo, Provincia de ensayo, España');
 
 const merged=fromOrder({...base,puntos_carga:[point('Almacén A',3000),point('Almacén C',5000)],puntos_descarga:[point('Cliente B',8000)]});
 assert.equal(merged.length,2);
@@ -56,7 +66,7 @@ async function persistence(){
     await pg.exec('CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,estado text,numero text,origen text,destino text,mercancia text,bultos numeric,peso_kg numeric,puntos_carga jsonb,puntos_descarga jsonb,carga_real_at timestamptz,descarga_real_at timestamptz,updated_at timestamptz DEFAULT NOW()); CREATE TABLE pedido_eventos(id uuid DEFAULT gen_random_uuid(),pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,actor_id uuid,detalle jsonb);');
     for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
     const empresaId=crypto.randomUUID(),pedidoId=crypto.randomUUID();
-    await pg.query("INSERT INTO pedidos(id,empresa_id,estado,numero,origen,destino,mercancia,peso_kg,puntos_carga,puntos_descarga) VALUES($1,$2,'confirmado','QA-PEDIDO','Madrid','Valencia','Cemento',8000,$3,$4)",[pedidoId,empresaId,JSON.stringify([point('Madrid',8000)]),JSON.stringify([point('Valencia',3000),point('Almansa',5000)])]);
+    await pg.query("INSERT INTO pedidos(id,empresa_id,estado,numero,origen,destino,mercancia,peso_kg,puntos_carga,puntos_descarga) VALUES($1,$2,'confirmado','QA-PEDIDO','Madrid','Valencia','Cemento',8000,$3,$4)",[pedidoId,empresaId,JSON.stringify(addresses.puntos_carga),JSON.stringify(addresses.puntos_descarga)]);
     const args={empresaId,pedidoId};
     await assert.rejects(shipments.ensureFromOrder(db,{...args,empresaId:crypto.randomUUID()}),{code:'ORDER_NOT_FOUND'});
     const prepared=await shipments.ensureFromOrder(db,args),ids=prepared.envioIds;
@@ -68,6 +78,15 @@ async function persistence(){
     await assert.rejects(documents.issue(db,{...args,payload,envioId:ids[0],baseUrl:'https://example.invalid',expectedUpdatedAt:prepared.updatedAt}),{code:'ORDER_CHANGED'});
     for(const envioId of ids)await documents.issue(db,{...args,payload,envioId,baseUrl:'https://example.invalid'});
     const originals=await documents.list(db,empresaId,pedidoId);
+    const normalize=value=>value.replace(/\s+/g,' ').trim();
+    for(const original of originals){
+      const stored=await documents.read(db,empresaId,pedidoId,original.id),document=original.payload.documento;
+      const shipment=addressSnapshots.find(s=>s.snapshot.destino.destinatario===document.destino.destinatario);
+      assert.ok(shipment,'El destinatario corresponde a su reparto');
+      assert.equal(document.destino.direccion,shipment.snapshot.destino.direccion);
+      const pdfText=normalize((await require('pdf-parse')(Buffer.from(stored.pdf))).text);
+      assert.ok(pdfText.includes(shipment.snapshot.destino.destinatario)&&pdfText.includes(shipment.snapshot.destino.direccion),'El PDF conserva toda la dirección específica de ese reparto');
+    }
     const stops=order.puntos_descarga.map((stop,index)=>({...stop,peso_kg:index?4800:3200}));
     await pg.query('UPDATE pedidos SET puntos_descarga=$2 WHERE id=$1',[pedidoId,JSON.stringify(stops)]);
     await assert.rejects(shipments.ensureFromOrder(db,args),{code:'VERSION_REASON_REQUIRED'});

@@ -1,6 +1,7 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
-const DECA_TEMPLATE_VERSION = '2026-10-readable-parties';
+const { fullStopAddress } = require('./stopAddress');
+const DECA_TEMPLATE_VERSION = '2026-10-complete-points-driver';
 
 const C = { ink: '#17313a', teal: '#087a73', pale: '#e8f5f2', line: '#c9d9d6', muted: '#577078' };
 const text = value => String(value ?? '').trim() || 'No informado';
@@ -11,7 +12,7 @@ const date = value => {
 const party = value => [value?.nombre, value?.nif && `NIF ${value.nif}`, value?.domicilio].filter(Boolean).join('\n');
 const comparable = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const stop = value => {
-  const name = String(value?.nombre || '').trim(), address = String(value?.direccion || '').trim();
+  const name = String(value?.destinatario || value?.nombre || '').trim(), address = fullStopAddress(value);
   // Algunos puntos antiguos usan la dirección como nombre. Imprime una sola
   // vez la dirección completa, sin perder el nombre cuando es diferente.
   if (name && address && (comparable(address) === comparable(name) || comparable(address).startsWith(`${comparable(name)} `))) return address;
@@ -109,7 +110,7 @@ async function renderDeca({ documento: d, version, generatedAt, url }) {
   section('ORIGEN, DESTINO Y MERCANCÍA');
   row([['Lugar de carga', stop(d.origen)], ['Lugar de entrega', stop(d.destino)]], 61);
   row([['Naturaleza y embalaje', [d.mercancia?.descripcion, d.mercancia?.embalaje && `Embalaje: ${d.mercancia.embalaje}`].filter(Boolean).join('\n')], ['Cantidad', `${number(d.mercancia?.peso_kg)} kg\n${number(d.mercancia?.bultos)} bultos/unidades`]], 60, .57);
-  row([['Tractora y remolque', [d.vehiculo?.tractora && `Tractora: ${d.vehiculo.tractora}`, d.vehiculo?.remolque && `Remolque: ${d.vehiculo.remolque}`].filter(Boolean).join('\n')], ['Autorización especial de circulación', d.autorizacion_especial?.requerida ? text(d.autorizacion_especial.referencia) : 'No indicada como necesaria']]);
+  row([['Vehículo y conductor', [`Conductor: ${text(d.chofer?.nombre)}`, d.vehiculo?.tractora && `Tractora: ${d.vehiculo.tractora}`, d.vehiculo?.remolque && `Remolque: ${d.vehiculo.remolque}`].filter(Boolean).join('\n')], ['Autorización especial de circulación', d.autorizacion_especial?.requerida ? text(d.autorizacion_especial.referencia) : 'No indicada como necesaria']]);
   if (d.observaciones) row([['Observaciones públicas', d.observaciones]], 49);
   section('QR Y TRAZABILIDAD');
   row([['Original verificable', `QR de descarga directa · código ${text(d.codigo_control)}\nEsta versión conserva sus propios datos y URL.`]], 55);
@@ -122,7 +123,7 @@ async function renderDeca({ documento: d, version, generatedAt, url }) {
     put(`ENVÍOS CONSOLIDADOS · ${text(d.referencia_pedido)}`, left, y, width, { bold: true, size: 13, color: C.teal }); y += 32;
     for (const [index, shipment] of d.envios.entries()) {
       section(`ENVÍO ${index + 1} · ${text(shipment.referencia || shipment.id)}`, 130);
-      row([['Origen', stop(shipment.origen)], ['Destinatario y destino', stop({nombre:shipment.destino?.destinatario,direccion:shipment.destino?.direccion})]], 45);
+      row([['Origen', stop(shipment.origen)], ['Destinatario y destino', stop(shipment.destino)]], 45);
       row([['Mercancía', [shipment.mercancia?.descripcion, shipment.mercancia?.embalaje].filter(Boolean).join(' · ')], ['Peso y bultos', `${number(shipment.mercancia?.peso_kg)} kg · ${number(shipment.mercancia?.bultos)} bultos`]], 45, .57);
     }
   }

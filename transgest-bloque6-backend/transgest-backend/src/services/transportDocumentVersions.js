@@ -75,6 +75,9 @@ function documentSnapshot(documento) {
   // Whitelist administrative fields. No financial conditions, changing signatures or attachments.
   const d = JSON.parse(JSON.stringify(documento));
   return {...Object.fromEntries(['codigo_control','referencia_pedido','fecha_transporte','cargador_contractual','transportista_efectivo','empresa','origen','destino','mercancia','vehiculo'].map(k => [k, d[k] || {}])),
+    // Driver identification is optional administrative information. Keep only
+    // the name from this issue's assignment, without personal contact/ID data.
+    ...(d.chofer?.nombre ? {chofer:{nombre:String(d.chofer.nombre).trim().slice(0,300)}} : {}),
     ...(d.autorizacion_especial ? { autorizacion_especial: {
       requerida: d.autorizacion_especial.requerida === true,
       referencia: d.autorizacion_especial.requerida === true ? String(d.autorizacion_especial.referencia || '').trim().slice(0, 120) : '',

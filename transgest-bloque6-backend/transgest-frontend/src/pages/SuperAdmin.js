@@ -1870,8 +1870,9 @@ export function IntegracionesAdmin({ saFetchFn }) {
                 <input aria-label="Clave API de empresa" autoComplete="new-password" type="password" style={input} value={form.api_key} onChange={e=>setForm(p=>({...p,api_key:e.target.value,use_global:false}))} placeholder={cfgEmpresa?.key_mask ? `Actual: ${cfgEmpresa.key_mask}` : "Pegar clave de esta empresa"} />
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Límite mensual del conector</label>
                 <input type="number" min="0" style={input} value={form.limite_mensual} onChange={e=>setForm(p=>({...p,limite_mensual:e.target.value}))} />
+                <small style={{display:"block",marginTop:4,color:"#94a3b8"}}>Número máximo de llamadas a este proveedor. 0 deja este conector sin tope adicional.</small>
               </div>
             </div>
             <div style={{...integrationButtonRow,marginTop:10}}>
@@ -1920,8 +1921,9 @@ export function IntegracionesAdmin({ saFetchFn }) {
                 {gpsProvider==='geotab'&&<small style={{display:'block',marginTop:4,color:'#94a3b8'}}>Introduce un JSON con database, userName y password del usuario API de MyGeotab. Se guarda cifrado y no se muestra después. Requiere acceso a Device y DeviceStatusInfo.</small>}
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Límite mensual del conector GPS</label>
                 <input type="number" min="0" style={input} value={gpsForm.limite_mensual} onChange={e=>setGpsForm(p=>({...p,limite_mensual:e.target.value}))} />
+                <small style={{display:"block",marginTop:4,color:"#94a3b8"}}>Número máximo de llamadas a este proveedor. 0 deja este conector sin tope adicional.</small>
               </div>
             </div>
             <div style={{...integrationButtonRow,marginTop:10}}>

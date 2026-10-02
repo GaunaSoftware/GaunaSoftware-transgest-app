@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const {driverStops} = require('./driverStops');
 const {weightKg,documentOrderWeight} = require('./stopWeights');
-const {fullStopAddress} = require('./stopAddress');
+const {fullStopAddress,stopPointName} = require('./stopAddress');
 const {canonical, hash} = require('./transportDocumentVersions');
 const fail = (message, code, status=409) => { throw Object.assign(Error(message),{code,status}); };
 const text = value => String(value ?? '').trim();
@@ -50,7 +50,7 @@ function fromOrder(order) {
       origen_id:origin.id,destino_id:destination.id,
       pedido_envio_uid:(manyUnloads?destination:manyLoads?origin:destination).pedido_stop_uid||null,
       referencia:text(destination.referencia||origin.referencia||order.referencia_cliente||order.numero),
-      destinatario:text(destination.destinatario||destination.cliente_nombre||destination.nombre||destination.label),
+      destinatario:text(destination.destinatario||destination.cliente_nombre||destination.clienteNombre||stopPointName(destination)||destination.label),
       mercancia:goods,peso_kg:weight,
       bultos:source.bultos||source.unidades||(!manyLoads&&!manyUnloads?order.bultos:null),
       embalaje:text(source.embalaje||origin.embalaje||order.embalaje),
@@ -137,7 +137,7 @@ function validate(order, rows) {
     if(!text(row.mercancia) || text(row.mercancia).length>500 || text(row.destinatario).length>300) fail(`Envío ${index+1}: indica la naturaleza de la mercancía.`, 'SHIPMENT_PARTIES',422);
     const weight=Number(row.peso_kg),units=row.bultos==null||row.bultos===''?null:Number(row.bultos);
     if(!Number.isFinite(weight)||weight<=0||weight>1000000||units!==null&&(!Number.isFinite(units)||units<0||units>1000000))fail(`Envío ${index+1}: revisa peso y bultos.`, 'SHIPMENT_GOODS',422);
-    const point=p=>({nombre:p.nombre||p.name||p.label,direccion:fullStopAddress(p),
+    const point=p=>({nombre:stopPointName(p)||p.label,direccion:fullStopAddress(p),
       codigo_postal:p.codigo_postal||p.cp||p.postal_code||null,
       ciudad:p.ciudad||p.poblacion||p.localidad||null,
       provincia:p.provincia||p.region||null,pais:p.pais||p.country||null});

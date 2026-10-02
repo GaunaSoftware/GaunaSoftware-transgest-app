@@ -1,7 +1,7 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
-const { fullStopAddress } = require('./stopAddress');
-const DECA_TEMPLATE_VERSION = '2026-10-complete-points-driver';
+const { fullStopAddress, stopPointName } = require('./stopAddress');
+const DECA_TEMPLATE_VERSION = '2026-10-complete-point-names';
 
 const C = { ink: '#17313a', teal: '#087a73', pale: '#e8f5f2', line: '#c9d9d6', muted: '#577078' };
 const text = value => String(value ?? '').trim() || 'No informado';
@@ -12,7 +12,7 @@ const date = value => {
 const party = value => [value?.nombre, value?.nif && `NIF ${value.nif}`, value?.domicilio].filter(Boolean).join('\n');
 const comparable = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const stop = value => {
-  const name = String(value?.destinatario || value?.nombre || '').trim(), address = fullStopAddress(value);
+  const name = String(value?.destinatario || stopPointName(value)).trim(), address = fullStopAddress(value);
   // Algunos puntos antiguos usan la dirección como nombre. Imprime una sola
   // vez la dirección completa, sin perder el nombre cuando es diferente.
   if (name && address && (comparable(address) === comparable(name) || comparable(address).startsWith(`${comparable(name)} `))) return address;

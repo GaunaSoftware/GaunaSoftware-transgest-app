@@ -21,4 +21,10 @@ function fullStopAddress(stop = {}) {
     country && !has(country) ? country : ''].filter(Boolean).join(', ');
 }
 
-module.exports = { fullStopAddress };
+// The order editor stores a selected point's business name as cliente_nombre.
+// Keep it separate from the address and the order's invoicing customer.
+function stopPointName(stop = {}) {
+  return String(stop.nombre || stop.name || stop.cliente_nombre || stop.clienteNombre || '').trim();
+}
+
+module.exports = { fullStopAddress, stopPointName };

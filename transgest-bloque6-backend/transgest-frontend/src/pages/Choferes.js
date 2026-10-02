@@ -1137,7 +1137,7 @@ export default function Choferes() {
       {modal && (
         <ModalChofer
           editando={editando}
-          initialTab={editando?.id === focusChofer?.chofer_id ? (focusChofer.section === 'documentacion' ? 'contrato' : focusChofer.section === 'plataformas' ? 'plataformas' : 'datos') : 'datos'}
+          initialTab={editando?.id && editando.id === focusChofer?.chofer_id ? (focusChofer.section === 'documentacion' ? 'contrato' : focusChofer.section === 'plataformas' ? 'plataformas' : 'datos') : 'datos'}
           vehiculos={vehiculos}
           tallerState={tallerState}
           persistTallerState={persistTallerState}

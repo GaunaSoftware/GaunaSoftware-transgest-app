@@ -13,6 +13,21 @@ const { buildDocumentoControlPayload, buildDocumentoControlHtml } = require('../
   assert.equal(snapshot.documento.origen.ciudad,'Castellón');
   assert.equal(snapshot.documento.origen.direccion,'Polígono Norte 4, 12006 Castellón, España');
   assert.equal(snapshot.documento.destino.destinatario,'Almacén receptor','Se conserva el nombre del punto receptor aunque el pedido tenga otro destino general');
+  // Selected points in the order editor carry cliente_nombre, not nombre.
+  const editorLoad={...carga,cliente_nombre:'ALMACÉN DEL PUNTO DE ENSAYO'};delete editorLoad.nombre;
+  const editorDrop={...editorLoad,cliente_nombre:'RECEPTOR DEL PUNTO DE ENSAYO'};
+  const editorPayload=buildDocumentoControlPayload({pedido:{...pedido,origen:carga.direccion,
+    puntos_carga:JSON.stringify([editorLoad]),puntos_descarga:JSON.stringify([editorDrop])},
+    cliente:{nombre:'CLIENTE FISCAL DISTINTO'}}).documento;
+  assert.equal(editorPayload.origen.nombre,editorLoad.cliente_nombre,'El nombre del punto no se sustituye por la calle ni por el cliente fiscal');
+  assert.equal(editorPayload.cargas[0].nombre,editorLoad.cliente_nombre);
+  assert.equal(editorPayload.destino.nombre,editorDrop.cliente_nombre);
+  assert.equal(editorPayload.descargas[0].nombre,editorDrop.cliente_nombre);
+  assert.equal(editorPayload.origen.direccion,'Polígono Norte 4, 12006 Castellón, España');
+  const legacyPoint={...editorLoad,cliente_nombre:undefined,clienteNombre:'PUNTO DE ENSAYO ANTIGUO'};
+  assert.equal(buildDocumentoControlPayload({pedido:{...pedido,puntos_carga:[legacyPoint]}}).documento.origen.nombre,legacyPoint.clienteNombre);
+  const editorHtml=await buildDocumentoControlHtml({documento:editorPayload});
+  assert.ok(editorHtml.includes(editorLoad.cliente_nombre));
   const pointPriority=buildDocumentoControlPayload({pedido:{...pedido,origen_provincia:'Provincia antigua',destino_provincia:'Provincia antigua',origen_pais:'Portugal',destino_pais:'Portugal'}}).documento;
   for(const place of [pointPriority.origen,pointPriority.destino]){
     assert.equal(place.provincia,'Castellón','La provincia de cada punto prevalece sobre el dato general del pedido');

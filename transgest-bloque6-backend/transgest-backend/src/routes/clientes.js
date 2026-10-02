@@ -12,6 +12,9 @@ const { authenticate, requireRole, GERENTE_O_CONTABLE } = require("../middleware
 
 const { normalizeClientImage } = require("../services/clientImage");
 const router = express.Router();
+// Coincide con los perfiles que ya tienen edición de Clientes. El acceso al
+// módulo (incluidas las revocaciones por usuario) se comprueba en server.js.
+const GESTION_FICHA_CLIENTE = requireRole("gerente", "contable", "trafico", "administrativo");
 
 const CLIENTES_CREATE_BASE_COLUMNS = new Set([
   "imagen_data", "empresa_id", "nombre", "cif", "direccion", "cp", "ciudad", "pais",
@@ -931,7 +934,7 @@ router.delete("/:id/integracion-tokens/:tokenId", GERENTE_O_CONTABLE, async (req
 });
 
 // POST /clientes
-router.post("/", GERENTE_O_CONTABLE,
+router.post("/", GESTION_FICHA_CLIENTE,
   body("nombre").notEmpty().withMessage("El nombre / razón social es obligatorio.").trim(),
   body("cif").optional({ nullable: true, checkFalsy: true }).trim().toUpperCase(),
   async (req, res) => {
@@ -1045,7 +1048,7 @@ router.post("/", GERENTE_O_CONTABLE,
 );
 
 // PUT /clientes/:id
-router.put("/:id", GERENTE_O_CONTABLE, async (req, res) => {
+router.put("/:id", GESTION_FICHA_CLIENTE, async (req, res) => {
   try {
   const clienteData = normalizeClienteWrite(req.body);
   const imagenData = await validatedClientImage(req.body);

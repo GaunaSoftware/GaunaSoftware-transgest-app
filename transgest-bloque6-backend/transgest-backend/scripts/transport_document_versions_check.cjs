@@ -18,6 +18,7 @@ async function main(){
   d.observaciones_publicas=d.observaciones;d.observaciones='NOTA INTERNA QUE NO SE PUBLICA';
   d.condiciones={precio_acordado:'9999 EUR PRIVADOS'};
   d.firmas={chofer:{nombre:'FIRMA ANTIGUA NO VINCULADA',fecha:'2026-01-01'}};
+  d.chofer={nombre:'CONDUCTOR DE ENSAYO',dni:'ID PRIVADO',telefono:'TELEFONO PRIVADO',email:'EMAIL PRIVADO'};
   await assert.rejects(service.issue(db,args),{code:'ORDER_NOT_CONFIRMED'});
   await pg.query("UPDATE pedidos SET estado='confirmado' WHERE id=$1",[order]);
   await pg.query('UPDATE pedidos SET remolque_id=$2 WHERE id=$1',[order,crypto.randomUUID()]);
@@ -28,6 +29,7 @@ async function main(){
   const first=await service.issue(db,args);assert.equal(first.created,true);
   const repeated=await service.issue(db,args);assert.equal(repeated.id,first.id);assert.equal(repeated.created,false);
   const initial=(await service.list(db,company,order))[0];const token=new URL(initial.public_url).searchParams.get('token');
+  assert.deepEqual(initial.payload.documento.chofer,{nombre:'CONDUCTOR DE ENSAYO'},'Se conserva únicamente el nombre del conductor');
   assert.equal(initial.metadata.template_version,require('../src/services/transportDocumentPdf').DECA_TEMPLATE_VERSION);
   await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250},{}),{code:'DECA_REVIEW_REQUIRED'});
   const reviewed={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[initial.id]};
@@ -52,6 +54,11 @@ async function main(){
   const original=await service.publicOriginal(db,initial.id,token);assert.equal(service.hash(original.pdf),initial.pdf_hash);
   assert.doesNotMatch((await require('pdf-parse')(original.pdf)).text,/NOTA INTERNA/);
   assert.doesNotMatch((await require('pdf-parse')(original.pdf)).text,/9999 EUR PRIVADOS|FIRMA ANTIGUA NO VINCULADA/);
+  const originalText=(await require('pdf-parse')(original.pdf)).text.replace(/\s+/g,' ');
+  assert.ok(originalText.includes('Conductor: CONDUCTOR DE ENSAYO'));
+  assert.doesNotMatch(originalText,/ID PRIVADO|TELEFONO PRIVADO|EMAIL PRIVADO/);
+  d.chofer.nombre='OTRO CONDUCTOR DE ENSAYO';
+  assert.equal((await service.read(db,company,order,initial.id)).payload.documento.chofer.nombre,'CONDUCTOR DE ENSAYO','Cambiar la asignación no reescribe el conductor del original emitido');
   assert.equal(await service.publicOriginal(db,initial.id,'wrong'),null);
   assert.equal(await service.read(db,other,order,initial.id),null);assert.deepEqual(await service.list(db,other,order),[]);
   await assert.rejects(service.issue(db,{...args,empresaId:other}),{code:'ORDER_NOT_FOUND'});

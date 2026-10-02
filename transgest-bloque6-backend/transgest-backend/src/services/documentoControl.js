@@ -1,5 +1,6 @@
 const { formatCompanyPaymentTerms } = require("./companyPayment");
 const { documentOrderWeight } = require("./stopWeights");
+const { fullStopAddress } = require("./stopAddress");
 ﻿const crypto = require("crypto");
 
 const DOC_CONTROL_DEFAULTS = {
@@ -54,19 +55,6 @@ function parseStops(raw) {
   return [];
 }
 
-function fullStopAddress(stop = {}) {
-  const street = String(stop.direccion || stop.address || '').trim();
-  const postal = String(stop.codigo_postal || stop.cp || stop.postal_code || '').trim();
-  const city = String(stop.ciudad || stop.poblacion || stop.localidad || '').trim();
-  const province = String(stop.provincia || stop.region || '').trim();
-  const country = String(stop.pais || stop.country || '').trim();
-  if (!street && !city && !postal) return '';
-  const has = value => value && street.toLocaleLowerCase('es').includes(value.toLocaleLowerCase('es'));
-  const locality = [has(postal) ? '' : postal, has(city) ? '' : city].filter(Boolean).join(' ');
-  return [street, locality, province && province.toLocaleLowerCase('es') !== city.toLocaleLowerCase('es') && !has(province) ? province : '',
-    country && !has(country) ? country : ''].filter(Boolean).join(', ');
-}
-
 function firstStopInfo(stops = [], fallbackName = "") {
   const stop = Array.isArray(stops) ? stops[0] || {} : {};
   return {
@@ -75,6 +63,7 @@ function firstStopInfo(stops = [], fallbackName = "") {
     codigo_postal: stop.codigo_postal || stop.cp || '',
     ciudad: stop.ciudad || stop.poblacion || '',
     cliente_nombre: stop.cliente_nombre || stop.clienteNombre || "",
+    destinatario: stop.destinatario || "",
     fecha: stop.fecha_carga || stop.fecha_descarga || stop.fecha || "",
     hora: stop.hora_carga || stop.hora_descarga || stop.hora || "",
     ventana: stop.ventana || "",
@@ -1075,7 +1064,7 @@ function buildDocumentoControlPayload({ empresaId, pedido, empresa = {}, cliente
       direccion: descarga.direccion || pedido?.destino || "",
       codigo_postal: descarga.codigo_postal || '',
       ciudad: descarga.ciudad || '',
-      destinatario: descarga.cliente_nombre || pedido?.destino || "",
+      destinatario: descarga.destinatario || descarga.cliente_nombre || descarga.nombre || pedido?.destino || "",
       provincia: pedido?.destino_provincia || descarga.provincia || "",
       pais: destinoPais,
       google_maps_url: descarga.google_maps_url || "",

@@ -12,6 +12,15 @@ const { buildDocumentoControlPayload, buildDocumentoControlHtml } = require('../
   assert.equal(snapshot.documento.origen.codigo_postal,'12006');
   assert.equal(snapshot.documento.origen.ciudad,'Castellón');
   assert.equal(snapshot.documento.origen.direccion,'Polígono Norte 4, 12006 Castellón, España');
+  assert.equal(snapshot.documento.destino.destinatario,'Almacén receptor','Se conserva el nombre del punto receptor aunque el pedido tenga otro destino general');
+  const {fullStopAddress}=require('../src/services/stopAddress');
+  assert.equal(fullStopAddress(snapshot.documento.origen),snapshot.documento.origen.direccion,'Una dirección ya completa no duplica componentes');
+  assert.equal(fullStopAddress({direccion:'CALLE 2, 12006 CASTELLON, ESPANA',codigo_postal:'12006',ciudad:'Castellón',provincia:'Castellón',pais:'España'}),'CALLE 2, 12006 CASTELLON, ESPANA');
+  assert.equal(fullStopAddress({direccion:'Calle Murcia 4',codigo_postal:'30100',ciudad:'Murcia',provincia:'Murcia',pais:'España'}),'Calle Murcia 4, 30100 Murcia, España','La localidad no se confunde con el nombre de la calle');
+  assert.equal(fullStopAddress({direccion:'Calle 1',codigo_postal:'03100',ciudad:'Ciudad de ensayo',provincia:'Provincia de ensayo',pais:'España'}),'Calle 1, 03100 Ciudad de ensayo, Provincia de ensayo, España');
+  assert.equal(fullStopAddress({nombre:'Solo un nombre',provincia:'Provincia',pais:'España'}),'','No se inventa la ubicación a partir del nombre');
+  const driver = buildDocumentoControlPayload({pedido:{...pedido,chofer_nombre:'Conductor',chofer_apellidos:'De Ensayo',conductor_efectivo_nombre:'Conductor Efectivo',conductor_efectivo_apellidos:'De Ensayo'}});
+  assert.equal(driver.documento.chofer.nombre,'Conductor Efectivo De Ensayo');
   const html = await buildDocumentoControlHtml({ documento:snapshot.documento });
   assert.ok(html.includes('Polígono Norte 4, 12006 Castellón, España'));
   carga.direccion='Dirección modificada después';

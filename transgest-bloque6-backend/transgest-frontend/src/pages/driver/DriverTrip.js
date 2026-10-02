@@ -44,6 +44,8 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   const [docControl,   setDocControl]   = useState(null);
   const [docControlLoading, setDocControlLoading] = useState(false);
   const [docControlError,setDocControlError] = useState('');
+  const [decaDecisionPending,setDecaDecisionPending] = useState(false);
+  const [decaDecisionBusy,setDecaDecisionBusy] = useState(false);
   const [choferDocs,   setChoferDocs]   = useState([]);
   const [qrVisible, setQrVisible] = useState(false);
   const [firmandoCargador, setFirmandoCargador] = useState(false);
@@ -220,18 +222,10 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   async function confirmarDcdAntesDeSalir() {
     let data = await cargarDocumentoControl();
     if (!data?.status?.ready) {
-      try {
-        await solicitarDecaPedido(pedido.id);
-        data = await cargarDocumentoControl();
-      } catch (error) {
-        notify(error.message || 'Tráfico debe completar los datos del DeCA antes de salir.', 'warning');
-        return false;
-      }
-      notify('Se ha solicitado el DeCA a tráfico. Espera a que esté disponible antes de salir.', 'warning');
-      return false;
-    }
-    if (!data?.status?.ready) {
-      notify(data?.status?.summary||'No se ha podido comprobar el DeCA. Revisa la conexión o avisa a tráfico antes de salir.','warning');
+      if (!data?.solicitud_deca && !data?.recepcion_cargador) setDecaDecisionPending(true);
+      notify(data?.solicitud_deca || data?.recepcion_cargador
+        ? 'El DeCA aún no está adjuntado. Espera a que tráfico lo ponga a disposición antes de salir.'
+        : 'Indica si el cargador te facilitó el DeCA o solicítalo a tráfico antes de salir.', 'warning');
       return false;
     }
     const ids=(data.versiones||[]).filter(v=>v.estado==='activa').map(v=>v.id);
@@ -460,7 +454,31 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
     }
     await marcarPaso("carga_ok");
     notify("Carga finalizada con mercancía, albarán y firma registrados.", "success");
+    const control = await cargarDocumentoControl();
+    if (!control?.status?.ready && !control?.solicitud_deca && !control?.recepcion_cargador) {
+      setDecaDecisionPending(true);
+      notify('Indica ahora si el cargador te ha facilitado el DeCA.', 'warning');
+    }
     onActualizar();
+  }
+
+  async function decidirDeCaTrasCarga(recibido) {
+    setDecaDecisionBusy(true);
+    try {
+      if (recibido) {
+        await registrarPedidoDocumentoControlEvento(pedido.id, {action:'recibido_cargador',source:'app_chofer'});
+        notify('Tráfico recibió el aviso para comprobar y adjuntar el DeCA del cargador.', 'success');
+      } else {
+        await solicitarDecaPedido(pedido.id);
+        notify('Solicitud de DeCA enviada a tráfico. Espera a que esté disponible antes de salir.', 'warning');
+      }
+      await cargarDocumentoControl();
+      setDecaDecisionPending(false);
+    } catch (error) {
+      notify(error.message || 'No se pudo registrar la decisión sobre el DeCA. Vuelve a intentarlo.', 'error');
+    } finally {
+      setDecaDecisionBusy(false);
+    }
   }
 
   async function iniciarViaje() {
@@ -790,10 +808,19 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
               </div>
             </div>
             {docControlError&&<p role="alert">{docControlError} <button onClick={cargarDocumentoControl}>Reintentar</button></p>}
-            {!dcdReady && <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:8}}>
-              <span>{docControl?.solicitud_deca ? 'Solicitud enviada a tráfico. Pendiente del original del cargador o de su emisión.' : 'Si el cargador no te entrega el DeCA, solicítalo a tráfico.'}</span>
-              <button type="button" disabled={docControlLoading||!!docControl?.solicitud_deca} onClick={async()=>{try{await solicitarDecaPedido(pedido.id);await cargarDocumentoControl();notify('Solicitud de DeCA enviada a tráfico.','success');}catch(error){notify(error.message,'error');}}}>Solicitar DeCA</button>
-            </div>}
+            {!dcdReady && (decaDecisionPending || ((!!allSteps.carga_ok || !!pedido.carga_real_at) && !docControl?.solicitud_deca && !docControl?.recepcion_cargador)) &&
+              <div role="group" aria-label="Documento de control tras la carga" style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:8,padding:12,marginBottom:8}}>
+                <strong>¿El cargador te ha facilitado el DeCA?</strong>
+                <p style={{fontSize:13,margin:'6px 0'}}>Confírmalo después de cargar. Tráfico debe comprobar y adjuntar el original, o prepararlo si no te lo han entregado. Antes de salir tendrás que revisar la versión disponible.</p>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  <button type="button" disabled={decaDecisionBusy||docControlLoading} onClick={()=>decidirDeCaTrasCarga(true)}>Sí, lo he recibido</button>
+                  <button type="button" disabled={decaDecisionBusy||docControlLoading} onClick={()=>decidirDeCaTrasCarga(false)}>No, solicitar a tráfico</button>
+                </div>
+              </div>}
+            {!dcdReady && !decaDecisionPending && (docControl?.solicitud_deca || docControl?.recepcion_cargador) &&
+              <p style={{fontSize:13}}>{docControl?.recepcion_cargador ? 'Has indicado que el cargador facilitó el DeCA. Tráfico debe comprobar y adjuntar el original antes de la salida.' : 'DeCA solicitado a tráfico. Espera a que esté disponible antes de salir.'}</p>}
+            {!dcdReady && !decaDecisionPending && !allSteps.carga_ok && !pedido.carga_real_at && !docControl?.solicitud_deca && !docControl?.recepcion_cargador &&
+              <p style={{fontSize:13}}>Al finalizar la carga podrás indicar si el cargador te ha facilitado el DeCA.</p>}
             {docControl?.documento && (
               <>
                 <div className="tg-driver-dcd-internal" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:8}}>

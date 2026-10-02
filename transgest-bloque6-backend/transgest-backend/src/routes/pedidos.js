@@ -19,6 +19,7 @@ const db      = require("../services/db");
 const { hasRecordedCost } = require("../services/financialEconomics");
 const logger  = require("../services/logger");
 const crypto  = require("crypto");
+const path = require("node:path");
 const zlib = require("zlib");
 const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
@@ -40,6 +41,7 @@ const {
 const { getEmpresaCalendarForDate, inferCcaaFromText } = require("../services/calendarioLaboral");
 const { resolveBestApiKey, assertApiUsageAllowed, recordApiUsage, getGlobalSetting } = require("../services/apiKeys");
 const { validateBase64Upload } = require("../services/uploadValidation");
+const { prepareSupplierProofs } = require("../services/supplierProofUpload");
 const webhooks = require("../services/webhooks");
 const adrService = require("../services/adr");
 
@@ -2192,6 +2194,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   const versions = await transportDocuments.list(db,empresaId,ctx.pedido.id);
   const shipments = (await db.query('SELECT id,referencia FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at,id',[empresaId,ctx.pedido.id])).rows;
   const decaRequest = (await db.query("SELECT created_at FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.solicitado' ORDER BY created_at DESC LIMIT 1", [empresaId,ctx.pedido.id])).rows[0] || null;
+  const decaReceived = (await db.query("SELECT created_at FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.recibido_cargador' ORDER BY created_at DESC LIMIT 1", [empresaId,ctx.pedido.id])).rows[0] || null;
   const current = versions.find(v=>v.estado==='activa');
   const coversShipment = (version,shipmentId) => version.estado==='activa' &&
     (String(version.envio_id||'')===String(shipmentId) || version.payload?.envio_ids?.some(id=>String(id)===String(shipmentId)));
@@ -2215,6 +2218,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
     versiones: versions.map(({payload: archivedPayload,...metadata})=>metadata),
     envios: shipments,
     solicitud_deca: decaRequest ? { created_at: decaRequest.created_at } : null,
+    recepcion_cargador: decaReceived ? { created_at: decaReceived.created_at } : null,
     consolidacion_permitida:ctx.empresa?.documento_control?.permitir_consolidado===true,
     puntos_envio: require('../services/driverStops').driverStops(ctx.pedido).map(p=>({id:p.id,tipo:p.tipo,label:p.label})),
     qr: {
@@ -3109,6 +3113,20 @@ function renderColaboradorDocumentoControlBox(docControl) {
     : '<p class="warn">Tráfico debe emitir o adjuntar el DeCA antes de salir.</p>')+'</div>';
 }
 
+async function notifyDeCaTraffic(empresaId, pedidoId, numero, received, createdBy = null) {
+  const recipients = (await db.query(`SELECT DISTINCT m.usuario_id AS id FROM usuario_empresas m JOIN usuarios u ON u.id=m.usuario_id
+    WHERE m.empresa_id=$1 AND m.activo=true AND u.activo=true AND m.rol IN ('trafico','gerente')`, [empresaId])).rows;
+  const title = received ? 'DeCA recibido del cargador: adjuntar original' : 'DeCA solicitado al no recibirlo del cargador';
+  const message = received
+    ? `${numero || 'Pedido'} · El conductor indica que recibió el DeCA. Comprueba el PDF original y adjúntalo al expediente antes de salir.`
+    : `${numero || 'Pedido'} · Revisar original o generar DeCA antes de salir.`;
+  await Promise.allSettled(recipients.map(({ id }) => crearNotificacion({
+    empresa_id:empresaId, usuario_id:id, tipo:'deca_solicitado', titulo:title, mensaje:message,
+    data:{pedido_id:pedidoId,pedido_numero:numero || '',dedupe_key:`deca_${received ? 'recibido' : 'solicitado'}:${pedidoId}`},
+    created_by:createdBy,
+  })));
+}
+
 function getColaboradorPrecioTonelada(data) {
   return data ? supplierTonneAgreement(data) : null;
 }
@@ -3394,12 +3412,10 @@ router.get("/colaborador/carga/:token", async (req, res) => {
   try {
     const data = await getColaboradorTokenData(req.params.token, "carga");
     if (!data) return res.status(404).send(colaboradorPage("Enlace no disponible", `<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>`));
-    const docControl = await getColaboradorDocumentoControlPayload(req, data.pedido_id, data.empresa_id);
-    if (docControl?.documento) await logColaboradorDocumentoControl(data.pedido_id, data.empresa_id, "consultado", { accion: "carga", codigo_control: docControl.documento.codigo_control || null });
+    if (data.colaborador_carga_confirmada_at) return res.send(colaboradorPage('Documento de control tras la carga', renderColaboradorDecisionDeca(req.params.token, data)));
     res.send(colaboradorPage("Confirmar carga", `
       <h1>Confirmar carga</h1>
       ${renderColaboradorPedidoBox(data)}
-      ${renderColaboradorDocumentoControlBox(docControl)}
       <form method="post">
         <label>Incidencia u observacion en carga</label><textarea name="notas" rows="3"></textarea>
         <button type="submit">Marcar como cargado</button>
@@ -3408,35 +3424,73 @@ router.get("/colaborador/carga/:token", async (req, res) => {
   } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
+function renderColaboradorDecisionDeca(token, data) {
+  return `<h1>Carga registrada</h1>${renderColaboradorPedidoBox(data)}
+    <div class="card"><h2>Documento de control tras la carga</h2>
+      <p>Indica si el cargador te ha facilitado el DeCA. Tráfico comprobará y adjuntará el original o preparará el documento antes de salir.</p>
+      <form method="post" action="/api/v1/pedidos/colaborador/carga/${htmlEscape(token)}/deca">
+        <label style="text-transform:none;font-size:14px"><input type="radio" name="deca_origen" value="recibido" required style="width:auto"/> Sí, el cargador me ha facilitado el DeCA</label>
+        <label style="text-transform:none;font-size:14px"><input type="radio" name="deca_origen" value="solicitar" required style="width:auto"/> No me lo ha facilitado: solicitarlo a tráfico</label>
+        <button type="submit">Confirmar respuesta y continuar</button>
+      </form>
+    </div>`;
+}
+
 router.post("/colaborador/carga/:token", async (req, res) => {
   try {
     const data = await getColaboradorTokenData(req.params.token, "carga");
     if (!data) return res.status(404).send(colaboradorPage("Enlace no disponible", `<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>`));
+    if (data.colaborador_carga_confirmada_at) return res.send(colaboradorPage('Documento de control tras la carga', renderColaboradorDecisionDeca(req.params.token, data)));
     const notas = String(req.body.notas || "").trim();
-    await db.query(`
-      UPDATE pedidos
-      SET estado='en_curso',
-          colaborador_carga_confirmada_at=NOW(),
-          carga_real_at=COALESCE(carga_real_at,NOW()),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1::text))
-      WHERE id=$2 AND empresa_id=$3
-    `, [notas ? `CARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
-    await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.carga_confirmada", { notas: notas || null }, "colaborador");
-    await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
+    await db.transaction(async client => {
+      const updated = await client.query(`UPDATE pedidos SET estado='en_curso', colaborador_carga_confirmada_at=NOW(),
+        carga_real_at=COALESCE(carga_real_at,NOW()), notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ',NULLIF(notas,''),$1::text))
+        WHERE id=$2 AND empresa_id=$3 AND colaborador_carga_confirmada_at IS NULL RETURNING id`,
+      [notas ? `CARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
+      if (!updated.rows.length) throw Object.assign(new Error('La carga ya estaba confirmada. Abre de nuevo el enlace para indicar el DeCA.'), { status:409 });
+      await client.query(`INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,detalle)
+        VALUES($1,$2,'colaborador.carga_confirmada','colaborador',$3::jsonb)`,
+      [data.pedido_id, data.empresa_id, JSON.stringify({notas:notas || null})]);
+    });
+    res.send(colaboradorPage('Documento de control tras la carga', renderColaboradorDecisionDeca(req.params.token, data)));
+  } catch(e) { res.status(e.status || 500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
+});
 
-    const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
+router.post('/colaborador/carga/:token/deca', async (req, res) => {
+  try {
+    const data = await getColaboradorTokenData(req.params.token, 'carga');
+    if (!data) return res.status(404).send(colaboradorPage('Enlace no disponible', '<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>'));
+    if (!data.colaborador_carga_confirmada_at) return res.status(409).send(colaboradorPage('Carga pendiente', '<h1>Confirma primero la carga</h1>'));
+    const decaOrigin = String(req.body.deca_origen || '').trim();
+    if (!['recibido','solicitar'].includes(decaOrigin)) return res.status(400).send(colaboradorPage('Indica el origen del DeCA', renderColaboradorDecisionDeca(req.params.token, data)));
+    await db.transaction(async client => {
+      const claimed = await client.query('UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1 AND usado_at IS NULL AND expires_at>NOW() RETURNING id', [data.token_id]);
+      if (!claimed.rows.length) throw Object.assign(new Error('Este enlace ya se utilizó.'), { status:409 });
+      await client.query(`INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,detalle)
+        VALUES($1,$2,$3,'colaborador',$4::jsonb)`, [data.pedido_id,data.empresa_id,
+        decaOrigin === 'recibido' ? 'documento_control.recibido_cargador' : 'documento_control.solicitado',
+        JSON.stringify({source:'colaborador',motivo:decaOrigin === 'recibido' ? 'cargador_entrego_original' : 'cargador_no_entrego_original',missing:'*'})]);
+    });
+    await notifyDeCaTraffic(data.empresa_id, data.pedido_id, data.numero, decaOrigin === 'recibido')
+      .catch(error => logger.warn('No se pudo avisar a tráfico sobre el DeCA:', error.message));
+
     let caminoEnviado = false;
-    if (pedido?.colaborador_email) {
-      const tokenCamino = await createColaboradorToken(pedido, "camino", 360);
-      try { await sendColaboradorEmail(req, pedido, "camino", tokenCamino); caminoEnviado = true; }
-      catch (e) { logger.error("Email colaborador camino:", e.message); }
+    try {
+      const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
+      if (pedido?.colaborador_email) {
+        const tokenCamino = await createColaboradorToken(pedido, "camino", 360);
+        await sendColaboradorEmail(req, pedido, "camino", tokenCamino);
+        caminoEnviado = true;
+      }
+    } catch (error) {
+      logger.error("No se pudo enviar el siguiente paso al colaborador:", error.message);
     }
     res.send(colaboradorPage("Carga registrada", `
       <h1>Carga registrada</h1>
-      <div class="ok">El pedido queda marcado como cargado. ${caminoEnviado ? "Te hemos enviado otro correo para confirmar la salida hacia destino." : "No se pudo enviar el siguiente enlace; solicita a tráfico que revise el correo."}</div>
-      ${renderColaboradorAcuseBox("Acuse de carga registrada", data, { notas })}
+      <div class="ok">El pedido queda marcado como cargado. ${decaOrigin === 'recibido' ? 'Tráfico ha recibido el aviso para verificar y adjuntar el original del cargador.' : 'Hemos solicitado el DeCA a tráfico.'} ${caminoEnviado ? "Te hemos enviado otro correo para confirmar la salida hacia destino." : "No se pudo enviar el siguiente enlace; solicita a tráfico que revise el correo."}</div>
+      ${renderColaboradorAcuseBox("Acuse de carga registrada", data)}
     `));
-  } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
+  } catch(e) { res.status(e.status || 500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
 router.get("/colaborador/camino/:token", async (req, res) => {
@@ -3482,45 +3536,27 @@ router.post("/colaborador/camino/:token", async (req, res) => {
   } catch(e) { res.status(e.status||500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
+router.get("/colaborador/descarga-form.js", (_req, res) => {
+  res.set("Cache-Control", "private, no-store");
+  res.type("application/javascript").sendFile(path.join(__dirname, "../public/colaboradorDescarga.js"));
+});
+
 router.get("/colaborador/descarga/:token", async (req, res) => {
   try {
     const data = await getColaboradorTokenData(req.params.token, "descarga");
     if (!data) return res.status(404).send(colaboradorPage("Enlace no disponible", `<h1>Enlace no disponible</h1><p>El enlace ha caducado o ya fue utilizado.</p>`));
     const postUrl = `/api/v1/pedidos/colaborador/descarga/${htmlEscape(req.params.token)}`;
-    const docControl = await getColaboradorDocumentoControlPayload(req, data.pedido_id, data.empresa_id);
-    if (docControl?.documento) await logColaboradorDocumentoControl(data.pedido_id, data.empresa_id, "consultado", { accion: "descarga", codigo_control: docControl.documento.codigo_control || null });
+    const alreadyDelivered = !!data.colaborador_descarga_confirmada_at;
     res.send(colaboradorPage("Confirmar descarga", `
-      <h1>Confirmar descarga</h1>
-      <p>Pedido <strong>${htmlEscape(data.numero)}</strong>. Sube los albaranes firmados y confirma la entrega.</p>
+      <h1>${alreadyDelivered ? "Subir albaranes" : "Confirmar descarga"}</h1>
+      <p>Pedido <strong>${htmlEscape(data.numero)}</strong>. ${alreadyDelivered ? "La descarga ya consta registrada. Sube los albaranes firmados pendientes." : "Sube los albaranes firmados y confirma la entrega."}</p>
       ${renderColaboradorPedidoBox(data)}
-      ${renderColaboradorDocumentoControlBox(docControl)}
-      <label>Albaranes firmados</label><input id="files" type="file" multiple accept="image/*,.pdf"/>
+      <label for="files">Albaranes firmados</label><input id="files" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp"/>
       <label>Observaciones de descarga</label><textarea id="notas" rows="3"></textarea>
-      <button id="send" type="button">Confirmar descarga y subir albaranes</button>
-      <p id="msg" class="muted"></p>
-      <script>
-        async function fileToBase64(file) {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-        }
-        document.getElementById('send').onclick = async () => {
-          const msg = document.getElementById('msg');
-          const files = Array.from(document.getElementById('files').files || []);
-          msg.textContent = 'Subiendo...';
-          const documentos = [];
-          for (const f of files) {
-            documentos.push({ nombre:f.name, file_mime:f.type || 'application/octet-stream', file_size_kb:Math.round(f.size/1024), file_base64: await fileToBase64(f) });
-          }
-          const res = await fetch('${postUrl}', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ notas:document.getElementById('notas').value, documentos }) });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) { msg.textContent = data.error || 'No se pudo enviar'; return; }
-          document.body.querySelector('main').innerHTML = data.html || '<h1>Descarga registrada</h1><div class="ok">Gracias. Hemos recibido la confirmacion y los albaranes.</div>';
-        };
-      </script>
+      <button id="send" type="button" data-upload-url="${postUrl}">${alreadyDelivered ? "Subir albaranes" : "Confirmar descarga y subir albaranes"}</button>
+      <p id="msg" class="muted" role="status" aria-live="polite"></p>
+      <noscript><p class="warn">Activa JavaScript en el navegador para subir los albaranes.</p></noscript>
+      <script src="/api/v1/pedidos/colaborador/descarga-form.js" defer></script>
     `));
   } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
@@ -3529,45 +3565,42 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
   try {
     const data = await getColaboradorTokenData(req.params.token, "descarga");
     if (!data) return res.status(404).json({ error: "El enlace ha caducado o ya fue utilizado" });
+    const documentos = prepareSupplierProofs(req.body?.documentos);
     const notas = String(req.body.notas || "").trim();
-    await db.query(`
-      UPDATE pedidos
-      SET estado='entregado',
-          colaborador_descarga_confirmada_at=NOW(),
-          descarga_real_at=COALESCE(descarga_real_at,NOW()),
-          fecha_entrega=COALESCE(fecha_entrega, CURRENT_DATE),
-          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ', NULLIF(notas,''), $1::text))
-      WHERE id=$2 AND empresa_id=$3
-    `, [notas ? `DESCARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
-    const documentos = Array.isArray(req.body.documentos) ? req.body.documentos.slice(0, 8) : [];
-    for (const doc of documentos) {
-      if (!doc?.file_base64) continue;
-      if (String(doc.file_base64).length > 5000000) continue;
-      await db.query(
-        `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
-         VALUES ($1,$2,$3,'Albaran',$4,$5,$6,$7)`,
-        [data.pedido_id, data.empresa_id, doc.nombre || "Albaran colaborador", doc.file_base64, doc.file_mime || "application/pdf", doc.file_size_kb || null, "Subido por colaborador"]
-      ).catch(e => logger.warn("No se pudo guardar albaran colaborador:", e.message));
-    }
-    await logPedidoEvento(data.pedido_id, data.empresa_id, "colaborador.descarga_confirmada", {
-      notas: notas || null,
-      documentos: documentos.length,
-      documentos_meta: documentos.map((doc) => ({
-        nombre: String(doc?.nombre || "Albaran colaborador").slice(0, 160),
-        mime: String(doc?.file_mime || "application/octet-stream").slice(0, 80),
-        size_kb: Number(doc?.file_size_kb || 0) || null,
-      })),
-    }, "colaborador");
-    await crearFacturaBorradorPedido(data.pedido_id, data.empresa_id, null)
+    const alreadyDelivered = !!data.colaborador_descarga_confirmada_at;
+    await db.transaction(async client => {
+      const claimed = await client.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1 AND usado_at IS NULL AND expires_at>NOW() RETURNING id", [data.token_id]);
+      if (!claimed.rows.length) throw Object.assign(new Error("Este enlace ya se utilizó. Solicita uno nuevo a tráfico."), { status:409 });
+      for (const doc of documentos) {
+        await client.query(
+          `INSERT INTO pedido_docs (pedido_id,empresa_id,nombre,tipo,file_base64,file_mime,file_size_kb,notas)
+           VALUES ($1,$2,$3,'Albaran',$4,$5,$6,$7)`,
+          [data.pedido_id, data.empresa_id, doc.name, doc.base64, doc.mime, doc.sizeKb, "Subido por colaborador"]
+        );
+      }
+      if (!alreadyDelivered) {
+        await client.query(`UPDATE pedidos SET estado='entregado', colaborador_descarga_confirmada_at=NOW(),
+          descarga_real_at=COALESCE(descarga_real_at,NOW()), fecha_entrega=COALESCE(fecha_entrega,CURRENT_DATE),
+          notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ',NULLIF(notas,''),$1::text)) WHERE id=$2 AND empresa_id=$3`,
+        [notas ? `DESCARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
+      }
+      await client.query(`INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,detalle)
+        VALUES($1,$2,$3,'colaborador',$4::jsonb)`, [data.pedido_id, data.empresa_id,
+        alreadyDelivered ? 'colaborador.albaranes_recibidos' : 'colaborador.descarga_confirmada',
+        JSON.stringify({notas:notas || null,documentos:documentos.length,
+          documentos_meta:documentos.map(doc=>({nombre:doc.name,mime:doc.mime,size_kb:doc.sizeKb}))})]);
+    });
+    if (!alreadyDelivered) await crearFacturaBorradorPedido(data.pedido_id, data.empresa_id, null)
       .catch(e => logger.error("No se pudo crear factura borrador automatica:", e.message));
-    await vincularAlbaranesAFacturaPedido(data.pedido_id, data.empresa_id);
-    await crearFacturaRecibidaColaborador(data.pedido_id, data.empresa_id, null);
-    await db.query("UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1", [data.token_id]);
+    await vincularAlbaranesAFacturaPedido(data.pedido_id, data.empresa_id)
+      .catch(e => logger.error("Albaranes guardados; no se pudieron vincular a factura:", e.message));
+    if (!alreadyDelivered) await crearFacturaRecibidaColaborador(data.pedido_id, data.empresa_id, null)
+      .catch(e => logger.error("Albaranes guardados; no se pudo crear factura recibida:", e.message));
     res.json({
       ok: true,
-      html: `<h1>Descarga registrada</h1><div class="ok">Gracias. Hemos recibido la confirmacion y los albaranes.</div>${renderColaboradorAcuseBox("Acuse de descarga registrada", data, { notas, documentos: documentos.length })}`
+      html: `<h1>${alreadyDelivered ? "Albaranes recibidos" : "Descarga registrada"}</h1><div class="ok">Gracias. Hemos recibido ${documentos.length} albarán(es) firmado(s)${alreadyDelivered ? "." : " y la confirmación de descarga."}</div>${renderColaboradorAcuseBox(alreadyDelivered ? "Acuse de albaranes recibidos" : "Acuse de descarga registrada", data, { notas, documentos: documentos.length })}`
     });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) { res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudieron guardar los albaranes. No se ha confirmado la descarga; vuelve a intentarlo." }); }
 });
 
 function sendTransportOriginal(res, bytes, filename, hash, download = false) {
@@ -6834,6 +6867,8 @@ router.post('/:id/documento-control-digital/solicitar', async(req,res)=>{
     if (!['chofer','trafico','gerente'].includes(req.user?.rol)) return res.status(403).json({error:'Sin permiso para solicitar el DeCA.'});
     const empresaId = await authorizeTransportDocument(req,res);
     if (!empresaId) return;
+    const order = (await db.query('SELECT numero,carga_real_at FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
+    if (req.user?.rol === 'chofer' && !order?.carga_real_at) return res.status(409).json({error:'Finaliza la carga antes de indicar si el cargador entregó el DeCA.'});
     const versions = await transportDocuments.list(db,empresaId,req.params.id);
     const shipmentIds = (await db.query('SELECT id FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,req.params.id])).rows.map(row=>String(row.id));
     const active = versions.filter(version=>version.estado==='activa');
@@ -6842,15 +6877,10 @@ router.post('/:id/documento-control-digital/solicitar', async(req,res)=>{
     const missing = shipmentIds.length ? shipmentIds.filter(id=>!active.some(version=>String(version.envio_id||'')===id||version.payload?.envio_ids?.some(value=>String(value)===id))).sort().join(',') : '*';
     const prior = (await db.query("SELECT id FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.solicitado' AND detalle->>'missing'=$3 AND created_at>NOW()-INTERVAL '6 hours' LIMIT 1",[empresaId,req.params.id,missing])).rows[0];
     if (prior) return res.json({ok:true,already_requested:true});
-    const order = (await db.query('SELECT numero FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];
     await db.query("INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,actor_id,detalle) VALUES($1,$2,'documento_control.solicitado','usuario',$3,$4::jsonb)",[
       req.params.id,empresaId,req.user.id,JSON.stringify({motivo:'cargador_no_entrego_original',missing}),
     ]);
-    const recipients = (await db.query(`SELECT DISTINCT m.usuario_id AS id FROM usuario_empresas m JOIN usuarios u ON u.id=m.usuario_id
-      WHERE m.empresa_id=$1 AND m.activo=true AND u.activo=true AND m.rol IN ('trafico','gerente')`,[empresaId])).rows;
-    await Promise.allSettled(recipients.map(({id})=>crearNotificacion({empresa_id:empresaId,usuario_id:id,tipo:'deca_solicitado',
-      titulo:'DeCA solicitado al no recibirlo del cargador',mensaje:`${order?.numero||'Pedido'} · Revisar original o generar DeCA antes de salir`,
-      data:{pedido_id:req.params.id,pedido_numero:order?.numero||'',dedupe_key:`deca_solicitado:${req.params.id}`},created_by:req.user.id})));
+    await notifyDeCaTraffic(empresaId,req.params.id,order?.numero,false,req.user.id);
     res.json({ok:true});
   }catch(error){res.status(error.status||500).json({error:error.message||'No se pudo solicitar el DeCA.'});}
 });
@@ -7181,8 +7211,14 @@ router.post("/:id/documento-control-digital/evento", async (req, res) => {
     }
 
     const action = String(req.body?.action || "consultado").trim().toLowerCase();
-    const allowed = new Set(["abierto", "impreso", "descargado", "copiado", "compartido", "consultado", "revisado", "disponible", "remitido"]);
+    const allowed = new Set(["abierto", "impreso", "descargado", "copiado", "compartido", "consultado", "revisado", "disponible", "remitido", "recibido_cargador"]);
     const normalizedAction = allowed.has(action) ? action : "consultado";
+    if (normalizedAction === 'recibido_cargador') {
+      if (!['chofer','trafico','gerente'].includes(req.user?.rol)) return res.status(403).json({error:'Sin permiso para confirmar la recepción del DeCA.'});
+      if (!ctx.pedido.carga_real_at) return res.status(409).json({error:'Confirma la carga antes de indicar si el cargador entregó el DeCA.'});
+      const prior = (await db.query("SELECT id FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.recibido_cargador' AND created_at>NOW()-INTERVAL '6 hours' LIMIT 1", [empresaId,req.params.id])).rows[0];
+      if (prior) return res.json({ok:true,action:normalizedAction,already_recorded:true});
+    }
     const payload = buildDocumentoControlPayload({
       empresaId,
       pedido: ctx.pedido,
@@ -7247,6 +7283,11 @@ router.post("/:id/documento-control-digital/evento", async (req, res) => {
       canal: payload.remision?.canal || "",
       source: req.body?.source || (req.user?.rol === "chofer" ? "app_chofer" : "pedidos"),
     }, req.user?.rol || "usuario", req.user?.id || null);
+
+    if (normalizedAction === 'recibido_cargador') {
+      await notifyDeCaTraffic(empresaId, req.params.id, ctx.pedido.numero, true, req.user.id)
+        .catch(error => logger.warn('No se pudo avisar a tráfico sobre el DeCA recibido:', error.message));
+    }
 
     res.json({
       ok: true,

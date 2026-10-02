@@ -60,7 +60,6 @@ import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../service
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import ModalNuevoClienteRapido from "./orders/NewCustomerModal";
 import { formatMatricula, upperFromEvent } from "../utils/formatos";
-import { GeoFields } from "../components/GeoFields";
 import { inferPlaceGeo, provinciaDeLugar } from "../utils/placeGeo";
 import { mergePointGeoDraft } from "../utils/pointGeoDraft";
 import { shouldSendSupplierWorkflow } from "../utils/supplierWorkflowPolicy";

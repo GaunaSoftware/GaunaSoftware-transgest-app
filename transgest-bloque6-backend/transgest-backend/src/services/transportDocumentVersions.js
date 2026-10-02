@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { renderDeca } = require('./transportDocumentPdf');
+const { renderDeca, DECA_TEMPLATE_VERSION } = require('./transportDocumentPdf');
 const { driverStops } = require('./driverStops');
 const fail = (message, code, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const canonical = value => JSON.stringify(value, function (key, v) {
@@ -188,7 +188,10 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
       if (missing.length) { const err = Object.assign(new Error(`Faltan: ${missing.join('; ')}`), { code: 'DECA_FIELDS_REQUIRED', status: 422, fields: missing }); throw err; }
     }
     const shipmentId=consolidated?null:shipment?.id||null;
-    const materialHash = hash(canonical({ source, documento: d, pdf: bytes ? hash(bytes) : null, envio_id: shipmentId }));
+    // Una corrección de plantilla crea una nueva versión con motivo; nunca
+    // regenera los bytes conservados detrás de un QR anterior.
+    const materialHash = hash(canonical({ source, documento: d, pdf: bytes ? hash(bytes) : null, envio_id: shipmentId,
+      ...(source === 'transgest' ? {template_version:DECA_TEMPLATE_VERSION} : {}) }));
     if (previous?.material_hash === materialHash) return { id: previous.id, created: false };
     if (previous && !String(reason || '').trim()) fail('Indica el motivo de la nueva versión', 'VERSION_REASON_REQUIRED', 422);
     const version = Number((await tx.query('SELECT COALESCE(MAX(version),0)+1 AS n FROM transport_document_versions WHERE empresa_id=$1 AND pedido_id=$2 AND scope_key=$3', [empresaId, pedidoId, scope])).rows[0].n);
@@ -200,7 +203,7 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
     const trip = (await tx.query("SELECT v.id FROM viajes_operativos v JOIN viaje_pedidos p ON p.empresa_id=v.empresa_id AND p.viaje_id=v.id WHERE p.empresa_id=$1 AND p.pedido_id=$2 AND p.activo=true AND v.estado<>'cancelado' ORDER BY v.created_at DESC LIMIT 1", [empresaId, pedidoId])).rows[0];
     await tx.query(`INSERT INTO transport_document_versions(id,empresa_id,pedido_id,envio_id,viaje_id,scope_key,version,source,payload,payload_hash,material_hash,pdf,pdf_hash,filename,reason,created_by,created_at,token_hash,public_url,retention_until,metadata)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,($17::timestamptz+INTERVAL '1 year')::date,$20)`,
-      [id,empresaId,pedidoId,shipmentId,trip?.id||null,scope,version,source,JSON.stringify(snapshot),hash(canonical(snapshot)),materialHash,pdf,hash(pdf),`DeCA-${id}-v${version}.pdf`,reason||'Emisión inicial',actorId||null,generatedAt,hash(token),url,JSON.stringify({native_pdf:source==='transgest'?'generated':'uploader_declared_text_detected',external_original:source==='external',validation:'No certifica contenido, firma ni cumplimiento del documento externo'})]);
+      [id,empresaId,pedidoId,shipmentId,trip?.id||null,scope,version,source,JSON.stringify(snapshot),hash(canonical(snapshot)),materialHash,pdf,hash(pdf),`DeCA-${id}-v${version}.pdf`,reason||'Emisión inicial',actorId||null,generatedAt,hash(token),url,JSON.stringify({native_pdf:source==='transgest'?'generated':'uploader_declared_text_detected',external_original:source==='external',...(source==='transgest'?{template_version:DECA_TEMPLATE_VERSION}:{}),validation:'No certifica contenido, firma ni cumplimiento del documento externo'})]);
     return { id, created: true, version };
   });
 }

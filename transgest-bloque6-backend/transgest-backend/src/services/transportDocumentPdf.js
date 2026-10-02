@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
+const DECA_TEMPLATE_VERSION = '2026-10-readable-parties';
 
 const C = { ink: '#17313a', teal: '#087a73', pale: '#e8f5f2', line: '#c9d9d6', muted: '#577078' };
 const text = value => String(value ?? '').trim() || 'No informado';
@@ -8,7 +9,14 @@ const date = value => {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw.slice(8, 10)}/${raw.slice(5, 7)}/${raw.slice(0, 4)}` : text(value);
 };
 const party = value => [value?.nombre, value?.nif && `NIF ${value.nif}`, value?.domicilio].filter(Boolean).join('\n');
-const stop = value => [value?.nombre, value?.direccion].filter(Boolean).join('\n');
+const comparable = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const stop = value => {
+  const name = String(value?.nombre || '').trim(), address = String(value?.direccion || '').trim();
+  // Algunos puntos antiguos usan la dirección como nombre. Imprime una sola
+  // vez la dirección completa, sin perder el nombre cuando es diferente.
+  if (name && address && comparable(address).startsWith(comparable(name))) return address;
+  return [name, address].filter(Boolean).join('\n');
+};
 const number = value => value === null || value === undefined || value === '' ? 'No informado' : Number(value).toLocaleString('es-ES');
 
 function dataImage(value) {
@@ -28,81 +36,109 @@ async function renderDeca({ documento: d, version, generatedAt, url }) {
   } });
   const chunks = []; pdf.on('data', chunk => chunks.push(chunk));
   const done = new Promise((resolve, reject) => { pdf.on('end', () => resolve(Buffer.concat(chunks))); pdf.on('error', reject); });
-  const left = 28, width = pdf.page.width - 56, half = width / 2, overflow = [];
+  const left = 28, width = pdf.page.width - 56, gap = 8, bottom = 754, overflow = [];
   const put = (value, x, y, w, { size = 8, bold = false, color = C.ink, height } = {}) => {
     pdf.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).fillColor(color)
-      .text(text(value), x, y, { width: w, height, lineGap: 2, ellipsis: true });
+      .text(text(value), x, y, { width: w, height, lineGap: 2 });
   };
-  const box = (label, value, x, y, w, h) => {
+  const measure = (value, w, size = 8, lineGap = 2) => pdf.font('Helvetica').fontSize(size).heightOfString(value, { width: w, lineGap });
+  const fit = (content, w, height, size = 8, lineGap = 2) => {
+    if (measure(content, w, size, lineGap) <= height) return [content, ''];
+    let low = 0, high = content.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (measure(content.slice(0, middle), w, size, lineGap) <= height) low = middle;
+      else high = middle - 1;
+    }
+    const boundary = content.lastIndexOf(' ', low);
+    const split = boundary > low / 2 ? boundary : Math.max(1, low);
+    return [content.slice(0, split).trimEnd(), content.slice(split).trimStart()];
+  };
+  const prepare = (label, value, w, minimum) => {
+    let content = text(value);
+    if (measure(content, w - 18) > 160) {
+      const [visible, rest] = fit(content, w - 18, 145);
+      content = `${visible}\nContinúa en el anexo.`;
+      overflow.push({ label, content: rest });
+    }
+    return { label, content, w, h: Math.max(minimum, Math.ceil(measure(content, w - 18)) + 31) };
+  };
+  const box = ({ label, content, w }, x, y, h) => {
     pdf.roundedRect(x, y, w, h, 5).lineWidth(.7).strokeColor(C.line).stroke();
     put(label.toUpperCase(), x + 9, y + 7, w - 18, { bold: true, size: 7, color: C.teal, height: 12 });
-    const content = text(value);
-    const fullHeight = pdf.font('Helvetica').fontSize(8).heightOfString(content, { width: w - 18, lineGap: 2 });
-    if (fullHeight > h - 26) {
-      overflow.push({ label, content });
-      put('Ver texto íntegro en anexo', x + 9, y + 21, w - 18, { size: 8, height: h - 26 });
-    } else put(content, x + 9, y + 21, w - 18, { size: 8, height: h - 26 });
+    put(content, x + 9, y + 22, w - 18);
   };
   const band = (label, y) => {
     pdf.roundedRect(left, y, width, 22, 4).fill(C.pale);
     put(label, left + 9, y + 5, width - 18, { bold: true, size: 9, color: C.teal });
   };
-  pdf.roundedRect(left, 28, width, 92, 8).lineWidth(1).strokeColor(C.line).stroke();
   const logo = dataImage(d.empresa?.logo_url);
-  if (logo) { try { pdf.image(logo, left + 10, 39, { fit: [55, 50] }); } catch {} }
   const titleX = left + (logo ? 75 : 13);
-  put('DOCUMENTO DE CONTROL ADMINISTRATIVO', titleX, 41, 357 - (logo ? 60 : 0), { bold: true, size: 10, color: C.teal });
-  put('ELECTRÓNICO · DeCA', titleX, 58, 357 - (logo ? 60 : 0), { bold: true, size: 11, color: C.ink });
-  put(`${text(d.empresa?.nombre)}  ·  Pedido ${text(d.referencia_pedido)}`, titleX, 79, 354 - (logo ? 60 : 0), { size: 7.5, color: C.muted, height: 16 });
-  put(`Original v${version} · ${new Date(generatedAt).toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}`, titleX, 98, 350 - (logo ? 60 : 0), { size: 7, color: C.muted, height: 14 });
+  const titleWidth = width - (titleX - left) - 100;
+  const companyHeight = measure(text(d.empresa?.nombre), titleWidth, 7.5);
+  const headerHeight = Math.max(99, 76 + companyHeight);
+  pdf.roundedRect(left, 28, width, headerHeight, 8).lineWidth(1).strokeColor(C.line).stroke();
+  if (logo) { try { pdf.image(logo, left + 10, 39, { fit: [55, 50] }); } catch {} }
+  put('DOCUMENTO DE CONTROL ADMINISTRATIVO', titleX, 41, titleWidth, { bold: true, size: 10, color: C.teal });
+  put('ELECTRÓNICO · DeCA', titleX, 58, titleWidth, { bold: true, size: 11, color: C.ink });
+  put(text(d.empresa?.nombre), titleX, 79, titleWidth, { size: 7.5, color: C.muted });
+  put(`${text(d.referencia_pedido)} · Original v${version} · ${new Date(generatedAt).toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}`, titleX, 84 + companyHeight, titleWidth, { size: 7, color: C.muted });
   const qr = await QRCode.toBuffer(url, { width: 200, margin: 1, errorCorrectionLevel: 'M' });
   pdf.image(qr, left + width - 81, 34, { width: 75 });
 
-  let y = 128;
-  band('PARTES DEL TRANSPORTE', y); y += 28;
-  box('Cargador contractual', party(d.cargador_contractual), left, y, half - 4, 68);
-  box('Transportista efectivo', party(d.transportista_efectivo), left + half + 4, y, half - 4, 68); y += 75;
-  box('Destinatario', [d.destino?.destinatario, d.destino?.direccion].filter(Boolean).join('\n'), left, y, half - 4, 60);
-  box('Fecha de transporte y referencia', `${date(d.fecha_transporte)}\n${text(d.referencia_pedido)}`, left + half + 4, y, half - 4, 60); y += 68;
-
-  band('ORIGEN, DESTINO Y MERCANCÍA', y); y += 28;
-  box('Lugar de carga', stop(d.origen), left, y, half - 4, 61);
-  box('Lugar de entrega', stop(d.destino), left + half + 4, y, half - 4, 61); y += 68;
-  box('Naturaleza y embalaje', [d.mercancia?.descripcion, d.mercancia?.embalaje && `Embalaje: ${d.mercancia.embalaje}`].filter(Boolean).join('\n'), left, y, width * .57 - 4, 60);
-  box('Cantidad', `${number(d.mercancia?.peso_kg)} kg\n${number(d.mercancia?.bultos)} bultos/unidades`, left + width * .57 + 4, y, width * .43 - 4, 60); y += 68;
-  box('Tractora y remolque', [d.vehiculo?.tractora && `Tractora: ${d.vehiculo.tractora}`, d.vehiculo?.remolque && `Remolque: ${d.vehiculo.remolque}`].filter(Boolean).join('\n'), left, y, half - 4, 52);
-  box('Autorización especial de circulación', d.autorizacion_especial?.requerida ? text(d.autorizacion_especial.referencia) : 'No indicada como necesaria', left + half + 4, y, half - 4, 52); y += 60;
-
-  if (d.observaciones) { box('Observaciones públicas', d.observaciones, left, y, width, 49); y += 57; }
-  band('QR Y TRAZABILIDAD', y); y += 28;
-  box('Original verificable', `QR de descarga directa · código ${text(d.codigo_control)}\nEsta versión conserva sus propios datos y URL.`, left, y, width, 55); y += 62;
-  const third = (width - 12) / 3;
-  ['Cargador', 'Transportista', 'Destinatario'].forEach((label, i) => {
-    box(`Firma contractual · ${label}`, 'No incorporada a este original.\nJustificantes operativos en expediente privado.', left + i * (third + 6), y, third, 68);
-  }); y += 77;
-  put('Documento de control administrativo. Este QR no publica importes. Cuando proceda, el precio y los gastos deben constar en un acuerdo escrito privado vinculado al envío.', left, y, width, { size: 7, color: C.muted, height: 25 });
+  let y = 28 + headerHeight + 8;
+  const ensure = height => {
+    if (y + height <= bottom) return;
+    pdf.addPage(); y = 36;
+    put(`DeCA · ${text(d.referencia_pedido)} · continuación`, left, y, width, { bold: true, size: 10, color: C.teal }); y += 26;
+  };
+  const section = (label, reserve = 60) => { ensure(28 + reserve); band(label, y); y += 28; };
+  const row = (items, minimum = 52, portion = .5) => {
+    const widths = items.length === 1 ? [width] : [(width - gap) * portion, (width - gap) * (1 - portion)];
+    const cells = items.map(([label, value], i) => prepare(label, value, widths[i], minimum));
+    const height = Math.max(...cells.map(cell => cell.h));
+    ensure(height);
+    let x = left;
+    for (const cell of cells) { box(cell, x, y, height); x += cell.w + gap; }
+    y += height + 8;
+  };
+  section('PARTES DEL TRANSPORTE', 100);
+  row([['Cargador contractual', party(d.cargador_contractual)], ['Transportista efectivo', party(d.transportista_efectivo)]], 68);
+  const recipient = d.destino?.destinatario || d.destino?.nombre;
+  row([['Destinatario', comparable(recipient) === comparable(d.destino?.direccion) ? '' : recipient], ['Fecha de transporte y referencia', `${date(d.fecha_transporte)}\n${text(d.referencia_pedido)}`]]);
+  section('ORIGEN, DESTINO Y MERCANCÍA');
+  row([['Lugar de carga', stop(d.origen)], ['Lugar de entrega', stop(d.destino)]], 61);
+  row([['Naturaleza y embalaje', [d.mercancia?.descripcion, d.mercancia?.embalaje && `Embalaje: ${d.mercancia.embalaje}`].filter(Boolean).join('\n')], ['Cantidad', `${number(d.mercancia?.peso_kg)} kg\n${number(d.mercancia?.bultos)} bultos/unidades`]], 60, .57);
+  row([['Tractora y remolque', [d.vehiculo?.tractora && `Tractora: ${d.vehiculo.tractora}`, d.vehiculo?.remolque && `Remolque: ${d.vehiculo.remolque}`].filter(Boolean).join('\n')], ['Autorización especial de circulación', d.autorizacion_especial?.requerida ? text(d.autorizacion_especial.referencia) : 'No indicada como necesaria']]);
+  if (d.observaciones) row([['Observaciones públicas', d.observaciones]], 49);
+  section('QR Y TRAZABILIDAD');
+  row([['Original verificable', `QR de descarga directa · código ${text(d.codigo_control)}\nEsta versión conserva sus propios datos y URL.`]], 55);
+  const notes = 'Las firmas de carga y entrega, cuando se registran, se consultan en los justificantes operativos del expediente. Este original es el documento de control administrativo; no incorpora una firma contractual avanzada.\nEste QR no publica importes. Cuando proceda, el precio y los gastos constarán en un acuerdo escrito privado vinculado al envío.';
+  const notesHeight = measure(notes, width, 7);
+  ensure(notesHeight + 4); put(notes, left, y, width, { size: 7, color: C.muted }); y += notesHeight + 8;
 
   if (d.envios?.length) {
     pdf.addPage(); y = 36;
     put(`ENVÍOS CONSOLIDADOS · ${text(d.referencia_pedido)}`, left, y, width, { bold: true, size: 13, color: C.teal }); y += 32;
     for (const [index, shipment] of d.envios.entries()) {
-      if (y + 154 > 760) { pdf.addPage(); y = 36; }
-      band(`ENVÍO ${index + 1} · ${text(shipment.referencia || shipment.id)}`, y); y += 29;
-      box('Origen', stop(shipment.origen), left, y, half - 4, 45);
-      box('Destinatario y destino', [shipment.destino?.destinatario, shipment.destino?.direccion].filter(Boolean).join('\n'), left + half + 4, y, half - 4, 45); y += 51;
-      box('Mercancía', [shipment.mercancia?.descripcion, shipment.mercancia?.embalaje].filter(Boolean).join(' · '), left, y, width * .57 - 4, 45);
-      box('Peso y bultos', `${number(shipment.mercancia?.peso_kg)} kg · ${number(shipment.mercancia?.bultos)} bultos`, left + width * .57 + 4, y, width * .43 - 4, 45); y += 57;
+      section(`ENVÍO ${index + 1} · ${text(shipment.referencia || shipment.id)}`, 130);
+      row([['Origen', stop(shipment.origen)], ['Destinatario y destino', stop({nombre:shipment.destino?.destinatario,direccion:shipment.destino?.direccion})]], 45);
+      row([['Mercancía', [shipment.mercancia?.descripcion, shipment.mercancia?.embalaje].filter(Boolean).join(' · ')], ['Peso y bultos', `${number(shipment.mercancia?.peso_kg)} kg · ${number(shipment.mercancia?.bultos)} bultos`]], 45, .57);
     }
   }
   if (overflow.length) {
-    pdf.addPage(); y = 36;
+    ensure(80);
     put(`ANEXO · DATOS ÍNTEGROS · ${text(d.referencia_pedido)}`, left, y, width, { bold: true, size: 12, color: C.teal }); y += 30;
     for (const item of overflow) {
-      const height = pdf.font('Helvetica').fontSize(9).heightOfString(item.content, { width, lineGap: 3 });
-      if (y + height + 38 > 760) { pdf.addPage(); y = 36; }
-      put(item.label.toUpperCase(), left, y, width, { bold: true, size: 8, color: C.teal }); y += 16;
-      pdf.font('Helvetica').fontSize(9).fillColor(C.ink).text(item.content, left, y, { width, lineGap: 3 });
-      y = pdf.y + 16;
+      let remaining = item.content, continuation = false;
+      while (remaining) {
+        ensure(50);
+        put(`${item.label.toUpperCase()}${continuation ? ' (CONTINUACIÓN)' : ''}`, left, y, width, { bold: true, size: 8, color: C.teal }); y += 16;
+        const [visible, rest] = fit(remaining, width, bottom - y - 16, 9, 3);
+        pdf.font('Helvetica').fontSize(9).fillColor(C.ink).text(visible, left, y, { width, lineGap: 3 });
+        y = pdf.y + 16; remaining = rest; continuation = true;
+        if (remaining) { pdf.addPage(); y = 36; }
+      }
     }
   }
   const range = pdf.bufferedPageRange();
@@ -113,4 +149,4 @@ async function renderDeca({ documento: d, version, generatedAt, url }) {
   pdf.end(); return done;
 }
 
-module.exports = { renderDeca };
+module.exports = { renderDeca, DECA_TEMPLATE_VERSION };

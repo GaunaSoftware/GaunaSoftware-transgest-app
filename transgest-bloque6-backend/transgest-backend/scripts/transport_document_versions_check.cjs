@@ -28,6 +28,7 @@ async function main(){
   const first=await service.issue(db,args);assert.equal(first.created,true);
   const repeated=await service.issue(db,args);assert.equal(repeated.id,first.id);assert.equal(repeated.created,false);
   const initial=(await service.list(db,company,order))[0];const token=new URL(initial.public_url).searchParams.get('token');
+  assert.equal(initial.metadata.template_version,require('../src/services/transportDocumentPdf').DECA_TEMPLATE_VERSION);
   await assert.rejects(service.assertDeparture(db,company,{id:order,peso_kg:1250},{}),{code:'DECA_REVIEW_REQUIRED'});
   const reviewed={dcd_revisado:true,dcd_disponible:true,dcd_versiones_revisadas:[initial.id]};
   await service.assertDeparture(db,company,{id:order,peso_kg:1250},reviewed);
@@ -96,6 +97,7 @@ async function main(){
   await assert.rejects(service.issue(db,{...args,payload:{documento:{...d,cargas:[{},{}]}}}),{code:'SHIPMENT_MAPPING_REQUIRED'});
   const external=await service.issue(db,{...args,source:'external',externalPdf:original.pdf.toString('base64'),nativeConfirmed:true,reason:'Original del cargador'});
   const stored=await service.read(db,company,order,external.id);assert.deepEqual(Buffer.from(stored.pdf),original.pdf);
+  assert.equal((await service.issue(db,{...args,source:'external',externalPdf:original.pdf.toString('base64'),nativeConfirmed:true,reason:'Reintento'})).created,false,'La revisión de plantilla no cambia ni duplica un original externo');
   await assert.rejects(service.issue(db,args),{code:'EXTERNAL_DECA_ACTIVE'});
   await assert.rejects(service.issue(db,{...args,source:'external',externalPdf:original.pdf.toString('base64'),nativeConfirmed:false}),{code:'NATIVE_PDF_REQUIRED'});
   await pg.query("INSERT INTO transport_document_events(empresa_id,document_id,event,effective_at,reason) VALUES($1,$2,'service_completed',$3,'Fin real sintético')",[company,initial.id,'2025-08-01T12:00:00Z']);
@@ -106,8 +108,21 @@ async function main(){
   assert.ok((await service.read(db,company,order,initial.id)).pdf,'Authenticated retention survives public expiry');
   const out=path.resolve(__dirname,'../../../output/pdf');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'phase5-deca-synthetic.pdf'),original.pdf);
   const parsed=await require('pdf-parse')(original.pdf);assert.match(parsed.text,/CONTROL ADMINISTRATIVO/);assert.match(parsed.text,/Cerámica/);assert.doesNotMatch(parsed.text,/Formato carta de porte|firma certificada|AdES|QES/);
-  const longPdf=await require('../src/services/transportDocumentPdf').renderDeca({documento:{...d,cargador_contractual:{...d.cargador_contractual,domicilio:`${'AVENIDA LARGA '.repeat(45)}FIN DE DIRECCION`},observaciones:''},version:1,generatedAt:new Date().toISOString(),url:'https://example.invalid/original'});
+  const longPdf=await require('../src/services/transportDocumentPdf').renderDeca({documento:{...d,cargador_contractual:{...d.cargador_contractual,domicilio:`${'AVENIDA LARGA '.repeat(300)}FIN DE DIRECCION`},observaciones:''},version:1,generatedAt:new Date().toISOString(),url:'https://example.invalid/original'});
   const longParsed=await require('pdf-parse')(longPdf);assert.ok(longParsed.numpages>1);assert.match(longParsed.text,/ANEXO · DATOS ÍNTEGROS/);assert.match(longParsed.text,/FIN DE DIRECCION/);
+  const templateOrder=crypto.randomUUID(),legacyId=crypto.randomUUID();
+  await pg.query("INSERT INTO pedidos(id,empresa_id,updated_at,estado) VALUES($1,$2,NOW(),'confirmado')",[templateOrder,company]);
+  const legacyDocument={...initial.payload.documento};delete legacyDocument.soporte_url;delete legacyDocument.qr_url;
+  const legacyMaterialHash=service.hash(service.canonical({source:'transgest',documento:legacyDocument,pdf:null,envio_id:null}));
+  await pg.query(`INSERT INTO transport_document_versions(id,empresa_id,pedido_id,envio_id,viaje_id,scope_key,version,source,payload,payload_hash,material_hash,pdf,pdf_hash,filename,reason,created_by,created_at,token_hash,public_url,retention_until,metadata)
+    SELECT $1,empresa_id,$2,envio_id,viaje_id,scope_key,version,source,payload,payload_hash,$3,pdf,pdf_hash,filename,reason,created_by,created_at,token_hash,public_url,retention_until,metadata-'template_version' FROM transport_document_versions WHERE id=$4`,[legacyId,templateOrder,legacyMaterialHash,initial.id]);
+  const templateArgs={...args,pedidoId:templateOrder,payload:{documento:legacyDocument},reason:''};
+  await assert.rejects(service.issue(db,templateArgs),{code:'VERSION_REASON_REQUIRED'});
+  const refreshed=await service.issue(db,{...templateArgs,reason:'Corrección del formato: partes visibles y direcciones sin duplicar'});
+  assert.equal(refreshed.version,2);assert.equal(refreshed.created,true);
+  assert.equal((await service.issue(db,{...templateArgs,reason:'Reintento'})).created,false,'No duplica la versión al repetir la misma plantilla');
+  assert.deepEqual(Buffer.from((await service.read(db,company,templateOrder,legacyId)).pdf),original.pdf,'La corrección de formato conserva los bytes del original anterior');
+  assert.deepEqual((await service.publicOriginal(db,legacyId,token)).pdf,original.pdf,'El QR anterior no se reemplaza por un PDF remaquetado');
   console.log('PASS document versions: old QR direct original bytes, one-year access after actual completion, manual disable guard, external originals, hashes, tenant isolation and retained private access. PDF pages:',parsed.numpages);
  }finally{await pg.close();}
 }

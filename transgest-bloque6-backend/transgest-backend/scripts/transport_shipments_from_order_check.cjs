@@ -13,6 +13,25 @@ assert.equal(single.length,1);
 assert.equal(single[0].mercancia,'Cemento');
 assert.equal(single[0].peso_kg,8000);
 
+const {buildDocumentoControlPayload}=require('../src/services/documentoControl');
+const stopOnly={...base,peso_kg:null,puntos_carga:[point('Almacén A',null)],puntos_descarga:[point('Cliente B',8000)]};
+assert.equal(fromOrder(stopOnly)[0].peso_kg,8000,'Una única descarga puede aportar el peso del envío');
+assert.equal(buildDocumentoControlPayload({pedido:stopOnly}).documento.mercancia.peso_kg,8000,'La generación utiliza el mismo peso que el envío');
+const loadOnly={...stopOnly,puntos_carga:[point('Almacén A',8000)],puntos_descarga:[point('Cliente B',null)]};
+assert.equal(buildDocumentoControlPayload({pedido:loadOnly}).documento.mercancia.peso_kg,8000);
+assert.throws(()=>fromOrder({...base,puntos_carga:[point('Almacén A',-1)],puntos_descarga:[point('Cliente B',8000)]}),{code:'ORDER_SHIPMENT_WEIGHT'},'Un peso inválido no se oculta usando el total');
+const decimalKg={...base,peso_kg:'250.500',puntos_carga:[point('Almacén A',250.5)],puntos_descarga:[point('Cliente B',250.5)]};
+assert.equal(fromOrder(decimalKg)[0].peso_kg,250.5,'Los pesos numéricos almacenados ya están en kg');
+assert.equal(buildDocumentoControlPayload({pedido:decimalKg}).documento.mercancia.peso_kg,250.5);
+
+const legacySplit={...base,peso_kg:16000,puntos_carga:[point('Almacén A',16000)],puntos_descarga:[point('Cliente B','8,0'),point('Cliente C','8,0')]};
+assert.deepEqual(fromOrder(legacySplit).map(row=>row.peso_kg),[8000,8000],'Se reconoce la entrada antigua en toneladas de cada reparto');
+assert.throws(()=>fromOrder({...legacySplit,puntos_descarga:[point('Cliente B',8000),point('Cliente C',null)]}),error=>error.code==='ORDER_SHIPMENT_WEIGHT'&&error.message.includes('Descarga 2')&&error.message.includes('El peso total no define su reparto'),'El total no se reparte por suposición');
+const withoutTotal={...legacySplit,peso_kg:null};
+assert.equal(buildDocumentoControlPayload({pedido:withoutTotal}).documento.mercancia.peso_kg,16000,'Las cargas y descargas no se suman entre sí');
+assert.equal(buildDocumentoControlPayload({pedido:{...withoutTotal,puntos_carga:[],puntos_descarga:[point('Cliente B',8000),point('Cliente C',null)]}}).documento.mercancia.peso_kg,null,'Un reparto parcial no define el peso total');
+assert.equal(buildDocumentoControlPayload({pedido:{...withoutTotal,puntos_carga:[point('Almacén A',15000)]}}).documento.mercancia.peso_kg,null,'No se deduce un total de repartos contradictorios');
+
 const split=fromOrder({...base,puntos_carga:[point('Almacén A',8000)],puntos_descarga:[point('Cliente B',3000),point('Cliente C',5000,{mercancia:'Cemento blanco'})]});
 assert.equal(split.length,2);
 assert.equal(split[0].origen_id,split[1].origen_id);

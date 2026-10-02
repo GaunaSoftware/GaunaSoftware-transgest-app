@@ -9,12 +9,12 @@ const date = value => {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw.slice(8, 10)}/${raw.slice(5, 7)}/${raw.slice(0, 4)}` : text(value);
 };
 const party = value => [value?.nombre, value?.nif && `NIF ${value.nif}`, value?.domicilio].filter(Boolean).join('\n');
-const comparable = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const comparable = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const stop = value => {
   const name = String(value?.nombre || '').trim(), address = String(value?.direccion || '').trim();
   // Algunos puntos antiguos usan la dirección como nombre. Imprime una sola
   // vez la dirección completa, sin perder el nombre cuando es diferente.
-  if (name && address && comparable(address).startsWith(comparable(name))) return address;
+  if (name && address && (comparable(address) === comparable(name) || comparable(address).startsWith(`${comparable(name)} `))) return address;
   return [name, address].filter(Boolean).join('\n');
 };
 const number = value => value === null || value === undefined || value === '' ? 'No informado' : Number(value).toLocaleString('es-ES');

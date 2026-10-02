@@ -45,6 +45,8 @@ async function main() {
   assert.equal(regular.text.split(d.destino.direccion).length-1,1,'La dirección de entrega se imprime una sola vez');
   assert.doesNotMatch(regular.text,/Ver texto íntegro|Firma contractual|FIRMA AJENA A ESTE ORIGINAL/);
   assert.match(regular.text,/justificantes operativos/);
+  const distinctName = await check({...d,origen:{nombre:'ALMACEN',direccion:'ALMACENES DE ENSAYO, CALLE 2'}},'deca-nombre-de-punto');
+  assert.ok(distinctName.text.includes('ALMACEN ALMACENES DE ENSAYO, CALLE 2'),'No se elimina un nombre diferente que solo comparte el prefijo de la dirección');
   const long = await check({...d,cargador_contractual:{...d.cargador_contractual,domicilio:`${'AVENIDA DE ENSAYO '.repeat(300)}FIN DEL DOMICILIO ÍNTEGRO`}},'deca-textos-largos');
   assert.ok(long.parsed.numpages>1);
   assert.match(long.text,/FIN DEL DOMICILIO ÍNTEGRO/);

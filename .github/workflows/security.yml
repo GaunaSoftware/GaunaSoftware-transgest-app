@@ -88,6 +88,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Suite general de regresion
         run: npm run check
+      - name: Correos de transporte y acciones por etapa
+        run: node scripts/transport_email_check.cjs
       - name: Regresiones de plan diario, permisos y documentos de chofer
         run: npm run daily-plan:regression
       - name: SSRF, aislamiento SQL, secretos y SMTP local

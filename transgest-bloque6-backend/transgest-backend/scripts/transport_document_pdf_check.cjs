@@ -53,6 +53,15 @@ async function main() {
   assert.ok(completePdf.text.includes('ALMACÉN SINTÉTICO C/ ALMACÉN DE ENSAYO 1, 30100 Murcia, España'));
   assert.ok(completePdf.text.includes('DESTINATARIO SINTÉTICO CTRA. DEL RECINTO, 15 - NAVE 2.3 MÓDULO 1, 23400 Úbeda, Jaén, España'));
   assert.equal(completePdf.parsed.numpages,1);
+  const {buildDocumentoControlPayload}=require('../src/services/documentoControl');
+  const editorDocument=buildDocumentoControlPayload({pedido:{numero:d.referencia_pedido,
+    origen:'C/ ALMACÉN DE ENSAYO 1',destino:'Calle de entrega 2',mercancia:'Mercancía de ensayo',peso_kg:8000,bultos:8,
+    puntos_carga:[{cliente_nombre:'PUNTO DE CARGA SINTÉTICO',direccion:'C/ ALMACÉN DE ENSAYO 1',codigo_postal:'30591',ciudad:'Balsicas',provincia:'Murcia',pais:'España'}],
+    puntos_descarga:[{cliente_nombre:'PUNTO RECEPTOR SINTÉTICO',direccion:'Calle de entrega 2',codigo_postal:'23400',ciudad:'Úbeda',provincia:'Jaén',pais:'España'}]}}).documento;
+  const editorPdf=await check({...d,origen:editorDocument.origen,destino:editorDocument.destino},'deca-nombres-desde-pedido');
+  assert.ok(editorPdf.text.includes('PUNTO DE CARGA SINTÉTICO C/ ALMACÉN DE ENSAYO 1, 30591 Balsicas, Murcia, España'));
+  assert.ok(editorPdf.text.includes('PUNTO RECEPTOR SINTÉTICO Calle de entrega 2, 23400 Úbeda, Jaén, España'));
+  assert.equal(editorPdf.parsed.numpages,1);
   const formatted = await check({...complete,origen:{...complete.origen,direccion:'C/ ALMACÉN DE ENSAYO 1, 30100 Murcia, España'}},'deca-direccion-ya-completa');
   assert.equal(formatted.text.split('30100 Murcia').length-1,1,'El renderer no duplica una dirección que ya viene completa');
   const distinctName = await check({...d,origen:{nombre:'ALMACEN',direccion:'ALMACENES DE ENSAYO, CALLE 2'}},'deca-nombre-de-punto');

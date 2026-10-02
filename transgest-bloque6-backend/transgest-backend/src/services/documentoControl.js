@@ -1,6 +1,6 @@
 const { formatCompanyPaymentTerms } = require("./companyPayment");
 const { documentOrderWeight } = require("./stopWeights");
-const { fullStopAddress } = require("./stopAddress");
+const { fullStopAddress, stopPointName } = require("./stopAddress");
 ﻿const crypto = require("crypto");
 
 const DOC_CONTROL_DEFAULTS = {
@@ -58,7 +58,7 @@ function parseStops(raw) {
 function firstStopInfo(stops = [], fallbackName = "") {
   const stop = Array.isArray(stops) ? stops[0] || {} : {};
   return {
-    nombre: stop.nombre || stop.name || fallbackName || "",
+    nombre: stopPointName(stop) || fallbackName || "",
     direccion: fullStopAddress(stop),
     codigo_postal: stop.codigo_postal || stop.cp || stop.postal_code || '',
     ciudad: stop.ciudad || stop.poblacion || stop.localidad || '',
@@ -80,7 +80,7 @@ function normalizeStopList(stops = [], fallback = {}) {
     mercancia: stop.mercancia || '', bultos: stop.bultos ?? '', peso_kg: stop.peso_kg ?? '',
     confirmacion_chofer: stop.confirmacion_chofer || null,
     firma_parada: stop.firma_parada || null,
-    nombre: stop.nombre || stop.name || stop.cliente_nombre || "",
+    nombre: stopPointName(stop),
     direccion: fullStopAddress(stop),
     codigo_postal: stop.codigo_postal || stop.cp || stop.postal_code || '',
     ciudad: stop.ciudad || stop.poblacion || stop.localidad || '',

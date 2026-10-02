@@ -36,16 +36,19 @@ const split=fromOrder({...base,puntos_carga:[point('Almacén A',8000)],puntos_de
 assert.equal(split.length,2);
 assert.equal(split[0].origen_id,split[1].origen_id);
 assert.equal(split[1].mercancia,'Cemento blanco');
-const addresses={...base,puntos_carga:[point('Calle de ensayo 1',8000,{nombre:'Almacén sintético',codigo_postal:'30100',ciudad:'Murcia',provincia:'Murcia',pais:'España'})],
-  puntos_descarga:[point('Calle de entrega 2',3000,{nombre:'Destinatario uno',codigo_postal:'23400',ciudad:'Úbeda',provincia:'Jaén',pais:'España'}),
-    point('Calle de entrega 3',5000,{nombre:'Destinatario dos',cp:'03100',poblacion:'Ciudad de ensayo',region:'Provincia de ensayo',country:'España'})]};
+const addresses={...base,puntos_carga:[point('Calle de ensayo 1',8000,{cliente_nombre:'Almacén sintético',codigo_postal:'30100',ciudad:'Murcia',provincia:'Murcia',pais:'España'})],
+  puntos_descarga:[point('Calle de entrega 2',3000,{cliente_nombre:'Destinatario uno',codigo_postal:'23400',ciudad:'Úbeda',provincia:'Jaén',pais:'España'}),
+    point('Calle de entrega 3',5000,{clienteNombre:'Destinatario dos',cp:'03100',poblacion:'Ciudad de ensayo',region:'Provincia de ensayo',country:'España'})]};
 const addressSnapshots=validate(addresses,fromOrder(addresses));
 assert.equal(addressSnapshots[0].snapshot.origen.direccion,'Calle de ensayo 1, 30100 Murcia, España');
+assert.equal(addressSnapshots[0].snapshot.origen.nombre,'Almacén sintético','El nombre guardado por el editor del pedido se conserva en cada envío');
 assert.equal(addressSnapshots[0].snapshot.destino.direccion,'Calle de entrega 2, 23400 Úbeda, Jaén, España');
 assert.equal(addressSnapshots[0].snapshot.destino.destinatario,'Destinatario uno');
 assert.equal(addressSnapshots[0].snapshot.destino.codigo_postal,'23400');
 assert.equal(addressSnapshots[0].snapshot.destino.provincia,'Jaén');
 assert.equal(addressSnapshots[1].snapshot.destino.direccion,'Calle de entrega 3, 03100 Ciudad de ensayo, Provincia de ensayo, España');
+assert.equal(addressSnapshots[1].snapshot.destino.nombre,'Destinatario dos');
+assert.equal(addressSnapshots[1].snapshot.destino.destinatario,'Destinatario dos');
 
 const merged=fromOrder({...base,puntos_carga:[point('Almacén A',3000),point('Almacén C',5000)],puntos_descarga:[point('Cliente B',8000)]});
 assert.equal(merged.length,2);
@@ -85,6 +88,7 @@ async function persistence(){
       assert.ok(shipment,'El destinatario corresponde a su reparto');
       assert.equal(document.destino.direccion,shipment.snapshot.destino.direccion);
       const pdfText=normalize((await require('pdf-parse')(Buffer.from(stored.pdf))).text);
+      assert.ok(pdfText.includes(`${shipment.snapshot.origen.nombre} ${shipment.snapshot.origen.direccion}`),'El original guardado contiene el nombre del punto de carga y su dirección');
       assert.ok(pdfText.includes(shipment.snapshot.destino.destinatario)&&pdfText.includes(shipment.snapshot.destino.direccion),'El PDF conserva toda la dirección específica de ese reparto');
     }
     const stops=order.puntos_descarga.map((stop,index)=>({...stop,peso_kg:index?4800:3200}));

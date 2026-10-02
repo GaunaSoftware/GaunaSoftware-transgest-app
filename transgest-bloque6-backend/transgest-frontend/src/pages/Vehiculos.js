@@ -2036,7 +2036,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         <ModalVehiculo
           editando={editando}
           initialClase={initialClaseModal}
-          initialTab={editando?.id === focusVehiculo?.vehiculo_id ? (focusVehiculo.section === 'documentacion' ? 'docs' : focusVehiculo.section === 'plataformas' ? 'plataformas' : 'identificacion') : 'identificacion'}
+          initialTab={editando?.id && editando.id === focusVehiculo?.vehiculo_id ? (focusVehiculo.section === 'documentacion' ? 'docs' : focusVehiculo.section === 'plataformas' ? 'plataformas' : 'identificacion') : 'identificacion'}
           choferes={choferes}
           vehiculos={vehiculos}
           onClose={() => { setModal(false); setEditando(null); }}

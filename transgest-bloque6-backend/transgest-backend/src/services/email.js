@@ -676,7 +676,6 @@ const PLANTILLAS = {
           <a href="${data.url}" style="display:inline-block;background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">Confirmar descarga y subir albaranes</a>
         </p>
         ${renderMapsEmailBox(data)}
-        ${renderDcdEmailBox(data)}
         <p style="font-size:12px;color:#64748b;word-break:break-all;">${data.url}</p>
       </div>
       ${FOOTER}

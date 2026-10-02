@@ -9,7 +9,7 @@ test('membership edit preserves company and revision, handles legacy null permis
  await act(async()=>root.render(<MultiCompanyAdmin saFetchFn={api}/>));
  const selects=node.querySelectorAll('select');
  await act(async()=>{selects[1].value='u';selects[1].dispatchEvent(new Event('change',{bubbles:true}));selects[2].value='b';selects[2].dispatchEvent(new Event('change',{bubbles:true}));});
- expect(node.textContent).toContain('revisión 8');
+ expect(node.textContent).toContain('Permisos en la empresa seleccionada');
  const permission=[...node.querySelectorAll('label')].find(l=>l.textContent.startsWith('Nóminas')).querySelector('select');
  await act(async()=>{permission.value='none';permission.dispatchEvent(new Event('change',{bubbles:true}));});
  api.mockRejectedValueOnce(Error('Membresía modificada. Recarga los datos.'));

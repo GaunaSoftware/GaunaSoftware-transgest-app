@@ -3,7 +3,7 @@ import IntegrationRegistryAdmin from "./IntegrationRegistryAdmin";
 import FiscalRepresentation from '../components/FiscalRepresentation';
 import ClaveiconAdminSummary from '../components/ClaveiconAdminSummary';
 import SupportInbox from "../components/SupportInbox";
-import CompanyProducts from "../planner/CompanyProducts";
+import CompanyProductFields, { CompanyProductBadge } from "./admin/CompanyProductFields";
 import { getBrandDisplayName } from "../branding";
 import { useState, useEffect, useCallback } from "react";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
@@ -179,9 +179,10 @@ function LoginSA({ onLogin }){
 }
 
 // Section
-function ModalNuevaEmpresa({ onClose, onCreada }){
+export function ModalNuevaEmpresa({ onClose, onCreada }){
   const [form,setForm]=useState({nombre_empresa:"",cif:"",nombre_admin:"",email_admin:"",plan:"profesional",origen_comercial:"",ciclo_facturacion:"mensual",fecha_vencimiento:"",metodo_pago:"pendiente",email_facturacion:"",iban_facturacion:""});
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
+  const [productMode,setProductMode]=useState('transgest');
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
   async function crear(){
     if(!form.nombre_empresa||!form.email_admin||!form.nombre_admin){setErr("Rellena todos los campos obligatorios");return;}
@@ -190,7 +191,7 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
     if(form.email_facturacion && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email_facturacion)){setErr("Indica un correo de facturación válido");return;}
     setLoading(true); setErr("");
     try{
-      const res = await saFetch("/empresas",{method:"POST",body:form});
+      const res = await saFetch("/empresas",{method:"POST",body:{...form,modalidad:productMode}});
       if(res.invitacion_url && res.email?.simulado){
         notify("Invitacion generada. Email en modo simulado:\n\n" + res.invitacion_url, "success", 12000);
       }
@@ -204,18 +205,15 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div className="sa-company-modal" role="dialog" aria-modal="true" aria-label="Nueva empresa" style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:14,padding:24,width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
+        <button type="button" className="sa-modal-close" aria-label="Cerrar nueva empresa" onClick={onClose}>×</button>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:18,color:"#e2e8f0",marginBottom:4}}>Nueva empresa</div>
-        <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Configura la empresa y su plan. Al crearla se enviará una invitación al gerente válida durante 72 horas. No se emitirá ningún cobro automático.</div>
+        <div style={{fontSize:12,color:"#94a3b8",marginBottom:16}}>Configura el producto, la versión y los datos de la empresa. Al crearla se enviará una invitación al gerente válida durante 72 horas. No se emitirá ningún cobro automático.</div>
         {err&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,padding:"9px 12px",color:"#fca5a5",fontSize:13,marginBottom:12}}>{err}</div>}
         <div className="sa-company-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <h3 className="sa-company-section">1. Empresa y producto</h3>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Nombre empresa *</label><input style={inp} value={form.nombre_empresa} onChange={f("nombre_empresa")} placeholder="Transportes Garcia S.L."/></div>
-          <div><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={f("cif")} placeholder="B12345678"/></div>
-          <div><label style={lbl}>Plan</label>
-            <select style={inp} value={form.plan} onChange={f("plan")}>
-              {PLANES_OPTS.map(p=><option key={p} value={p}>{getBrandDisplayName(p)}</option>)}
-            </select>
-          </div>
+          <div style={{gridColumn:"1/-1"}}><label style={lbl}>CIF / NIF</label><input style={inp} value={form.cif} onChange={f("cif")} placeholder="B12345678"/></div>
+          <div className="sa-product-full"><CompanyProductFields plan={form.plan} modalidad={productMode} onChange={next=>{setForm(p=>({...p,plan:next.plan}));setProductMode(next.modalidad);}} disabled={loading}/></div>
           <div><label style={lbl}>Origen comercial *</label><select style={inp} value={form.origen_comercial} onChange={f("origen_comercial")}><option value="">Selecciona el origen</option><option value="directa">Directa</option><option value="canal">Canal</option></select></div>
           <div><label style={lbl}>Facturacion</label>
             <select style={inp} value={form.ciclo_facturacion} onChange={f("ciclo_facturacion")}>
@@ -256,7 +254,14 @@ function ModalNuevaEmpresa({ onClose, onCreada }){
 // Section
 const supportRequest = (path, options) => saFetch(`/soporte${path}`,options);
 
-function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
+export function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
+  const [productMode,setProductMode]=useState(null);
+  const [productError,setProductError]=useState('');
+  const loadProducts=useCallback(()=>{
+    setProductError('');setProductMode(null);
+    return saFetch(`/empresas/${empresa.id}/productos`).then(d=>setProductMode(d.modalidad)).catch(e=>setProductError(e.message));
+  },[empresa.id]);
+  useEffect(()=>{loadProducts();},[loadProducts]);
   const [form,setForm]=useState({
     codigo_acceso:empresa.codigo_acceso||"",
     plan:empresa.plan,
@@ -318,8 +323,10 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
     finally{ setPurging(false); }
   }
   async function guardar(){
+    if (!productMode) { setErr('Espera a que se carguen los productos de esta empresa.'); return; }
     setLoading(true); setErr("");
-    const body = { ...form, fecha_vencimiento: form.fecha_vencimiento || null };
+    const body = { ...form, modalidad:productMode, fecha_vencimiento: form.fecha_vencimiento || null };
+    if (body.plan === empresa.plan) delete body.plan;
     if (!body.origen_comercial) delete body.origen_comercial;
     try{ await saFetch("/empresas/"+empresa.id,{method:"PATCH",body}); onGuardado(); }
     catch(e){ setErr(e.message); }
@@ -389,20 +396,16 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
 
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:14,padding:24,width:"min(500px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
+      <div className="sa-company-modal" role="dialog" aria-modal="true" aria-label={`Gestionar ${empresa.nombre}`} style={{background:"#141c2e",border:"1px solid #1c2740",borderRadius:14,padding:24,width:"min(760px,96vw)",maxHeight:"92vh",overflowY:"auto"}}>
+        <button type="button" className="sa-modal-close" aria-label="Cerrar gestión de empresa" onClick={onClose}>×</button>
         <div style={{fontFamily:"'Syne',sans-serif",fontWeight:900,fontSize:16,color:"#e2e8f0",marginBottom:2}}>Editar {empresa.nombre}</div>
         <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>{empresa.email_admin}</div>
-        <CompanyProducts empresaId={empresa.id} request={saFetch} />
+        {productError ? <p role="alert">{productError} <button type="button" onClick={loadProducts}>Reintentar productos</button></p> : !productMode ? <p role="status">Cargando productos de la empresa…</p> : <CompanyProductFields plan={form.plan} modalidad={productMode} onChange={next=>{setForm(p=>({...p,plan:next.plan}));setProductMode(next.modalidad);}} disabled={loading}/>}
 
         {err&&<div style={{background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.25)",borderRadius:8,padding:"9px 12px",color:"#fca5a5",fontSize:12,marginBottom:12}}>{err}</div>}
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+        <div className="sa-company-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
           <div style={{gridColumn:"1/-1"}}><label style={lbl}>Código de empresa para acceder</label><input style={inp} value={form.codigo_acceso} onChange={e=>setForm(p=>({...p,codigo_acceso:e.target.value.toUpperCase()}))} maxLength={20}/><small>Único para cada empresa. Los usuarios pueden repetir iniciales en empresas distintas.</small></div>
-          <div><label style={lbl}>Plan</label>
-            <select style={inp} value={form.plan} onChange={f("plan")}>
-              {form.plan === "basico" && <option value="basico">Control · pendiente migración a Pro</option>}
-              {PLANES_OPTS.map(p=><option key={p} value={p}>{getBrandDisplayName(p)}</option>)}
-            </select></div>
           <div><label style={lbl}>Origen comercial</label><select style={inp} value={form.origen_comercial} onChange={f("origen_comercial")}><option value="">Por clasificar</option><option value="directa">Directa</option><option value="canal">Canal</option></select>{!form.origen_comercial&&<small style={{display:'block',color:'#fbbf24',marginTop:5}}>Clasifícala antes de generar nuevos enlaces de pago.</small>}</div>
           <div><label style={lbl}>Estado</label>
             <select style={inp} value={form.estado} onChange={f("estado")}>
@@ -505,7 +508,7 @@ function ModalEditarEmpresa({ empresa, onClose, onGuardado }){
 
         <div style={{display:"flex",gap:10,marginTop:16,justifyContent:"flex-end"}}>
           <button onClick={onClose} style={{padding:"8px 16px",borderRadius:8,border:"1px solid #1c2740",background:"transparent",color:"#64748b",fontFamily:"'DM Sans',sans-serif",fontSize:13,cursor:"pointer"}}>Cancelar</button>
-          <button onClick={guardar} disabled={loading} style={{padding:"8px 20px",borderRadius:8,border:"none",background:"#3b6ef5",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+          <button onClick={guardar} disabled={loading || !productMode} style={{padding:"8px 20px",borderRadius:8,border:"none",background:"#3b6ef5",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
             {loading?"Guardando...":"Guardar"}
           </button>
         </div>
@@ -718,11 +721,12 @@ function CorreoGaunaAdmin({ saFetchFn }) {
   );
 }
 
-function IntegracionesAdmin({ saFetchFn }) {
+export function IntegracionesAdmin({ saFetchFn }) {
   const [data, setData] = useState(null);
   const [salud, setSalud] = useState(null);
   const [accountingIntegrations, setAccountingIntegrations] = useState(null);
-  const [integrationTab, setIntegrationTab] = useState("empresa");
+  const [integrationTab, setIntegrationTab] = useState("salud");
+  const [providerByArea,setProviderByArea] = useState({rutas:"here",ia:"openai"});
   const [integrationScope, setIntegrationScope] = useState("company");
   const [savingIntegration, setSavingIntegration] = useState(false);
   const [integrationError, setIntegrationError] = useState("");
@@ -736,7 +740,8 @@ function IntegracionesAdmin({ saFetchFn }) {
     setApiKeysMsg("");
     saFetchFn("/integraciones/api-keys/" + id, { method: "DELETE" }).then(() => cargarApiKeysAll()).catch(e => setApiKeysMsg((e && e.message) || "No se pudo revocar"));
   }
-  const [accountingCompanyId, setAccountingCompanyId] = useState("");
+  const [empresaId, setEmpresaId] = useState("");
+  const accountingCompanyId = empresaId;
   const [accountingForm, setAccountingForm] = useState({
     connector_id:"",
     status:"not_configured",
@@ -749,7 +754,6 @@ function IntegracionesAdmin({ saFetchFn }) {
   });
   const [accountingSaving, setAccountingSaving] = useState(false);
   const [accountingFilters, setAccountingFilters] = useState({ q:"", connector_id:"", status:"" });
-  const [empresaId, setEmpresaId] = useState("");
   const [provider, setProvider] = useState("here");
   const [form, setForm] = useState({ use_global:true, activo:true, api_key:"", limite_mensual:0 });
   const [aiForm, setAiForm] = useState({ provider:"anthropic", base_url:"", model:"" });
@@ -780,8 +784,7 @@ function IntegracionesAdmin({ saFetchFn }) {
       setIntegrationError("");
       setSalud(saludData);
       setAccountingIntegrations(accountingData);
-      if (!empresaId && d.empresas?.[0]) setEmpresaId(d.empresas[0].id);
-      if (!accountingCompanyId && d.empresas?.[0]) setAccountingCompanyId(d.empresas[0].id);
+      if (d.empresas?.[0]) setEmpresaId(current=>current || d.empresas[0].id);
       if (d.ai) setAiForm({ provider:d.ai.provider || "anthropic", base_url:d.ai.base_url || "", model:d.ai.model || "" });
       if (d.app_meta) setAppMetaForm({
         brand_name: d.app_meta.brand_name || "TransGest",
@@ -791,7 +794,7 @@ function IntegracionesAdmin({ saFetchFn }) {
         fiscal_software_id: d.app_meta.fiscal_software_id || "transgest-tms",
       });
     }).catch(error=>{setIntegrationError(error.message || "No se pudieron cargar las integraciones.");}).finally(()=>setLoading(false));
-  }, [saFetchFn, empresaId, accountingCompanyId]);
+  }, [saFetchFn]);
 
   useEffect(()=>{ cargar(); }, [cargar]);
 
@@ -854,9 +857,9 @@ function IntegracionesAdmin({ saFetchFn }) {
     }
   }, [saFetchFn, empresaId]);
   useEffect(() => {
-    if (!empresaId) return;
+    if (!empresaId || integrationTab !== "fiscal") return;
     cargarFiscalQueueSummary();
-  }, [empresaId, cargarFiscalQueueSummary]);
+  }, [empresaId, integrationTab, cargarFiscalQueueSummary]);
 
   async function guardarGlobal(p) {
     if (savingIntegration) return;
@@ -920,10 +923,10 @@ function IntegracionesAdmin({ saFetchFn }) {
     setTestMsg(null);
     try {
       const r = await saFetchFn(`/integraciones/empresas/${empresaId}/${p}/test`, { method:"POST" });
-      setTestMsg(r);
+      setTestMsg({...r,provider:p,scope:'company',empresa_id:empresaId});
       notify(r.message || (r.ok ? "Integracion lista." : "Integracion incompleta."), r.ok ? "success" : "warning");
     } catch (e) {
-      setTestMsg({ ok:false, provider:p, message:e.message || "No se pudo probar la integracion." });
+      setTestMsg({ ok:false, provider:p, scope:'company',empresa_id:empresaId,message:e.message || "No se pudo probar la integracion." });
       notify(e.message || "No se pudo probar la integracion.", "error");
     } finally {
       setTestingProvider("");
@@ -953,10 +956,10 @@ function IntegracionesAdmin({ saFetchFn }) {
     setTestMsg(null);
     try {
       const r = await saFetchFn(`/integraciones/global/${p}/test`, { method:"POST", body:{ model:aiForm.model, base_url:aiForm.base_url } });
-      setTestMsg(r);
+      setTestMsg({...r,provider:p,scope:'global'});
       notify(r.message || (r.ok ? "Conexion global verificada." : "La conexion global no esta lista."), r.ok ? "success" : "warning");
     } catch (e) {
-      setTestMsg({ ok:false, provider:p, message:e.message || "No se pudo probar la clave global." });
+      setTestMsg({ ok:false, provider:p, scope:'global',message:e.message || "No se pudo probar la clave global." });
       notify(e.message || "No se pudo probar la clave global.", "error");
     } finally {
       setTestingProvider("");
@@ -1199,7 +1202,16 @@ function IntegracionesAdmin({ saFetchFn }) {
       : saludIntegraciones?.resumen?.estado === "vigilancia"
         ? { color:"#fbbf24", bg:"rgba(245,158,11,.10)", border:"rgba(245,158,11,.24)", label:"En vigilancia" }
         : { color:"#f87171", bg:"rgba(239,68,68,.10)", border:"rgba(239,68,68,.24)", label:"Bloqueada" };
-  const companyProviderOptions = (data?.providers || []).filter(p => !gpsProviders.includes(p));
+  const companyProviderOptions = (data?.providers || ["here","ors","openai","anthropic","ai_generic"]).filter(p => !gpsProviders.includes(p));
+  const areaProviderOptions = companyProviderOptions.filter(p => integrationTab === "ia" ? ["openai","anthropic","ai_generic"].includes(p) : !["openai","anthropic","ai_generic"].includes(p));
+  function selectIntegrationTab(id) {
+    setTestMsg(null);
+    setIntegrationTab(id);
+    if (id === "fiscal") setIntegrationScope("company");
+    if (id === "rutas" || id === "ia") setProvider(providerByArea[id]);
+  }
+  function selectAreaProvider(value) { setProvider(value);setProviderByArea(p=>({...p,[integrationTab]:value})); }
+  useEffect(()=>{setTestMsg(null);setWebhookTokenMsg(null);},[empresaId,provider,gpsProvider,integrationScope,integrationTab]);
   const providerGlobalStatus = data?.global?.[provider] || {};
   const providerGlobalOk = !!providerGlobalStatus.global_configured;
   const providerReady = cfgEmpresa?.activo !== false && (cfgEmpresa?.use_global === false ? !!cfgEmpresa?.key_mask : providerGlobalOk);
@@ -1212,38 +1224,11 @@ function IntegracionesAdmin({ saFetchFn }) {
   const gpsEffectiveSource = cfgGps?.activo === false ? "Desactivada" : cfgGps?.use_global === false
     ? (cfgGps?.key_mask ? "Clave propia de empresa" : "Falta clave propia")
     : (gpsGlobalOk ? "Fallback global" : "Sin clave de respaldo");
-  const gpsActiveLabel = gpsActivoEmpresa ? (labels[gpsActivoEmpresa] || gpsActivoEmpresa) : "Sin GPS activo";
   const visibleGpsProviders = showGpsProviderPicker
     ? gpsProviders
     : [gpsProvider || gpsActivoEmpresa || gpsProviders[0]].filter(Boolean);
   const aiGlobalStatus = data?.global?.[aiForm.provider] || {};
   const aiGlobalOk = !!aiGlobalStatus.global_configured;
-  const quickStatusCards = [
-    {
-      label: "GPS en uso",
-      value: gpsActiveLabel,
-      detail: gpsReady ? `Clave ${cfgGps?.key_mask ? "propia" : "global"} disponible` : "Pendiente de clave",
-      color: gpsReady ? "#34d399" : "#94a3b8",
-    },
-    {
-      label: "Rutas / IA seleccionada",
-      value: labels[provider] || provider,
-      detail: providerReady ? `Clave ${cfgEmpresa?.key_mask ? "propia" : "global"} disponible` : "Pendiente si se usa este proveedor",
-      color: providerReady ? "#34d399" : "#94a3b8",
-    },
-    {
-      label: "Motor IA global",
-      value: labels[aiForm.provider] || aiForm.provider,
-      detail: aiGlobalOk ? "Clave global disponible" : "Clave global pendiente",
-      color: aiGlobalOk ? "#34d399" : "#94a3b8",
-    },
-    {
-      label: "Alertas fiscales",
-      value: fiscalCfgEmpresa?.email_alertas || "Sin email",
-      detail: fiscalCfgEmpresa?.modo === "verifactu" ? "VERIFACTU" : fiscalCfgEmpresa?.modo === "sii" ? "SII" : "Sin activar",
-      color: fiscalCfgEmpresa?.email_alertas ? "#34d399" : "#94a3b8",
-    },
-  ];
   const fiscalRows = (data?.empresas || []).map((empresa) => {
     const fiscal = data?.fiscal_configs?.find(c => c.empresa_id === empresa.id);
     return {
@@ -1268,14 +1253,21 @@ function IntegracionesAdmin({ saFetchFn }) {
       : "Sin activar";
   const fiscalTestFreshness = getFiscalTestFreshness(fiscalCfgEmpresa?.ultima_prueba || fiscalTestMsg?.test);
   const integrationTabs = [
-    ["salud", "Salud APIs"],
-    ["version", "Version programa"],
-    ["empresa", "Empresas y APIs"],
-    ["apikeys", "API keys"],
-    ["contabilidad", "Contabilidad externa"],
+    ["salud","Resumen","Estado de las conexiones y pruebas pendientes"],
+    ["rutas","Rutas y mapas","Distancias, itinerarios y proveedores de rutas"],
+    ["gps","GPS","Posiciones reales y proveedor de telemetría"],
+    ["ia","Inteligencia artificial","Proveedor, claves, modelo y cuotas"],
+    ["fiscal","Fiscal","Estado fiscal, alertas y registros por empresa"],
+    ["contabilidad","Contabilidad","ClaveiCon y otros programas contables"],
+    ["apikeys","Acceso por API","Claves para conectar otros sistemas a TransGest"],
+    ["version","Software","Identificación y versión técnica del programa"],
   ];
+  const activeIntegration = integrationTabs.find(([id])=>id===integrationTab);
+  const companyArea = ["rutas","gps","ia","fiscal","contabilidad"].includes(integrationTab);
+  const scopeArea = ["rutas","gps","ia"].includes(integrationTab);
+  const configurationBusy = savingIntegration || testingFiscal || processingFiscalQueue || accountingSaving || !!testingProvider;
   const integrationSubcard = {background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12};
-  const integrationGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:10,alignItems:"end"};
+  const integrationGrid = {display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,240px),1fr))",gap:10,alignItems:"end"};
   const integrationButtonRow = {display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"};
   const integrationStatusChip = (ok, warning = false) => ({
     fontSize:10,
@@ -1376,33 +1368,20 @@ function IntegracionesAdmin({ saFetchFn }) {
 
   return (
     <div style={SaaS.card}>
-      <div style={SaaS.title}>Integraciones / APIs</div>
-      <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.55,marginBottom:14}}>
-        Cada empresa utiliza la clave general o la propia según el modo guardado para cada proveedor.
+      <div className="sa-integration-heading"><div><h2>Conexiones del programa</h2><p>Elige qué quieres configurar. Cada área tiene sus propios ajustes y pruebas.</p></div><button type="button" className="sa-action" onClick={cargar} disabled={loading}>{loading?"Actualizando…":"Actualizar estado"}</button></div>
+      <div className="sa-integration-tabs" role="tablist" aria-label="Áreas de integración">
+        {integrationTabs.map(([id,label])=><button type="button" role="tab" aria-selected={integrationTab===id} aria-controls="sa-integration-panel" key={id} onClick={()=>selectIntegrationTab(id)}>{label}</button>)}
       </div>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-        {[...integrationTabs,["registry","Registro verificable"]].map(([id, label]) => (
-          <button
-            key={id}
-            onClick={()=>setIntegrationTab(id)}
-            style={{
-              ...SaaS.btn,
-              padding:"8px 12px",
-              background:integrationTab===id ? "rgba(20,184,166,.16)" : "#0f1728",
-              color:integrationTab===id ? "#5eead4" : "#94a3b8",
-              border:`1px solid ${integrationTab===id ? "rgba(20,184,166,.35)" : "#1c2740"}`,
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {integrationTab==="registry" && <IntegrationRegistryAdmin saFetchFn={saFetchFn} empresas={data?.empresas || []} />}
+      <div className="sa-integration-guide" id="sa-integration-panel" role="tabpanel" aria-label={activeIntegration?.[1]}><h3>{activeIntegration?.[1]}</h3><p>{activeIntegration?.[2]}</p></div>
+      {companyArea && <div className="sa-connection-context">
+        {scopeArea && <fieldset disabled={configurationBusy} className="sa-segmented" aria-label="Ámbito de configuración"><button type="button" className={integrationScope==="company"?"is-active":""} onClick={()=>setIntegrationScope("company")}>Una empresa</button><button type="button" className={integrationScope==="global"?"is-active":""} onClick={()=>setIntegrationScope("global")}>Plataforma</button></fieldset>}
+        {(!scopeArea || integrationScope==="company") ? <><label>Empresa a configurar<select disabled={configurationBusy} aria-label="Empresa a configurar" style={input} value={empresaId} onChange={e=>setEmpresaId(e.target.value)}>{(data?.empresas||[]).map(e=><option key={e.id} value={e.id}>{e.nombre}</option>)}</select></label><p>Los cambios se guardan solo para <strong>{selectedEmpresa?.nombre||"la empresa seleccionada"}</strong>.</p></> : <p>Estas claves pertenecen a la plataforma. Solo las usan las empresas que seleccionan «Usar clave general».</p>}
+      </div>}
+      {integrationTab==="salud" && <><div className="sa-connection-cards">{integrationTabs.slice(1,6).map(([id,label,detail])=><button type="button" key={id} onClick={()=>selectIntegrationTab(id)}><strong>{label}</strong><span>{detail}</span><small>Abrir configuración →</small></button>)}</div><details className="sa-technical-details"><summary>Registro de pruebas y evidencias</summary><p>Seguimiento técnico de cada proveedor. Las claves se configuran en su área; este registro conserva las comprobaciones y su historial.</p><IntegrationRegistryAdmin saFetchFn={saFetchFn} empresas={data?.empresas||[]}/></details></>}
       <div style={{display:integrationTab==="salud" ? "block" : "none",background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
-            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Salud de integraciones</div>
+            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Diagnóstico de las conexiones</div>
             <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,maxWidth:860}}>
               Auditoria de configuracion de IA, rutas, GPS, SMTP, fiscal y seguridad. Las pruebas reales contra proveedor se hacen con el boton Probar de cada pestaña.
             </div>
@@ -1482,16 +1461,17 @@ function IntegracionesAdmin({ saFetchFn }) {
       <div style={{display:integrationTab==="contabilidad" ? "block" : "none",background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:12}}>
           <div>
-            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Integraciones contables externas</div>
+            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Conexión con programas contables</div>
             <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,maxWidth:860}}>
-              Superadmin gobierna el catalogo, la priorizacion y la activacion de conectores. Contabilidad ejecuta exportaciones y futuras sincronizaciones sin permitir escrituras directas en tablas contables.
+              Envía o prepara información para el programa contable de la empresa. La generación de registros fiscales se supervisa en Fiscal.
             </div>
           </div>
-          <button onClick={openAccountingConnectors} style={{...SaaS.btnOk,padding:"8px 12px"}}>
-            Abrir conectores contables
-          </button>
         </div>
 
+        <section className="sa-claveicon-setup"><h3>ClaveiCon</h3><p>Guarda la clave privada y el código de la empresa en ClaveiCon. Después prueba la conexión. Guardar la clave no activa envíos automáticos.</p>{integrationTab === "contabilidad" && empresaId && <ClaveiconAdminSummary key={empresaId} empresaId={empresaId} request={saFetchFn} defaultOpen/>}</section>
+        <details className="sa-technical-details"><summary>Otros programas contables · preparación y catálogo</summary><p>Registra el programa, el responsable y el mapeo necesario para preparar una integración. Los conectores en estudio todavía no están disponibles para sincronizar.</p>
+        <p>El módulo contable externo es un programa independiente. Su catálogo ayuda a preparar otras conexiones; la clave de ClaveiCon se configura en el apartado superior.</p>
+        <button onClick={openAccountingConnectors} style={{...SaaS.btn,padding:"8px 12px"}}>Abrir módulo contable externo</button>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,marginBottom:12}}>
           {[
             ["Catalogo", accountingSummary.total || accountingItems.length || 0, "#93c5fd", accountingCatalog.catalog_version || "-"],
@@ -1521,10 +1501,7 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
           <div style={{display:"grid",gridTemplateColumns:"minmax(220px,1.2fr) minmax(190px,1fr) minmax(150px,.7fr) minmax(170px,.8fr)",gap:8,alignItems:"end",marginBottom:9}}>
             <div>
-              <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Empresa</label>
-              <select style={input} value={accountingCompanyId} onChange={e=>setAccountingCompanyId(e.target.value)}>
-                {(data?.empresas || []).map(e => <option key={e.id} value={e.id}>{e.nombre} - {e.plan}</option>)}
-              </select>
+<strong style={{fontSize:12}}>{selectedEmpresa?.nombre}</strong>
             </div>
             <div>
               <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Programa contable</label>
@@ -1704,7 +1681,7 @@ function IntegracionesAdmin({ saFetchFn }) {
                       <td style={SaaS.td}>{item.owner_email || item.advisor_name || "-"}</td>
                       <td style={{...SaaS.td,textAlign:"right"}}>
                         <button
-                          onClick={()=>{ setAccountingCompanyId(item.empresa_id); setAccountingFilters(prev=>({...prev,q:""})); }}
+                          onClick={()=>{ setEmpresaId(item.empresa_id); setAccountingFilters(prev=>({...prev,q:""})); }}
                           style={{...SaaS.btn,padding:"5px 9px"}}
                         >
                           Editar
@@ -1804,24 +1781,11 @@ function IntegracionesAdmin({ saFetchFn }) {
 
         <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginTop:12}}>
           {accountingCatalog.disclaimer || "Catalogo tecnico preliminar. No declara certificacion, homologacion ni cumplimiento legal."}
-        </div>
+        </div></details>
       </div>
 
       {integrationError && <div role="alert" style={{color:"var(--sa-danger,#dc2626)",marginBottom:12}}>{integrationError} <button onClick={cargar} style={SaaS.btn}>Reintentar</button></div>}
-      <fieldset disabled={savingIntegration} className="sa-integration-manager" style={{minWidth:0,margin:0,display:integrationTab==="empresa" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
-        <div className="sa-scope-switcher">
-          <div>
-            <div style={{fontWeight:900,color:"#e2e8f0",fontSize:15}}>Ambito de configuracion</div>
-            <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4}}>
-              Cambia de ambito de forma explicita. Las claves generales son respaldo de plataforma; las privadas pertenecen exclusivamente a la empresa seleccionada.
-            </div>
-          </div>
-          <div className="sa-segmented" role="group" aria-label="Ambito de integraciones">
-            <button type="button" className={integrationScope==="global" ? "is-active" : ""} onClick={()=>setIntegrationScope("global")}>General</button>
-            <button type="button" className={integrationScope==="company" ? "is-active" : ""} onClick={()=>setIntegrationScope("company")}>Por empresa</button>
-          </div>
-        </div>
-
+      <fieldset disabled={savingIntegration} className={`sa-integration-manager sa-area-${integrationTab}`} style={{minWidth:0,margin:0,display:["rutas","gps","ia","fiscal"].includes(integrationTab) ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
         {integrationScope === "global" ? (
           <div className="sa-global-integrations">
             <div className="sa-scope-notice sa-scope-notice-global">
@@ -1829,12 +1793,12 @@ function IntegracionesAdmin({ saFetchFn }) {
               <span>Se usa en la demo y como respaldo solo cuando una empresa no tiene una clave privada activa. No modifica credenciales propias de ningun cliente.</span>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,280px),1fr))",gap:12}}>
-              <div style={integrationSubcard}>
-                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Rutas, mapas y servicios</div>
+              <div className="sa-routes-only" style={integrationSubcard}>
+                <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Proveedor de rutas de la plataforma</div>
                 <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>Selecciona un proveedor global, configura su clave cifrada y verifica la conexion real.</div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor general</label>
-                <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
-                  <optgroup label="Mapas y cálculo de rutas">{companyProviderOptions.filter(p=>!['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}</option>)}</optgroup><optgroup label="Inteligencia artificial">{companyProviderOptions.filter(p=>['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}{p==='openai'?' · Intelligence':''}</option>)}</optgroup>
+                <select style={input} value={provider} onChange={e=>selectAreaProvider(e.target.value)}>
+                  {areaProviderOptions.map(p=><option key={p} value={p}>{labels[p] || p}{p==='openai'?' · Intelligence':''}</option>)}
                 </select>
                 <div style={{...integrationButtonRow,marginTop:10}}>
                   <button onClick={()=>guardarGlobal(provider)} style={{...SaaS.btnOk,height:36}}>{providerGlobalOk ? "Sustituir clave" : "Configurar clave"}</button>
@@ -1843,7 +1807,7 @@ function IntegracionesAdmin({ saFetchFn }) {
                 </div>
                 <div style={{fontSize:11,color:providerGlobalOk ? "#34d399" : "#fbbf24",fontWeight:800,marginTop:9}}>{providerGlobalOk ? `Clave disponible (${providerGlobalStatus.global_source || "global"})` : "Sin clave general"}</div>
               </div>
-              <div style={integrationSubcard}>
+              <div className="sa-ai-only" style={integrationSubcard}>
                 <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>IA y automatizacion</div>
                 <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>Motor general para demo y fallback. La empresa sigue pudiendo usar su propia clave y cuota.</div>
                 <div style={integrationGrid}>
@@ -1863,7 +1827,7 @@ function IntegracionesAdmin({ saFetchFn }) {
                   {aiGlobalOk && <button onClick={()=>eliminarGlobal(aiForm.provider)} style={{...SaaS.btn,color:"#f87171",height:36}}>Eliminar</button>}
                 </div>
               </div>
-              <div style={integrationSubcard}>
+              <div className="sa-gps-only" style={integrationSubcard}>
                 <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>GPS de respaldo</div>
                 <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,marginBottom:10}}>El proveedor activo se elige siempre por empresa. Aqui solo se mantiene una credencial general opcional.</div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor GPS</label>
@@ -1878,16 +1842,8 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
         ) : (
         <>
-        <div className="sa-scope-notice">
-          <strong>Configuracion privada por empresa</strong>
-          <span>Los cambios siguientes afectan solo a <b>{selectedEmpresa?.nombre || "la empresa seleccionada"}</b>. Fiscalidad y certificados nunca se comparten globalmente.</span>
-          <select style={{...input,maxWidth:360}} value={empresaId} onChange={e=>setEmpresaId(e.target.value)}>
-            {(data?.empresas || []).map(e => <option key={e.id} value={e.id}>{e.nombre} - {e.plan}</option>)}
-          </select>
-        </div>
-
         <div className="sa-provider-editors" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,300px),1fr))",gap:12,marginBottom:12}}>
-          <div style={integrationSubcard}>
+          <div className="sa-provider-only" style={integrationSubcard}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
               <div>
                 <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>{['openai','anthropic','ai_generic'].includes(provider)?'Inteligencia artificial':'Mapas y rutas'}</div>
@@ -1898,8 +1854,8 @@ function IntegracionesAdmin({ saFetchFn }) {
             <div style={integrationGrid}>
               <div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Proveedor</label>
-                <select style={input} value={provider} onChange={e=>setProvider(e.target.value)}>
-                  <optgroup label="Mapas y cálculo de rutas">{companyProviderOptions.filter(p=>!['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}</option>)}</optgroup><optgroup label="Inteligencia artificial">{companyProviderOptions.filter(p=>['openai','anthropic','ai_generic'].includes(p)).map(p=><option key={p} value={p}>{labels[p] || p}{p==='openai'?' · Intelligence':''}</option>)}</optgroup>
+                <select style={input} value={provider} onChange={e=>selectAreaProvider(e.target.value)}>
+                  {areaProviderOptions.map(p=><option key={p} value={p}>{labels[p] || p}{p==='openai'?' · Intelligence':''}</option>)}
                 </select>
               </div>
               <div>
@@ -1914,8 +1870,9 @@ function IntegracionesAdmin({ saFetchFn }) {
                 <input aria-label="Clave API de empresa" autoComplete="new-password" type="password" style={input} value={form.api_key} onChange={e=>setForm(p=>({...p,api_key:e.target.value,use_global:false}))} placeholder={cfgEmpresa?.key_mask ? `Actual: ${cfgEmpresa.key_mask}` : "Pegar clave de esta empresa"} />
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Límite mensual del conector</label>
                 <input type="number" min="0" style={input} value={form.limite_mensual} onChange={e=>setForm(p=>({...p,limite_mensual:e.target.value}))} />
+                <small style={{display:"block",marginTop:4,color:"#94a3b8"}}>Número máximo de llamadas a este proveedor. 0 deja este conector sin tope adicional.</small>
               </div>
             </div>
             <div style={{...integrationButtonRow,marginTop:10}}>
@@ -1930,7 +1887,7 @@ function IntegracionesAdmin({ saFetchFn }) {
             </div>
           </div>
 
-          <div style={integrationSubcard}>
+          <div className="sa-gps-only" style={integrationSubcard}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
               <div>
               <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>GPS y telemetria</div>
@@ -1964,8 +1921,9 @@ function IntegracionesAdmin({ saFetchFn }) {
                 {gpsProvider==='geotab'&&<small style={{display:'block',marginTop:4,color:'#94a3b8'}}>Introduce un JSON con database, userName y password del usuario API de MyGeotab. Se guarda cifrado y no se muestra después. Requiere acceso a Device y DeviceStatusInfo.</small>}
               </div>
               <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Limite mensual</label>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Límite mensual del conector GPS</label>
                 <input type="number" min="0" style={input} value={gpsForm.limite_mensual} onChange={e=>setGpsForm(p=>({...p,limite_mensual:e.target.value}))} />
+                <small style={{display:"block",marginTop:4,color:"#94a3b8"}}>Número máximo de llamadas a este proveedor. 0 deja este conector sin tope adicional.</small>
               </div>
             </div>
             <div style={{...integrationButtonRow,marginTop:10}}>
@@ -1983,21 +1941,7 @@ function IntegracionesAdmin({ saFetchFn }) {
           </div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))",gap:8,marginBottom:14}}>
-          {quickStatusCards.map(card => (
-            <div key={card.label} style={{background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:10}}>
-              <div style={{fontSize:10,color:"#64748b",fontWeight:900,textTransform:"uppercase"}}>{card.label}</div>
-              <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0",marginTop:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={String(card.value || "")}>
-                {card.value}
-              </div>
-              <div style={{fontSize:10,color:card.color,fontWeight:800,marginTop:5}}>
-                {card.detail}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:14}}>
+        <div className="sa-ai-only" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,220px),1fr))",gap:10,marginBottom:14}}>
           <div style={{background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
             <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Cuota IA de la empresa</div>
             <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4}}>
@@ -2017,16 +1961,15 @@ function IntegracionesAdmin({ saFetchFn }) {
               {Number(selectedEmpresa?.ia_usos_mes || 0)} / {Number(selectedEmpresa?.ia_limite_mensual || 0)}
             </div>
             <div style={{fontSize:11,color:"#64748b",marginTop:5}}>
-              Periodo {selectedEmpresa?.ia_periodo_mes || new Date().toISOString().slice(0,7)}. Las cuotas propias de proveedor se guardan debajo.
+              Periodo {selectedEmpresa?.ia_periodo_mes || new Date().toISOString().slice(0,7)}. El límite de cada proveedor se guarda en su conexión.
             </div>
           </div>
         </div>
 
-        <div style={{display:"block",marginBottom:14,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
+        <div className="sa-fiscal-only" style={{display:"block",marginBottom:14,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Fiscal por empresa</div>
-              {empresaId&&<ClaveiconAdminSummary key={empresaId} empresaId={empresaId} request={saFetchFn}/>}
               {empresaId&&<FiscalRepresentation key={`${empresaId}:${fiscalCfgEmpresa?.representacion?.updated_at || ""}`} value={fiscalCfgEmpresa?.representacion} canEdit save={body=>saFetchFn(`/integraciones/fiscal/${empresaId}/representacion`,{method:'PUT',body})}/>}
               <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginTop:4,maxWidth:780}}>
                 VERIFACTU y SII se revisan siempre a nivel de empresa. La API o certificado fiscal no se comparte globalmente entre clientes.
@@ -2320,7 +2263,7 @@ function IntegracionesAdmin({ saFetchFn }) {
           )}
         </div>
 
-        <div style={{display:"block",marginBottom:14,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
+        <div className="sa-fiscal-only" style={{display:"block",marginBottom:14,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
           <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0",marginBottom:4}}>Vista soporte multiempresa</div>
           <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.45,marginBottom:10}}>
             Resumen rápido para detectar qué empresa está lista, cuál está en pruebas y cuál necesita intervención fiscal antes de lanzar VERIFACTU o SII.
@@ -2357,7 +2300,7 @@ function IntegracionesAdmin({ saFetchFn }) {
         </div>
 
 
-        <div style={{display:"block",marginTop:12,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
+        <div className="sa-gps-only" style={{display:"block",marginTop:12,background:"#121b2d",border:"1px solid #22304a",borderRadius:8,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start",flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>Webhook de posiciones GPS</div>
@@ -2382,7 +2325,17 @@ function IntegracionesAdmin({ saFetchFn }) {
             </div>
           )}
         </div>
-        {testMsg && (testMsg.empresa_id || !["anthropic","openai","ai_generic"].includes(testMsg.provider)) && (
+        <div className="sa-gps-only" style={{display:"block",fontSize:11,color:"#64748b",marginTop:10}}>
+          {selectedEmpresa ? `${selectedEmpresa.nombre}: ` : ""}
+          al guardar un GPS queda como unico proveedor activo para esa empresa.
+        </div>
+        <div className="sa-fiscal-only" style={{display:"block",fontSize:11,color:"#64748b",marginTop:6}}>
+          La configuracion fiscal sensible se mantiene en la propia empresa para respetar APIs, certificados y credenciales separadas por cliente.
+        </div>
+        </>
+        )}
+      </fieldset>
+        {testMsg && scopeArea && testMsg.scope === integrationScope && (integrationScope === 'global' || testMsg.empresa_id === empresaId) && testMsg.provider === (integrationTab === 'gps' ? gpsProvider : integrationTab === 'ia' && integrationScope === 'global' ? aiForm.provider : provider) && (
           <div style={{
             marginTop:10,
             padding:"9px 11px",
@@ -2427,21 +2380,11 @@ function IntegracionesAdmin({ saFetchFn }) {
             )}
           </div>
         )}
-        <div style={{display:"block",fontSize:11,color:"#64748b",marginTop:10}}>
-          {selectedEmpresa ? `${selectedEmpresa.nombre}: ` : ""}
-          al guardar un GPS queda como unico proveedor activo para esa empresa.
-        </div>
-        <div style={{display:"block",fontSize:11,color:"#64748b",marginTop:6}}>
-          La configuracion fiscal sensible se mantiene en la propia empresa para respetar APIs, certificados y credenciales separadas por cliente.
-        </div>
-        </>
-        )}
-      </fieldset>
 
       <div style={{display:integrationTab==="version" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
-        <div style={{fontWeight:800,color:"#e2e8f0",fontSize:14,marginBottom:6}}>Version global del programa</div>
+        <div style={{fontWeight:800,color:"#e2e8f0",fontSize:14,marginBottom:6}}>Identificación del software</div>
         <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginBottom:10}}>
-          Esta version se usa como referencia general del producto y tambien alimenta la version del software emisor en VERIFACTU para todas las empresas.
+          Identifica la versión técnica instalada; no cambia el producto ni la versión contratada de las empresas. Estos datos también identifican el software emisor en los registros fiscales.
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,alignItems:"end",marginBottom:12}}>
           <div>
@@ -2471,9 +2414,9 @@ function IntegracionesAdmin({ saFetchFn }) {
       </div>
 
       <div style={{display:integrationTab==="apikeys" ? "block" : "none", background:"#0f1728",border:"1px solid #1c2740",borderRadius:8,padding:14,marginBottom:18}}>
-        <div style={{fontWeight:800,color:"#e2e8f0",fontSize:14,marginBottom:6}}>API keys de empresas</div>
+        <div style={{fontWeight:800,color:"#e2e8f0",fontSize:14,marginBottom:6}}>Acceso de otros sistemas a TransGest</div>
         <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginBottom:10}}>
-          Claves tgk_ activas de todas las empresas para integraciones externas. Cada empresa crea las suyas desde Mi cuenta; aqui puedes revocarlas si hace falta.
+          Estas claves permiten que un sistema externo acceda a TransGest con los permisos de la empresa. Son distintas de las claves de HERE, GPS, IA o ClaveiCon. Cada empresa las crea en Mi cuenta; aquí puedes revisar y revocar sus accesos.
         </div>
         {apiKeysMsg && <div style={{fontSize:12,color:"#f87171",marginBottom:8}}>{apiKeysMsg}</div>}
         {apiKeysAll.length===0 ? (
@@ -2630,7 +2573,7 @@ function SaludSaaS({ saFetchFn, onGestionar, onEntrar }) {
                   <td style={SaaS.td}>
                     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                       <button onClick={()=>onEntrar(e)} style={SaaS.btnOk}>Entrar</button>
-                      <button onClick={()=>onGestionar(e)} style={SaaS.btn}>Gestionar / Planner</button>
+                      <button onClick={()=>onGestionar(e)} style={SaaS.btn}>Gestionar empresa</button>
                       <button onClick={()=>gracia(e)} style={SaaS.btnWarn}>Gracia</button>
                     </div>
                   </td>
@@ -3152,7 +3095,7 @@ export default function SuperAdmin(){
   const navItems = [
     ["dashboard","Dashboard","DB"],
     ["empresas","Empresas","EM"],
-    ["multiempresas","Grupos y accesos","GR"],
+    ["multiempresas","Acceso multiempresa","GR"],
     ["soporte","Soporte","SP"],
     ["salud","Implantación","SL"],
     ["integraciones","Integraciones","IN"],
@@ -3162,7 +3105,7 @@ export default function SuperAdmin(){
     ["config","Configuracion","CF"],
   ];
   const pageMeta = {
-    multiempresas:["Grupos y accesos","Membresías y permisos por sociedad"],
+    multiempresas:["Acceso multiempresa","Usuarios que trabajan en varias sociedades y grupos empresariales"],
     dashboard:["Dashboard","Resumen general del entorno TransGest"],
     empresas:["Empresas","Gestion centralizada de clientes y suscripciones"],
     soporte:["Soporte","Solicitudes y conversaciones de las empresas"],
@@ -3358,10 +3301,10 @@ export default function SuperAdmin(){
             ):empresasFiltradas.length===0?(
               <div style={{padding:30,textAlign:"center",color:"#64748b"}}>Sin resultados.</div>
             ):(
-              <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",minWidth:1120}}>
+              <div className="sa-companies-list" style={{overflowX:"auto"}}>
+                <table className="sa-companies-table" style={{width:"100%",borderCollapse:"collapse",minWidth:1120}}>
                   <thead><tr>
-                    <th style={S.th}>Empresa</th><th style={S.th}>Plan</th><th style={S.th}>Estado</th>
+                    <th style={S.th}>Empresa</th><th style={S.th}>Producto y versión</th><th style={S.th}>Estado</th>
                     <th style={S.th}>Pago</th><th style={S.th}>Uso</th><th style={S.th}>Implantacion</th><th style={S.th}>Pedidos</th>
                     <th style={S.th}>Registro</th><th style={S.th}>Vencimiento</th><th style={{...S.th,position:"sticky",right:0,background:"var(--sa-panel)",zIndex:3}}>Acciones</th>
                   </tr></thead>
@@ -3373,27 +3316,27 @@ export default function SuperAdmin(){
                       const implantacionColor = implantacion.estado === "lista" ? "#34d399" : implantacion.estado === "en curso" ? "#fbbf24" : "#f87171";
                       return(
                         <tr key={e.id}>
-                          <td style={{...S.td,fontWeight:700,color:"#e2e8f0"}}>
+                          <td data-label="Empresa" style={{...S.td,fontWeight:700,color:"#e2e8f0"}}>
                             <div>{e.nombre}</div>
                             <div style={{fontSize:11,color:"#64748b"}}>{e.email_admin}</div>
                             <div style={{fontSize:10,color:"#5eead4"}}>Código: {e.codigo_acceso || "Pendiente"}</div>
                             {e.cif&&<div style={{fontSize:10,color:"#475569"}}>{e.cif}</div>}
                           </td>
-                          <td style={S.td}><span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${PLAN_COLOR[e.plan]}20`,color:PLAN_COLOR[e.plan],border:`1px solid ${PLAN_COLOR[e.plan]}40`}}>{getBrandDisplayName(e.plan)}</span></td>
-                          <td style={S.td}>
+                          <td data-label="Producto y versión" style={S.td}><CompanyProductBadge company={e}/></td>
+                          <td data-label="Estado" style={S.td}>
                             <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:`${ESTADO_COLOR[e.estado]}18`,color:ESTADO_COLOR[e.estado]}}>{e.estado}</span>
                             {e.bloqueo_manual && <div style={{marginTop:4,padding:"2px 7px",borderRadius:20,fontSize:9,fontWeight:800,background:"rgba(239,68,68,.15)",color:"#f87171",display:"inline-block",letterSpacing:".04em"}}>BLOQUEADA{e.bloqueo_motivo?` · ${e.bloqueo_motivo}`:""}</div>}
                           </td>
-                          <td style={S.td}>
+                          <td data-label="Pago" style={S.td}>
                             <div style={{fontSize:11,color:e.metodo_pago==="pendiente"?"#fbbf24":"#94a3b8",fontWeight:700}}>{e.metodo_pago || "pendiente"}</div>
                             {e.email_facturacion&&<div style={{fontSize:10,color:"#64748b",marginTop:2}}>{e.email_facturacion}</div>}
                           </td>
-                          <td style={S.td}>
+                          <td data-label="Uso" style={S.td}>
                             <div style={{fontSize:11,color:"#f97316",fontWeight:700}}>{fmtN(e.n_vehiculos)} vehiculos</div>
                             <div style={{fontSize:11,color:"#3b82f6",fontWeight:700,marginTop:2}}>{fmtN(e.n_usuarios)} usuarios</div>
                             <div style={{fontSize:10,color:"#14b8a6",fontWeight:700,marginTop:2}}>{fmtN(e.n_clientes)} clientes</div>
                           </td>
-                          <td style={S.td}>
+                          <td data-label="Implantación" style={S.td}>
                             <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:900,color:implantacionColor}}>{implantacion.score}%</div>
                             <div style={{fontSize:10,color:implantacionColor,fontWeight:800,textTransform:"uppercase",marginTop:1}}>{implantacion.estado}</div>
                             {!!implantacion.pendientes.length && (
@@ -3402,14 +3345,14 @@ export default function SuperAdmin(){
                               </div>
                             )}
                           </td>
-                          <td style={{...S.td,fontFamily:"'JetBrains Mono',monospace",textAlign:"center",color:"#e2e8f0"}}>{fmtN(e.n_pedidos)}</td>
-                          <td style={{...S.td,fontSize:11}}>{fmtDate(e.created_at)}</td>
-                          <td style={{...S.td,fontSize:11}}>
+                          <td data-label="Pedidos" style={{...S.td,fontFamily:"'JetBrains Mono',monospace",textAlign:"center",color:"#e2e8f0"}}>{fmtN(e.n_pedidos)}</td>
+                          <td data-label="Registro" style={{...S.td,fontSize:11}}>{fmtDate(e.created_at)}</td>
+                          <td data-label="Vencimiento" style={{...S.td,fontSize:11}}>
                             <span style={{color:vencida?"#ef4444":proxima?"#fbbf24":"#94a3b8"}}>
                               {vencida?"Vencida ":proxima?"Proxima ":""}{e.fecha_vencimiento?fmtDate(e.fecha_vencimiento):"Sin limite"}
                             </span>
                           </td>
-                          <td style={{...S.td,textAlign:"right",position:"sticky",right:0,background:"var(--sa-panel)",zIndex:2,boxShadow:"-8px 0 12px -8px rgba(15,23,42,.18)"}}>
+                          <td className="sa-company-actions" data-label="Acciones" style={{...S.td,textAlign:"right",position:"sticky",right:0,background:"var(--sa-panel)",zIndex:2,boxShadow:"-8px 0 12px -8px rgba(15,23,42,.18)"}}>
                             <div style={{display:"flex",gap:6,justifyContent:"flex-end",flexWrap:"wrap",maxWidth:230,marginLeft:"auto"}}>
                               <button onClick={()=>entrarEmpresa(e)} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"#34d399",border:"1px solid rgba(16,185,129,.25)"}}>Entrar</button>
                               <button onClick={()=>resetPasswordEmpresa(e)} style={{...S.btn,background:"rgba(20,184,166,.10)",color:"#5eead4",border:"1px solid rgba(20,184,166,.22)"}}>Clave</button>
@@ -3418,7 +3361,7 @@ export default function SuperAdmin(){
                               <button onClick={()=>toggleBloqueoEmpresa(e)} style={{...S.btn, ...(e.bloqueo_manual
                                 ? {background:"rgba(16,185,129,.14)",color:"#34d399",border:"1px solid rgba(16,185,129,.3)"}
                                 : {background:"rgba(239,68,68,.12)",color:"#f87171",border:"1px solid rgba(239,68,68,.3)"})}}>{e.bloqueo_manual ? "Desbloquear" : "Bloquear"}</button>
-                              <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar / Planner</button>
+                              <button onClick={()=>setEditando(e)} style={{...S.btn,background:"#1e2d45",color:"#94a3b8",border:"1px solid #1c2740"}}>Gestionar empresa</button>
                             </div>
                           </td>
                         </tr>

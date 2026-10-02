@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 const buttonStyle = { minHeight: 36, padding: '8px 12px', borderRadius: 7, border: '1px solid #0f766e', background: '#0f766e', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const secondaryButtonStyle = { ...buttonStyle, background: '#172338', borderColor: '#475569', color: '#e2e8f0' };
 
-export default function ClaveiconAdminSummary({ empresaId, request }) {
+export default function ClaveiconAdminSummary({ empresaId, request, defaultOpen = false }) {
   const [value, setValue] = useState(null);
   const [key, setKey] = useState('');
   const [code, setCode] = useState('');
@@ -66,7 +66,7 @@ export default function ClaveiconAdminSummary({ empresaId, request }) {
   }
 
   const cfg = value?.config || {};
-  return <details style={{ marginTop: 16, color: '#e2e8f0', maxWidth: 780 }}>
+  return <details open={defaultOpen || undefined} style={{ marginTop: 16, color: '#e2e8f0', maxWidth: 780 }}>
     <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
       ClaveiCon · {cfg.enabled ? 'Configurado' : 'Sin activar'} · {value?.pending || 0} pendientes · {value?.errors || 0} errores
     </summary>

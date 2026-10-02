@@ -44,4 +44,4 @@ async function main(){
   assert.deepEqual(allowed(['planner'],'pedidos','visualizador','POST'),{pass:false,code:403});
   console.log('PASS: company-scoped product persistence, defaults, activation/revocation, validation and backend product/role permissions. DB simulated.');
 }
-main().catch(e=>{console.error(e);process.exitCode=1;});
+main().then(()=>require('./company_product_selection_check.cjs')).catch(e=>{console.error(e);process.exitCode=1;});

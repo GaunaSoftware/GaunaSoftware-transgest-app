@@ -1151,7 +1151,11 @@ router.get("/empresas", superAuth, async (req, res) => {
     FROM empresas e
     ORDER BY e.created_at DESC
   `);
-  res.json(rows);
+  const products = require('../services/companyProducts');
+  await products.ensure();
+  const modes = (await db.query('SELECT empresa_id,modalidad FROM empresa_productos')).rows;
+  const byCompany = new Map(modes.map(row=>[row.empresa_id,row.modalidad]));
+  res.json(rows.map(row=>({...row,modalidad:row.plan==='planner'?'planner':row.plan==='pro_planner'?'combinado':byCompany.get(row.id)||'transgest'})));
 });
 
 router.get('/tarifas-comerciales', superAuth, (req, res) => {
@@ -1256,6 +1260,7 @@ router.post("/empresas", superAuth, async (req, res) => {
     email_admin,
     nombre_admin,
     plan = "profesional",
+    modalidad,
     origen_comercial,
     fecha_vencimiento,
     ciclo_facturacion = "mensual",
@@ -1269,6 +1274,9 @@ router.post("/empresas", superAuth, async (req, res) => {
   if (!["lite","profesional","enterprise","planner","pro_planner"].includes(plan)) return res.status(400).json({error:"Plan no válido"});
   if (!['directa','canal'].includes(origen_comercial)) return res.status(400).json({error:'Origen comercial no válido'});
   try {
+    const products = require('../services/companyProducts');
+    const productMode = products.validateSelection(plan, modalidad);
+    await products.ensure();
     const dominio = nombre_empresa.toLowerCase()
       .normalize("NFD").replace(/[̀-ͯ]/g, "")
       .replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-")
@@ -1282,6 +1290,7 @@ router.post("/empresas", superAuth, async (req, res) => {
           fecha_vencimiento || null, ciclo_facturacion, normalizeBillingMethod(metodo_pago), iban_facturacion || null, email_facturacion || email_admin, origen_comercial]);
 
       const empresa = empresaRes.rows[0];
+      await client.query('INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,$2)',[empresa.id,productMode]);
       const tempHash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 12);
       const userRes = await client.query(`
         INSERT INTO usuarios (nombre, email, username, password_hash, rol, empresa_id, activo, debe_cambiar_password)
@@ -1318,7 +1327,7 @@ router.post("/empresas", superAuth, async (req, res) => {
     });
   } catch(err) {
     if (err.code === "23505") return res.status(409).json({ error: "El email o dominio ya existe" });
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1446,6 +1455,7 @@ router.post("/empresas/demo", superAuth, async (req, res) => {
 router.patch("/empresas/:id", superAuth, async (req, res) => {
   const {
     plan,
+    modalidad,
     origen_comercial,
     estado,
     fecha_vencimiento,
@@ -1501,13 +1511,15 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
     updates.push(`ia_limite_mensual=$${i++}`); params.push(n);
   }
   if (!updates.length && "email_admin" in req.body) updates.push("email_admin=email_admin");
+  if (!updates.length && modalidad !== undefined) updates.push('plan=plan');
   if (!updates.length) return res.status(400).json({ error: "Nada que actualizar" });
   params.push(req.params.id);
   try {
-    if (plan !== undefined) await require('../services/companyProducts').get(req.params.id);
+    if (plan !== undefined || modalidad !== undefined) await require('../services/companyProducts').ensure();
     await db.transaction(async client => {
       const previous = await client.query("SELECT email_admin,plan FROM empresas WHERE id=$1 FOR UPDATE", [req.params.id]);
       if (!previous.rows.length) throw Object.assign(new Error("Empresa no encontrada"), { status:404 });
+      const productMode = modalidad !== undefined ? require('../services/companyProducts').validateSelection(plan ?? previous.rows[0].plan, modalidad) : null;
       if ("email_admin" in req.body) {
         const email = String(req.body.email_admin || "").trim().toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw Object.assign(new Error("Introduce un email válido del administrador"), {status:400});
@@ -1523,8 +1535,8 @@ router.patch("/empresas/:id", superAuth, async (req, res) => {
         }
       }
       await client.query(`UPDATE empresas SET ${updates.join(",")} WHERE id=$${i}`, params);
-      if (plan !== undefined && (['planner','pro_planner'].includes(plan) || ['planner','pro_planner'].includes(previous.rows[0].plan))) {
-        await client.query(`INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,$2) ON CONFLICT(empresa_id) DO UPDATE SET modalidad=EXCLUDED.modalidad,updated_at=NOW()`,[req.params.id,plan==='planner'?'planner':plan==='pro_planner'?'combinado':'transgest']);
+      if (productMode || (plan !== undefined && (['planner','pro_planner'].includes(plan) || ['planner','pro_planner'].includes(previous.rows[0].plan)))) {
+        await client.query(`INSERT INTO empresa_productos(empresa_id,modalidad) VALUES($1,$2) ON CONFLICT(empresa_id) DO UPDATE SET modalidad=EXCLUDED.modalidad,updated_at=NOW()`,[req.params.id,productMode || (plan==='planner'?'planner':plan==='pro_planner'?'combinado':'transgest')]);
       }
     });
   } catch (error) { return res.status(error.status || (error.code === '23505' ? 409 : 500)).json({error:error.status ? error.message : error.code === '23505' ? 'El código de empresa o el email ya está registrado.' : 'No se pudo actualizar la empresa.'}); }

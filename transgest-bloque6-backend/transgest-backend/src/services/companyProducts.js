@@ -2,6 +2,13 @@ const MODES = { transgest:['transgest'], planner:['planner'], combinado:['transg
 const SHARED = new Set(['pedidos','clientes','rutas','colaboradores','palets','documentos','facturacion','empresa','usuarios','mi_cuenta','agenda','avisos','solicitudes','portal_cliente','portal-cliente']);
 const modeForPlan = plan => plan === 'planner' ? 'planner' : plan === 'pro_planner' ? 'combinado' : null;
 const defaultMode = () => process.env.TRANSGEST_PRODUCT === 'planner' ? 'planner' : 'transgest';
+function validateSelection(plan, modalidad) {
+  const mode = modalidad === undefined ? (modeForPlan(plan) || 'transgest') : modalidad;
+  if (!Object.prototype.hasOwnProperty.call(MODES, mode)) throw Object.assign(new Error('Selecciona un producto válido.'), {status:400});
+  const fixed = modeForPlan(plan);
+  if (fixed && fixed !== mode) throw Object.assign(new Error('El producto no corresponde a la licencia seleccionada.'), {status:400});
+  return mode;
+}
 function productsFor(mode) { return [...(MODES[mode] || MODES[defaultMode()])]; }
 function moduleAvailable(products, module) {
   const enabled = Array.isArray(products) ? products : productsFor();
@@ -20,6 +27,7 @@ function createStore(db) {
     await schema;
   }
   return {
+    ensure,
     async get(empresaId) {
       if (!empresaId) return {modalidad:defaultMode(),productos:productsFor()};
       await ensure();
@@ -44,4 +52,4 @@ function createStore(db) {
 }
 let store;
 function getStore() { if (!store) store=createStore(require('./db')); return store; }
-module.exports={productsFor,moduleAvailable,createStore,get: id=>getStore().get(id),set:(id,mode)=>getStore().set(id,mode)};
+module.exports={productsFor,moduleAvailable,createStore,validateSelection,ensure:()=>getStore().ensure(),get: id=>getStore().get(id),set:(id,mode)=>getStore().set(id,mode)};

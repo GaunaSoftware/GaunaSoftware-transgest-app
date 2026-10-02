@@ -21,6 +21,7 @@ function normalizarTab(value) {
 export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
   const [tab, setTab] = useState(() => normalizarTab(initialTab));
   const [showWeekly, setShowWeekly] = useState(false);
+  const nuevoPedido=()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",view:tab,action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));};
 
   useEffect(() => {
     setTab(normalizarTab(initialTab));
@@ -36,7 +37,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       color: "var(--text)",
       fontFamily: "'DM Sans',sans-serif",
     }}>
-      <header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",view:tab,action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));}}>+ Nuevo pedido</button></header>
+      {tab!=="cuadrante"&&<header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={nuevoPedido}>+ Nuevo pedido</button></header>}
       <div className="tg-planificacion-tabs" style={{
         display: "flex",
         alignItems: "center",
@@ -70,7 +71,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {tab === "cuadrante" && <><TrafficLocationAgenda /><section className="traffic-weekly-detail"><button type="button" aria-expanded={showWeekly} onClick={()=>setShowWeekly(value=>!value)}>{showWeekly?'Ocultar':'Abrir'} cuadrante semanal detallado</button>{showWeekly&&<GestionTrafico initialVista="cuadrante" hideInternalTabs onViewChange={setTab} />}</section></>}
+        {tab === "cuadrante" && <><TrafficLocationAgenda onNewOrder={nuevoPedido} /><section className="traffic-weekly-detail"><button type="button" aria-expanded={showWeekly} onClick={()=>setShowWeekly(value=>!value)}>{showWeekly?'Ocultar':'Abrir'} cuadrante semanal detallado</button>{showWeekly&&<GestionTrafico initialVista="cuadrante" hideInternalTabs onViewChange={setTab} />}</section></>}
         {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs onViewChange={setTab} />}
         {tab === "optimizacion" && <GestionTrafico initialVista="optimizacion" hideInternalTabs />}
       </div>

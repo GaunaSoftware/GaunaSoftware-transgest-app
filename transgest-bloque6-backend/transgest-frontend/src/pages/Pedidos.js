@@ -3910,7 +3910,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
   const [adding, setAdding] = useState(false);
   const [editingStopIndex, setEditingStopIndex] = useState(null);
   const [puntosInteres, setPuntosInteres] = useState(getPuntosInteres);
-  const emptyStop = { direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", precio:"", referencia:"", notas:"", google_maps_url:"", pais:"España", provincia:"" };
+  const emptyStop = { direccion:"", cliente_nombre:"", fecha:"", hora:"", ventana:"", bultos:"", peso_kg:"", mercancia:"", origen_carga_indice:"", precio:"", referencia:"", notas:"", google_maps_url:"", pais:"España", provincia:"" };
   const [newStop, setNewStop] = useState(emptyStop);
   const [newStopDetailsOpen, setNewStopDetailsOpen] = useState(false);
   const [puntoQuery, setPuntoQuery] = useState("");
@@ -3971,6 +3971,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
       }, 0)
     : (mainLugar ? inferStopGeo({ direccion: mainLugar, fecha: mainFecha || "", hora: mainHora || "", pais: fallbackPais, provincia: fallbackProvincia, tipo, es_principal: true, es_adicional: false }, 0) : null);
   const stopsOrdenados = effectivePrimary ? [effectivePrimary, ...paradas] : paradas;
+  const cargasParaDeca = tipo === "descarga" ? (parseStops(form.puntos_carga).length ? parseStops(form.puntos_carga) : [{direccion:form.origen}]) : [];
   latestStopsRef.current = stopsOrdenados;
   useEffect(() => {
     if (provinciaManual) return;
@@ -4160,7 +4161,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
     };
   }, []);
 
-  function setStopsOrdenados(nextStops, { infer = true } = {}) {
+  function setStopsOrdenados(nextStops, { infer = true, loadOrderBefore = null } = {}) {
     setForm(p => {
       const previousStopWeight = Math.max(sumStopWeights(p.puntos_carga), sumStopWeights(p.puntos_descarga));
       const stopsToStore = nextStops
@@ -4176,6 +4177,12 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
       const first = stopsToStore[0] || {};
       const updated = {...p, [key]: stopsToStore};
       if (tipo === "carga") {
+        if (loadOrderBefore) updated.puntos_descarga = parseStops(p.puntos_descarga).map(stop => {
+          if (stop.origen_carga_indice == null || stop.origen_carga_indice === "") return stop;
+          const original=loadOrderBefore[Number(stop.origen_carga_indice)];
+          const nextIndex=nextStops.indexOf(original);
+          return {...stop,origen_carga_indice:nextIndex<0?"":nextIndex};
+        });
         updated.origen = first.cliente_nombre || first.nombre || stopAddress(first) || "";
         // La fecha/hora de la parada de carga se lleva al campo de arriba (junto
         // a Fecha pedido) automaticamente; si la parada no tiene, se conserva lo
@@ -4244,7 +4251,7 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
   }
   function removeStop(idx) {
     if (stopsOrdenados.length <= 1) return;
-    setStopsOrdenados(stopsOrdenados.filter((_, i) => i !== idx));
+    setStopsOrdenados(stopsOrdenados.filter((_, i) => i !== idx), {loadOrderBefore:tipo === "carga" ? stopsOrdenados : null});
     setEditingStopIndex(current => current === idx ? null : (current > idx ? current - 1 : current));
   }
   function moveStop(idx, delta) {
@@ -4252,14 +4259,14 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
     if (nextIdx < 0 || nextIdx >= stopsOrdenados.length) return;
     const next = [...stopsOrdenados];
     [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
-    setStopsOrdenados(next);
+    setStopsOrdenados(next, {loadOrderBefore:tipo === "carga" ? stopsOrdenados : null});
   }
   function dropStop(overIdx) {
     if (disabled || dragIdx === null || dragIdx === overIdx) return;
     const next = [...stopsOrdenados];
     const [moved] = next.splice(dragIdx, 1);
     next.splice(overIdx, 0, moved);
-    setStopsOrdenados(next);
+    setStopsOrdenados(next, {loadOrderBefore:tipo === "carga" ? stopsOrdenados : null});
     setDragIdx(null);
   }
 
@@ -4403,6 +4410,9 @@ function ParadasEditor({ tipo, form, setForm, disabled, pedidoId, compact = fals
                     <input style={inp} disabled={disabled} value={d.ventana || ""} onChange={e=>updateStop(i,{ventana:e.target.value})} placeholder="Ventana horaria" />
                     <input type="number" min="0" style={inp} disabled={disabled} value={d.bultos || ""} onChange={e=>updateStop(i,{bultos:e.target.value})} placeholder="Bultos / palets" />
                     <input type="text" inputMode="decimal" style={inp} disabled={disabled} value={d.peso_kg ?? ""} onChange={e=>updateStop(i,{peso_kg:e.target.value})} onBlur={()=>{const kg=normalizePesoKgInput(d.peso_kg);if(kg!=null)updateStop(i,{peso_kg:kg});}} placeholder="Peso kg (8,0 = 8.000)" />
+                    <input style={inp} disabled={disabled} value={d.mercancia || ""} onChange={e=>updateStop(i,{mercancia:e.target.value})} placeholder="Mercancía de esta parada (si difiere de la general)" aria-label={`Mercancía de ${label} ${i+1}`} />
+                    {tipo === "descarga" && <input style={inp} disabled={disabled} value={d.destinatario || ""} onChange={e=>updateStop(i,{destinatario:e.target.value})} placeholder="Destinatario (si difiere del punto)" aria-label={`Destinatario de descarga ${i+1}`} />}
+                    {tipo === "descarga" && cargasParaDeca.length>1 && stopsOrdenados.length>1 && <select style={inp} disabled={disabled} value={d.origen_carga_indice ?? ""} onChange={e=>updateStop(i,{origen_carga_indice:e.target.value})} aria-label={`Carga de origen de descarga ${i+1}`}><option value="">Carga de origen del envío</option>{cargasParaDeca.map((carga,index)=><option key={index} value={index}>Carga {index+1}: {carga.cliente_nombre || stopAddress(carga)}</option>)}</select>}
                     {(i > 0 || Number(d.precio||0) > 0) ? (
                       <input type="number" min="0" step="0.01" style={inp} disabled={disabled} value={d.precio || ""} onChange={e=>updateStop(i,{precio:e.target.value})} placeholder={`Precio extra ${label} EUR`} />
                     ) : (
@@ -4552,6 +4562,9 @@ compact ? <DropdownMenu data-pedido-mutation="true" label={`Acciones de ${label}
             />
             <input type="number" style={inp} placeholder="Bultos" value={newStop.bultos} onChange={e=>setNewStop(p=>({...p,bultos:e.target.value}))}/>
             <input type="text" inputMode="decimal" style={inp} placeholder="Peso kg (8,0 = 8.000)" value={newStop.peso_kg} onChange={e=>setNewStop(p=>({...p,peso_kg:e.target.value}))} onBlur={()=>{const kg=normalizePesoKgInput(newStop.peso_kg);if(kg!=null)setNewStop(p=>({...p,peso_kg:kg}));}}/>
+            <input style={inp} placeholder="Mercancía de esta parada (si difiere de la general)" value={newStop.mercancia} onChange={e=>setNewStop(p=>({...p,mercancia:e.target.value}))}/>
+            {tipo === "descarga" && <input style={inp} placeholder="Destinatario (si difiere del punto)" value={newStop.destinatario || ""} onChange={e=>setNewStop(p=>({...p,destinatario:e.target.value}))}/>}
+            {tipo === "descarga" && cargasParaDeca.length>1 && <select style={inp} value={newStop.origen_carga_indice} onChange={e=>setNewStop(p=>({...p,origen_carga_indice:e.target.value}))} aria-label="Carga de origen del nuevo envío"><option value="">Carga de origen del envío</option>{cargasParaDeca.map((carga,index)=><option key={index} value={index}>Carga {index+1}: {carga.cliente_nombre || stopAddress(carga)}</option>)}</select>}
             <input type="number" step="0.01" style={inp} placeholder={`Precio ${label} EUR`} value={newStop.precio} onChange={e=>setNewStop(p=>({...p,precio:e.target.value}))}/>
             <input style={inp} placeholder={`Referencia ${label}`} value={newStop.referencia} onChange={e=>setNewStop(p=>({...p,referencia:e.target.value}))}/>
             <input className="tg-stop-grid-wide" style={inp} placeholder="Notas" value={newStop.notas} onChange={e=>setNewStop(p=>({...p,notas:e.target.value}))}/>

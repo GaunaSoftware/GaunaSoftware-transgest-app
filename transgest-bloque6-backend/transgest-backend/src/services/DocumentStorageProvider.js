@@ -10,13 +10,14 @@ class LegacyDocumentStorageProvider {
 }
 class DatabaseDocumentStorageProvider {
   constructor(database=db){this.db=database;}
-  async stage(client,empresaId,batchId,rowId,name,bytes){
+  async stage(client,empresaId,batchId,rowId,name,bytes,mime='application/pdf'){
     if(!Buffer.isBuffer(bytes)||bytes.length<10||bytes.length>5*1024*1024)throw new Error('PDF vacío o superior a 5 MB');
     const filename=normalizeFilename(name);
     const sha=crypto.createHash('sha256').update(bytes).digest('hex');
-    const {rows}=await client.query(`INSERT INTO import_document_blobs(empresa_id,batch_id,row_id,file_name,size_bytes,sha256,content)
-      VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,[empresaId,batchId,rowId,filename,bytes.length,sha,bytes]);
-    return {storageKey:`db:${rows[0].id}`,fileName:filename,mime:'application/pdf',sizeBytes:bytes.length,sha256:sha};
+    if(!['application/pdf','image/png','image/jpeg','image/webp'].includes(mime))throw new Error('Tipo de archivo no permitido');
+    const {rows}=await client.query(`INSERT INTO import_document_blobs(empresa_id,batch_id,row_id,file_name,size_bytes,sha256,content,mime)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,[empresaId,batchId,rowId,filename,bytes.length,sha,bytes,mime]);
+    return {storageKey:`db:${rows[0].id}`,fileName:filename,mime,sizeBytes:bytes.length,sha256:sha};
   }
   async commit(client,empresaId,storageKey){
     const id=String(storageKey||'').replace(/^db:/,'');

@@ -4,6 +4,7 @@ import FiscalRepresentation from '../components/FiscalRepresentation';
 import ClaveiconAdminSummary from '../components/ClaveiconAdminSummary';
 import SupportInbox from "../components/SupportInbox";
 import CompanyProductFields, { CompanyProductBadge } from "./admin/CompanyProductFields";
+import GeotabCredentials,{parseGeotabCredentials} from '../components/GeotabCredentials';
 import { getBrandDisplayName } from "../branding";
 import { useState, useEffect, useCallback } from "react";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
@@ -1077,6 +1078,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
       return;
     }
     try {
+      if(gpsProvider==='geotab'&&!gpsForm.use_global&&gpsForm.api_key)parseGeotabCredentials(gpsForm.api_key);
       setSavingIntegration(true);
       await saFetchFn(`/integraciones/empresas/${empresaId}/${gpsProvider}`, { method:"PUT", body:{ ...gpsForm, activo:true } });
       notify("GPS de empresa guardado. El resto de proveedores GPS quedan inactivos para esta empresa.", "success");
@@ -1915,16 +1917,16 @@ export function IntegracionesAdmin({ saFetchFn }) {
                   <option value="global">Usar clave general</option>
                 </select>
               </div>
-              <div>
-                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>{gpsProvider==='geotab'?'Credenciales Geotab de esta empresa':'Clave GPS propia'}</label>
-                <input aria-label="Clave GPS de empresa" autoComplete="new-password" type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value,use_global:false}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}` : gpsProvider==='geotab'?'JSON con database, userName y password':'Pegar clave GPS de esta empresa'} />
-                {gpsProvider==='geotab'&&<small style={{display:'block',marginTop:4,color:'#94a3b8'}}>Introduce un JSON con database, userName y password del usuario API de MyGeotab. Se guarda cifrado y no se muestra después. Requiere acceso a Device y DeviceStatusInfo.</small>}
-              </div>
+              {gpsProvider!=='geotab'&&<div>
+                <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Clave GPS propia</label>
+                <input aria-label="Clave GPS de empresa" autoComplete="new-password" type="password" style={input} value={gpsForm.api_key} onChange={e=>setGpsForm(p=>({...p,api_key:e.target.value,use_global:false}))} placeholder={cfgGps?.key_mask ? `Actual: ${cfgGps.key_mask}`:'Pegar clave GPS de esta empresa'} />
+              </div>}
               <div>
                 <label style={{fontSize:10,color:"#64748b",fontWeight:800,textTransform:"uppercase"}}>Límite mensual del conector GPS</label>
                 <input type="number" min="0" style={input} value={gpsForm.limite_mensual} onChange={e=>setGpsForm(p=>({...p,limite_mensual:e.target.value}))} />
                 <small style={{display:"block",marginTop:4,color:"#94a3b8"}}>Número máximo de llamadas a este proveedor. 0 deja este conector sin tope adicional.</small>
               </div>
+              {gpsProvider==='geotab'&&<GeotabCredentials key={`${empresaId}-${gpsProvider}`} value={gpsForm.api_key} configured={!!cfgGps?.key_mask} disabled={savingIntegration} inputStyle={input} onChange={api_key=>setGpsForm(previous=>({...previous,api_key,use_global:false}))}/>}
             </div>
             <div style={{...integrationButtonRow,marginTop:10}}>
               <button onClick={guardarGpsEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar GPS activo</button>

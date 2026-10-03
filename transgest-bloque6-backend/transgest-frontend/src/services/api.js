@@ -1472,6 +1472,7 @@ export const getRutaAnalisis = id => apiFetch(`/rutas/${id}/analisis`);
 export const getFleetLocations=()=>apiFetch("/vehiculos/localizacion",{silentSuccess:true});
 
 export const analizarDocVehiculo=(vehicleId,documentId)=>apiFetch(`/docs/vehiculo/${vehicleId}/${documentId}/analizar`,{method:"POST",body:JSON.stringify({}),timeoutMs:75000});
+export const analizarDocVehiculoNuevo=data=>apiFetch('/docs/vehiculo/analizar',{method:'POST',body:data,timeoutMs:75000});
 
 export const getSupplierDocumentDeliveries=id=>apiFetch(`/pedidos/${id}/deca-envios`,{silentSuccess:true});
 export const retrySupplierDocumentDelivery=(id,job)=>apiFetch(`/pedidos/${id}/deca-envios/${job}/reintentar`,{method:"POST",body:JSON.stringify({})});

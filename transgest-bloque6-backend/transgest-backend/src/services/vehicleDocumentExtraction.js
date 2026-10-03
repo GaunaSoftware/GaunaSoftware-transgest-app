@@ -8,7 +8,7 @@ function normalize(data,vehicle={}){
   if(!data||data.legible!==true||Number(data.confianza_lectura)<0.8)throw fail('No se puede escanear con suficiente calidad. Sube una foto nítida, completa y sin reflejos, o rellena la ficha manualmente.');
   const fields=[],warnings=[];
   const plate=value=>String(value||'').replace(/[^a-z0-9]/gi,'').toUpperCase();
-  if(data.matricula_documento&&plate(data.matricula_documento)!==plate(vehicle.matricula))throw fail('La matrícula del documento no coincide con la del vehículo. Revisa el archivo antes de continuar.');
+  if(vehicle.matricula&&data.matricula_documento&&plate(data.matricula_documento)!==plate(vehicle.matricula))throw fail('La matrícula del documento no coincide con la del vehículo. Revisa el archivo antes de continuar.');
   for(const entry of Array.isArray(data.campos)?data.campos.slice(0,60):[]){
     const key=entry?.campo;if(!Object.hasOwn(LABELS,key)||fields.some(f=>f.key===key)||Number(entry.confianza)<0.8||!String(entry.evidencia||'').trim())continue;
     let value=entry.valor;
@@ -22,7 +22,7 @@ function normalize(data,vehicle={}){
     }else{
       if(typeof value!=='string')continue;value=value.trim().slice(0,200);if(!value)continue;
       if(key==='numero_bastidor'&&!/^[A-HJ-NPR-Z0-9]{17}$/i.test(value))continue;
-      if(key==='matricula'&&plate(value)!==plate(vehicle.matricula))throw fail('La matrícula detectada no corresponde al vehículo. No se ha modificado la ficha.');
+      if(key==='matricula'&&vehicle.matricula&&plate(value)!==plate(vehicle.matricula))throw fail('La matrícula detectada no corresponde al vehículo. No se ha modificado la ficha.');
     }
     fields.push({key,label:LABELS[key],value,evidence:String(entry.evidencia).slice(0,400),confidence:Number(entry.confianza),existing:vehicle[key]??null});
   }
@@ -49,4 +49,9 @@ async function extractStoredVehicleDocument(db,company,vehicleId,documentId,{rea
   const result=await readAI(company,file,instruction);
   return {...normalize(result.data,{...row.vehicle,...row.extra}),provider:result.provider,model:result.model,document_id:row.id};
 }
-module.exports={upload,normalize,extractStoredVehicleDocument,instruction,LABELS};
+async function extractUploadedVehicleDocument(company,body,{readAI=require('./documentAI').readDocument}={}){
+  const file=upload(body.file_url,body.file_nombre);
+  const result=await readAI(company,file,instruction);
+  return {...normalize(result.data,{matricula:String(body.matricula||'').slice(0,20)}),provider:result.provider,model:result.model};
+}
+module.exports={upload,normalize,extractStoredVehicleDocument,extractUploadedVehicleDocument,instruction,LABELS};

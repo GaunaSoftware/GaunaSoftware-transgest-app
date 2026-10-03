@@ -61,7 +61,8 @@ module.exports=async({db,base,company,token,outbound=[],outboundLinks=[]})=>{
  assert.match(loadedPage,/name="deca_origen"/,'tras la carga debe preguntar si el cargador facilitó el DeCA');
  assert.equal((await db.query('SELECT estado::text AS estado,colaborador_carga_confirmada_at IS NOT NULL AS cargado FROM pedidos WHERE id=$1',[confirmOrder])).rows[0].cargado,true);
  assert.equal(outboundLinks.length,sentBeforeLoad,'el correo de salida espera a la respuesta sobre el DeCA');
- const decaDecision=await fetch(base+'/pedidos/colaborador/carga/'+loadToken+'/deca',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({deca_origen:'solicitar'})});
+ await db.query("UPDATE pedidos SET origen='Calle Prueba 1, 46001 Valencia, España',destino='Calle Destino 2, 28001 Madrid, España',fecha_carga=CURRENT_DATE WHERE id=$1",[confirmOrder]);
+ const decaDecision=await fetch(base+'/pedidos/colaborador/carga/'+loadToken+'/deca',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({deca_origen:'solicitar',verificado_chofer:'true',mercancia_0:'Palets de ensayo',peso_0:'100',bultos_0:'1',origen_0:'0',embalaje_0:'Palet'})});
  assert.equal(decaDecision.status,200,await decaDecision.text());
  assert.equal((await db.query("SELECT count(*)::int n FROM pedido_eventos WHERE pedido_id=$1 AND tipo='documento_control.solicitado'",[confirmOrder])).rows[0].n,1);
  assert.equal(outboundLinks.at(-1).plantilla,'colaborador_camino');

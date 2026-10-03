@@ -5,7 +5,8 @@ const { saveSupplierProgress }=require('../src/services/supplierProgress');
 async function main() {
   assert.equal(stateFromProgress({carga_iniciada:true}),'espera_carga');
   assert.equal(stateFromProgress({carga_iniciada:true,carga_proceso:true}),'cargando');
-  assert.equal(stateFromProgress({carga_ok:true}),'en_curso');
+  assert.equal(stateFromProgress({carga_ok:true}),'cargado');
+  assert.equal(stateFromProgress({carga_ok:true,viaje_iniciado:true}),'en_curso');
   assert.equal(stateFromProgress({posicionado_descarga:true}),'espera_descarga');
   assert.equal(stateFromProgress({descarga_ok:true}),'descarga');
   assert.equal(stateFromProgress({descarga_ok:true},{deliveryComplete:true}),'entregado');
@@ -34,7 +35,7 @@ async function main() {
     assert.equal((await pg.query('SELECT estado FROM pedidos')).rows[0].estado,'espera_carga');
     assert.equal((await pg.query('SELECT data FROM pedido_chofer_pasos')).rows[0].data.carga_proceso,undefined);
     assert.equal((await save({carga_proceso:true})).estado,'cargando');
-    assert.equal((await save({carga_ok:true})).estado,'en_curso');
+    assert.equal((await save({carga_ok:true})).estado,'cargado');
     assert.ok((await pg.query('SELECT carga_real_at FROM pedidos')).rows[0].carga_real_at);
     await save({albaran_carga:true});
     await assert.rejects(save({viaje_iniciado:true}),{code:'DECA_REQUIRED'});

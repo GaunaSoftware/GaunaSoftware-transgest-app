@@ -1,0 +1,3 @@
+ALTER TABLE rutas ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL;
+ALTER TABLE rutas ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL;
+ALTER TABLE rutas ADD COLUMN IF NOT EXISTS observaciones_factura TEXT;

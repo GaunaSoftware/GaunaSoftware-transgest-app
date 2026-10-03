@@ -1,0 +1,390 @@
+{
+  "branch": "codex/workflow-oct02",
+  "production": "Prohibido desplegar o fusionar hasta autorización nueva",
+  "ecmr": "Pendiente del documento que aportará el usuario; no publicar una equivalencia jurídica sin validar el flujo",
+  "network_portal": "Diferido; mantener fuera del producto publicado",
+  "statuses": {
+    "local_verified": "Implementado; probado en entorno local",
+    "external_pending": "Implementado; conexión real pendiente",
+    "dependency_pending": "Pendiente de información o referencia",
+    "deferred": "Diferido por instrucción",
+    "documented": "Explicación y recomendación incluidas"
+  },
+  "phases": [
+    {
+      "name": "Clientes y tarifas",
+      "items": [
+        {
+          "id": 1,
+          "request": "Eliminar correo de pedidos de clientes; estados y albaranes a emails_albaranes",
+          "status": "external_pending",
+          "evidence": "Correo de pedidos retirado de la ficha. Los correos de albaranes reciben estados y la documentación de entrega; cola persistente con reintentos. Probar entrega real con SMTP de cada empresa."
+        },
+        {
+          "id": 2,
+          "request": "Corregir Añadir correo",
+          "status": "local_verified",
+          "evidence": "Texto «Añadir correo» corregido."
+        },
+        {
+          "id": 3,
+          "request": "Crear, editar, buscar y vincular puntos desde cliente",
+          "status": "local_verified",
+          "evidence": "Crear, buscar, editar y vincular puntos desde el cliente con el formulario completo de Pedidos; vínculo múltiple sin mover un punto de otro cliente. Probado por API y en móvil."
+        },
+        {
+          "id": 4,
+          "request": "Horarios en puntos; retirar de facturación",
+          "status": "local_verified",
+          "evidence": "Horarios guardados en el punto, retirados de facturación. En móvil se modificó y recuperó un horario 08:00–15:00."
+        },
+        {
+          "id": 5,
+          "request": "Retirar mínimo de toneladas del cliente",
+          "status": "local_verified",
+          "evidence": "Mínimo de toneladas retirado del cliente; se mantienen los mínimos pactados de cada tarifa y los datos históricos."
+        },
+        {
+          "id": 6,
+          "request": "Modo general de factura con Según factura y cambio manual",
+          "status": "local_verified",
+          "evidence": "Modo general del cliente aplicado al preparar factura, cambio manual disponible y opción Según factura. Formatos y gasoil comprobados a céntimos."
+        },
+        {
+          "id": 7,
+          "request": "Motivo desplegable al bloquear cliente",
+          "status": "local_verified",
+          "evidence": "El motivo se despliega al bloquear, y se exige al guardar. Comprobado visualmente en móvil."
+        },
+        {
+          "id": 8,
+          "request": "Gerencia, contabilidad y administración crean cliente revisado",
+          "status": "local_verified",
+          "evidence": "Gerencia, administración y contabilidad crean la ficha revisada sin el aviso de revisión por tráfico. Revisado no equivale a datos fiscales completos: estos siguen validándose al emitir factura."
+        },
+        {
+          "id": 9,
+          "request": "Tarifas visibles, responsive y plegado al primer clic",
+          "status": "local_verified",
+          "evidence": "Vista de rutas con precio, unidad y condiciones; filtros adaptados, plegado al primer clic. Probado en móvil."
+        },
+        {
+          "id": 10,
+          "request": "Detalle de tarifa: mapa, historial y tiempos; integrar métricas en BI",
+          "status": "external_pending",
+          "evidence": "Al pulsar una ruta se abre mapa y análisis de los últimos servicios con horas reales. Sin muestras se indica Sin datos. Queda pendiente validar el proveedor de cálculo de rutas con sus credenciales."
+        },
+        {
+          "id": 11,
+          "request": "Puntos exactos al crear tarifa y aplicarlos al pedido",
+          "status": "local_verified",
+          "evidence": "Selección y creación de puntos completos en tarifa; se guardan sus identificadores y se usan al crear el pedido. Se rechaza un punto ajeno a la empresa."
+        },
+        {
+          "id": 12,
+          "request": "Explicar mínimo de unidades",
+          "status": "documented",
+          "evidence": "El mínimo es la cantidad comercial pactada que se factura si se transporta menos; no es la capacidad del camión. Ayuda visible en el formulario."
+        },
+        {
+          "id": 13,
+          "request": "Notas operativas de tarifa que se deben aceptar en pedido",
+          "status": "local_verified",
+          "evidence": "Notas operativas desplegadas en el pedido y aceptación obligatoria; el servidor conserva el texto aceptado, usuario y fecha."
+        },
+        {
+          "id": 14,
+          "request": "Observaciones de tarifa impresas en factura",
+          "status": "local_verified",
+          "evidence": "Observaciones comerciales de tarifa copiadas al pedido y a la factura del cliente, sin duplicarlas."
+        },
+        {
+          "id": 15,
+          "request": "Inferir empresa/autónomo por razón social y NIF válido",
+          "status": "local_verified",
+          "evidence": "Inferencia por NIF válido y razón social; se conserva posibilidad de corrección manual. Pruebas de tipos societarios."
+        },
+        {
+          "id": 16,
+          "request": "Observaciones solo en documentación del colaborador",
+          "status": "local_verified",
+          "evidence": "Según tu aclaración: solo liquidación y registro de factura de proveedor; también se precargan en el registro manual. Nunca se añaden a la factura del cliente."
+        },
+        {
+          "id": 17,
+          "request": "Recomendar mejoras del formulario de colaboradores",
+          "status": "documented",
+          "evidence": "Se mantienen contacto, correo operativo/facturación, domicilio fiscal, impuestos, vencimientos y documentos. Recomiendo completar contacto de incidencias y caducidades de seguros cuando sean necesarios, evitando otro bloque obligatorio."
+        },
+        {
+          "id": 18,
+          "request": "Explicar Revisar liquidaciones",
+          "status": "documented",
+          "evidence": "Revisar liquidaciones busca enlaces enviados sin abrir o sin confirmar y genera avisos para revisarlos. No compara importes contables, no recibe dinero, no aprueba ni paga una factura."
+        }
+      ]
+    },
+    {
+      "name": "Dashboard, Control Tower y Network",
+      "items": [
+        {
+          "id": 19,
+          "request": "Intercambio sencillo de viajes e información entre empresas TransGest",
+          "status": "local_verified",
+          "evidence": "Network integrado en Clientes: encargos aceptados aparecen en Pedidos, sincronización de seguimiento y documentos, pantalla con el estilo del programa."
+        },
+        {
+          "id": 20,
+          "request": "Permisos por empresa: camiones durante servicio, albaranes, propuestas",
+          "status": "local_verified",
+          "evidence": "Consentimiento bilateral y permisos independientes para matrícula/conductor, estados, ETA, GPS durante servicio, documentos y facturas. Revocación y aislamiento entre empresas probados."
+        },
+        {
+          "id": 21,
+          "request": "Portal bolsa interna separado y sin publicar",
+          "status": "deferred",
+          "evidence": "Portal bolsa interna: especificación separada en network-portal-deferred.json, sin pantalla, ruta ni publicación. Diferido por tu instrucción."
+        },
+        {
+          "id": 22,
+          "request": "Pedidos de hoy abre solo hoy",
+          "status": "local_verified",
+          "evidence": "Pedidos de hoy abre exactamente los identificadores con carga hoy, sin arrastrar el filtro de días siguientes."
+        },
+        {
+          "id": 23,
+          "request": "Viajes activos: contador y lista coinciden",
+          "status": "local_verified",
+          "evidence": "Contador y navegación comparten el mismo conjunto activo. Incluye viajes sin completar aunque venciera la fecha prevista. En la revisión visual: contador 18, consulta 18."
+        },
+        {
+          "id": 24,
+          "request": "Vencimientos dentro del dashboard, sin subpestaña",
+          "status": "local_verified",
+          "evidence": "Vencimientos integrados en el dashboard; no se añade otra subpestaña. Se conserva el módulo general de avisos."
+        },
+        {
+          "id": 25,
+          "request": "Profundizar BI y justificar métricas",
+          "status": "local_verified",
+          "evidence": "BI separa realizado, emitido, pendiente y márgenes parciales. Añadidos puntualidad, OTIF, cobertura de POD, tiempos reales de viaje/carga/descarga/espera y número de muestras; no inventa tiempos faltantes."
+        },
+        {
+          "id": 26,
+          "request": "Nuevo pedido rápido en primer paso",
+          "status": "local_verified",
+          "evidence": "Nuevo pedido desde acción rápida abre el paso 1. La asignación de un pedido existente sigue abriendo su paso de asignación."
+        },
+        {
+          "id": 27,
+          "request": "Acción útil de asignación",
+          "status": "local_verified",
+          "evidence": "Acción Asignar viajes abre la mesa para seleccionar y asignar, en lugar de un enlace genérico a Pedidos sin contexto."
+        },
+        {
+          "id": 28,
+          "request": "Reparar interacción de visibilidad de extremo a extremo",
+          "status": "local_verified",
+          "evidence": "La visibilidad de extremo a extremo permite abrir el pedido correspondiente para consultar y actuar; controles del detalle dejan de simular campos editables bloqueados."
+        },
+        {
+          "id": 29,
+          "request": "Valorar y adaptar enfoque de Control Tower",
+          "status": "documented",
+          "evidence": "Enfoque recomendado: visibilidad, excepciones y acción sobre el viaje; planificación en Mesa de tráfico, finanzas en Facturación. Se conserva el seguimiento real y se distingue ETA de posición GPS."
+        }
+      ]
+    },
+    {
+      "name": "Pedidos, documentos y correos",
+      "items": [
+        {
+          "id": 30,
+          "request": "Capacidad y unidad según tipo y ficha real de vehículo",
+          "status": "local_verified",
+          "evidence": "Unidad según carrocería: volumen para cisterna/bañera y ocupación lineal cuando corresponde. Las dimensiones/capacidades salen de la ficha real; si faltan, no se sustituyen por una capacidad genérica."
+        },
+        {
+          "id": 31,
+          "request": "DeCA recibido o faltante después de cargar; datos verificados del pedido",
+          "status": "local_verified",
+          "evidence": "Después de cargado: recibido del cargador o solicitar/generar. Si falta, se confirman mercancía, bultos, peso y origen por envío, contrastados con chófer. Se guarda en el pedido antes de emitir; se rechazan datos incompletos."
+        },
+        {
+          "id": 32,
+          "request": "DeCA solo en correo posterior a carga, nunca solicitud ni entrega",
+          "status": "local_verified",
+          "evidence": "DeCA retirado de solicitud inicial y correo final de albaranes; se presenta en el paso posterior a la carga, antes de iniciar el transporte."
+        },
+        {
+          "id": 33,
+          "request": "Cargado separado de En tránsito",
+          "status": "local_verified",
+          "evidence": "Cargado es un estado propio. En camino pasa a En tránsito. Catálogo, servidor, app y filtros actualizados."
+        },
+        {
+          "id": 34,
+          "request": "Enviar originales DeCA adjuntos y revisar antes de salir",
+          "status": "external_pending",
+          "evidence": "Los originales activos de todos los envíos se adjuntan al correo previo a salida. Cola durable, consulta del envío y reintento; un fallo de correo no borra los PDF. Entrega real en buzón pendiente."
+        },
+        {
+          "id": 35,
+          "request": "Recorrido completo de estados y albaranes adjuntos al pedido",
+          "status": "local_verified",
+          "evidence": "Recorrido integrado del chófer y colaborador probado por HTTP, con originales revisados, cambios de estado y albaranes incorporados al pedido."
+        },
+        {
+          "id": 36,
+          "request": "Avisar a empresa que emitió la orden de cada estado",
+          "status": "external_pending",
+          "evidence": "Avisos al cliente configurado y, en viajes de colaborador, a usuarios de tráfico de la empresa emisora (gerencia como alternativa). Destinatarios internos en copia oculta. Pendiente recepción real por SMTP."
+        },
+        {
+          "id": 37,
+          "request": "Destinatario, entrega, mercancía y embalaje desde pedido y repartos",
+          "status": "local_verified",
+          "evidence": "Destinatario y entrega, naturaleza, embalaje, peso y bultos proceden del pedido o de cada reparto. No se reparten pesos totales de forma inventada."
+        },
+        {
+          "id": 38,
+          "request": "eCMR junto al DeCA",
+          "status": "dependency_pending",
+          "dependency": "Referencia eCMR que el usuario enviará",
+          "evidence": "Pendiente del eCMR que dijiste que enviarías. No se afirma equivalencia contractual de un PDF con firmas operativas locales ni se adjunta un eCMR inexistente."
+        }
+      ]
+    },
+    {
+      "name": "Facturación, cobros y pagos",
+      "items": [
+        {
+          "id": 39,
+          "request": "Explicar comparación de soportes con IA",
+          "status": "documented",
+          "evidence": "Analizar soportes IA compara datos de pedido/documentos para ayudar a detectar diferencias. Es una ayuda de revisión, no condición para facturar ni validación fiscal automática."
+        },
+        {
+          "id": 40,
+          "request": "Facturar y enviar sin albaranes, manteniendo validación fiscal",
+          "status": "local_verified",
+          "evidence": "La falta de albaranes ya no impide emitir o enviar una factura de cliente; se mantiene el aviso documental y la validación de sus datos fiscales."
+        },
+        {
+          "id": 41,
+          "request": "Borradores reservan viajes; no crearlos automáticamente al entregar",
+          "status": "local_verified",
+          "evidence": "Borrador reserva sus viajes; preparar la misma selección recupera ese borrador, otra selección incompatible se bloquea. No se crean borradores de cliente al marcar entregado."
+        },
+        {
+          "id": 42,
+          "request": "Envío de factura usa correo de facturación de ficha",
+          "status": "external_pending",
+          "evidence": "Envío usa email_facturacion, con alternativas de los campos anteriores para compatibilidad. Se prueba destinatario en el envío simulado; falta recepción real."
+        },
+        {
+          "id": 43,
+          "request": "Corregir documentación, guardado y pagos de proveedor",
+          "status": "local_verified",
+          "evidence": "Documentación y previsiones de pago guardadas con transacción, importes/fechas validados, factura proveedor revisada conserva original y auditoría. Pago parcial, repetición y exceso de saldo probados. Abonos negativos requieren compensación propia, no el formulario de pago positivo."
+        },
+        {
+          "id": 44,
+          "request": "Procesamiento contable exacto e idempotente, compatible con Clavei",
+          "status": "external_pending",
+          "evidence": "Céntimos, conciliación y reintentos locales comprobados. Clavei sigue pendiente de prueba PRUEB: listar empresas, importar el XML acordado, comprobar asiento/resultados e idempotencia. La remisión real no se da por terminada ni se habilita por estos tests."
+        },
+        {
+          "id": 45,
+          "request": "Pagos, cobros y facturas proveedor responsive",
+          "status": "local_verified",
+          "evidence": "Pagos adaptados a móvil; se separa previsión neta de servicio y saldo bruto de factura. Factura revisada permite registrar pagos realizados y ver historial, sin ejecutar transferencias bancarias."
+        },
+        {
+          "id": 46,
+          "request": "Revisar recordatorios automáticos de cobro",
+          "status": "external_pending",
+          "evidence": "Recordatorios usan SMTP de la empresa y correo de facturación; control de intentos/repeticiones. No se marca enviado si falla el proveedor. Requiere validar calendario y mensajes en un buzón real."
+        }
+      ]
+    },
+    {
+      "name": "Configuración, flota e IA",
+      "items": [
+        {
+          "id": 47,
+          "request": "Bandeja IA: test de conexión útil y contraseña cifrada conservada",
+          "status": "external_pending",
+          "evidence": "Clave de bandeja cifrada y preservada si se deja en blanco; estado de credencial visible y errores de conexión comprensibles. Tests de HTTP y proveedor simulado; IMAP real pendiente."
+        },
+        {
+          "id": 48,
+          "request": "Calidad de datos comprensible y accionable",
+          "status": "local_verified",
+          "evidence": "Calidad de datos con explicación y accesos a ficha que corregir, separando incidencias operativas de fiscales. No convierte toda ficha incompleta en bloqueo de pedidos."
+        },
+        {
+          "id": 49,
+          "request": "Puntos y ubicaciones responsive",
+          "status": "local_verified",
+          "evidence": "Puntos y ubicaciones con búsqueda, formulario completo y disposición móvil. Guardado/recuperación comprobados visualmente a 390 px sin desbordamiento horizontal."
+        },
+        {
+          "id": 50,
+          "request": "Configuración WhatsApp",
+          "status": "external_pending",
+          "evidence": "WhatsApp de empresa con claves cifradas, conservación al guardar en blanco, identificación de teléfono/WABA y comprobación de plantillas aprobadas en español. Validado con respuestas simuladas, falta cuenta real de Meta."
+        },
+        {
+          "id": 51,
+          "request": "Localización en Operaciones con mapa GPS",
+          "status": "local_verified",
+          "evidence": "Localización en Operaciones con mapa, fecha y fuente. Señales sin fecha verificable, futuras, inválidas o antiguas no se presentan como posición actual."
+        },
+        {
+          "id": 52,
+          "request": "Proveedor GPS de empresa, dispositivo por vehículo y alternativa app chófer",
+          "status": "external_pending",
+          "evidence": "Superadmin habilita el proveedor de la empresa; cada vehículo conserva su identificador de dispositivo. App del chófer como alternativa si no hay posición reciente del proveedor. Configuración real GPS pendiente."
+        },
+        {
+          "id": 53,
+          "request": "Documentos de tractoras y remolques: extracción IA con calidad y revisión",
+          "status": "external_pending",
+          "evidence": "Subida de documentos para tractoras, rígidos y remolques, análisis de campos técnicos con revisión antes de guardar. Rechaza escaneo de baja calidad, campos sin evidencia y documentos ajenos. Alta de rígido abre, guarda y reabre sin incidencia."
+        },
+        {
+          "id": 54,
+          "request": "Pruebas IA autorizadas en demo; informar si faltan créditos",
+          "status": "dependency_pending",
+          "evidence": "Falta identificar la empresa demo y tener acceso a su proveedor IA para probar una ficha técnica real de buena y mala calidad. No se han utilizado créditos reales ni se da por probado el modelo remoto."
+        },
+        {
+          "id": 55,
+          "request": "Investigar automatizaciones IA útiles",
+          "status": "documented",
+          "evidence": "Propuestas priorizadas: extracción de órdenes/POD, conciliación de factura proveedor y ficha técnica con revisión humana; sugerencias de planificación después de obtener GPS y tiempos fiables. Evitar pagos o emisión fiscal autónomos."
+        },
+        {
+          "id": 56,
+          "request": "Informe final de pruebas y puntos que probará el usuario",
+          "status": "local_verified",
+          "evidence": "Informe de pruebas entregado con checklist por fase, evidencias y dependencias. Producción, eCMR, Portal y NO VERI*FACTU quedan expresamente delimitados."
+        }
+      ]
+    }
+  ],
+  "date": "2026-10-03",
+  "verification": {
+    "environment": "Datos sintéticos; API local y PGlite; navegador de escritorio y móvil. No producción.",
+    "main_checks": 158,
+    "driver_http_checks": 99,
+    "supplier_invoice_checks": 46,
+    "oct02_checks": 17,
+    "frontend_tests": 47,
+    "frontend_suites": 10,
+    "real_external_delivery": false,
+    "live_AI_credits_used": 0,
+    "NO_VERIFACTU_changes": false
+  }
+}

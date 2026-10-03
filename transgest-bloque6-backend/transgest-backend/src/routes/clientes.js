@@ -11,6 +11,7 @@ const { legacyUnbilledClientDelta } = require("../services/orderPriceReconciliat
 const { authenticate, requireRole, GERENTE_O_CONTABLE } = require("../middleware/auth");
 
 const { normalizeClientImage } = require("../services/clientImage");
+const { customerNeedsReview } = require("../services/customerReview");
 const router = express.Router();
 // Coincide con los perfiles que ya tienen edición de Clientes. El acceso al
 // módulo (incluidas las revocaciones por usuario) se comprueba en server.js.
@@ -554,18 +555,22 @@ async function assertClienteEmpresa(clienteId, empresaId) {
 }
 
 async function getRutasClienteRows(clienteId, empresaId) {
+  await require("../services/commercialWorkflowSchema").ensureCommercialWorkflowSchema(db);
   const { rows } = await db.query(
     `SELECT COALESCE(rc.ruta_id, r.id) AS ruta_id,
             COALESCE(rc.cliente_id, r.cliente_id) AS cliente_id,
             rc.precio,
             rc.iva_pct,
             rc.notas AS precio_notas,
-            cli.minimo_facturable_toneladas AS cliente_minimo_facturable_toneladas,
+            COALESCE(rc.notas, r.notas) AS notas,
+            COALESCE(rc.observaciones_factura,r.observaciones_factura) AS observaciones_factura,
+            COALESCE(rc.origen_punto_id,r.origen_punto_id) AS origen_punto_id,
+            COALESCE(rc.destino_punto_id,r.destino_punto_id) AS destino_punto_id,
             r.id, r.origen, r.destino, r.km, r.peajes, r.tiempo_h, r.tipo_vehiculo, r.grupo_id,
             COALESCE(rc.tarifa_tipo, r.tarifa_tipo, 'viaje') AS tarifa_tipo,
             COALESCE(rc.precio, r.precio_base, 0) AS precio_base,
             COALESCE(rc.minimo_facturable, r.minimo_facturable) AS minimo_facturable,
-            COALESCE(rc.minimo_unidades, r.minimo_unidades, cli.minimo_facturable_toneladas) AS minimo_unidades,
+            COALESCE(rc.minimo_unidades, r.minimo_unidades) AS minimo_unidades,
             COALESCE(rc.recargo_combustible_pct, r.recargo_combustible_pct, 0) AS recargo_combustible_pct
        FROM rutas r
        LEFT JOIN ruta_precios_cliente rc ON rc.ruta_id = r.id AND rc.cliente_id = $1
@@ -720,7 +725,7 @@ router.get("/:id/riesgo-operativo", cacheMiddleware(30), async (req, res) => {
             FROM pedidos p
            WHERE p.empresa_id = c.empresa_id
              AND p.cliente_id = c.id
-             AND p.estado::text IN ('confirmado','en_curso','descarga','entregado')
+             AND p.estado::text IN ('confirmado','cargado','en_curso','descarga','entregado')
              AND p.factura_id IS NULL
         ) pr ON true
        WHERE c.id = $1 AND c.empresa_id = $2
@@ -944,6 +949,7 @@ router.post("/", GESTION_FICHA_CLIENTE,
     if (!errors.isEmpty()) return res.status(400).json({ error: errors.array()[0]?.msg || "Datos de cliente no válidos.", errors: errors.array() });
 
     const clienteData = normalizeClienteWrite(req.body);
+    if(clienteData.bloqueado && !String(clienteData.bloqueo_motivo||" ").trim())return res.status(400).json({error:"Selecciona el motivo del bloqueo."});
     const imagenData = await validatedClientImage(req.body);
     const { nombre, direccion, cp, ciudad, pais, email, contacto, telefono,
             forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, notas,
@@ -963,9 +969,7 @@ router.post("/", GESTION_FICHA_CLIENTE,
       return res.status(e.status || 400).json({ error: e.message });
     }
     // Auto-marcar como pendiente si faltan datos clave
-    const incompleto = pendiente_revision ||
-      !String(req.body?.cif || "").trim() || !email?.trim() || !telefono?.trim() ||
-      (!cp?.trim() && !codigo_postal?.trim()) || (!ciudad?.trim());
+    const incompleto = customerNeedsReview(req.user, clienteData);
 
     const created = await insertClienteCompat({
       imagen_data: imagenData,
@@ -1051,6 +1055,7 @@ router.post("/", GESTION_FICHA_CLIENTE,
 router.put("/:id", GESTION_FICHA_CLIENTE, async (req, res) => {
   try {
   const clienteData = normalizeClienteWrite(req.body);
+  if(clienteData.bloqueado && !String(clienteData.bloqueo_motivo||" ").trim())return res.status(400).json({error:"Selecciona el motivo del bloqueo."});
   const imagenData = await validatedClientImage(req.body);
   const { nombre, cif, direccion, cp, ciudad, pais, email, contacto, telefono,
           forma_pago, vencimiento, tipo_iva, iva_regimen, tipo_irpf, precio_tn_km, activo, notas,
@@ -1176,7 +1181,9 @@ router.post("/:id/rutas", requireRole("gerente", "contable", "trafico", "adminis
   try {
     const empresaId = req.empresaId||req.user.empresa_id;
     const { origen, destino, km, precio_base, notas, tarifa_tipo, minimo_facturable, minimo_unidades, recargo_combustible_pct, tipo_vehiculo } = req.body;
+    await require("../services/commercialWorkflowSchema").ensureCommercialWorkflowSchema(db);
     const minima = normalizeMinimumsByTarifa(tarifa_tipo, minimo_facturable, minimo_unidades);
+    for(const key of ["km","precio_base","minimo_facturable","minimo_unidades","recargo_combustible_pct","peajes","tiempo_h"])require("../services/commercialRouteWrite").number(req.body[key]);
     if (!(await assertClienteEmpresa(req.params.id, empresaId))) {
       return res.status(404).json({ error: "Cliente no encontrado" });
     }
@@ -1197,8 +1204,8 @@ router.post("/:id/rutas", requireRole("gerente", "contable", "trafico", "adminis
       let id = existing[0]?.id;
       if (!id) {
         const { rows } = await client.query(
-          "INSERT INTO rutas (origen,destino,km,notas,empresa_id,cliente_id,tipo_vehiculo,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id",
-          [origen.trim(), destino.trim(), numericOrNull(km), notas||null, empresaId, req.params.id, tipo_vehiculo || "cualquiera", minima.tarifaTipo, numericOrNull(precio_base) || 0, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
+          "INSERT INTO rutas (origen,destino,km,notas,empresa_id,cliente_id,tipo_vehiculo,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct,peajes,tiempo_h) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id",
+          [origen.trim(), destino.trim(), numericOrNull(km), notas||null, empresaId, req.params.id, tipo_vehiculo || "cualquiera", minima.tarifaTipo, numericOrNull(precio_base) || 0, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0, numericOrNull(req.body.peajes),numericOrNull(req.body.tiempo_h)]
         );
         id = rows[0].id;
       }
@@ -1220,10 +1227,11 @@ router.post("/:id/rutas", requireRole("gerente", "contable", "trafico", "adminis
         );
       }
       await client.query("RELEASE SAVEPOINT precio_cliente");
+      await require("../services/commercialRouteTerms").saveCustomerRouteTerms(client,empresaId,req.params.id,id,req.body);
       return id;
     });
     res.status(201).json({ ruta_id: rutaId, ok: true });
-  } catch(e) { res.status(500).json({error:e.message}); }
+  } catch(e) { res.status(e.status || 500).json({error:e.message}); }
 });
 
 // PUT /clientes/:id/rutas/:rid - editar ruta asociada a cliente
@@ -1231,7 +1239,9 @@ router.put("/:id/rutas/:rid", requireRole("gerente", "contable", "trafico", "adm
   try {
     const empresaId = req.empresaId||req.user.empresa_id;
     const { origen, destino, km, precio_base, notas, tarifa_tipo, minimo_facturable, minimo_unidades, recargo_combustible_pct, tipo_vehiculo } = req.body;
+    await require("../services/commercialWorkflowSchema").ensureCommercialWorkflowSchema(db);
     const minima = normalizeMinimumsByTarifa(tarifa_tipo, minimo_facturable, minimo_unidades);
+    for(const key of ["km","precio_base","minimo_facturable","minimo_unidades","recargo_combustible_pct","peajes","tiempo_h"])require("../services/commercialRouteWrite").number(req.body[key]);
     if (!(await assertClienteEmpresa(req.params.id, empresaId))) {
       return res.status(404).json({ error: "Cliente no encontrado" });
     }
@@ -1254,7 +1264,9 @@ router.put("/:id/rutas/:rid", requireRole("gerente", "contable", "trafico", "adm
       const compartida = actual.empresa_id !== empresaId || actual.cliente_id !== req.params.id || actual.otros_clientes;
       const cambiaRecorrido = actual.origen !== origen.trim() || actual.destino !== destino.trim()
         || Number(actual.km || 0) !== Number(numericOrNull(km) || 0)
-        || (actual.tipo_vehiculo || "cualquiera") !== (tipo_vehiculo || "cualquiera");
+        || (actual.tipo_vehiculo || "cualquiera") !== (tipo_vehiculo || "cualquiera")
+        || (req.body.peajes!==undefined&&Number(actual.peajes||0)!==Number(numericOrNull(req.body.peajes)||0))
+        || (req.body.tiempo_h!==undefined&&Number(actual.tiempo_h||0)!==Number(numericOrNull(req.body.tiempo_h)||0));
       if (compartida && cambiaRecorrido) {
         const error = new Error("La ruta es compartida. Crea otra ruta para cambiar recorrido, km o tipo de vehículo.");
         error.status = 409;
@@ -1264,12 +1276,12 @@ router.put("/:id/rutas/:rid", requireRole("gerente", "contable", "trafico", "adm
         await client.query(`
           UPDATE rutas SET origen=$1, destino=$2, km=$3, notas=$4, tipo_vehiculo=$5,
             tarifa_tipo=$6, precio_base=$7, minimo_facturable=$8, minimo_unidades=$9,
-            recargo_combustible_pct=$10
+            recargo_combustible_pct=$10,peajes=$13,tiempo_h=$14
           WHERE id=$11 AND empresa_id=$12
         `, [origen.trim(), destino.trim(), numericOrNull(km), notas || null,
           tipo_vehiculo || "cualquiera", minima.tarifaTipo, numericOrNull(precio_base) ?? 0,
           minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) ?? 0,
-          req.params.rid, empresaId]);
+          req.params.rid, empresaId, req.body.peajes===undefined?actual.peajes:numericOrNull(req.body.peajes),req.body.tiempo_h===undefined?actual.tiempo_h:numericOrNull(req.body.tiempo_h)]);
       }
       // El precio y su unidad pertenecen al cliente; nunca se propagan a otra tarifa vinculada.
       await client.query(`
@@ -1279,6 +1291,7 @@ router.put("/:id/rutas/:rid", requireRole("gerente", "contable", "trafico", "adm
       `, [numericOrNull(precio_base) ?? 0, minima.tarifaTipo, minima.minimoFacturable,
         minima.minimoUnidades, numericOrNull(recargo_combustible_pct) ?? 0,
         req.params.rid, req.params.id]);
+      await require("../services/commercialRouteTerms").saveCustomerRouteTerms(client,empresaId,req.params.id,req.params.rid,req.body);
       return { ...actual, origen: origen.trim(), destino: destino.trim(), km: numericOrNull(km),
         tipo_vehiculo: tipo_vehiculo || "cualquiera",
         tarifa_tipo: minima.tarifaTipo, precio_base: numericOrNull(precio_base) ?? 0,

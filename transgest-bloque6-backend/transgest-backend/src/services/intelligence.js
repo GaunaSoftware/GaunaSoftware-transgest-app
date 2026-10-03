@@ -74,7 +74,7 @@ async function executeTool(db, user, name, args) {
     const desde = date(args.desde), hasta = date(args.hasta);
     if (desde > hasta) throw fail('Rango de fechas invertido.');
     const estado = text(args.estado).toLowerCase();
-    const allowed = ['', 'abiertos','pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga','entregado','facturado','incidencia','cancelado'];
+    const allowed = ['', 'abiertos','pendiente','confirmado','espera_carga','cargando','cargado','en_curso','espera_descarga','descarga','entregado','facturado','incidencia','cancelado'];
     if (!allowed.includes(estado)) throw fail('Estado de pedido no válido.');
     const pagina = Number(args.pagina || 1);
     if (!Number.isInteger(pagina) || pagina < 1 || pagina > 10000) throw fail('Página no válida.');

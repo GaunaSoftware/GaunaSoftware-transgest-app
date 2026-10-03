@@ -66,7 +66,6 @@ function problems(value,waiver='') {
     const operating=value.operativa?.find(r=>r.id===p.id);
     if(operating)result.push(...operating.errores.map(e=>`${p.numero}: ${e}`));
     if(!operating&&!['entregado','facturado'].includes(p.estado))result.push(`${p.numero}: pendiente de entrega`);
-    if(!operating&&!p.soportes.length)result.push(`${p.numero}: falta albarán, POD o CMR con archivo`);
     if(!String(p.referencia_cliente || value.factura.referencia_cliente || '').trim() && !String(waiver).trim())result.push(`${p.numero}: revisa la referencia o justifica que no procede`);
   }
   return result;

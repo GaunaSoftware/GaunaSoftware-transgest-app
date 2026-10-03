@@ -75,7 +75,7 @@ router.get("/bi/resumen", async (req, res) => {
         COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado') AND coste_operativo > 0)::int AS con_coste,
         COUNT(*) FILTER (WHERE estado::text IN ('entregado','facturado') AND km_ruta > 0)::int AS con_km,
         COUNT(*) FILTER (WHERE estado::text IN ('pendiente'))::int AS pendientes,
-        COUNT(*) FILTER (WHERE estado::text IN ('confirmado','cargando','en_curso','en_ruta','descarga','descargando','espera_carga','espera_descarga'))::int AS activos,
+        COUNT(*) FILTER (WHERE estado::text IN ('confirmado','cargando','cargado','en_curso','en_ruta','descarga','descargando','espera_carga','espera_descarga'))::int AS activos,
         COUNT(*) FILTER (WHERE estado::text='incidencia')::int AS incidencias,
         COUNT(*) FILTER (WHERE pendiente_completar IS TRUE OR NULLIF(TRIM(COALESCE(aviso_completar,'')),'') IS NOT NULL)::int AS pendientes_completar,
         COUNT(*) FILTER (WHERE estado::text <> 'cancelado' AND COALESCE(NULLIF(importe,0), NULLIF(precio_cliente_col,0), NULLIF(precio_unitario,0), 0) <= 0)::int AS sin_precio,
@@ -511,7 +511,7 @@ function estadoPedidoLabel(estado) {
   const labels = {
     pendiente: "Pendiente",
     confirmado: "Confirmado",
-    en_curso: "En curso",
+    en_curso: "En tránsito", cargado: "Cargado",
     descarga: "En descarga",
     entregado: "Entregado",
     facturado: "Facturado",

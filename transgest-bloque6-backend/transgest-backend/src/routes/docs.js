@@ -3,7 +3,7 @@ const { cacheMiddleware, invalidateCache } = require("../services/cache");
 const express = require("express");
 const db      = require("../services/db");
 const {DatabaseDocumentStorageProvider}=require('../services/DocumentStorageProvider');
-const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
+const { authenticate, GERENTE_O_TRAFICO, requirePlanFeature, requireRole } = require("../middleware/auth");
 const router  = express.Router();
 const privateStorage=new DatabaseDocumentStorageProvider(db);
 router.use(authenticate);
@@ -160,10 +160,16 @@ router.get("/vehiculo/:id", async (req,res) => {
   res.json(rows.map(r => normalizeDocRow(r, { entidad_tipo:"vehiculo" })));
 });
 
+router.post('/vehiculo/:id/:docId/analizar',requireRole('gerente','trafico','responsable_taller'),requirePlanFeature('ai'),async(req,res)=>{
+  try{const result=await require('../services/vehicleDocumentExtraction').extractStoredVehicleDocument(db,req.empresaId||req.user?.empresa_id,req.params.id,req.params.docId);res.set('Cache-Control','private, no-store');res.json(result);}
+  catch(error){res.status(error.status||500).json({error:error.status?error.message:'No se pudo analizar el documento. El archivo sigue guardado y la ficha no se ha modificado.'});}
+});
+
 router.post("/vehiculo/:id", GERENTE_O_TRAFICO, invalidateCache("docs"), async (req,res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const data = normalizeDocInput(req.body, "vehiculo");
+    if(data.file_url){const file=require('../services/vehicleDocumentExtraction').upload(data.file_url,data.file_nombre);data.file_size_kb=Math.ceil(file.bytes.length/1024);}
     let rows;
     try {
       ({ rows } = await db.query(
@@ -189,7 +195,7 @@ router.post("/vehiculo/:id", GERENTE_O_TRAFICO, invalidateCache("docs"), async (
     }
     if (!rows.length) return res.status(404).json({ error:"Vehiculo no encontrado" });
     res.status(201).json(normalizeDocRow(rows[0], { entidad_tipo:"vehiculo" }));
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) { res.status(e.status||500).json({ error:e.status?e.message:"No se pudo archivar el documento del vehículo." }); }
 });
 
 router.delete("/vehiculo/:vehiculoId/:docId", GERENTE_O_TRAFICO, invalidateCache("docs"), async (req,res) => {

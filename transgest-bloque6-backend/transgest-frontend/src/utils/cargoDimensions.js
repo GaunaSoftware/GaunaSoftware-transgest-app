@@ -1,3 +1,5 @@
+import { cargoVehicle, vehicleCapacity } from "./vehicleCapacity";
+
 // One quantity and one occupied length; legacy fields are synchronized on save.
 export const PALLET_SIZES = {europeo:[1.2,0.8], americano:[1.2,1], medio:[0.8,0.6]};
 const number = v => Number(String(v ?? '').replace(',', '.')) || 0;
@@ -29,7 +31,7 @@ export function cargoPayload(p){
  // a pallet estimate merely because another field is edited and saved.
  const length=p.id&&p.longitud_ocupada_mode == null ? recorded :
   p.longitud_ocupada_mode==='manual' ? recorded :
-  p.longitud_ocupada_mode==='auto' && (p.tipo_carga||'completa')==='completa' ? (recorded||13.65) : cargoLength(p);
+  p.longitud_ocupada_mode==='auto' && (p.tipo_carga||'completa')==='completa' ? recorded : cargoLength(p);
  return {...p,bultos:count,palets_cantidad:p.palets_tipo==='granel'?null:count,carga_largo_m:length||null,metros_lineales:length||null};
 }
 export function updateCargo(p,key,value){
@@ -50,10 +52,8 @@ export function updateCargo(p,key,value){
 }
 
 export function fullLoadLength(form, vehicles = []) {
- const tractor=vehicles.find(v=>v.id===form.vehiculo_id);
- const trailer=vehicles.find(v=>v.id===(form.remolque_id_manual||form.remolque_id||tractor?.remolque_id));
- const length=number(trailer?.metros_carga);
- return length>0?Math.min(13.65,length):13.65;
+ const capacity=vehicleCapacity(cargoVehicle(form,vehicles)||{});
+ return capacity.unit==='ml'?capacity.length||0:0;
 }
 
 export function resolveQuickFullLoadLength(form, vehicles = []) {
@@ -70,7 +70,7 @@ export function cargoLengthMode(form = {}) {
  return form.id ? 'manual' : 'auto';
 }
 
-export function syncFullLoadLength(form = {}, length = 13.65) {
+export function syncFullLoadLength(form = {}, length = 0) {
  if ((form.tipo_carga || 'completa') !== 'completa' || cargoLengthMode(form) !== 'auto') return form;
  if (form.longitud_ocupada_mode === 'auto' && Number(String(form.carga_largo_m || '').replace(',','.')) === length && Number(String(form.metros_lineales || '').replace(',','.')) === length) return form;
  return { ...form, longitud_ocupada_mode:'auto', carga_largo_m:length, metros_lineales:length, _cargoLengthManual:false };

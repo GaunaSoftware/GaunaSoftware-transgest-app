@@ -887,7 +887,7 @@ router.get("/resumen", requireCliente, async (req, res) => {
     db.query(
       `SELECT COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE estado::text NOT IN ('entregado','cancelado','facturado'))::int AS activos,
-              COUNT(*) FILTER (WHERE estado::text IN ('en_curso','descarga'))::int AS en_curso,
+              COUNT(*) FILTER (WHERE estado::text IN ('cargado','en_curso','descarga'))::int AS en_curso,
               COUNT(*) FILTER (WHERE estado::text='entregado')::int AS entregados,
               MIN(fecha_carga) FILTER (
                 WHERE estado::text NOT IN ('entregado','cancelado','facturado')
@@ -1281,7 +1281,7 @@ router.get("/integracion/manifest", requireClienteIntegracion("manifest"), async
         shipment_fields: ["id", "numero", "referencia_cliente", "estado", "origen", "destino", "fechas", "mercancia", "tracking", "documentos", "updated_at"],
         invoice_fields: ["id", "numero", "serie", "fecha", "fecha_vencimiento", "estado", "importes", "pedido_ids", "detail_url", "updated_at"],
         document_fields: ["id", "nombre", "tipo", "mime", "size_kb", "created_at", "download_url"],
-        status_values_hint: ["pendiente", "confirmado", "en_curso", "descarga", "entregado", "facturado", "incidencia", "cancelado"],
+        status_values_hint: ["pendiente", "confirmado", "cargado", "en_curso", "descarga", "entregado", "facturado", "incidencia", "cancelado"],
       },
       governance: {
         authenticated: true,
@@ -1893,7 +1893,7 @@ router.post("/solicitudes", requireCliente, asyncRoute(async (req, res) => {
        FROM pedidos
       WHERE empresa_id=$1
         AND cliente_id=$2
-        AND estado::text IN ('confirmado','en_curso','descarga','incidencia')
+        AND estado::text IN ('confirmado','cargado','en_curso','descarga','incidencia')
         AND COALESCE(fecha_carga::text,'')=COALESCE($3::text,'')
         AND (
           (COALESCE(LOWER(TRIM(referencia_cliente)),'') <> '' AND COALESCE(LOWER(TRIM(referencia_cliente)),'')=COALESCE(LOWER(TRIM($4)),''))

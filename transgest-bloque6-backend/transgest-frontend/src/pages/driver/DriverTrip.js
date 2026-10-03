@@ -671,6 +671,7 @@ function TarjetaViaje({ pedido, onActualizar, jornadaInfo, onAbrirJornada, expan
   }
 
   const ACCIONES = {
+    cargado: [{label:"Iniciar viaje", estado:"en_curso", bg:"#3b82f6"}],
     confirmado: [{label:"Iniciar viaje",   estado:"en_curso",   bg:"#3b82f6"}],
     en_curso:   [{label:"En descarga",      estado:"descarga",   bg:"#a78bfa"},
                  {label:"Entregar + Firma", action:"firma",      bg:"#10b981"}],

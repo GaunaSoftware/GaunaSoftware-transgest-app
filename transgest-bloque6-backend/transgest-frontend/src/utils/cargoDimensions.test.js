@@ -34,12 +34,12 @@ test('manual dimensions survive later quantity edits and are used by groupage',(
  expect(cargoLength({palets_tipo:'granel',bultos:4,carga_largo_m:3})).toBe(3);
 });
 
-test('full load uses explicit trailer, linked trailer, or 13.65m fallback',()=>{
+test('full load uses the recorded capacity and does not invent a fallback',()=>{
  const vehicles=[{id:'tractor',remolque_id:'long'},{id:'long',metros_carga:15},{id:'short',metros_carga:'12,5'}];
- expect(fullLoadLength({vehiculo_id:'tractor'},vehicles)).toBe(13.65);
+ expect(fullLoadLength({vehiculo_id:'tractor'},vehicles)).toBe(15);
  expect(fullLoadLength({vehiculo_id:'tractor',remolque_id_manual:'short'},vehicles)).toBe(12.5);
- expect(fullLoadLength({},vehicles)).toBe(13.65);
- expect(fullLoadLength({remolque_id_manual:'missing'},vehicles)).toBe(13.65);
+ expect(fullLoadLength({},vehicles)).toBe(0);
+ expect(fullLoadLength({remolque_id_manual:'missing'},vehicles)).toBe(0);
 });
 
 test('new complete loads follow trailer in auto mode; historic and manual lengths survive',()=>{
@@ -54,7 +54,7 @@ test('new complete loads follow trailer in auto mode; historic and manual length
  expect(cargoPayload({...legacy,palets_tipo:'europeo',palets_cantidad:2})).toMatchObject({carga_largo_m:7,metros_lineales:7});
  expect(cargoPayload({id:'legacy-default',metros_lineales:13.65,palets_tipo:'europeo',palets_cantidad:2})).toMatchObject({carga_largo_m:13.65,metros_lineales:13.65});
  expect(cargoPayload({id:'legacy-empty',palets_tipo:'europeo',palets_cantidad:2})).toMatchObject({carga_largo_m:null,metros_lineales:null});
- expect(cargoPayload({tipo_carga:'completa',longitud_ocupada_mode:'auto'})).toMatchObject({metros_lineales:13.65});
+ expect(cargoPayload({tipo_carga:'completa',longitud_ocupada_mode:'auto'})).toMatchObject({metros_lineales:null});
  expect(cargoPayload({tipo_carga:'completa',longitud_ocupada_mode:'manual',carga_largo_m:'10,5'})).toMatchObject({metros_lineales:10.5});
 });
 
@@ -65,3 +65,9 @@ test('quick order preserves manual length and accepts Spanish decimal input',()=
  expect(resolveQuickFullLoadLength({metros_lineales:'10.5'},vehicles)).toEqual({length:10.5,mode:'manual'});
  expect(()=>resolveQuickFullLoadLength({metros_lineales:'-1'},vehicles)).toThrow('mayor que cero');
 });
+
+ test('bulk cargo uses volume and a rigid uses its own body',()=>{
+ const vehicles=[{id:'tractor',remolque_id:'bulk'},{id:'bulk',clase:'Remolque - Cisterna',metros_carga:10,volumen_m3:32},{id:'rigid',clase:'Camión rígido',metros_carga:7}];
+ expect(fullLoadLength({vehiculo_id:'tractor'},vehicles)).toBe(0);
+ expect(fullLoadLength({vehiculo_id:'rigid'},vehicles)).toBe(7);
+ });

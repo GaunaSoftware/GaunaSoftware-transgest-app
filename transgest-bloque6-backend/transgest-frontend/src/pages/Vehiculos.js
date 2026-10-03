@@ -5,7 +5,9 @@ import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
 import StoredDocumentButton from "../components/StoredDocumentButton";
 import "./fleet/fleet.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
+import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, analizarDocVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
+import VehicleDocumentReview from "../components/VehicleDocumentReview";
+import {getEmpresaPlanLocal,planHasFeature} from "../utils/planFeatures";
 import { useAuth } from "../context/AuthContext";
 import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { confirmDialog, notify } from "../services/notify";
@@ -208,20 +210,8 @@ function normalizeVehiculoForClase(data = {}) {
   return next;
 }
 
-// Longitud de carga (metros lineales) estandar de un semirremolque para
-// carrocerias tipo tautliner/lona, plataforma lisa o lateral bajo.
-const METROS_CARGA_ESTANDAR = "13.65";
-function carroceriaUsaMedidaEstandar(form = {}) {
-  const c = String(form.tipo_carroceria || "").toLowerCase();
-  return c.includes("tautliner") || c.includes("lona") || c.includes("plataforma") || !!form.lateral_bajo;
-}
-function aplicarMedidasEstandarCarga(next = {}) {
-  // Rellena la medida estandar solo si esta vacia (no pisa lo que ponga el usuario).
-  if (!esClaseRigido(next.clase) && carroceriaUsaMedidaEstandar(next) && !String(next.metros_carga || "").trim()) {
-    next.metros_carga = METROS_CARGA_ESTANDAR;
-  }
-  return next;
-}
+// Changing a body type never invents usable dimensions.
+function aplicarMedidasEstandarCarga(next = {}) { return {...next,unidad_ocupacion:''}; }
 
 const TIPO_COMBUSTIBLE = ["Diesel","AdBlue/Diesel","GNL (Gas Natural)","GNC","Electrico","Hibrido","Gasolina"];
 
@@ -290,7 +280,7 @@ function GpsMappingPanel({ vehiculos, providers, status, canEdit, syncing, syncP
   const [gpsDiagnosticoOpen, setGpsDiagnosticoOpen] = useState(false);
   const gpsProviders = (providers || []).filter(p => p.id !== "manual");
   const selectableProviders = [
-    { id:"manual", label:"Sin proveedor / manual" },
+    { id:"manual", label:"Sin proveedor · ubicación de la app del chófer" },
     ...gpsProviders.map(p => ({ id:p.id, label:GPS_PROVIDER_LABELS[p.id] || p.label || p.id, configured:p.configured })),
   ];
   const vehiculosGps = useMemo(() => (vehiculos || []).filter(v => esVehiculoConGpsHabitual(v, vehiculos)), [vehiculos]);
@@ -1070,10 +1060,18 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
   const [docsVehiculo, setDocsVehiculo] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docUploading, setDocUploading] = useState(false);
+  const [docAnalyzing,setDocAnalyzing]=useState('');
+  const [docReview,setDocReview]=useState(null);
+  const canReadAI=canEdit&&planHasFeature(getEmpresaPlanLocal(),'ai');
+  async function analyzeDocument(documentId){
+    if(!documentId)return;setDocAnalyzing(documentId);setDocReview(null);
+    try{setDocReview(await analizarDocVehiculo(editando.id,documentId));}
+    catch(e){notify(e.message,'warning');}finally{setDocAnalyzing('');}
+  }
   const gpsProviderActivo = gpsProviders.find(p => p.active)?.id || "";
   const gpsProviderOptions = [
-    { id:"manual", label:"Sin proveedor / manual" },
-    ...gpsProviders.filter(p => p.id !== "manual").map(p => ({ id:p.id, label:GPS_PROVIDER_LABELS[p.id] || p.label || p.id, configured:p.configured })),
+    { id:"manual", label:"Sin proveedor · ubicación de la app del chófer" },
+    ...gpsProviders.filter(p => p.id !== "manual" && p.active).map(p => ({ id:p.id, label:GPS_PROVIDER_LABELS[p.id] || p.label || p.id, configured:p.configured })),
   ];
 
   useEffect(() => {
@@ -1107,7 +1105,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
     try {
       const fileUrl = await fileToDataUrl(file);
       const tipo = inferVehiculoDocTipo(file.name);
-      await crearDocVehiculo(editando.id, {
+      const savedDoc=await crearDocVehiculo(editando.id, {
         tipo,
         descripcion: `Archivado desde ficha de vehiculo. Tipo detectado: ${tipo}.`,
         file_url: fileUrl,
@@ -1116,6 +1114,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
       });
       notify("Documento archivado en la ficha del vehiculo", "success");
       cargarDocsVehiculo();
+      if(canReadAI)await analyzeDocument(savedDoc?.id);
     } catch (e) {
       notify(e.message || "No se pudo archivar el documento", "error");
     } finally {
@@ -1330,6 +1329,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                   <div>
                     <label style={S.lbl}>Proveedor GPS del vehículo</label>
                     <select value={form.gps_provider || gpsProviderActivo || "manual"} onChange={e=>setForm(p=>({...p,gps_provider:e.target.value,gps_external_id:e.target.value==="manual"?"":(p.gps_external_id || "")}))} style={S.sel}>
+                      {form.gps_provider && !gpsProviderOptions.some(p=>p.id===form.gps_provider) && <option value={form.gps_provider}>{GPS_PROVIDER_LABELS[form.gps_provider]||form.gps_provider} (enlace anterior; selecciona el proveedor activo)</option>}
                       {gpsProviderOptions.map(p => <option key={p.id} value={p.id}>{p.label}{p.id !== "manual" && !p.configured ? " (sin configurar)" : ""}</option>)}
                     </select>
                   </div>
@@ -1483,6 +1483,8 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                         {CARROCERIAS_REMOLQUE.map(c=><option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
+                    <div><label style={S.lbl}>Unidad de ocupación</label><select style={S.sel} value={form.unidad_ocupacion||''} onChange={f('unidad_ocupacion')}><option value="">Según carrocería</option><option value="ml">Metros lineales</option><option value="m3">Metros cúbicos</option><option value="unidades">Vehículos / unidades</option></select></div>
+                    <div><label style={S.lbl}>Capacidad en vehículos (portacoches)</label><input type="number" min="0" step="1" style={S.inp} value={form.capacidad_unidades||''} onChange={f('capacidad_unidades')}/></div>
                     <div>
                       <label style={S.lbl}>Apertura / carga</label>
                       <input style={S.inp} value={form.apertura_lateral||""} onChange={f("apertura_lateral")} placeholder="Lateral, trasera, techo, superior..."/>
@@ -1669,6 +1671,9 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                       <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={docUploading} onChange={e=>subirDocumentoVehiculo(e.target.files?.[0])}/>
                     </label>
                   )}
+                  {canReadAI&&<p style={{fontSize:12,color:'var(--text4)'}}>Al subir un documento se usa una lectura IA. El archivo se conserva aunque no sea legible. Los campos requieren revisión y guardado; cada análisis consume un uso de IA.</p>}
+                  {docAnalyzing&&<p role="status">Leyendo el documento; la ficha aún no se ha modificado…</p>}
+                  {docReview&&<VehicleDocumentReview result={docReview} onClose={()=>setDocReview(null)} onApply={values=>{setForm(previous=>({...previous,...values}));setDocReview(null);notify('Datos aplicados al formulario. Revisa y guarda la ficha.','success');}}/>}
                   {docsLoading ? (
                     <div style={{color:"var(--text5)",fontSize:12}}>Cargando documentos...</div>
                   ) : docsVehiculo.length === 0 ? (
@@ -1676,14 +1681,15 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                   ) : (
                     <div style={{display:"grid",gap:8}}>
                       {docsVehiculo.map(doc => (
-                        <div key={doc.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 11px",background:"var(--bg3)"}}>
+                        <div key={doc.id} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,230px),1fr))",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 11px",background:"var(--bg3)"}}>
                           <div>
                             <div style={{fontWeight:800,color:"var(--text)",fontSize:13}}>{doc.file_name || doc.file_nombre || doc.descripcion || doc.tipo_doc || "Documento"}</div>
                             <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
                               {(doc.tipo_doc || doc.tipo || "otro")} {doc.fecha_vencimiento ? `- vence ${new Date(doc.fecha_vencimiento).toLocaleDateString("es-ES")}` : ""} {doc.file_size_kb ? `- ${doc.file_size_kb} KB` : ""}
                             </div>
                           </div>
-                          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                            {canReadAI&&<button type="button" style={S.btn} disabled={!!docAnalyzing} onClick={()=>analyzeDocument(doc.id)}>Leer datos con IA</button>}
                             <StoredDocumentButton doc={doc} scope="vehiculo" style={{...S.btn,textDecoration:"none",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)"}}/>
                             {canEdit && (
                               <button type="button" style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.22)"}} onClick={async()=>{

@@ -795,7 +795,7 @@ const VEHICULO_EXT_FIELDS = [
   "masa_total_kg", "plazas", "potencia_cv", "cilindrada", "combustible",
   "longitud_mm", "anchura_mm", "altura_mm", "ejes", "velocidad_max_kmh", "homologacion_co2",
   "tipo_carroceria", "apertura_lateral", "techo_elevable", "temperatura_min_c", "temperatura_max_c",
-  "capacidad_palets", "volumen_m3", "lateral_bajo", "piso_movil", "metros_carga",
+  "capacidad_palets", "volumen_m3", "unidad_ocupacion", "capacidad_unidades", "lateral_bajo", "piso_movil", "metros_carga",
   "fecha_compra", "valor_compra", "financiacion", "concesionario", "numero_pedido_compra",
   "fecha_venta", "valor_venta", "comprador",
   "compania_seguro", "numero_poliza",
@@ -915,6 +915,8 @@ async function syncVehiculoStatusAux({ empresaId, vehiculoId, estado, updatedBy 
   }
   await upsertVehiculoExt({ empresaId, vehiculoId, data: next, updatedBy });
 }
+
+r1.get('/localizacion',async(req,res)=>{try{res.json(await require('../services/fleetLocations').readFleetLocations(db,req.empresaId||req.user?.empresa_id));}catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo consultar la localización de la flota.'});}});
 
 r1.get("/", async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;

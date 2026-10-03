@@ -139,6 +139,9 @@ function ensureRutasSchema() {
   if (!rutasSchemaReady) {
     rutasSchemaReady = (async () => {
       await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS activa BOOLEAN DEFAULT true");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS origen_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS destino_punto_id UUID REFERENCES puntos_interes(id) ON DELETE SET NULL");
+      await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS observaciones_factura TEXT");
       await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS tipo_vehiculo VARCHAR(50) DEFAULT 'cualquiera'");
       await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS pct_subida NUMERIC DEFAULT 0");
       await db.query("ALTER TABLE rutas ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL");
@@ -182,6 +185,7 @@ function ensureRutasSchema() {
 router.use(async (req, res, next) => {
   try {
     await ensureRutasSchema();
+    await require("../services/commercialWorkflowSchema").ensureCommercialWorkflowSchema(db);
     next();
   } catch (e) {
     next(e);
@@ -209,7 +213,27 @@ router.get("/", cacheMiddleware(300), async (req, res) => {
   res.json(rows);
 });
 
-router.get("/:id/precios", async (req, res) => {
+router.get('/:id/analisis', async (req, res, next) => {
+  try {
+    const empresa = req.empresaId || req.user?.empresa_id;
+    const route = (await db.query('SELECT id FROM rutas WHERE id=$1 AND empresa_id=$2 AND activa=true',[req.params.id,empresa])).rows[0];
+    if (!route) return res.status(404).json({error:'Ruta no encontrada en esta empresa.'});
+    const graph = (await db.query("SELECT to_regclass('public.viaje_paradas') AS name")).rows[0]?.name;
+    const stops = graph ? `COALESCE((SELECT jsonb_agg(s ORDER BY s.orden) FROM viaje_paradas s
+      JOIN viajes_operativos v ON v.id=s.viaje_id AND v.empresa_id=s.empresa_id
+      JOIN viaje_pedidos vp ON vp.viaje_id=v.id AND vp.empresa_id=v.empresa_id AND vp.pedido_id=p.id
+      WHERE s.empresa_id=p.empresa_id AND v.estado<>'cancelado'
+        AND v.id=(SELECT v2.id FROM viajes_operativos v2 JOIN viaje_pedidos vp2 ON vp2.viaje_id=v2.id AND vp2.empresa_id=v2.empresa_id WHERE vp2.empresa_id=p.empresa_id AND vp2.pedido_id=p.id AND v2.estado<>'cancelado' ORDER BY v2.created_at DESC LIMIT 1)
+        AND (s.legacy_key LIKE p.id::text||':%' OR (v.legacy_pedido_id=p.id AND s.legacy_key NOT LIKE '%:%'))),'[]'::jsonb)` : "'[]'::jsonb";
+    const legacy=(await db.query("SELECT to_regclass('public.pedido_chofer_pasos') AS name")).rows[0]?.name;
+    const {rows} = await db.query(`SELECT p.*,${stops} AS paradas,${legacy?"COALESCE((SELECT data FROM pedido_chofer_pasos WHERE empresa_id=p.empresa_id AND pedido_id=p.id),'{}'::jsonb)":"'{}'::jsonb"} AS pasos
+      FROM pedidos p WHERE p.empresa_id=$1 AND p.ruta_id=$2 AND p.estado::text IN ('entregado','facturado')
+      ORDER BY p.fecha_descarga DESC NULLS LAST,p.created_at DESC LIMIT 30`,[empresa,route.id]);
+    res.json({...require('../services/routePerformance').routePerformance(rows), limite:30});
+  } catch(e) { next(e); }
+});
+router.get("/:id/precios", async (req, res, next) => {
+  try {
   const empresaId = req.empresaId || req.user?.empresa_id;
   const ruta = await db.query(
     "SELECT * FROM rutas WHERE id=$1 AND activa=true AND (empresa_id=$2 OR empresa_id IS NULL)",
@@ -226,6 +250,7 @@ router.get("/:id/precios", async (req, res) => {
               WHERE rr.ruta_id=$1 ORDER BY rr.orden`, [req.params.id, empresaId]),
   ]);
   res.json({ ...ruta.rows[0], precios: precios.rows, repartos: repartos.rows });
+  } catch(error) { next(error); }
 });
 
 router.put("/:id/precios", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes"), async (req, res) => {
@@ -293,89 +318,11 @@ router.put("/:id/precios", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes
   }
 });
 
-router.post("/", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes"), async (req, res) => {
-  const empresaId = req.empresaId || req.user?.empresa_id;
-  const {
-    origen, destino, km, peajes, tiempo_h, notas, tipo_vehiculo, pct_subida, cliente_id,
-    tarifa_tipo, precio_base, minimo_facturable, minimo_unidades, recargo_combustible_pct
-  } = req.body;
-  // Always store in uppercase to avoid duplicates
-  const origenUp  = (origen||"").trim().toUpperCase();
-  const destinoUp = (destino||"").trim().toUpperCase();
-  if (!origenUp || !destinoUp) return res.status(400).json({ error: "Origen y destino son obligatorios" });
-  const tipoVehiculo = tipo_vehiculo || "cualquiera";
-  const clienteId = cliente_id || null;
-  // Una misma ruta puede tener tarifa distinta por cliente o tipo de vehiculo.
-  const exists = await db.query(
-    `SELECT id FROM rutas
-      WHERE UPPER(origen)=$1
-        AND UPPER(destino)=$2
-        AND COALESCE(cliente_id::text,'')=COALESCE($3::uuid::text,'')
-        AND COALESCE(tipo_vehiculo,'cualquiera')=$4
-        AND activa=true
-        AND (empresa_id=$5 OR empresa_id IS NULL)
-      LIMIT 1`,
-    [origenUp, destinoUp, clienteId, tipoVehiculo, empresaId]
-  );
-  const minima = normalizeMinimumsByTarifa(tarifa_tipo, minimo_facturable, minimo_unidades);
-  if (exists.rows[0]) {
-    const { rows: updatedRows } = await db.query(
-      `UPDATE rutas
-          SET km=COALESCE($1, km),
-              peajes=COALESCE($2, peajes),
-              tiempo_h=COALESCE($3, tiempo_h),
-              notas=COALESCE($4, notas),
-              pct_subida=COALESCE($5, pct_subida),
-              tarifa_tipo=$6,
-              precio_base=COALESCE($7, precio_base),
-              minimo_facturable=$8,
-              minimo_unidades=$9,
-              recargo_combustible_pct=COALESCE($10, recargo_combustible_pct),
-              empresa_id=COALESCE(empresa_id,$11)
-        WHERE id=$12 AND (empresa_id=$11 OR empresa_id IS NULL)
-        RETURNING *`,
-      [
-        numericOrNull(km), numericOrNull(peajes), numericOrNull(tiempo_h), notas || null,
-        numericOrNull(pct_subida), minima.tarifaTipo, numericOrNull(precio_base),
-        minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct),
-        empresaId, exists.rows[0].id,
-      ]
-    );
-    if (clienteId && updatedRows[0]) {
-      await db.query(
-        `INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET
-           precio=EXCLUDED.precio,
-           tarifa_tipo=EXCLUDED.tarifa_tipo,
-           minimo_facturable=EXCLUDED.minimo_facturable,
-           minimo_unidades=EXCLUDED.minimo_unidades,
-           recargo_combustible_pct=EXCLUDED.recargo_combustible_pct`,
-        [updatedRows[0].id, clienteId, numericOrNull(precio_base) || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
-      ).catch(() => {});
-    }
-    return res.status(200).json({ ...(updatedRows[0] || exists.rows[0]), reutilizada: true });
-  }
-  const { rows } = await db.query(
-    "INSERT INTO rutas (origen,destino,km,peajes,tiempo_h,notas,tipo_vehiculo,pct_subida,cliente_id,tarifa_tipo,precio_base,minimo_facturable,minimo_unidades,recargo_combustible_pct,empresa_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *",
-    [origenUp, destinoUp, km||null, peajes||0, tiempo_h||null, notas||null,
-     tipoVehiculo, pct_subida||0, clienteId,
-     minima.tarifaTipo, numericOrNull(precio_base)||0, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct)||0, empresaId]
-  );
-  if (clienteId) {
-    await db.query(
-      `INSERT INTO ruta_precios_cliente (ruta_id,cliente_id,precio,tarifa_tipo,minimo_facturable,minimo_unidades,recargo_combustible_pct)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (ruta_id,cliente_id) DO UPDATE SET
-         precio=EXCLUDED.precio,
-         tarifa_tipo=EXCLUDED.tarifa_tipo,
-         minimo_facturable=EXCLUDED.minimo_facturable,
-         minimo_unidades=EXCLUDED.minimo_unidades,
-         recargo_combustible_pct=EXCLUDED.recargo_combustible_pct`,
-      [rows[0].id, clienteId, numericOrNull(precio_base) || 0, minima.tarifaTipo, minima.minimoFacturable, minima.minimoUnidades, numericOrNull(recargo_combustible_pct) || 0]
-    ).catch(() => {});
-  }
-  res.status(201).json(rows[0]);
+router.post("/", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes"), async (req,res,next)=>{
+  try {
+    const row=await db.transaction(tx=>require('../services/commercialRouteWrite').saveCommercialRoute(tx,req.empresaId||req.user.empresa_id,req.body));
+    res.status(201).json(row);
+  } catch(e) { if(e.status)return res.status(e.status).json({error:e.message}); next(e); }
 });
 
 function xmlDecode(value) {
@@ -582,37 +529,11 @@ router.post("/importar", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes")
   }
 });
 
-router.put("/:id", GERENTE_O_TRAFICO, invalidateCache("rutas"), async (req, res) => {
-  const empresaId = req.empresaId || req.user?.empresa_id;
-  const {
-    origen, destino, km, peajes, tiempo_h, activa, notas, tipo_vehiculo, pct_subida, cliente_id,
-    tarifa_tipo, precio_base, minimo_facturable, minimo_unidades, recargo_combustible_pct
-  } = req.body;
-  const minima = normalizeMinimumsByTarifa(tarifa_tipo, minimo_facturable, minimo_unidades);
-  const { rows } = await db.query(
-    "UPDATE rutas SET origen=$1,destino=$2,km=$3,peajes=$4,tiempo_h=$5,activa=$6,notas=$7,tipo_vehiculo=$8,pct_subida=$9,cliente_id=$10,tarifa_tipo=$11,precio_base=$12,minimo_facturable=$13,minimo_unidades=$14,recargo_combustible_pct=$15,empresa_id=COALESCE(empresa_id,$16) WHERE id=$17 AND (empresa_id=$16 OR empresa_id IS NULL) RETURNING *",
-    [
-      (origen||"").trim().toUpperCase(),
-      (destino||"").trim().toUpperCase(),
-      numericOrNull(km),
-      numericOrNull(peajes) || 0,
-      numericOrNull(tiempo_h),
-      activa!==undefined?activa:true,
-      notas || null,
-      tipo_vehiculo || "cualquiera",
-      numericOrNull(pct_subida) || 0,
-      cliente_id || null,
-      minima.tarifaTipo,
-      numericOrNull(precio_base) || 0,
-      minima.minimoFacturable,
-      minima.minimoUnidades,
-      numericOrNull(recargo_combustible_pct) || 0,
-      empresaId,
-      req.params.id
-    ]
-  );
-  if (!rows[0]) return res.status(404).json({ error:"Ruta no encontrada" });
-  res.json(rows[0]);
+router.put("/:id", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes"), async (req,res,next)=>{
+  try {
+    const row=await db.transaction(tx=>require('../services/commercialRouteWrite').saveCommercialRoute(tx,req.empresaId||req.user.empresa_id,req.body,req.params.id));
+    res.json(row);
+  } catch(e) { if(e.status)return res.status(e.status).json({error:e.message}); next(e); }
 });
 
 router.delete("/:id", GERENTE_O_TRAFICO, invalidateCache("rutas", "clientes"), async (req, res) => {

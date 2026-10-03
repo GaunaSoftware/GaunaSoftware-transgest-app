@@ -6,9 +6,10 @@ const madridDay = now => new Intl.DateTimeFormat('sv-SE', {
 function loadDateChoice(order, nextState, role, input = {}, now = new Date()) {
   const state = String(nextState || '').toLowerCase();
   const current = String(order.estado || '').toLowerCase();
-  const load = ['espera_carga', 'cargando', 'en_curso'].includes(state);
+  if (state === 'en_curso' && (current === 'cargado' || order.carga_real_at)) return { recordActual:false, choice:null };
+  const load = ['espera_carga', 'cargando', 'cargado', 'en_curso'].includes(state);
   const delivery = ['espera_descarga', 'descarga', 'entregado'].includes(state);
-  const finishingLoad = state === 'en_curso' && ['confirmado', 'espera_carga', 'cargando'].includes(current) && !order.carga_real_at;
+  const finishingLoad = ['cargado', 'en_curso'].includes(state) && ['confirmado', 'espera_carga', 'cargando'].includes(current) && !order.carga_real_at;
   if ((!load && !delivery) || current === state) return { recordActual: false, choice: null };
   // Driver events describe what happened; they never rewrite agreed dates.
   if (role === 'chofer') return { recordActual: finishingLoad, choice: finishingLoad ? 'observada' : null };

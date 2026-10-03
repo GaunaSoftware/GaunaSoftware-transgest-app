@@ -205,14 +205,14 @@ function FlowPanel({ flujo = [], selectedKey = "", onStatusClick }) {
             <button
               key={row.key}
               type="button"
-              onClick={() => total > 0 && onStatusClick?.(row)}
-              disabled={total <= 0}
+              onClick={() => onStatusClick?.(row)}
+              title={total ? "Ver los pedidos en este estado" : "Consultar este estado: no hay pedidos en el alcance actual"}
               style={{
                 border:`1px solid ${selectedKey === row.key ? (transportState?.border || "var(--accent-a48)") : "var(--border)"}`,
                 borderRadius:8,
                 padding:"9px 10px",
                 background:selectedKey === row.key ? (transportState?.bg || "var(--accent-a10)") : "var(--bg3)",
-                cursor:total > 0 ? "pointer" : "default",
+                cursor:"pointer",
                 textAlign:"left",
                 fontFamily:"'DM Sans',sans-serif",
                 opacity:total > 0 ? 1 : .72,

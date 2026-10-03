@@ -38,7 +38,7 @@ async function cargarFacturaEmailContext(facturaId, empresaId) {
   const { rows } = await db.query(
     `SELECT f.*, f.updated_at::text AS envio_version, c.nombre AS cliente_nombre, c.cif AS cliente_cif,
             c.direccion AS cliente_direccion, c.cp AS cliente_cp, c.ciudad AS cliente_ciudad, c.pais AS cliente_pais,
-            c.email AS cliente_email, c.email_facturacion AS cliente_email_facturacion,
+            c.email AS cliente_email, COALESCE(NULLIF(trim(c.email_facturacion),''),NULLIF(trim(to_jsonb(c)->>'email_facturas'),''),NULLIF(trim(c.email),'')) AS cliente_email_facturacion,
             c.telefono AS cliente_telefono, c.contacto AS cliente_contacto,
             c.forma_pago AS cliente_forma_pago, c.vencimiento AS cliente_vencimiento
        FROM facturas f
@@ -119,7 +119,7 @@ function buildFacturaEmailPreflight(ctx, destinatario = "") {
   if (Number(factura.total || 0) <= 0) issues.push("El total de la factura es cero o negativo.");
   const pedidosSinAlbaran = pedidos.filter(p => Number(p.albaranes_count || 0) <= 0);
   if (pedidosSinAlbaran.length) {
-    issues.push(`Faltan albaranes/POD en ${pedidosSinAlbaran.length} pedido(s): ${pedidosSinAlbaran.map(p => p.numero || p.id).slice(0, 8).join(", ")}.`);
+    warnings.push(`Faltan albaranes/POD en ${pedidosSinAlbaran.length} pedido(s): ${pedidosSinAlbaran.map(p => p.numero || p.id).slice(0, 8).join(", ")}.`);
   }
   if (!String(factura.cliente_cif || "").trim()) warnings.push("El cliente no tiene CIF/NIF informado.");
   if (!factura.fecha_vencimiento) warnings.push("La factura no tiene vencimiento calculado.");

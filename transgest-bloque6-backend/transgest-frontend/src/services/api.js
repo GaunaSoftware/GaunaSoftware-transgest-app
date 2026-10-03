@@ -623,6 +623,7 @@ export const avisarClientePedido = (id, data = {}) => apiFetch(`/pedidos/${id}/a
 export const getWhatsappStatus = () => apiFetch("/whatsapp/status", { silentSuccess:true });
 export const getWhatsappConfig = () => apiFetch("/whatsapp/config", { silentSuccess:true });
 export const guardarWhatsappConfig = (data) => apiFetch("/whatsapp/config", { method:"PUT", body:data });
+export const probarWhatsappConfig = () => apiFetch("/whatsapp/test",{method:"POST",body:{},silentSuccess:true});
 export const getWhatsappLog = () => apiFetch("/whatsapp/log", { silentSuccess:true });
 export const getPedidoWhatsappPreflight = (id, target = "cliente") =>
   apiFetch(`/whatsapp/pedido/${id}/preflight?target=${encodeURIComponent(target)}`, { silentSuccess:true });
@@ -1456,3 +1457,14 @@ export async function downloadClaveicon(id) {
  if(!response.ok){const data=await parseApiResponse(response);throw new Error(data.error || 'No se pudo exportar');}
  const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filenameFromDisposition(response.headers.get('content-disposition')) || 'claveicon.xml';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
+
+export const asociarPuntoCliente = (id, cliente_id) => apiFetch(`/puntos-interes/${id}/clientes`, {method:"POST",body:{cliente_id}});
+
+export const getRutaAnalisis = id => apiFetch(`/rutas/${id}/analisis`);
+
+export const getFleetLocations=()=>apiFetch("/vehiculos/localizacion",{silentSuccess:true});
+
+export const analizarDocVehiculo=(vehicleId,documentId)=>apiFetch(`/docs/vehiculo/${vehicleId}/${documentId}/analizar`,{method:"POST",body:JSON.stringify({}),timeoutMs:75000});
+
+export const getSupplierDocumentDeliveries=id=>apiFetch(`/pedidos/${id}/deca-envios`,{silentSuccess:true});
+export const retrySupplierDocumentDelivery=(id,job)=>apiFetch(`/pedidos/${id}/deca-envios/${job}/reintentar`,{method:"POST",body:JSON.stringify({})});

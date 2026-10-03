@@ -5,11 +5,13 @@ import { cargoCount, fullLoadLength, cargoLengthMode, syncFullLoadLength } from 
 import { updateCargo } from "../../../utils/cargoDimensions";
 import { PALLET_SIZES } from "../../../utils/cargoDimensions";
 import { cargoLength } from "../../../utils/cargoDimensions";
+import { cargoVehicle, vehicleCapacity } from "../../../utils/vehicleCapacity";
 import AdrPanel from "../../../components/AdrPanel";
 
 export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClienteCol, syncCantidadSiVacia, calcularCosteGasoil, setShowCostes, normalizePesoKgDraft, PesoAlerta, vehiculosLocal }) {
  const tractor = vehiculosLocal.find(v => String(v.id) === String(form.vehiculo_id));
  const trailer = vehiculosLocal.find(v => String(v.id) === String(form.remolque_id_manual || form.remolque_id || tractor?.remolque_id));
+ const capacity=vehicleCapacity(cargoVehicle(form,vehiculosLocal)||{});
  const palletCapacity = Number(trailer?.capacidad_palets || 0);
  const palletExcess = !!PALLET_SIZES[form.palets_tipo] && palletCapacity > 0 && cargoCount(form) > palletCapacity;
  return <OrderSection title="Mercancía" icon="truck">
@@ -31,8 +33,8 @@ export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClient
                 <span style={{fontSize:11,color:"#f59e0b",marginLeft:8}}>Se añadirá a Grupajes para combinarlo con otros pedidos</span>
               )}
             </div>
-            {(form.tipo_carga||"completa")==="completa" && <div className="order-editor-help">
-              <span>Longitud automática: {fullLoadLength(form,vehiculosLocal).toLocaleString("es-ES")} m. Se utilizan 13,65 m cuando el remolque no tiene medida. En modo manual se conserva el valor indicado.</span>
+            {(form.tipo_carga||"completa")==="completa" && capacity.unit==="ml" && <div className="order-editor-help">
+              <span>{capacity.length ? `Longitud útil del vehículo: ${capacity.length.toLocaleString("es-ES")} m.` : "Longitud útil sin informar: completa la ficha del vehículo o indica una longitud manual."} En modo manual se conserva el valor indicado.</span>
               <label style={{display:'inline-flex',alignItems:'center',gap:6,marginLeft:12}}>Longitud ocupada
                 <select aria-label="Modo de longitud ocupada" value={cargoLengthMode(form)} onChange={e=>setForm(p=>e.target.value==='auto'
                   ? syncFullLoadLength({...p,longitud_ocupada_mode:'auto',_cargoLengthManual:false},fullLoadLength(p,vehiculosLocal))
@@ -41,6 +43,7 @@ export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClient
                 </select>
               </label>
             </div>}
+            {capacity.unit!=="ml"&&<div className="order-editor-help">Ocupación por {capacity.unit==='m3'?'volumen (m³)':'número de vehículos'}. {capacity.quantity?`Capacidad de la ficha: ${capacity.quantity.toLocaleString('es-ES')} ${capacity.unit==='m3'?'m³':'unidades'}.`:'Capacidad sin informar en la ficha.'} El peso se verifica por separado.</div>}
             <div className="order-editor-cargo-grid"><div style={{gridColumn:"1/-1"}}><label style={S.label}>Descripcion mercancia</label><input style={S.input} value={form.mercancia||""} onChange={f("mercancia")} placeholder="Pallets de ceramica, maquinaria..."/></div>
 <div>
                   <label style={S.label}>Peso (kg)</label>
@@ -63,8 +66,9 @@ export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClient
                   vehiculos={vehiculosLocal}
                 />
               </div>
-<div><label style={S.label}>{form.palets_tipo === "granel" ? "Número de bultos" : "Número de palets / bultos"}</label><input aria-label="Cantidad de carga" type="number" min="0" step="1" style={S.input} value={cargoCount(form)||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia(updateCargo(p,"palets_cantidad",e.target.value))))}/>{palletExcess&&<small role="alert" style={{color:'var(--red)'}}>La carga indica {cargoCount(form)} palés y el remolque admite {palletCapacity}. Revisa la capacidad.</small>}</div>
-<div><label style={S.label}>Tipo de palet</label>
+<div><label style={S.label}>{capacity.unit==='unidades'?'Número de vehículos':form.palets_tipo === "granel" ? "Número de bultos" : "Número de palets / bultos"}</label><input aria-label="Cantidad de carga" type="number" min="0" step="1" style={S.input} value={cargoCount(form)||""} onChange={e=>setForm(p=>syncPrecioClienteCol(syncCantidadSiVacia(updateCargo(p,"palets_cantidad",e.target.value))))}/>{palletExcess&&<small role="alert" style={{color:'var(--red)'}}>La carga indica {cargoCount(form)} palés y el remolque admite {palletCapacity}. Revisa la capacidad.</small>}</div>
+{capacity.unit==='m3'&&<div><label style={S.label}>Volumen de la carga (m³)</label><input style={S.input} inputMode="decimal" value={form.volumen||""} onChange={f("volumen")}/>{capacity.volume>0&&parseLocaleNumber(form.volumen,0)>capacity.volume&&<small role="alert">El volumen supera la capacidad del vehículo.</small>}</div>}
+<div><label style={S.label}>Embalaje (si corresponde)</label><input style={S.input} value={form.embalaje||""} onChange={f("embalaje")} placeholder="Film, caja, jaula…"/></div><div><label style={S.label}>Tipo de palet</label>
                 <select style={S.sel} value={form.palets_tipo||""} onChange={e=>setForm(p=>updateCargo(p,"palets_tipo",e.target.value))}>
                   <option value="">Sin especificar</option>
                   <option value="europeo">Europeo (120x80)</option>
@@ -83,7 +87,7 @@ export default function OrderCargoFields({ S, form, setForm, f, syncPrecioClient
 <div><label style={S.label}>Ancho carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_ancho_m||""} aria-label="Ancho de carga" onChange={e=>setForm(p=>updateCargo(p,"carga_ancho_m",e.target.value))}/></div>
 <div><label style={S.label}>Alto carga (m)</label><input type="text" inputMode="decimal" style={S.input} value={form.carga_alto_m||""} onChange={f("carga_alto_m")}/></div>
 <div><label style={S.label}>Temperatura (C)</label><input type="text" inputMode="decimal" style={S.input} value={form.temperatura_c??""} onChange={f("temperatura_c")} placeholder="Ej: -18 (vacio = sin frio)"/></div>
-<div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div></div></OrderDisclosure>
+{capacity.unit!=="m3"&&<div><label style={S.label}>Volumen (m3)</label><input type="text" inputMode="decimal" style={S.input} value={form.volumen||""} onChange={f("volumen")}/></div>}</div></OrderDisclosure>
 
             <AdrPanel
               adr={!!form.adr}

@@ -11,18 +11,18 @@ test('shared transport states keep incident and execution separate', () => {
   expect(TRANSPORT_STATES.entregado.final).toBe(true);
   expect(TRANSPORT_STATES.en_curso.final).toBe(false);
   expect(TRANSPORT_STATES.colaborador).toBeUndefined();
-  expect(RECOMMENDED_STATE_FLOW.cargando).toBe('en_curso');
+  expect(RECOMMENDED_STATE_FLOW.cargando).toBe('cargado');
   expect(transportStateMeta('estado_legacy').description).toBe('Estado no catalogado');
 });
 
 test('recorded progress distinguishes loading from departure without changing legacy state', () => {
   const order = { estado:'en_curso', estado_operativo:{codigo:'cargado',estado_legacy:'en_curso',fuente:'pasos_chofer'} };
   expect(transportStateKey(order)).toBe('cargado');
-  expect(transportStateMeta(order).label).toBe('Carga terminada');
+  expect(transportStateMeta(order).label).toBe('Cargado');
   expect(transportStateMeta({...order,estado_operativo:{codigo:'en_transito',estado_legacy:'en_curso'}}).label).toBe('En tránsito');
   expect(transportStateMeta({estado:'en_curso'}).label).toBe('En tránsito');
   expect(transportStateKey({...order,estado_operativo:{codigo:'unknown'}})).toBe('en_curso');
-  expect(TRANSPORT_STATES.cargado.readOnly).toBe(true);
+  expect(TRANSPORT_STATES.cargado.readOnly).not.toBe(true);
   expect(order.estado).toBe('en_curso');
   expect(transportStateKey({...order,estado:'cancelado'})).toBe('cancelado');
 });

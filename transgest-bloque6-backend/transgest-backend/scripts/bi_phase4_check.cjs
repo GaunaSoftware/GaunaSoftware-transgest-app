@@ -5,7 +5,7 @@ const range={desde:'2026-09-01',hasta:'2026-09-30'};
 const order=(id,more={})=>({id,empresa_id:'a',numero:id,estado:'entregado',fecha_bi:'2026-09-11',
   fecha_carga:'2026-09-10',fecha_descarga:'2026-09-11',ventana_carga:'08:00-09:00',ventana_descarga:'10:00-12:00',
   origen:'Madrid',destino:'Valencia',bultos:10,peso_kg:1000,importe:500,km_ruta:100,km_vacio:20,vehiculo_id:'v',...more});
-const events={carga_iniciada_at:'2026-09-10T06:30:00Z',carga_proceso_at:'2026-09-10T07:00:00Z',
+const events={viaje_iniciado_at:'2026-09-10T08:15:00Z',carga_iniciada_at:'2026-09-10T06:30:00Z',carga_proceso_at:'2026-09-10T07:00:00Z',
   carga_ok_at:'2026-09-10T08:00:00Z',carga_ok:true,
   posicionado_descarga_at:'2026-09-11T08:30:00Z',descarga_iniciada_at:'2026-09-11T09:00:00Z',
   descarga_ok_at:'2026-09-11T10:00:00Z',firma_entrega_at:'2026-09-11T10:10:00Z',firma_entrega:true,
@@ -25,6 +25,15 @@ assert.equal(result.tiempos.espera_carga.media,30);
 assert.equal(result.tiempos.carga_efectiva.mediana,60);
 assert.equal(result.tiempos.descarga_efectiva.p90,60);
 assert.equal(result.tiempos.recepcion_pod.mediana,60);
+assert.equal(result.tiempos.trayecto.media,1455);
+const {routePerformance,duration}=require('../src/services/routePerformance');
+const routeResult=routePerformance([{...input.orders[0],pasos:perStop}]);
+assert.equal(routeResult.indicadores.trayecto.minutos,result.tiempos.trayecto.media);
+assert.equal(routeResult.indicadores.carga.minutos,result.tiempos.carga_efectiva.media);
+assert.equal(routePerformance([{...input.orders[0],pasos:{},paradas:stopIds.map((s,i)=>({...s,id:'graph-'+i,legacy_key:'one:'+s.id,inicio_real_at:'2026-09-10T08:00:00Z',fin_real_at:'2026-09-10T08:30:30Z'}))}]).indicadores.carga.minutos,30.5);
+assert.equal(routePerformance([input.orders[0]]).indicadores.trayecto.minutos,null,'Las fechas previstas no sustituyen los eventos reales');
+assert.equal(duration('2026-09-10','2026-09-09'),null);
+assert.equal(duration('2026-09-01','2026-09-30'),null);
 assert.equal(result.metricas.consumo_l_100km.valor,null,'Repostajes no se convierten en consumo');
 assert.equal(result.metricas.coste_combustible_km.valor,1.25);
 assert.equal(result.metricas.mantenimiento_km.valor,1);
@@ -81,6 +90,15 @@ async function evidenceCheck(){
     const evidence=await loadOperationalEvidence(a,[p,q]);
     assert.equal(evidence.steps.length,1);assert.equal(evidence.docs.length,1);
     assert.equal(String(evidence.steps[0].pedido_id),p);
+    await pg.exec(`CREATE TABLE viajes_operativos(id uuid,empresa_id uuid,legacy_pedido_id uuid,estado text,created_at timestamptz);
+      CREATE TABLE viaje_pedidos(viaje_id uuid,empresa_id uuid,pedido_id uuid);
+      CREATE TABLE viaje_paradas(id uuid,viaje_id uuid,empresa_id uuid,legacy_key text,tipo text,progreso jsonb,llegada_real_at timestamptz,inicio_real_at timestamptz,fin_real_at timestamptz);
+      INSERT INTO viajes_operativos VALUES ('40000000-0000-4000-8000-000000000001','${a}','${p}','entregado',now());
+      INSERT INTO viaje_pedidos VALUES ('40000000-0000-4000-8000-000000000001','${a}','${p}');
+      INSERT INTO viaje_paradas VALUES ('50000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','${a}','${p}:${stopIds[1].id}','descarga','{}','2026-09-11 08:30Z','2026-09-11 09:00Z','2026-09-11 10:00Z');`);
+    const graphed=await loadOperationalEvidence(a,[p,q]);
+    assert.equal(graphed.steps.length,1);
+    assert.equal(new Date(graphed.steps[0].data.paradas[stopIds[1].id].descarga_ok_at).toISOString(),'2026-09-11T10:00:00.000Z');
     const planner=await loadPlannerMetrics(a,range);
     assert.equal(planner.reservas,1,'Planner mantiene aislamiento y producto propio');
     assert.equal(planner.por_muelle[0].minutos_reservados,60);

@@ -55,6 +55,15 @@
 .clients-upload:focus-within { outline:2px solid var(--accent); }
 .clients-upload input { position:absolute; width:1px; height:1px; opacity:0; }
 .clients-editor { min-width:0; }
+.client-points { min-width:0; display:grid; gap:14px; }
+.client-points header,.client-points article { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; }
+.client-points h3,.client-points p { margin:0 0 8px; }
+.client-points article { border:1px solid var(--border); padding:14px; border-radius:10px; }
+.client-points article > div { min-width:0; overflow-wrap:anywhere; }
+.client-points small { display:block; color:var(--text3); margin:5px 0; }
+.client-points-tools,.client-points-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.client-points-tools > input { flex:1 1 180px; }
+.client-points-tools label { font-size:12px; display:flex; gap:8px; align-items:center; }
 .clients-editor > div:nth-child(1) { overflow-x:auto; }
 .clients-editor input,.clients-editor select,.clients-editor textarea { max-width:100%; box-sizing:border-box; }
 .clients-routes { padding:22px !important; min-width:0; }
@@ -84,3 +93,12 @@
   .clients-routes [style*="grid-template-columns"] { grid-template-columns:minmax(0,1fr) !important; }
   .clients-routes [style*="min-width: 340"],.clients-routes [style*="min-width: 400"] { min-width:0 !important; }
 }
+
+.clients-routes .tg-rutas-import { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:12px; }
+.tg-rutas-import input { flex:1 1 240px; min-width:0; width:auto !important; }
+.route-performance { margin:18px 0; }
+.route-performance p { color:var(--text3); font-size:12px; }
+.route-performance-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+.route-performance-kpis > div { border:1px solid var(--border); border-radius:10px; padding:14px; }
+.route-performance-kpis small,.route-performance-kpis strong { display:block; }
+.route-history { display:flex; flex-wrap:wrap; gap:8px; }

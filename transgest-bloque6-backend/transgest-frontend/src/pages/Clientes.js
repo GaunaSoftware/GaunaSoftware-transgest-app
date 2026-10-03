@@ -1,14 +1,17 @@
+import {readRuntimeFocus, clearRuntimeFocus} from "../services/runtimeFocus";
+import RoutePointField from "../components/RoutePointField";
 import { useState, useEffect, useCallback } from "react";
 import { Modal } from "../ui";
 import ClientsWorkspace, { ClientPhotoInput } from "./clients/CommercialViews";
+import PointEditor from "../components/PointEditor";
 import { routeMargin } from '../utils/routeMargin';
 import {
-  getClientes, crearCliente, editarCliente, borrarCliente,
+  getClientes, getCliente, crearCliente, editarCliente, borrarCliente,
   getRutasCliente, getRutasClienteSalud, crearRutaCliente, editarRutaCliente, borrarRutaCliente,
   agruparRutasCliente, desagruparRutasCliente,
   getPedidosCliente, crearFacturaMultiple, getRutas, marcarClienteRevisado,
   crearPortalUsuarioCliente, getClienteIntegracionTokens, crearClienteIntegracionToken, revocarClienteIntegracionToken,
-  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres, crearPuntoInteres, editarPuntoInteres, borrarPuntoInteres,
+  getFacturas, getPortalSolicitudesAdmin, getPuntosInteres, asociarPuntoCliente,
 } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
@@ -135,8 +138,8 @@ const TIPO_VEHICULO_RUTA = [
   {v:"caja",l:"Caja cerrada"},
   {v:"adr",l:"ADR"},
 ];
-const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",espera_carga:"#eab308",cargando:"var(--accent-l)",en_curso:"#22d3ee",espera_descarga:"#d946ef",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
-const LABEL_ESTADO = {pendiente:"Pendiente de asignar",confirmado:"Confirmado",espera_carga:"Espera carga",cargando:"Cargando",en_curso:"En tránsito",espera_descarga:"Espera descarga",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
+const ESTADO_COLOR = {pendiente:"#fb8c3a",confirmado:"#3b6ef5",espera_carga:"#eab308",cargando:"var(--accent-l)",cargado:"#10b981",en_curso:"#22d3ee",espera_descarga:"#d946ef",descarga:"#a78bfa",entregado:"var(--green)",cancelado:"#f05252",incidencia:"#fbbf24"};
+const LABEL_ESTADO = {pendiente:"Pendiente de asignar",confirmado:"Confirmado",espera_carga:"Espera carga",cargando:"Cargando",cargado:"Cargado",en_curso:"En tránsito",espera_descarga:"Espera descarga",descarga:"En descarga",entregado:"Entregado",cancelado:"Cancelado",incidencia:"Incidencia"};
 const fmt2 = n => Number(n||0).toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2});
 const GRUPO_COLORES = ["#3b6ef5","#10b981","#f59e0b","#a855f7","#ef4444","#06b6d4","#ec4899","#84cc16"];
 // Ordena las tarifas dejando juntas las de un mismo grupo (asociadas, comparten
@@ -208,36 +211,6 @@ const S = {
 // ---------------------------------------------------------------------------
 // Subcomponente: Ficha de cliente (modal completo con tabs)
 // ---------------------------------------------------------------------------
-function normalizarHorarioHabitual(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const normalizeTime = (t) => {
-    const clean = String(t || "").trim().replace(/[hH]\.?$/, "").replace(".", ":");
-    const m = clean.match(/^(\d{1,2})(?::?(\d{2}))?$/);
-    if (!m) return null;
-    const hh = Number(m[1]);
-    const mm = m[2] === undefined ? 0 : Number(m[2]);
-    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-  };
-  const parts = raw
-    .replace(/,/g, ";")
-    .replace(/\r?\n/g, ";")
-    .replace(/[–—]/g, "-")
-    .replace(/\s+a\s+/gi, "-")
-    .split(";")
-    .map(p => p.trim())
-    .filter(Boolean);
-  const out = [];
-  for (const part of parts) {
-    const [start, end] = part.split("-").map(x => x.trim());
-    const a = normalizeTime(start);
-    const b = normalizeTime(end);
-    if (!a || !b) throw new Error("Horario no valido. Usa, por ejemplo: 08:00-13:30; 15:00-18:00");
-    out.push(`${a}-${b}`);
-  }
-  return out.join("; ");
-}
 
 function splitEmailList(value) {
   return String(value || "")
@@ -351,204 +324,40 @@ function PuntoClienteSelector({ cliente, onApply }) {
   );
 }
 
-function ClientePuntosPanel({ cliente, canEdit }) {
-  const emptyPointForm = {
-    nombre: "",
-    tipo: "ambos",
-    direccion: "",
-    ciudad: "",
-    provincia: "",
-    pais: "Espana",
-    codigo_postal: "",
-    ventana: "",
-    contacto_nombre: "",
-    contacto_telefono: "",
-    email: "",
-    notas: "",
-    google_maps_url: "",
-    punto_general: false,
-  };
-  const pointToForm = (punto = {}) => {
-    const metadata = punto.metadata && typeof punto.metadata === "object" ? punto.metadata : {};
-    return {
-      ...emptyPointForm,
-      ...punto,
-      punto_general: punto.punto_general ?? punto.es_general ?? !punto.cliente_id,
-      google_maps_url: punto.google_maps_url || metadata.google_maps_url || "",
-      contacto_nombre: punto.contacto_nombre || metadata.contacto_nombre || metadata.contacto || "",
-      contacto_telefono: punto.contacto_telefono || metadata.contacto_telefono || metadata.telefono_contacto || "",
-      email: punto.email || metadata.email || "",
-      notas: punto.notas || metadata.notas || "",
-    };
-  };
-  const [puntos, setPuntos] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [editingPoint, setEditingPoint] = useState(null);
-  const [form, setForm] = useState(emptyPointForm);
-
-  const cargar = useCallback(() => {
-    if (!cliente?.id) return;
-    setLoading(true);
-    getPuntosInteres({ cliente_id: cliente.id })
-      .then(data => setPuntos(Array.isArray(data) ? data : []))
-      .catch(() => setPuntos([]))
-      .finally(() => setLoading(false));
-  }, [cliente?.id]);
-
-  useEffect(() => { cargar(); }, [cargar]);
-
-  function set(k, value) {
-    setForm(prev => ({ ...prev, [k]: value }));
+export function ClientePuntosPanel({ cliente, canEdit }) {
+  const [points, setPoints] = useState([]), [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState(""), [all, setAll] = useState(false), [editing, setEditing] = useState(null);
+  const [error, setError] = useState(""), [linking, setLinking] = useState(null);
+  const load = useCallback(() => {
+    let alive = true;
+    setLoading(true); setError("");
+    getPuntosInteres(all ? {} : {cliente_id:cliente.id}).then(rows => { if(alive) setPoints(Array.isArray(rows)?rows:[]); })
+      .catch(e => { if(alive) setError(e.message); }).finally(() => { if(alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [cliente.id, all]);
+  useEffect(load, [load]);
+  async function link(point) {
+    setLinking(point.id); setError("");
+    try { await asociarPuntoCliente(point.id, cliente.id); notify("Punto añadido a este cliente", "success"); load(); }
+    catch(e) { setError(e.message); } finally { setLinking(null); }
   }
-
-  async function guardar(e) {
-    e.preventDefault();
-    if (!form.nombre.trim() || !form.direccion.trim()) {
-      notify("Indica nombre y direccion del punto", "warning");
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        ...form,
-        cliente_id: form.punto_general ? "" : cliente.id,
-        nombre: form.nombre.trim(),
-        direccion: form.direccion.trim(),
-        ciudad: form.ciudad.trim(),
-        provincia: form.provincia.trim(),
-        codigo_postal: form.codigo_postal.trim(),
-        google_maps_url: form.google_maps_url.trim(),
-      };
-      if (editingPoint?.id) await editarPuntoInteres(editingPoint.id, payload);
-      else await crearPuntoInteres(payload);
-      notify(editingPoint?.id ? "Punto actualizado" : (form.punto_general ? "Punto general creado" : "Punto vinculado al cliente creado"), "success");
-      setEditingPoint(null);
-      setForm(emptyPointForm);
-      cargar();
-    } catch (err) {
-      notify(err?.message || "No se pudo guardar el punto", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function editar(punto) {
-    setEditingPoint(punto);
-    setForm(pointToForm(punto));
-  }
-
-  function cancelarEdicion() {
-    setEditingPoint(null);
-    setForm(emptyPointForm);
-  }
-
-  async function borrar(punto) {
-    const ok = await confirmDialog({
-      title: "Eliminar punto",
-      message: `Eliminar "${punto.nombre || "punto"}"? No se eliminan los pedidos ya creados.`,
-      confirmText: "Eliminar",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await borrarPuntoInteres(punto.id);
-      notify("Punto eliminado", "success");
-      cargar();
-    } catch (err) {
-      notify(err?.message || "No se pudo eliminar el punto", "error");
-    }
-  }
-
-  const input = { ...S.inp, minWidth:0 };
-
-  return (
-    <div style={{display:"grid",gap:14}}>
-      <div style={{background:"rgba(14,165,164,.08)",border:"1px solid rgba(14,165,164,.22)",borderRadius:10,padding:"12px 14px",fontSize:12,color:"var(--text3)",lineHeight:1.45}}>
-        Los campos de origen y destino escritos en pedidos son poblaciones. Si necesitas muelle, cantera, almacen, obra o direccion concreta, crealo aqui como punto de carga, descarga o ambos.
-      </div>
-
-      {canEdit && (
-        <form onSubmit={guardar} style={{background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
-            <div>
-              <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>{editingPoint?.id ? "Ficha del punto" : "Nuevo punto"}</div>
-              <div style={{fontSize:11,color:"var(--text4)"}}>{editingPoint?.id ? "Revisa y actualiza los datos guardados del punto." : `Por defecto queda asociado a ${cliente?.nombre}. Marca general si lo quieres reutilizar en otros clientes.`}</div>
-            </div>
-            <label style={{display:"inline-flex",alignItems:"center",gap:7,fontSize:12,fontWeight:800,color:"var(--text3)"}}>
-              <input type="checkbox" checked={form.punto_general} onChange={e=>set("punto_general", e.target.checked)} />
-              Punto general
-            </label>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
-            <div><label style={S.lbl}>Nombre *</label><input style={input} value={form.nombre} onChange={e=>set("nombre", e.target.value)} placeholder="Almacen, cantera, obra..." /></div>
-            <div><label style={S.lbl}>Tipo</label><select style={input} value={form.tipo} onChange={e=>set("tipo", e.target.value)}><option value="ambos">Carga y descarga</option><option value="carga">Carga</option><option value="descarga">Descarga</option></select></div>
-            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Direccion *</label><input style={input} value={form.direccion} onChange={e=>set("direccion", e.target.value)} placeholder="Calle, poligono, acceso o enlace de Maps" /></div>
-            <div><label style={S.lbl}>Poblacion</label><input style={input} value={form.ciudad} onChange={e=>set("ciudad", e.target.value)} /></div>
-            <div><label style={S.lbl}>Provincia / region</label><input style={input} value={form.provincia} onChange={e=>set("provincia", e.target.value)} /></div>
-            <div><label style={S.lbl}>CP</label><input style={input} value={form.codigo_postal} onChange={e=>set("codigo_postal", e.target.value)} /></div>
-            <div><label style={S.lbl}>Pais</label><input style={input} value={form.pais} onChange={e=>set("pais", e.target.value)} /></div>
-            <div><label style={S.lbl}>Ventana horaria</label><input style={input} value={form.ventana} onChange={e=>set("ventana", e.target.value)} placeholder="08:00-14:00" /></div>
-            <div><label style={S.lbl}>Contacto</label><input style={input} value={form.contacto_nombre} onChange={e=>set("contacto_nombre", e.target.value)} /></div>
-            <div><label style={S.lbl}>Telefono contacto</label><input style={input} value={form.contacto_telefono} onChange={e=>set("contacto_telefono", e.target.value)} /></div>
-            <div><label style={S.lbl}>Email contacto</label><input style={input} value={form.email || ""} onChange={e=>set("email", e.target.value)} /></div>
-            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Enlace Maps / HERE</label><input style={input} value={form.google_maps_url} onChange={e=>set("google_maps_url", e.target.value)} placeholder="Opcional" /></div>
-            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas operativas</label><textarea style={{...input,minHeight:74,resize:"vertical"}} value={form.notas || ""} onChange={e=>set("notas", e.target.value)} placeholder="Entrada, muelle, persona de contacto, instrucciones..." /></div>
-          </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
-            <button type="submit" disabled={saving} style={{...S.btn,background:"var(--accent)",color:"#fff",opacity:saving?0.6:1}}>
-              {saving ? "Guardando..." : (editingPoint?.id ? "Guardar cambios" : "Crear punto")}
-            </button>
-            {editingPoint?.id && (
-              <button type="button" onClick={cancelarEdicion} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--text3)"}}>
-                Cancelar
-              </button>
-            )}
-          </div>
-        </form>
-      )}
-
-      <div style={{background:"var(--bg2)",border:"1px solid var(--border)",borderRadius:10,overflow:"hidden"}}>
-        <div style={{padding:"10px 12px",fontSize:12,fontWeight:900,color:"var(--text3)",borderBottom:"1px solid var(--border)"}}>
-          Puntos del cliente y puntos generales disponibles
-        </div>
-        {loading ? (
-          <div style={{padding:18,textAlign:"center",color:"var(--text4)",fontSize:12}}>Cargando puntos...</div>
-        ) : puntos.length === 0 ? (
-          <div style={{padding:18,textAlign:"center",color:"var(--text4)",fontSize:12}}>Sin puntos guardados.</div>
-        ) : (
-          <div style={{display:"grid",gap:8,padding:10}}>
-            {puntos.map(p => (
-              <div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:10,background:p.cliente_id ? "rgba(16,185,129,.07)" : "var(--bg3)"}}>
-                <div style={{minWidth:0}}>
-                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    <b style={{fontSize:13,color:"var(--text)"}}>{p.nombre}</b>
-                    <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:p.cliente_id ? "var(--green)" : "var(--accent)"}}>{p.cliente_id ? "Cliente" : "General"}</span>
-                    <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",color:"var(--text5)"}}>{p.tipo || "ambos"}</span>
-                  </div>
-                  <div style={{fontSize:12,color:"var(--text4)",marginTop:3}}>{[p.direccion, p.codigo_postal, p.ciudad, p.provincia, p.pais].filter(Boolean).join(" - ")}</div>
-                  {(p.ventana || p.contacto_nombre || p.contacto_telefono) && (
-                    <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{[p.ventana, p.contacto_nombre, p.contacto_telefono].filter(Boolean).join(" | ")}</div>
-                  )}
-                  {(p.google_maps_url || p.email || p.notas) && (
-                    <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>
-                      {[p.google_maps_url ? "Maps configurado" : "", p.email, p.notas].filter(Boolean).join(" | ")}
-                    </div>
-                  )}
-                </div>
-                {canEdit && (
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-                    <button type="button" onClick={()=>editar(p)} style={{...S.btn,background:"transparent",border:"1px solid var(--border2)",color:"var(--accent)",padding:"7px 10px"}}>Abrir ficha</button>
-                    <button type="button" onClick={()=>borrar(p)} style={{...S.btn,background:"rgba(239,68,68,.10)",border:"1px solid rgba(239,68,68,.25)",color:"#ef4444",padding:"7px 10px"}}>Eliminar</button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  const filtered = points.filter(p => [p.nombre,p.direccion,p.ciudad,p.provincia].some(v=>String(v||"").toLocaleLowerCase().includes(search.toLocaleLowerCase())));
+  return <section className="client-points">
+    <header><div><h3>Puntos de carga y descarga</h3><p>Direcciones, contactos, horarios y accesos para los pedidos de {cliente.nombre}.</p></div>
+      {canEdit && <button style={S.btn} onClick={()=>setEditing({cliente_id:cliente.id,punto_general:false})}>+ Crear punto</button>}</header>
+    <div className="client-points-tools"><input style={S.inp} aria-label="Buscar puntos" placeholder="Buscar nombre, dirección o población…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      <label><input type="checkbox" checked={all} onChange={e=>setAll(e.target.checked)}/> Ver todos los puntos de la empresa</label></div>
+    {error && <p role="alert">{error} <button style={S.btn} onClick={load}>Reintentar</button></p>}
+    {loading ? <p role="status">Cargando puntos…</p> : !filtered.length ? <p>No hay puntos con esta búsqueda.</p> : filtered.map(point=>{
+      const linked = String(point.cliente_id)===String(cliente.id) || (point.clientes_ids||[]).map(String).includes(String(cliente.id));
+      return <article key={point.id}><div><strong>{point.nombre}</strong><small>{linked ? 'Guardado en este cliente' : point.cliente_id ? 'Punto de otro cliente' : 'Punto general'}</small>
+        <p>{[point.direccion,point.codigo_postal,point.ciudad,point.provincia,point.pais].filter(Boolean).join(', ')}</p>
+        <small>{[point.ventana,point.contacto_nombre,point.contacto_telefono].filter(Boolean).join(' · ')}</small></div>
+        <div className="client-points-actions">{canEdit && <button style={S.btn} onClick={()=>setEditing(point)}>Editar punto</button>}
+          {canEdit && !linked && <button style={S.btn} disabled={linking===point.id} onClick={()=>link(point)}>{linking===point.id?'Añadiendo…':'Seleccionar para este cliente'}</button>}</div></article>;
+    })}
+    {editing && <PointEditor initial={editing} onClose={()=>setEditing(null)} onSave={()=>load()}/>}
+  </section>;
 }
 
 function buildClienteForm(cliente) {
@@ -673,6 +482,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
   // Guardar cliente
   async function guardarCliente() {
     if (!form.nombre) { notify("El nombre es obligatorio", "warning"); return; }
+    if(form.bloqueado && !String(form.bloqueo_motivo||" ").trim()){notify("Selecciona el motivo del bloqueo.","warning");return;}
     const emailsAlbaranes = splitEmailList(form.emails_albaranes);
     const invalidEmails = emailsAlbaranes.filter(v => !isValidEmail(v));
     if (invalidEmails.length) {
@@ -702,8 +512,6 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
         contacto: form.contacto_nombre || "",
         vencimiento: normalizePlazoPagoCliente(form.dias_pago === "Personalizado" ? form.dias_pago_custom : form.dias_pago),
         emails_albaranes: emailsAlbaranes.join("\n"),
-        horario_carga: normalizarHorarioHabitual(form.horario_carga),
-        horario_descarga: normalizarHorarioHabitual(form.horario_descarga),
       };
       const saved = esNuevo ? await crearCliente(payload) : await editarCliente(cliente.id, payload);
       if (!saved?.id) throw new Error("El servidor no ha confirmado el cliente. No repitas el alta: recarga la lista y revisa la API.");
@@ -1060,15 +868,14 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               <div key={k}><label style={S.lbl}>{l}</label>
               <input style={S.inp} value={form[k]||""} onChange={f(k)} placeholder={ph||""}/></div>
             ))}
-            <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Email para pedidos y órdenes de carga (si diferente)</label><input type="email" style={S.inp} value={form.email_pedidos||""} onChange={f("email_pedidos")} placeholder="pedidos@empresa.com"/></div>
             <div style={{gridColumn:"1/-1",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:6}}>
                 <div>
-                  <label style={{...S.lbl,marginTop:0}}>Correos para envio de albaranes</label>
-                  <div style={{fontSize:10,color:"var(--text5)"}}>Aparecen en la orden de carga como destinatarios de albaranes firmados.</div>
+                  <label style={{...S.lbl,marginTop:0}}>Correos para estados del viaje y albaranes</label>
+                  <div style={{fontSize:10,color:"var(--text5)"}}>Reciben los cambios de estado y los albaranes cuando se completa su subida.</div>
                 </div>
                 <button type="button" onClick={addEmailAlbaranField} style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.28)",padding:"6px 10px",fontSize:11}}>
-                  + Anadir correo
+                  + Añadir correo
                 </button>
               </div>
               <div style={{display:"grid",gap:7}}>
@@ -1171,17 +978,20 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                   <span style={{display:"block",fontSize:11,color:"var(--text4)",marginTop:2}}>Impide crear nuevos viajes hasta desactivar el bloqueo.</span>
                 </span>
               </label>
-              <label style={S.lbl}>Motivo del bloqueo</label>
-              <input style={S.inp} value={form.bloqueo_motivo||""} onChange={f("bloqueo_motivo")} placeholder="Ej: impago, documentacion pendiente, decision comercial..."/>
-              <label style={S.lbl}>Minimo facturable por toneladas (T)</label>
-              <input type="text" inputMode="decimal" style={S.inp} value={form.minimo_facturable_toneladas||""} onChange={f("minimo_facturable_toneladas")} placeholder="Ej: 25,5"/>
+              {form.bloqueado && <div><label style={S.lbl}>Motivo del bloqueo</label>
+                <select required style={S.sel} value={form.bloqueo_motivo||""} onChange={f("bloqueo_motivo")}>
+                  <option value="">Selecciona el motivo</option>{['Impago','Documentación pendiente','Decisión comercial'].map(reason=><option key={reason}>{reason}</option>)}
+                  {form.bloqueo_motivo && !['Impago','Documentación pendiente','Decisión comercial'].includes(form.bloqueo_motivo) && <option>{form.bloqueo_motivo}</option>}
+                </select></div>}
               <label style={S.lbl}>Modo de facturación</label>
               <select style={S.sel} value={form.modo_facturacion||"por_viaje"} onChange={f("modo_facturacion")}>
+                <option value="segun_factura">Según factura (elegir al prepararla)</option>
                 <option value="por_viaje">Por viaje (una factura por viaje)</option>
                 <option value="agrupada_linea">Agrupada - Una línea por período</option>
                 <option value="agrupada_detalle">Agrupada - Línea por cada viaje</option>
                 <option value="agrupada_kg">Agrupada por kg (con desglose de tarifas)</option>
               </select>
+              <small>Se propone al preparar cada factura; puedes cambiarlo en esa factura.</small>
             </div>
           </div>
         )}
@@ -1233,20 +1043,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               <label style={S.lbl}>Email de facturación (si diferente)</label>
               <input style={S.inp} value={form.email_facturacion||""} onChange={f("email_facturacion")}/>
             </div>
-            <div>
-              <label style={S.lbl}>Horario de carga habitual</label>
-              <input style={S.inp} value={form.horario_carga||""} onChange={f("horario_carga")}
-                onBlur={e=>{ try { setForm(p=>({...p, horario_carga: normalizarHorarioHabitual(e.target.value)})); } catch(err) { notify(err.message, "warning"); } }}
-                placeholder="08:00-13:30; 15:00-18:00" title="Se auto-rellena en ventana de carga al crear pedidos"/>
-              <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Admite horario partido separado por punto y coma.</div>
-            </div>
-            <div>
-              <label style={S.lbl}>Horario de descarga habitual</label>
-              <input style={S.inp} value={form.horario_descarga||""} onChange={f("horario_descarga")}
-                onBlur={e=>{ try { setForm(p=>({...p, horario_descarga: normalizarHorarioHabitual(e.target.value)})); } catch(err) { notify(err.message, "warning"); } }}
-                placeholder="08:00-13:30; 15:00-18:00"/>
-              <div style={{fontSize:10,color:"var(--text5)",marginTop:4}}>Ejemplo valido: 08:00-13:30; 15:00-18:00.</div>
-            </div>
+            <p style={{gridColumn:"1/-1"}}>Los horarios operativos se guardan en cada punto de carga o descarga.</p>
           </div>
         )}
 
@@ -1390,6 +1187,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                         title={`Ingreso ${fmt2(margenRuta(r, form).ingresoKm)} EUR/km - coste estimado ${fmt2(margenRuta(r, form).costeKm)} EUR/km - margen estimado total ${fmt2(margenRuta(r, form).margen)} EUR`}>
                         {r.km ? (() => {
                           const m = margenRuta(r, form);
+                          if(!m.available)return <small>Sin cantidad de referencia para estimar margen</small>;
                           return (
                             <div style={{display:"grid",gap:2}}>
                               <span style={{fontSize:11,color:"var(--text4)"}}>Ing. {fmt2(m.ingresoKm)}</span>
@@ -1424,8 +1222,8 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                 <div className="clients-editor">
                   <div style={{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,marginBottom:18,color:"var(--text)"}}>{editRuta?"Editar ruta":"Nueva ruta para "+form.nombre}</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <div><label style={S.lbl}>Origen *</label><input style={S.inp} value={formRuta.origen||""} onChange={fr("origen")}/></div>
-                    <div><label style={S.lbl}>Destino *</label><input style={S.inp} value={formRuta.destino||""} onChange={fr("destino")}/></div>
+                    <div><label style={S.lbl}>Origen *</label><input style={S.inp} value={formRuta.origen||""} onChange={e=>setFormRuta(p=>({...p,origen:e.target.value,origen_punto_id:null}))}/><RoutePointField side="origen" customer={cliente.id} form={formRuta} setForm={setFormRuta} inputStyle={S.sel} buttonStyle={S.btn}/></div>
+                    <div><label style={S.lbl}>Destino *</label><input style={S.inp} value={formRuta.destino||""} onChange={e=>setFormRuta(p=>({...p,destino:e.target.value,destino_punto_id:null}))}/><RoutePointField side="destino" customer={cliente.id} form={formRuta} setForm={setFormRuta} inputStyle={S.sel} buttonStyle={S.btn}/></div>
                     <div><label style={S.lbl}>Kilometros</label><input type="number" style={S.inp} value={formRuta.km||""} onChange={fr("km")}/></div>
                     <div><label style={S.lbl}>Tiempo estimado (h)</label><input type="number" step="0.5" style={S.inp} value={formRuta.tiempo_h||""} onChange={fr("tiempo_h")}/></div>
                     <div><label style={S.lbl}>Peajes (EUR)</label><input type="number" step="0.01" style={S.inp} value={formRuta.peajes||""} onChange={fr("peajes")}/></div>
@@ -1440,10 +1238,11 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
                       </select>
                     </div>
                     <div><label style={S.lbl}>Precio base</label><input type="number" step="0.01" style={S.inp} value={formRuta.precio_base||""} onChange={fr("precio_base")} placeholder="0.00"/></div>
-                    <div><label style={S.lbl}>{(formRuta.tarifa_tipo||"viaje")==="viaje"?"Minimo facturable (EUR)":"Minimo de unidades"}</label>
+                    <div><label style={S.lbl}>{(formRuta.tarifa_tipo||"viaje")==="viaje"?"Minimo facturable (EUR)":"Cantidad mínima facturable"}</label>
                       <input type="number" step="0.01" style={S.inp} value={(formRuta.tarifa_tipo||"viaje")==="viaje"?(formRuta.minimo_facturable||""):(formRuta.minimo_unidades||"")} onChange={e=>setFormRuta(p=>({...p,[(p.tarifa_tipo||"viaje")==="viaje"?"minimo_facturable":"minimo_unidades"]:e.target.value}))}/></div>
                     <div><label style={S.lbl}>Recargo combustible (%)</label><input type="number" step="0.1" style={S.inp} value={formRuta.recargo_combustible_pct||""} onChange={fr("recargo_combustible_pct")} placeholder="0"/></div>
-                    <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas</label><input style={S.inp} value={formRuta.notas||""} onChange={fr("notas")}/></div>
+                    <small style={{gridColumn:"1/-1"}}>El mínimo de unidades es la cantidad pactada que se factura aunque se transporte menos: toneladas, km, horas o palés según la tarifa. No limita la carga del vehículo.</small>
+                    <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Instrucciones operativas</label><textarea style={S.inp} value={formRuta.notas||""} onChange={fr("notas")}/><small>Se muestran en el pedido y requieren aceptación.</small><label style={S.lbl}>Observaciones para la factura</label><textarea style={S.inp} value={formRuta.observaciones_factura||""} onChange={fr("observaciones_factura")}/><small>Este texto aparecerá en la factura del cliente.</small></div>
                   </div>
                   <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
                     <button style={{...S.btn,background:"transparent",color:"var(--text2)",border:"1px solid var(--border2)"}} onClick={()=>setModalRuta(false)}>Cancelar</button>
@@ -1882,6 +1681,20 @@ export default function Clientes() {
   }, [q, mostrarBaja]);
 
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    let alive=true;
+    const open=async()=>{
+      const focus=readRuntimeFocus('tms_clientes_focus');
+      if(!focus?.cliente_id)return;
+      clearRuntimeFocus('tms_clientes_focus');
+      try{const client=await getCliente(focus.cliente_id);if(alive){setInitialTab('datos');setFicha(client);}}
+      catch(error){if(alive)notify(error.message,'error');}
+    };
+    const handle=event=>{if(event.detail?.key==='tms_clientes_focus')open();};
+    open();window.addEventListener('tms:runtime-focus',handle);
+    return()=>{alive=false;window.removeEventListener('tms:runtime-focus',handle);};
+  },[]);
+
 
   async function eliminar(c) {
     const ok = await confirmDialog({
@@ -1899,7 +1712,7 @@ export default function Clientes() {
     <>
       <ClientsWorkspace clientes={clientes} rutas={rutasG} loading={loading} error={loadError} reload={cargar}
         q={q} setQ={setQ} mostrarBaja={mostrarBaja} setMostrarBaja={setMostrarBaja}
-        soloPendientes={soloPendientes} setSoloPendientes={setSoloPendientes} canEdit={canEdit}
+        soloPendientes={soloPendientes} setSoloPendientes={setSoloPendientes} canEdit={canEdit} renderPoints={client=><ClientePuntosPanel cliente={client} canEdit={canEdit}/>}
         onEdit={(cliente, tab) => { setInitialTab(tab); setFicha(cliente || "nuevo"); }} onDelete={eliminar}
         onReviewed={async c => { try { await marcarClienteRevisado(c.id); cargar(); } catch(e) { notify(e.message,"error"); } }} />
 

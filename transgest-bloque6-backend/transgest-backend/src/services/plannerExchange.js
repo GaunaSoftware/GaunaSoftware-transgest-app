@@ -51,7 +51,7 @@ async function synchronize(db,company,actor=null){
    }
    if(!['cancelado','facturado','entregado'].includes(source.estado)){
     const values={};
-    if(consent.allowed(link,'estados')&&['espera_carga','cargando','en_curso','espera_descarga','descarga','entregado','facturado','incidencia'].includes(trip.estado)){
+    if(consent.allowed(link,'estados')&&['espera_carga','cargando','cargado','en_curso','espera_descarga','descarga','entregado','facturado','incidencia'].includes(trip.estado)){
      values.estado=trip.estado==='facturado'?'entregado':trip.estado;values.incidencia_tipo=trip.incidencia_tipo;values.incidencia_descripcion=trip.incidencia_descripcion;
     }
     if(consent.allowed(link,'recursos')){

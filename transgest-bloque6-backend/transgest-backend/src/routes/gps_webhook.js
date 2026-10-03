@@ -68,16 +68,14 @@ router.post("/webhook/:empresaId/:provider", async (req, res) => {
       return res.status(401).json({ error: "Token GPS invalido" });
     }
 
-    const activeProvider = await db.query(
-      `SELECT provider
+    const providerConfig = await db.query(
+      `SELECT activo
        FROM empresa_api_configs
-       WHERE empresa_id=$1 AND provider = ANY($2::varchar[]) AND activo=true
-       ORDER BY updated_at DESC
-       LIMIT 1`,
-      [empresaId, GPS_REMOTE_PROVIDERS]
+       WHERE empresa_id=$1 AND provider=$2`,
+      [empresaId, provider]
     );
-    if (activeProvider.rows[0]?.provider && activeProvider.rows[0].provider !== provider) {
-      return res.status(409).json({ error: `El GPS activo de la empresa es ${activeProvider.rows[0].provider}` });
+    if (providerConfig.rows[0]?.activo === false) {
+      return res.status(409).json({ error: `El conector ${provider} está desactivado para esta empresa` });
     }
 
     const positions = normalizePositions(req.body);
@@ -96,27 +94,33 @@ router.post("/webhook/:empresaId/:provider", async (req, res) => {
           continue;
         }
         const veh = await client.query(
-          `SELECT id, gps_external_id
+          `SELECT id, gps_provider, gps_external_id
            FROM vehiculos
            WHERE empresa_id=$1 AND activo=true AND (
              (gps_provider=$2 AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND UPPER(TRIM(gps_external_id))=UPPER(TRIM($3)))
-             OR ($4 <> '' AND UPPER(TRIM(matricula))=$4)
+             OR ($4 <> '' AND UPPER(TRIM(matricula))=$4
+                 AND (gps_provider IS NULL OR gps_provider='' OR gps_provider=$2)
+                 AND (NULLIF(TRIM(gps_external_id),'') IS NULL OR UPPER(TRIM(gps_external_id))=UPPER(TRIM($3))))
            )
            ORDER BY CASE WHEN gps_provider=$2 AND UPPER(TRIM(COALESCE(gps_external_id,'')))=UPPER(TRIM($3)) THEN 0 ELSE 1 END
-           LIMIT 1`,
+           FOR UPDATE`,
           [empresaId, provider, pos.external_id, pos.matricula]
         );
-        if (!veh.rows[0]) {
+        const exact = veh.rows.filter(v => v.gps_provider===provider && v.gps_external_id && String(v.gps_external_id).trim().toUpperCase()===pos.external_id.toUpperCase());
+        const matches = exact.length ? exact : veh.rows;
+        if (matches.length !== 1) {
           ignored += 1;
           errors.push({ external_id: pos.external_id || null, matricula: pos.matricula || null, reason: "vehiculo no vinculado" });
           continue;
         }
 
-        const current = veh.rows[0];
+        const current = matches[0];
         const tracking=require('../services/vehicleTracking');
         try { tracking.position(pos); }catch(e){ignored++;errors.push({external_id:pos.external_id,reason:e.message});continue;}
+        const link=await client.query("UPDATE vehiculos SET gps_provider=$3,gps_external_id=COALESCE(NULLIF($4,''),gps_external_id) WHERE empresa_id=$1 AND id=$2 AND (gps_provider IS NULL OR gps_provider='' OR gps_provider=$3) RETURNING id",[empresaId,current.id,provider,pos.external_id]);
+        if (!link.rows.length) { ignored++; continue; }
         await tracking.record({query:(...args)=>client.query(...args),transaction:fn=>fn(client)}, {empresaId,vehiculoId:current.id,provider,input:pos,externalId:pos.external_id||current.gps_external_id,raw:pos.raw});
-        const update=await client.query("UPDATE vehiculos SET gps_provider=$3,gps_external_id=COALESCE(NULLIF($4,''),gps_external_id) WHERE empresa_id=$1 AND id=$2 RETURNING id,matricula,ubicacion_actual,gps_lat,gps_lng,km_actuales",[empresaId,current.id,provider,pos.external_id]);
+        const update=await client.query("SELECT id,matricula,ubicacion_actual,gps_lat,gps_lng,km_actuales FROM vehiculos WHERE empresa_id=$1 AND id=$2",[empresaId,current.id]);
         updated += 1;
         updatedVehicles.push(update.rows[0]);
       }

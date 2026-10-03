@@ -1,6 +1,7 @@
 const {hash,canonical}=require('./transportDocumentVersions');
 const {activeDriverStop,driverStops}=require('./driverStops');
 const {loadJourney,ownerOf}=require('./driverJourney');
+const {positionSource,assignedGps,GPS_PROVIDERS}=require('./gpsSource');
 const fail=(message,code='TRACKING_INVALID',status=422)=>{throw Object.assign(Error(message),{code,status});};
 const number=v=>v===null||v===undefined||v===''?null:Number(v);
 function position(input,now=Date.now()){
@@ -45,7 +46,8 @@ async function evaluateGeofences(tx,company,vehicle,p,logId,now=Date.now()){
  const orders=(await tx.query("SELECT * FROM pedidos WHERE empresa_id=$1 AND vehiculo_id=$2 AND estado::text NOT IN ('entregado','facturado','cancelado','borrador') AND fecha_carga<=(NOW() AT TIME ZONE 'Europe/Madrid')::date",[company,vehicle])).rows;
  for(const order of orders){const cfg=await config(tx,company,order.id);if(now-Date.parse(p.recorded_at)>cfg.stale_seconds*1000)continue;
   const stop=await nextStop(tx,company,order),coords=coordinate(stop);if(!coords)continue;
-  const previous=(await tx.query('SELECT * FROM tracking_geofence_state WHERE empresa_id=$1 AND pedido_id=$2 AND parada_id=$3 FOR UPDATE',[company,order.id,stop.id])).rows[0];
+  const previous=(await tx.query(`SELECT s.* FROM tracking_geofence_state s JOIN gps_position_log l ON l.id=s.position_id AND l.empresa_id=s.empresa_id
+    WHERE s.empresa_id=$1 AND s.pedido_id=$2 AND s.parada_id=$3 AND l.provider=$4 FOR UPDATE OF s`,[company,order.id,stop.id,p.provider])).rows[0];
   if(previous&&Date.parse(previous.observed_at)>=Date.parse(p.recorded_at))continue;
   const {radius_m=150,hysteresis_m=50}=cfg.stops[stop.id]||{},meters=distance(p,coords);
   const event=transition(previous,meters,radius_m,hysteresis_m,p.accuracy_m);
@@ -59,14 +61,18 @@ async function record(db,{empresaId,vehiculoId,provider,input,externalId,raw={},
  return db.transaction(async tx=>{
   if(authorize)await authorize(tx);
   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:gps:${vehiculoId}`]);
-  const vehicle=(await tx.query('SELECT id FROM vehiculos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,vehiculoId])).rows[0];
+  const vehicle=(await tx.query('SELECT id,gps_provider FROM vehiculos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,vehiculoId])).rows[0];
   if(!vehicle)fail('Vehículo no encontrado','VEHICLE_NOT_FOUND',404);
   const row=(await tx.query(`INSERT INTO gps_position_log(empresa_id,vehiculo_id,provider,external_id,lat,lng,velocidad_kmh,odometro_km,raw,recorded_at,ingestion_key)
    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(empresa_id,ingestion_key) WHERE ingestion_key IS NOT NULL DO NOTHING RETURNING id`,[empresaId,vehiculoId,provider,externalId||null,p.lat,p.lng,p.velocidad_kmh,p.odometro_km,JSON.stringify({...raw,accuracy_m:p.accuracy_m,heading:p.heading,timestamp_source:p.timestamp_source}),p.recorded_at,key])).rows[0];
   if(!row)return {ok:true,idempotent:true};
+  // Keep both sources in history, but only the selected source publishes the
+  // vehicle position and drives operational geofence observations.
+  const selected=provider===positionSource(vehicle)||(provider==='manual'&&!assignedGps(vehicle));
+  if(!selected)return {ok:true,id:row.id,idempotent:false,recorded_at:p.recorded_at,selected_source:false};
   await tx.query(`UPDATE vehiculos SET ubicacion_actual=$3,ubicacion_fuente=$4,ubicacion_ts=$5,gps_lat=$6,gps_lng=$7,km_actuales=COALESCE($8,km_actuales)
-   WHERE empresa_id=$1 AND id=$2 AND (ubicacion_ts IS NULL OR ubicacion_ts<=$5::timestamptz)`,[empresaId,vehiculoId,`${p.lat}, ${p.lng}`,provider,p.recorded_at,p.lat,p.lng,p.odometro_km]);
-  await evaluateGeofences(tx,empresaId,vehiculoId,p,row.id);
+   WHERE empresa_id=$1 AND id=$2 AND (ubicacion_fuente IS DISTINCT FROM $4 OR ubicacion_ts IS NULL OR ubicacion_ts<=$5::timestamptz)`,[empresaId,vehiculoId,`${p.lat}, ${p.lng}`,provider,p.recorded_at,p.lat,p.lng,p.odometro_km]);
+  await evaluateGeofences(tx,empresaId,vehiculoId,{...p,provider},row.id);
   return {ok:true,id:row.id,idempotent:false,recorded_at:p.recorded_at};
  });
 }
@@ -74,11 +80,15 @@ async function snapshot(db,company,order,now=Date.now()){
  if(order.empresa_id!==company)fail('Pedido no encontrado','ORDER_NOT_FOUND',404);
  const cfg=await config(db,company,order.id),stop=await nextStop(db,company,order);
  const closed=['entregado','facturado','cancelado'].includes(order.estado);
- const row=!closed&&order.vehiculo_id?(await db.query('SELECT * FROM gps_position_log WHERE empresa_id=$1 AND vehiculo_id=$2 AND recorded_at<=$3 ORDER BY recorded_at DESC,id DESC LIMIT 1',[company,order.vehiculo_id,new Date(now+60000).toISOString()])).rows[0]:null;
+ const row=!closed&&order.vehiculo_id?(await db.query(`SELECT p.* FROM gps_position_log p JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+   WHERE p.empresa_id=$1 AND p.vehiculo_id=$2 AND p.recorded_at<=$3
+   AND p.provider=CASE WHEN v.gps_provider=ANY($4::varchar[]) THEN v.gps_provider ELSE 'app_chofer' END
+   ORDER BY p.recorded_at DESC,p.id DESC LIMIT 1`,[company,order.vehiculo_id,new Date(now+60000).toISOString(),GPS_PROVIDERS])).rows[0]:null;
  const age=row?Math.max(0,(now-Date.parse(row.recorded_at))/1000):null;
  const timestampSource=row?.raw?.timestamp_source||'legacy';
  const fresh=timestampSource==='device'&&age!==null&&age<=cfg.stale_seconds,coords=row&&coordinate(row),target=coordinate(stop);
- const event=stop?(await db.query('SELECT id,event,observed_at FROM tracking_geofence_events WHERE empresa_id=$1 AND pedido_id=$2 AND parada_id=$3 ORDER BY observed_at DESC,id DESC LIMIT 1',[company,order.id,stop.id])).rows[0]:null;
+ const event=stop&&row?(await db.query(`SELECT e.id,e.event,e.observed_at FROM tracking_geofence_events e JOIN gps_position_log l ON l.id=e.position_id AND l.empresa_id=e.empresa_id
+   WHERE e.empresa_id=$1 AND e.pedido_id=$2 AND e.parada_id=$3 AND l.provider=$4 ORDER BY e.observed_at DESC,e.id DESC LIMIT 1`,[company,order.id,stop.id,row.provider])).rows[0]:null;
  return {pedido_id:order.id,status:closed?'finalizado':!row?'sin_datos':timestampSource!=='device'?'captura_sin_fecha':fresh&&coords?'reciente':'obsoleta',stale_seconds:cfg.stale_seconds,
   last_recorded_at:row?.recorded_at||null,age_seconds:age,provider:row?.provider||null,timestamp_source:timestampSource,
   position:fresh&&coords?{...coords,heading:number(row.raw?.heading),accuracy_m:number(row.raw?.accuracy_m),speed_kmh:number(row.velocidad_kmh)}:null,

@@ -5,7 +5,7 @@ async function main(){
  const db={query:(...args)=>pg.query(...args),transaction:fn=>pg.transaction(fn)};
  try{
   await pg.exec(`CREATE TABLE pedidos(id UUID PRIMARY KEY,empresa_id UUID,vehiculo_id UUID,estado text,fecha_carga date,origen text,destino text,puntos_carga jsonb,puntos_descarga jsonb);
-   CREATE TABLE vehiculos(id UUID PRIMARY KEY,empresa_id UUID,ubicacion_actual text,ubicacion_fuente text,ubicacion_ts timestamptz,gps_lat numeric,gps_lng numeric,km_actuales numeric);
+   CREATE TABLE vehiculos(id UUID PRIMARY KEY,empresa_id UUID,gps_provider text,ubicacion_actual text,ubicacion_fuente text,ubicacion_ts timestamptz,gps_lat numeric,gps_lng numeric,km_actuales numeric);
    CREATE TABLE pedido_chofer_pasos(empresa_id UUID,pedido_id UUID,data jsonb);`);
   for(const name of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_vehicle_tracking.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',name),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_vehicle_tracking.sql'),'utf8'));
@@ -40,6 +40,20 @@ async function main(){
   assert.equal(tracking.transition(null,10,150,50,null),null);assert.equal(tracking.transition(null,10,150,50,500),null);
   await tracking.record(db,{...args,input:{lat:40,lng:-3}});
   const unknownCapture=await tracking.snapshot(db,company,order);assert.equal(unknownCapture.status,'captura_sin_fecha');assert.equal(unknownCapture.position,null);assert.equal(unknownCapture.arrival,null);
+  await pg.query("UPDATE vehiculos SET gps_provider='geotab' WHERE id=$1",[vehicle]);
+  await tracking.record(db,{...args,provider:'geotab',input:input(-500,39)});
+  assert.equal((await tracking.snapshot(db,company,order)).provider,'geotab');
+  assert.equal((await pg.query('SELECT gps_lat FROM vehiculos')).rows[0].gps_lat,'39','Selected GPS supersedes the previous app despite its newer timestamp');
+  const mobileRecord=await tracking.record(db,{...args,input:input(Date.now()-now+1,41)});
+  assert.equal(mobileRecord.selected_source,false);
+  assert.equal((await pg.query('SELECT gps_lat FROM vehiculos')).rows[0].gps_lat,'39');
+  const otherGps=await tracking.record(db,{...args,provider:'movildata',input:input(0,42)});
+  assert.equal(otherGps.selected_source,false);
+  assert.equal((await tracking.snapshot(db,company,order)).position.lat,39);
+  assert.equal((await tracking.snapshot(db,company,order,now+360000)).position,null,'No switch to app when GPS gets old');
+  await pg.query("UPDATE vehiculos SET gps_provider='manual' WHERE id=$1",[vehicle]);
+  const appSelected=await tracking.snapshot(db,company,order);
+  assert.equal(appSelected.provider,'app_chofer');assert.equal(appSelected.position.lat,41);
   console.log('PASS tracking: coordinate/time validation, no stale overwrite, deduplication, tenant, vehicle changes, stale/missing data, road-only ETA, explicit windows, geofence hysteresis/accuracy and audit without completing stops.');
  }finally{await pg.close();}
 }

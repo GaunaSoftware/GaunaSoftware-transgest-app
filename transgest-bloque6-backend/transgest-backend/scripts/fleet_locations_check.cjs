@@ -9,7 +9,7 @@ const company = '11111111-1111-4111-8111-111111111111';
 const otherCompany = '22222222-2222-4222-8222-222222222222';
 const vehicle = '33333333-3333-4333-8333-333333333333';
 const now = Date.now();
-const originalAuth = auth.authenticate, originalQuery = db.query;
+const originalAuth = auth.authenticate, originalQuery = db.query, originalTransaction = db.transaction;
 
 (async () => {
   const pg = new PGlite();
@@ -38,6 +38,7 @@ const originalAuth = auth.authenticate, originalQuery = db.query;
     assert.equal((await sync(company, 'locatel', async () => ({ updated: 1 }))).updated, 1);
     await assert.rejects(sync(null, 'geotab', failed), { status: 401 });
     await pg.exec(`
+      CREATE TABLE empresas(id uuid PRIMARY KEY);
       CREATE TABLE vehiculos(id uuid, empresa_id uuid, matricula text, estado text,
         gps_provider text, activo boolean, clase text, tipo text, chofer_id uuid);
       CREATE TABLE choferes(id uuid, empresa_id uuid, nombre text, apellidos text);
@@ -59,23 +60,42 @@ const originalAuth = auth.authenticate, originalQuery = db.query;
     let fleet = await readFleetLocations(pg, company, { now });
     assert.equal(fleet.items.length, 1);
     assert.equal(fleet.items[0].chofer_nombre, 'Ana Prueba');
-    assert.equal(fleet.items[0].provider, 'app_chofer');
-    assert.equal(fleet.items[0].fallback, true);
+    assert.equal(fleet.items[0].provider, 'geotab');
+    assert.equal(fleet.items[0].status, 'obsoleta');
+    assert.equal(fleet.items[0].position, null, 'A newer app signal cannot replace an assigned GPS');
+    assert.equal(fleet.items[0].fallback, false);
     assert.ok(!JSON.stringify(fleet).includes('PRIVATE'));
     await gps(company, 'geotab', 4);
     fleet = await readFleetLocations(pg, company, { now });
     assert.equal(fleet.items[0].provider, 'geotab');
     assert.equal(fleet.items[0].fallback, false);
+    await gps(company, 'movildata', 0);
+    assert.equal((await readFleetLocations(pg, company, {now})).items[0].provider,'geotab');
+    await pg.query("UPDATE vehiculos SET gps_provider='movildata' WHERE id=$1",[vehicle]);
+    assert.equal((await readFleetLocations(pg, company, {now})).items[0].provider,'movildata');
+    await pg.query("UPDATE vehiculos SET gps_provider='manual' WHERE id=$1",[vehicle]);
+    assert.equal((await readFleetLocations(pg, company, {now})).items[0].provider,'app_chofer');
+    await pg.query("UPDATE vehiculos SET gps_provider='geotab' WHERE id=$1",[vehicle]);
+    const mixed=[
+      {id:'gps-a',gps_provider:'geotab'}, {id:'gps-b',gps_provider:'movildata'}, {id:'mobile',gps_provider:'manual'}
+    ];
+    const mixedRows=mixed.flatMap(v=>['geotab','movildata','app_chofer'].map(provider=>({vehiculo_id:v.id,provider,lat:38,lng:-1,recorded_at:new Date(now).toISOString(),raw:{timestamp_source:'device'}})));
+    assert.deepEqual(mixed.map(v=>locationForVehicle(v,mixedRows,{now}).provider),['geotab','movildata','app_chofer']);
     assert.equal((await readFleetLocations(pg, company, { now: now + 3600000 })).items[0].position, null);
     const row = { vehiculo_id: vehicle, provider: 'geotab', lat: 38, lng: -1,
       recorded_at: new Date(now).toISOString(), raw: { timestamp_source: 'device' } };
     for (const change of [{ raw: {} }, { lat: 91 }, { recorded_at: new Date(now + 120000).toISOString() }, { provider: 'manual' }]) {
-      assert.equal(locationForVehicle({ id: vehicle }, [{ ...row, ...change }], { now }).position, null);
+      assert.equal(locationForVehicle({ id: vehicle, gps_provider:'geotab' }, [{ ...row, ...change }], { now }).position, null);
     }
     assert.equal(locationForVehicle({ id: vehicle }, [], { now }).status, 'sin_datos');
     await assert.rejects(readFleetLocations(pg, null), { status: 401 });
 
     db.query = (...args) => pg.query(...args);
+    db.transaction = fn => pg.transaction(tx=>fn({query:(...args)=>tx.query(...args)}));
+    await pg.query('INSERT INTO empresas VALUES($1),($2)',[company,otherCompany]);
+    const keys=require('../src/services/apiKeys');
+    await keys.setCompanyApiConfig(company,'geotab',{api_key:'fake-geotab',use_global:false});
+    await keys.setCompanyApiConfig(company,'movildata',{api_key:'fake-movildata',use_global:false});
     // Substitute identity only. Preserve the production role, plan and module gates.
     auth.authenticate = (req, res, next) => {
       const who = req.get('x-test-user');
@@ -110,10 +130,19 @@ const originalAuth = auth.authenticate, originalQuery = db.query;
     assert.match(response.headers.get('cache-control'), /no-store/);
     assert.equal((await response.json()).items[0].matricula, '2418-LPH');
     assert.equal((await (await call('other')).json()).items[0].matricula, 'PRIVATE');
+    const providers=await fetch(`http://127.0.0.1:${server.address().port}/vehiculos/gps/providers`,{headers:{'x-test-user':'manager'}});
+    assert.equal(providers.status,200);
+    const configuredProviders=await providers.json();
+    assert.deepEqual(configuredProviders.active_providers,['geotab','movildata']);
+    assert.equal(configuredProviders.active_provider,'');
+    assert.deepEqual(configuredProviders.providers.filter(p=>p.active).map(p=>p.id).sort(),['geotab','movildata']);
+    const privateProviders=await (await fetch(`http://127.0.0.1:${server.address().port}/vehiculos/gps/providers`,{headers:{'x-test-user':'other'}})).json();
+    assert.deepEqual(privateProviders.active_providers,[]);
     console.log('PASS LOCATE: company-scoped GPS request sharing, cooldown and failed-read recovery; real SQL and HTTP route, company isolation, permissions, GPS priority, driver fallback, stale/invalid/undated signals, active tractors only. Synthetic local fixtures; no provider calls.');
   } finally {
     auth.authenticate = originalAuth;
     db.query = originalQuery;
+    db.transaction = originalTransaction;
     if (server) await new Promise(resolve => server.close(resolve));
     await pg.close();
   }

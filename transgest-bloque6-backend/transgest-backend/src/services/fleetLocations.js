@@ -1,4 +1,4 @@
-const REMOTE = new Set(['locatel','tacogest','movildata','geotab','gps_generic']);
+const { assignedGps, positionSource } = require('./gpsSource');
 function numeric(value) { if(value===null||value===undefined||value==='')return null;const n=Number(value);return Number.isFinite(n)?n:null; }
 function observation(row, now, staleSeconds) {
   const lat=numeric(row.lat), lng=numeric(row.lng), time=Date.parse(row.recorded_at);
@@ -11,16 +11,17 @@ function observation(row, now, staleSeconds) {
 }
 function locationForVehicle(vehicle, rows, {now=Date.now(), staleSeconds=900}={}) {
   const relevant=rows.filter(row=>String(row.vehiculo_id)===String(vehicle.id))
-    .filter(row=>REMOTE.has(row.provider)||row.provider==='app_chofer')
+    .filter(row=>row.provider===positionSource(vehicle))
     .map(row=>observation(row,now,staleSeconds)).sort((a,b)=>Date.parse(b.recorded_at)-Date.parse(a.recorded_at));
-  // A current provider fix takes precedence. The driver's current fix is the fallback.
-  const current=relevant.find(row=>row.position&&REMOTE.has(row.provider))||relevant.find(row=>row.position);
+  // One assigned source per vehicle, independent of which company connector
+  // was saved last. A newer app or second-provider fix cannot replace its GPS.
+  const current=relevant.find(row=>row.position);
   const last=current||relevant[0];
   return {id:vehicle.id,matricula:vehicle.matricula,chofer_nombre:vehicle.chofer_nombre||null,
     gps_provider:vehicle.gps_provider||null,estado:vehicle.estado,
     status:last?.status||'sin_datos',position:current?.position||null,
-    provider:last?.provider||null,last_recorded_at:last?.recorded_at||null,age_seconds:last?.age_seconds??null,
-    fallback:current?.provider==='app_chofer',stale_seconds:staleSeconds};
+    provider:last?.provider||positionSource(vehicle),last_recorded_at:last?.recorded_at||null,age_seconds:last?.age_seconds??null,
+    source_mode:assignedGps(vehicle)?'gps':'app',fallback:false,stale_seconds:staleSeconds};
 }
 async function readFleetLocations(db, company, options={}) {
   if(!company)throw Object.assign(Error('Empresa no identificada'),{status:401});
@@ -36,6 +37,6 @@ async function readFleetLocations(db, company, options={}) {
     FROM gps_position_log WHERE empresa_id=$1 AND vehiculo_id=ANY($2::uuid[])
     ORDER BY vehiculo_id,provider,recorded_at DESC,id DESC`,[company,vehicles.map(v=>v.id)])).rows:[];
   return {generated_at:new Date(options.now??Date.now()).toISOString(),items:vehicles.map(v=>locationForVehicle(v,rows,options)),
-    definition:'Posiciones recibidas del proveedor GPS o de la app del conductor. Las capturas sin fecha verificada o de más de 15 minutos no se muestran como posición actual.'};
+    definition:'Cada vehículo usa su GPS asignado; si no tiene GPS, usa la app del conductor. Las capturas sin fecha verificada o de más de 15 minutos no se muestran como posición actual.'};
 }
 module.exports={locationForVehicle,readFleetLocations,observation};

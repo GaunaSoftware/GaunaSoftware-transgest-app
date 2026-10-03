@@ -21,10 +21,15 @@ async function main() {
   assert.equal(calls.length,3);
   assert.equal(calls[1].url,'https://eu.geotab.com/apiv1');
   const vehicle={id:'vehicle-a',matricula:'7484 HTS',gps_provider:null,gps_external_id:null};
+  const {uniqueIndex}=require('../src/services/gpsSource');
+  assert.equal(uniqueIndex([{id:'a',device:'same'},{id:'b',device:'same'}],v=>v.device).size,0,'Ambiguous IDs are never assigned');
   const match=geotab.positions(data,[vehicle]);
   assert.equal(match.positions.length,1);
   assert.equal(match.positions[0].vehicle.id,vehicle.id);
   assert.equal(match.positions[0].deviceId,'b1');
+  for(const provider of ['locatel','movildata','manual','app_chofer']) {
+    assert.equal(geotab.positions(data,[{...vehicle,gps_provider:provider}]).positions.length,0,`Preserve ${provider} assignment`);
+  }
   assert.equal(geotab.positions(data,[vehicle,{...vehicle,id:'other'}]).positions.length,0,'No enlazar matrículas duplicadas');
   assert.equal(geotab.positions({...data,devices:[...data.devices,{id:'b3',licensePlate:'7484-HTS'}]},[vehicle]).positions.length,0,'No enlazar dispositivos con matrícula duplicada');
   assert.equal(geotab.positions(data,[{...vehicle,gps_provider:'geotab',gps_external_id:'b2'}]).positions.length,0,'No reemplazar un enlace explícito por matrícula');

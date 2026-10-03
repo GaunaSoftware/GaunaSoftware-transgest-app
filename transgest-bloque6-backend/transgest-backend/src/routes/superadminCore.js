@@ -371,23 +371,24 @@ async function buildIntegracionesSalud() {
     return !!global[provider]?.global_configured;
   }
 
-  function activeGpsProvider(empresaId) {
+  function activeGpsProviders(empresaId) {
     return configs
       .filter(c => String(c.empresa_id) === String(empresaId) && GPS_PROVIDERS.includes(c.provider) && c.activo !== false)
-      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0]?.provider || "";
+      .map(c => c.provider).sort();
   }
 
   const empresasSalud = empresas.map(empresa => {
     const veh = vehicleByEmpresa.get(String(empresa.id)) || {};
-    const gpsProvider = activeGpsProvider(empresa.id);
-    const gpsWebhook = gpsProvider ? webhooksByEmpresaProvider.get(`${empresa.id}:${gpsProvider}`) : null;
+    const gpsProviders = activeGpsProviders(empresa.id);
+    const gpsProvider = gpsProviders.join(', ');
+    const gpsWebhook = gpsProviders.some(p => webhooksByEmpresaProvider.get(`${empresa.id}:${p}`)?.activo);
     const fiscalConfig = normalizeFiscalConfig(empresa?.configuracion?.facturacion_fiscal || {});
     fiscalConfig.verifactu.software_version = appMeta.version;
     fiscalConfig.verifactu.software_nombre = appMeta.fiscal_software_name;
     fiscalConfig.verifactu.software_id = appMeta.fiscal_software_id;
     const fiscalStatus = buildFiscalStatus(fiscalConfig);
     const empresaGpsDuplicates = gpsDuplicateRows.rows.filter(r => String(r.empresa_id) === String(empresa.id)).length;
-    const gpsReady = !!gpsProvider && providerReady(empresa.id, gpsProvider) && empresaGpsDuplicates === 0;
+    const gpsReady = gpsProviders.length > 0 && gpsProviders.every(p => providerReady(empresa.id, p)) && empresaGpsDuplicates === 0;
     return {
       id: empresa.id,
       nombre: empresa.nombre,
@@ -398,8 +399,9 @@ async function buildIntegracionesSalud() {
       ia_usos_mes: Number(empresa.ia_usos_mes || 0),
       routing_truck_ready: providerReady(empresa.id, "here") || providerReady(empresa.id, "ors"),
       gps_provider: gpsProvider,
+      gps_providers: gpsProviders,
       gps_ready: gpsReady,
-      gps_webhook_activo: !!gpsWebhook?.activo,
+      gps_webhook_activo: gpsWebhook,
       vehiculos_activos: Number(veh.vehiculos_activos || 0),
       gps_enlazados: Number(veh.gps_enlazados || 0),
       gps_senal_reciente: Number(veh.gps_senal_reciente || 0),
@@ -1961,16 +1963,17 @@ router.get("/integraciones", superAuth, async (req, res, next) => {
       ORDER BY updated_at DESC
     `);
     const gpsActiveRows = await db.query(
-      `SELECT DISTINCT ON (empresa_id) empresa_id, provider
+      `SELECT empresa_id, provider
        FROM empresa_api_configs
        WHERE provider = ANY($1::varchar[]) AND activo=true
        ORDER BY empresa_id, updated_at DESC`,
       [GPS_PROVIDERS]
     );
-    const gps_active = gpsActiveRows.rows.reduce((acc, row) => {
-      acc[row.empresa_id] = row.provider;
+    const gps_active_providers = gpsActiveRows.rows.reduce((acc, row) => {
+      (acc[row.empresa_id] ||= []).push(row.provider);
       return acc;
     }, {});
+    const gps_active = Object.fromEntries(Object.entries(gps_active_providers).map(([id, providers]) => [id, providers.length===1 ? providers[0] : '']));
     const webhookRows = await db.query(`
       SELECT empresa_id, provider, token_mask, activo, created_at, updated_at, last_used_at
       FROM gps_webhook_tokens
@@ -2015,6 +2018,7 @@ router.get("/integraciones", superAuth, async (req, res, next) => {
       empresas: empresas.rows.map(({ configuracion, ...empresa }) => empresa),
       configs: companyRows.rows,
       gps_active,
+      gps_active_providers,
       gps_webhooks: webhookRows.rows,
       fiscal_configs,
     });
@@ -2220,7 +2224,7 @@ router.put("/integraciones/empresas/:empresaId/:provider", superAuth, async (req
       use_global: req.body?.use_global,
       activo: req.body?.activo,
       limite_mensual: req.body?.limite_mensual,
-      gps_unico: GPS_PROVIDERS.includes(provider) ? true : undefined,
+      gps_multiple: GPS_PROVIDERS.includes(provider) ? true : undefined,
     }, req.params.empresaId);
     res.json({ ok: true, status: await publicStatusForProvider(provider, req.params.empresaId) });
   } catch (e) { next(e); }
@@ -2248,13 +2252,12 @@ router.post("/integraciones/empresas/:empresaId/:provider/test", superAuth, asyn
         : Promise.resolve({ rows: [] }),
     ]);
 
-    const gpsActive = gpsRows.rows[0]?.provider || "";
-    const gpsConflict = GPS_PROVIDERS.includes(provider) && gpsActive && gpsActive !== provider;
-    const ok = Boolean(resolved.key) && resolved.source !== "disabled" && !gpsConflict;
+    const gpsActiveProviders = gpsRows.rows.map(row => row.provider);
+    const gpsActive = gpsActiveProviders.length===1 ? gpsActiveProviders[0] : '';
+    const ok = Boolean(resolved.key) && resolved.source !== "disabled";
     const reasons = [];
     if (!resolved.key) reasons.push(status.use_global === false ? "falta clave propia" : "falta clave global o propia");
     if (resolved.source === "disabled") reasons.push("integracion bloqueada");
-    if (gpsConflict) reasons.push(`GPS activo: ${gpsActive}`);
     const providerTest = ok ? await (AI_PROVIDERS.includes(provider)
       ? (async () => {
           const selectedProvider = normalizeAiProvider(await getGlobalSetting("ia_provider", process.env.AI_PROVIDER || "anthropic"));
@@ -2288,6 +2291,7 @@ router.post("/integraciones/empresas/:empresaId/:provider/test", superAuth, asyn
       limite_mensual: status.limite_mensual,
       usos_mes: status.usos_mes,
       gps_active: gpsActive,
+      gps_active_providers: gpsActiveProviders,
       provider_test: providerTest,
       reasons,
       message: finalOk

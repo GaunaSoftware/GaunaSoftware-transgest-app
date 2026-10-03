@@ -27,6 +27,7 @@ const GPS_PROVIDERS = {
   app_chofer: "App chofer",
 };
 const GPS_REMOTE_PROVIDERS = ["locatel", "tacogest", "movildata", "geotab", "gps_generic"];
+const { canAutoLink, positionSource, uniqueIndex } = require('../services/gpsSource');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isUuid(value) {
@@ -290,30 +291,34 @@ async function syncMovildataVehicleLinks(empresaId, apiKey) {
     [empresaId]
   );
   if (!vehiculos.length) return { linked: 0, receivedVehicles: 0 };
-  const byPlate = new Map(vehiculos.map(v => [normalizePlate(v.matricula), v]).filter(([k]) => k));
+  const byPlate = uniqueIndex(vehiculos.filter(v => canAutoLink(v, 'movildata')),v=>normalizePlate(v.matricula));
   const payload = await requestMovildata("Users/GetVehiculos", apiKey);
   const remoteVehicles = listFromProviderPayload(payload).map(movildataVehicleFromItem).filter(v => v.plate || v.imei);
+  const remotePlates = uniqueIndex(remoteVehicles,v=>normalizePlate(v.plate));
   let linked = 0;
   const matched = [];
   const unmatched = [];
   for (const remote of remoteVehicles) {
+    if (remotePlates.get(normalizePlate(remote.plate)) !== remote) { unmatched.push(summarizeRemoteVehicle(remote)); continue; }
     const vehiculo = byPlate.get(normalizePlate(remote.plate));
     if (!vehiculo) {
       unmatched.push(summarizeRemoteVehicle(remote));
       continue;
     }
     const externalId = remote.imei || remote.plate || vehiculo.matricula;
+    if (vehiculo.gps_external_id && String(vehiculo.gps_external_id) !== String(externalId)) continue;
     matched.push({ matricula: vehiculo.matricula, external_id: externalId || "", alias: remote.alias || "" });
     if (vehiculo.gps_provider === "movildata" && String(vehiculo.gps_external_id || "") === String(externalId || "")) continue;
-    await db.query(
+    const link = await db.query(
       `UPDATE vehiculos
        SET gps_provider='movildata',
            gps_external_id=$1,
            ubicacion_fuente='movildata',
            updated_at=NOW()
-       WHERE id=$2 AND empresa_id=$3`,
+       WHERE id=$2 AND empresa_id=$3 AND (gps_provider IS NULL OR gps_provider='' OR gps_provider='movildata') RETURNING id`,
       [externalId || null, vehiculo.id, empresaId]
     );
+    if (!link.rows.length) continue;
     await logVehiculoEvento({
       empresaId,
       vehiculoId: vehiculo.id,
@@ -335,12 +340,12 @@ async function syncMovildataDistanceHours(empresaId, apiKey) {
   const { rows: vehiculos } = await db.query(
     `SELECT id, matricula, gps_external_id, km_actuales
      FROM vehiculos
-     WHERE empresa_id=$1 AND activo IS DISTINCT FROM false`,
+     WHERE empresa_id=$1 AND activo IS DISTINCT FROM false AND gps_provider='movildata'`,
     [empresaId]
   );
   if (!vehiculos.length) return { updated: 0, received: 0, unmatched: 0, error: null };
-  const byPlate = new Map(vehiculos.map(v => [normalizePlate(v.matricula), v]).filter(([k]) => k));
-  const byExternal = new Map(vehiculos.map(v => [String(v.gps_external_id || "").trim().toUpperCase(), v]).filter(([k]) => k));
+  const byPlate = uniqueIndex(vehiculos,v=>normalizePlate(v.matricula));
+  const byExternal = uniqueIndex(vehiculos,v=>String(v.gps_external_id || '').trim().toUpperCase());
   let payload = null;
   try {
     payload = await requestMovildata("Users/GetCurrentDistanceAndHours", apiKey, {}, { timeoutMs: 12000 });
@@ -365,6 +370,7 @@ async function syncMovildataDistanceHours(empresaId, apiKey) {
       unmatched += 1;
       continue;
     }
+    if (snapshot.imei && vehiculo.gps_external_id && String(snapshot.imei).toUpperCase() !== String(vehiculo.gps_external_id).toUpperCase()) {unmatched++;continue;}
     if (snapshot.km === null || !Number.isFinite(snapshot.km) || snapshot.km < 0) continue;
     const nextKm = Math.round(snapshot.km);
     await db.query(
@@ -375,7 +381,7 @@ async function syncMovildataDistanceHours(empresaId, apiKey) {
            END,
            ubicacion_fuente=COALESCE(NULLIF(ubicacion_fuente,''), 'movildata'),
            updated_at=NOW()
-       WHERE id=$2 AND empresa_id=$3`,
+       WHERE id=$2 AND empresa_id=$3 AND gps_provider='movildata'`,
       [nextKm, vehiculo.id, empresaId]
     );
     updated += 1;
@@ -384,29 +390,16 @@ async function syncMovildataDistanceHours(empresaId, apiKey) {
 }
 
 async function syncMovildataPositions(empresaId, apiKey) {
+  const linkResult = await syncMovildataVehicleLinks(empresaId, apiKey).catch((e) => ({ linked: 0, receivedVehicles: 0, matched: [], unmatched: [], link_error: e.message }));
   const { rows: vehiculos } = await db.query(
     `SELECT id, matricula, gps_provider, gps_external_id
      FROM vehiculos
-     WHERE empresa_id=$1 AND activo IS DISTINCT FROM false`,
+     WHERE empresa_id=$1 AND activo IS DISTINCT FROM false AND gps_provider='movildata'`,
     [empresaId]
   );
   if (!vehiculos.length) return { updated: 0, received: 0, unmatched: 0 };
-  const byPlate = new Map(vehiculos.map(v => [normalizePlate(v.matricula), v]).filter(([k]) => k));
-  const byExternal = new Map(vehiculos.map(v => [String(v.gps_external_id || "").trim().toUpperCase(), v]).filter(([k]) => k));
-  const linkResult = await syncMovildataVehicleLinks(empresaId, apiKey).catch((e) => ({ linked: 0, receivedVehicles: 0, matched: [], unmatched: [], link_error: e.message }));
-  if (linkResult.linked) {
-    const refreshed = await db.query(
-      `SELECT id, matricula, gps_provider, gps_external_id
-       FROM vehiculos
-       WHERE empresa_id=$1 AND activo IS DISTINCT FROM false`,
-      [empresaId]
-    );
-    byExternal.clear();
-    refreshed.rows.forEach(v => {
-      const ext = String(v.gps_external_id || "").trim().toUpperCase();
-      if (ext) byExternal.set(ext, v);
-    });
-  }
+  const byPlate = uniqueIndex(vehiculos,v=>normalizePlate(v.matricula));
+  const byExternal = uniqueIndex(vehiculos,v=>String(v.gps_external_id || '').trim().toUpperCase());
   let payload = null;
   let positionsError = null;
   try {
@@ -459,6 +452,7 @@ async function syncMovildataPositions(empresaId, apiKey) {
       || byExternal.get(String(pos.plate || "").trim().toUpperCase())
       || byPlate.get(normalizePlate(pos.plate));
     if (!vehiculo) { unmatched += 1; continue; }
+    if (pos.imei && vehiculo.gps_external_id && String(pos.imei).toUpperCase() !== String(vehiculo.gps_external_id).toUpperCase()) {unmatched++;continue;}
     await updateVehiclePosition({
       empresaId,
       vehiculoId: vehiculo.id,
@@ -635,8 +629,9 @@ async function syncGeotabPositions(empresaId, secret) {
   let updated=0,linked=0;
   for (const item of matched.positions) {
     if (item.vehicle.gps_provider !== 'geotab' || item.vehicle.gps_external_id !== item.deviceId) {
-      await db.query(`UPDATE vehiculos SET gps_provider='geotab',gps_external_id=$3
-        WHERE id=$1 AND empresa_id=$2`,[item.vehicle.id,empresaId,item.deviceId]);
+      const link=await db.query(`UPDATE vehiculos SET gps_provider='geotab',gps_external_id=$3
+        WHERE id=$1 AND empresa_id=$2 AND (gps_provider IS NULL OR gps_provider='' OR gps_provider='geotab') RETURNING id`,[item.vehicle.id,empresaId,item.deviceId]);
+      if (!link.rows.length) continue;
       linked++;
     }
     await updateVehiclePosition({empresaId,vehiculoId:item.vehicle.id,provider:'geotab',
@@ -648,26 +643,26 @@ async function syncGeotabPositions(empresaId, secret) {
     unmatched:matched.unmatched,receivedVehicles:snapshot.devices.length};
 }
 
-async function getActiveGpsProvider(empresaId) {
-  if (!empresaId) return "";
+async function getActiveGpsProviders(empresaId) {
+  if (!empresaId) return [];
   const { rows } = await db.query(
     `SELECT provider
      FROM empresa_api_configs
      WHERE empresa_id=$1 AND provider = ANY($2::varchar[]) AND activo=true
-     ORDER BY updated_at DESC
-     LIMIT 1`,
+     ORDER BY provider`,
     [empresaId, GPS_REMOTE_PROVIDERS]
   );
-  return rows[0]?.provider || "";
+  return rows.map(row => row.provider);
 }
 
 async function getGpsProviderStatuses(empresaId) {
-  const activeProvider = await getActiveGpsProvider(empresaId);
+  const activeProviders = await getActiveGpsProviders(empresaId);
+  const activeProvider = activeProviders.length === 1 ? activeProviders[0] : '';
   const providers = await Promise.all(
     Object.entries(GPS_PROVIDERS)
       .filter(([id]) => !["ultima_descarga", "app_chofer"].includes(id))
       .map(async ([id, label]) => {
-        if (id === "manual") return { id, label, configured: true, source: "manual", active: !activeProvider };
+        if (id === "manual") return { id, label, configured: true, source: "manual", active: !activeProviders.length };
         const resolved = await resolveApiKey(empresaId, id).catch(() => ({ key: "", source: "none", config: null }));
         const companyEnabled = !!resolved.key && (resolved.source === "company" || resolved.config?.use_global === true);
         return {
@@ -675,14 +670,13 @@ async function getGpsProviderStatuses(empresaId) {
           label,
           configured: companyEnabled,
           source: resolved.source || "none",
-          active: activeProvider ? activeProvider === id : false,
+          active: activeProviders.includes(id),
           mode: resolved.config ? (resolved.config.use_global ? "global" : "company") : "default",
           blocked: resolved.source === "disabled",
         };
       })
   );
-  const resolvedActive = activeProvider || "";
-  return { providers: providers.map(p => ({ ...p, active: resolvedActive ? p.id === resolvedActive : p.active })), activeProvider: resolvedActive };
+  return { providers, activeProvider, activeProviders };
 }
 
 async function assertGpsProviderMatchesCompany(empresaId, provider) {
@@ -725,10 +719,9 @@ async function updateVehiclePosition({ empresaId, vehiculoId, provider = "manual
          ubicacion_ts=COALESCE($3::timestamptz, NOW()),
          gps_lat=COALESCE($4, gps_lat),
          gps_lng=COALESCE($5, gps_lng),
-         gps_provider=COALESCE(NULLIF($6,''), gps_provider),
-         gps_external_id=COALESCE(NULLIF($7,''), gps_external_id),
-         km_actuales=COALESCE($8, km_actuales)
-     WHERE id=$9 AND empresa_id=$10
+         km_actuales=COALESCE($6, km_actuales)
+     WHERE id=$7 AND empresa_id=$8 AND (gps_provider=$2 OR
+       ((gps_provider IS NULL OR NOT(gps_provider=ANY($9::varchar[]))) AND $2 IN ('manual','app_chofer')))
      RETURNING *`,
     [
       cleanUbicacion,
@@ -736,11 +729,10 @@ async function updateVehiclePosition({ empresaId, vehiculoId, provider = "manual
       recordedAt || null,
       lat === null || lat === "" ? null : Number(lat),
       lng === null || lng === "" ? null : Number(lng),
-      safeProvider,
-      externalId || null,
       odometro === null || odometro === "" ? null : Math.round(Number(odometro)),
       vehiculoId,
       empresaId,
+      GPS_REMOTE_PROVIDERS,
     ]
   );
   if (!rows[0]) return null;
@@ -837,13 +829,12 @@ async function attachVehiculosGpsSnapshot(empresaId, rows = []) {
   const vehiculoIds = rows.map(r => String(r.id || "")).filter(Boolean);
   if (!vehiculoIds.length) return rows;
   const { rows: gpsRows } = await db.query(
-    `SELECT DISTINCT ON (vehiculo_id)
-        vehiculo_id, provider, external_id, lat, lng, ubicacion, odometro_km, velocidad_kmh, recorded_at, created_at
-     FROM gps_position_log
-     WHERE empresa_id=$1
-       AND vehiculo_id = ANY($2::uuid[])
-     ORDER BY vehiculo_id, recorded_at DESC, created_at DESC`,
-    [empresaId, vehiculoIds]
+    `SELECT DISTINCT ON (p.vehiculo_id) p.*
+     FROM gps_position_log p JOIN vehiculos v ON v.id=p.vehiculo_id AND v.empresa_id=p.empresa_id
+     WHERE p.empresa_id=$1 AND p.vehiculo_id = ANY($2::uuid[])
+       AND p.provider=CASE WHEN v.gps_provider=ANY($3::varchar[]) THEN v.gps_provider ELSE 'app_chofer' END
+     ORDER BY p.vehiculo_id, p.recorded_at DESC, p.created_at DESC`,
+    [empresaId, vehiculoIds, GPS_REMOTE_PROVIDERS]
   ).catch(() => ({ rows: [] }));
   const gpsMap = new Map(gpsRows.map(r => [String(r.vehiculo_id), r]));
   return rows.map((row) => {
@@ -851,11 +842,7 @@ async function attachVehiculosGpsSnapshot(empresaId, rows = []) {
     if (!snap) return row;
     const snapTs = snap.recorded_at ? new Date(snap.recorded_at).getTime() : 0;
     const rowTs = row.ubicacion_ts ? new Date(row.ubicacion_ts).getTime() : 0;
-    const shouldOverlay =
-      !row.ubicacion_actual ||
-      !row.ubicacion_fuente ||
-      !rowTs ||
-      (snapTs && snapTs > rowTs);
+    const shouldOverlay = row.ubicacion_fuente !== positionSource(row) || !rowTs || snapTs >= rowTs;
     if (!shouldOverlay) return row;
     return {
       ...row,
@@ -864,8 +851,8 @@ async function attachVehiculosGpsSnapshot(empresaId, rows = []) {
       ubicacion_ts: snap.recorded_at || row.ubicacion_ts || null,
       gps_lat: snap.lat ?? row.gps_lat ?? null,
       gps_lng: snap.lng ?? row.gps_lng ?? null,
-      gps_provider: row.gps_provider || snap.provider || null,
-      gps_external_id: row.gps_external_id || snap.external_id || null,
+      gps_provider: row.gps_provider || null,
+      gps_external_id: row.gps_external_id || null,
       gps_odometro_km: snap.odometro_km ?? row.gps_odometro_km ?? null,
       gps_velocidad_kmh: snap.velocidad_kmh ?? row.gps_velocidad_kmh ?? null,
     };
@@ -955,14 +942,14 @@ r1.get("/", async (req, res) => {
 // GET /vehiculos/gps/providers - supported GPS connectors.
 r1.get("/gps/providers", async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
-  const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
-  res.json({ providers, active_provider: activeProvider });
+  const { providers, activeProvider, activeProviders } = await getGpsProviderStatuses(empresaId);
+  res.json({ providers, active_provider: activeProvider, active_providers: activeProviders });
 });
 
 r1.get("/gps/status", async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
-    const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
+    const { providers, activeProvider, activeProviders } = await getGpsProviderStatuses(empresaId);
     const tractoraFilter = `
       AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%remolque%'
       AND LOWER(COALESCE(clase,tipo,'')) NOT LIKE '%semirremolque%'
@@ -983,7 +970,8 @@ r1.get("/gps/status", async (req, res) => {
            COUNT(*)::int AS total,
            COUNT(*) FILTER (WHERE activo=true)::int AS activos,
            COUNT(*) FILTER (WHERE activo=true AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL)::int AS enlazados,
-           COUNT(*) FILTER (WHERE activo=true AND (gps_provider IS NULL OR gps_provider='manual' OR NULLIF(TRIM(gps_external_id),'') IS NULL))::int AS pendientes,
+           COUNT(*) FILTER (WHERE activo=true AND gps_provider=ANY($2::varchar[]) AND NULLIF(TRIM(gps_external_id),'') IS NULL)::int AS pendientes,
+           COUNT(*) FILTER (WHERE activo=true AND (gps_provider IS NULL OR NOT(gps_provider=ANY($2::varchar[]))))::int AS app,
            COUNT(*) FILTER (WHERE activo=true AND ubicacion_ts IS NOT NULL)::int AS con_ubicacion,
            COUNT(*) FILTER (WHERE activo=true AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND ubicacion_ts IS NULL)::int AS nunca_senal,
            COUNT(*) FILTER (WHERE activo=true AND gps_provider IS NOT NULL AND gps_provider <> 'manual' AND NULLIF(TRIM(gps_external_id),'') IS NOT NULL AND ubicacion_ts >= NOW()-INTERVAL '6 hours')::int AS senal_reciente,
@@ -991,7 +979,7 @@ r1.get("/gps/status", async (req, res) => {
          FROM vehiculos
          WHERE empresa_id=$1
          ${tractoraFilter}`,
-        [empresaId]
+        [empresaId, GPS_REMOTE_PROVIDERS]
       ),
       db.query(
         `SELECT gps_provider, UPPER(TRIM(gps_external_id)) AS gps_external_id, COUNT(*)::int AS total,
@@ -1041,15 +1029,16 @@ r1.get("/gps/status", async (req, res) => {
     const c = counts.rows[0] || {};
     const configured = providers.filter(p => p.id !== "manual" && p.configured && !p.blocked).map(p => p.id);
     const warnings = [];
-    if (!activeProvider) warnings.push("No hay proveedor GPS activo para esta empresa.");
+    if (!activeProviders.length) warnings.push("No hay proveedores GPS activos; los vehículos sin GPS usan la app del conductor.");
     if (!configured.length) warnings.push("No hay proveedor GPS configurado. Para activarlo, habla con soporte o configura el proveedor desde SuperAdmin.");
-    if (Number(c.pendientes || 0) > 0) warnings.push(`${c.pendientes} vehiculo(s) activos sin enlace GPS.`);
+    if (Number(c.pendientes || 0)>0) warnings.push(`${c.pendientes} vehículo(s) con proveedor GPS asignado pero sin ID del dispositivo.`);
     if (Number(c.nunca_senal || 0) > 0) warnings.push(`${c.nunca_senal} vehiculo(s) enlazados todavia no han enviado ninguna posicion.`);
     if (Number(c.sin_senal_reciente || 0) > 0) warnings.push(`${c.sin_senal_reciente} vehiculo(s) enlazados sin senal GPS reciente.`);
     if (duplicates.rows.length) warnings.push(`${duplicates.rows.length} ID(s) GPS duplicados.`);
-    const activeWebhook = webhookRows.rows.find(w => w.provider === activeProvider && w.activo);
+    const activeWebhook = webhookRows.rows.find(w => activeProviders.includes(w.provider) && w.activo);
     res.json({
       active_provider: activeProvider || "",
+      active_providers: activeProviders,
       providers,
       configured,
       counts: {
@@ -1057,6 +1046,7 @@ r1.get("/gps/status", async (req, res) => {
         activos: Number(c.activos || 0),
         enlazados: Number(c.enlazados || 0),
         pendientes: Number(c.pendientes || 0),
+        app: Number(c.app || 0),
         con_ubicacion: Number(c.con_ubicacion || 0),
         nunca_senal: Number(c.nunca_senal || 0),
         senal_reciente: Number(c.senal_reciente || 0),
@@ -1078,7 +1068,7 @@ r1.get("/gps/status", async (req, res) => {
           "La posicion llega por webhook/proveedor externo y todavia no se ha recibido ningun envio."
         ]
       },
-      ready: !!activeProvider && configured.includes(activeProvider) && !duplicates.rows.length && Number(c.sin_senal_reciente || 0) === 0,
+      ready: activeProviders.length > 0 && activeProviders.every(p => configured.includes(p)) && !duplicates.rows.length && Number(c.sin_senal_reciente || 0) === 0,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1148,7 +1138,11 @@ r1.patch("/gps-links", GERENTE_O_TRAFICO, async (req, res) => {
           `UPDATE vehiculos
            SET gps_provider=$1::varchar,
                gps_external_id=$2,
-               ubicacion_fuente=CASE WHEN $1::varchar='manual' THEN COALESCE(ubicacion_fuente,'manual') ELSE $1::varchar END,
+               ubicacion_fuente=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE ubicacion_fuente END,
+               ubicacion_actual=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE ubicacion_actual END,
+               ubicacion_ts=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE ubicacion_ts END,
+               gps_lat=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE gps_lat END,
+               gps_lng=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE gps_lng END,
                updated_at=NOW()
            WHERE id=$3 AND empresa_id=$4
            RETURNING *`,
@@ -1408,7 +1402,11 @@ r1.patch("/:id/gps-link", GERENTE_O_TRAFICO, async (req, res) => {
       `UPDATE vehiculos
        SET gps_provider=$1::varchar,
            gps_external_id=$2,
-           ubicacion_fuente=CASE WHEN $1::varchar='manual' THEN COALESCE(ubicacion_fuente,'manual') ELSE $1::varchar END,
+           ubicacion_fuente=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE ubicacion_fuente END,
+           ubicacion_actual=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE ubicacion_actual END,
+           ubicacion_ts=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE ubicacion_ts END,
+           gps_lat=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE gps_lat END,
+           gps_lng=CASE WHEN gps_provider IS DISTINCT FROM $1::varchar THEN NULL ELSE gps_lng END,
            updated_at=NOW()
        WHERE id=$3 AND empresa_id=$4
        RETURNING *`,
@@ -1506,8 +1504,11 @@ r1.get("/:id/posiciones", async (req, res) => {
 r1.post("/:id/posiciones/sync", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
-    const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
-    const provider = String(req.body?.provider || activeProvider || "").trim().toLowerCase();
+    const { providers } = await getGpsProviderStatuses(empresaId);
+    const vehicle = (await db.query('SELECT gps_provider FROM vehiculos WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId])).rows[0];
+    if (!vehicle) return res.status(404).json({error:'Vehículo no encontrado'});
+    const provider = String(req.body?.provider || vehicle.gps_provider || '').trim().toLowerCase();
+    if (provider !== vehicle.gps_provider) return res.status(409).json({error:'Selecciona el GPS asignado a este vehículo.'});
     if (provider !== "movildata") {
       return res.status(400).json({ error: "La sincronizacion historica por vehiculo esta disponible para Movildata." });
     }
@@ -1537,7 +1538,7 @@ r1.post("/:id/posiciones/sync", GERENTE_O_TRAFICO, async (req, res) => {
 r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
-    const { providers, activeProvider } = await getGpsProviderStatuses(empresaId);
+    const { providers, activeProvider, activeProviders } = await getGpsProviderStatuses(empresaId);
     const provider = String(req.body.provider || activeProvider || "").trim().toLowerCase();
     if (!GPS_PROVIDERS[provider] || provider === "manual") {
       return res.status(400).json({ error: "Selecciona un proveedor GPS activo para sincronizar." });
@@ -1546,8 +1547,8 @@ r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
     if (!providerStatus?.configured || providerStatus?.blocked) {
       return res.status(400).json({ error: `No hay proveedor GPS configurado para ${GPS_PROVIDERS[provider] || provider}. Habla con soporte para activarlo.` });
     }
-    if (activeProvider && provider !== activeProvider) {
-      return res.status(409).json({ error: `El GPS activo de la empresa es ${GPS_PROVIDERS[activeProvider]}. Cambialo en SuperAdmin antes de sincronizar ${GPS_PROVIDERS[provider]}.` });
+    if (!activeProviders.includes(provider)) {
+      return res.status(409).json({ error: `${GPS_PROVIDERS[provider]} no está activo para esta empresa. Activa ese conector en SuperAdmin.` });
     }
     const resolved = await resolveApiKey(empresaId, provider);
     if (!resolved.key) {

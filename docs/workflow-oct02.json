@@ -1,12 +1,13 @@
 {
   "branch": "codex/workflow-oct02",
   "production": "Prohibido desplegar o fusionar hasta autorización nueva",
-  "ecmr": "Pendiente del documento que aportará el usuario; no publicar una equivalencia jurídica sin validar el flujo",
+  "ecmr": "Referencia Dashdoc recibida y revisada el 3 de octubre: dos páginas. Mapeo en ecmr-reference-oct03.json; adaptación, firma y procedimiento electrónico siguen pendientes de implementación y validación",
   "network_portal": "Diferido; mantener fuera del producto publicado",
   "statuses": {
     "local_verified": "Implementado; probado en entorno local",
     "external_pending": "Implementado; conexión real pendiente",
     "dependency_pending": "Pendiente de información o referencia",
+    "implementation_pending": "Referencia revisada; implementación y validación pendientes",
     "deferred": "Diferido por instrucción",
     "documented": "Explicación y recomendación incluidas"
   },
@@ -249,9 +250,9 @@
         {
           "id": 38,
           "request": "eCMR junto al DeCA",
-          "status": "dependency_pending",
-          "dependency": "Referencia eCMR que el usuario enviará",
-          "evidence": "Pendiente del eCMR que dijiste que enviarías. No se afirma equivalencia contractual de un PDF con firmas operativas locales ni se adjunta un eCMR inexistente."
+          "status": "implementation_pending",
+          "dependency": "Implementar y validar plantilla, autenticación de partes y procedimiento electrónico",
+          "evidence": "Referencia Dashdoc recibida y revisada: casillas, mercancía, horarios, firmas y condiciones. Mapeo y criterios en ecmr-reference-oct03.json. El ejemplo tiene firmas vacías y no acredita el proceso de firma. El envío conjunto con DeCA todavía no está implementado ni se anuncia validez contractual electrónica."
         }
       ]
     },

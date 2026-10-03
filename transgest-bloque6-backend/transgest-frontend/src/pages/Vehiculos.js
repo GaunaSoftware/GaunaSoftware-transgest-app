@@ -1823,7 +1823,7 @@ export default function Vehiculos({ initialTipo = "todos" }) {
         setGpsProviders(list);
         setGpsStatus(status);
         const preferred = status?.active_provider || r?.active_provider || list.find(p => p.id !== "manual" && p.active)?.id || "";
-        setGpsSyncProvider(preferred);
+        setGpsSyncProvider(previous => list.some(p => p.id===previous && p.active) ? previous : preferred);
       } catch {}
     }, []);
   const [choferPicker, setChoferPicker] = useState(null); // {vehiculoId, estado} - para asignar chofer al cambiar estado

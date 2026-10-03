@@ -3,6 +3,8 @@ WORKDIR /frontend
 COPY transgest-bloque6-backend/transgest-frontend/package*.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY transgest-bloque6-backend/transgest-frontend/ ./
+# The frontend prebuild reads the shared release catalog from its sibling.
+COPY transgest-bloque6-backend/transgest-backend/src/data/productReleases.json /transgest-backend/src/data/productReleases.json
 ENV CI=false DISABLE_ESLINT_PLUGIN=true GENERATE_SOURCEMAP=false
 ENV REACT_APP_LOCAL_SERVER=true REACT_APP_ENVIRONMENT=staging
 RUN npm run build

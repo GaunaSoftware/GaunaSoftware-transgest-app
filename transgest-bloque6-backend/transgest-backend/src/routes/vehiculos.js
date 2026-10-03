@@ -1265,7 +1265,7 @@ r1.post("/", GERENTE_O_TRAFICO, async (req, res) => {
     if (e.code === "23505") {
       return res.status(409).json({ error: "Esa matricula ya existe en el sistema. No se puede crear un vehiculo duplicado." });
     }
-    require('../services/logger').warn('Alta de vehículo fallida',{request_id:req.requestId,code:e.code,status:e.status||500});
+    require('../services/logger').warn('Alta de vehículo fallida',{request_id:req.id,code:e.code,status:e.status||500});
     res.status(e.status||500).json({ error:e.status?e.message:'No se pudo guardar el vehículo.' });
   }
 });
@@ -1397,7 +1397,7 @@ r1.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     res.json((await hydrateVehiculos(empresaId, rows))[0]);
   } catch (e) {
     if (e.code === "23505") return res.status(409).json({ error: "La matricula ya existe en el sistema." });
-    require('../services/logger').warn('Edición de vehículo fallida',{request_id:req.requestId,code:e.code,status:e.status||500});
+    require('../services/logger').warn('Edición de vehículo fallida',{request_id:req.id,code:e.code,status:e.status||500});
     res.status(e.status||500).json({ error:e.status?e.message:'No se pudo guardar el vehículo.' });
   }
 });

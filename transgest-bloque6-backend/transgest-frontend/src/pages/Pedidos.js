@@ -8831,8 +8831,8 @@ export default function Pedidos() {
   useEffect(()=>{
     if(!aiDisponible)return;let active=true;
     const refresh=()=>getOrderInbox({summary:true}).then(data=>{if(active)setInboxCount(data.counts.filter(row=>!['creado','descartado'].includes(row.state)).reduce((n,row)=>n+row.count,0));}).catch(()=>{if(active)setInboxCount(null);});
-    refresh();window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
-    return()=>{active=false;window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
+    refresh();const timer=setInterval(refresh,30000);window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
+    return()=>{active=false;clearInterval(timer);window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
   },[aiDisponible]);
   const [focusPedido] = useState(() => readPedidosFocus());
   // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de

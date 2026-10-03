@@ -9,7 +9,7 @@ export default function OrderAiInbox({onPrepared,onOpenOrder,revision}){
  const total=data?.counts?.filter(item=>!state||item.state===state).reduce((sum,item)=>sum+item.count,0)||0;
  async function act(item,action){setBusy(item.id);setError('');try{
   if(action==='open'){onOpenOrder(await getPedido(item.pedido_id));return;}
-  if(action==='parse')onPrepared(await interpretarPedidoIA({inbox_id:item.id}));
+  if(action==='parse'||action==='reparse')onPrepared(await interpretarPedidoIA({inbox_id:item.id,...(action==='reparse'?{reanalyze:true}:{})}));
   else await changeOrderInboxState(item.id,{state:action,version:item.version,reviewed:action==='listo'});
   setReload(value=>value+1);notifyInboxChanged();
  }catch(e){setError(e.message);}finally{setBusy(null);}}
@@ -22,12 +22,13 @@ export default function OrderAiInbox({onPrepared,onOpenOrder,revision}){
   {!data&&!error&&<p role="status">Cargando entradas…</p>}
   {data?.items?.length===0&&<p>No hay entradas en este estado.</p>}
   {data?.items?.map(item=><article key={item.id} style={{padding:'12px 0',borderBottom:'1px solid var(--border2)'}}>
-   <div><strong>{item.filename||'Texto de pedido'}</strong> · {labels[item.state]}{item.processing_at?' · Análisis en curso':''}</div>
+   <div><strong>{item.email_subject||item.filename||'Texto de pedido'}</strong> · {labels[item.state]}{item.processing_at?' · Análisis en curso':''}</div>
    <p>{new Date(item.created_at).toLocaleString('es-ES')}{item.error&&` · ${item.error}`}</p>
    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
     {item.state==='creado'?<Button disabled={!!busy} onClick={()=>act(item,'open')}>Ver pedido creado</Button>:<>
      {item.state==='descartado'?<Button disabled={!!busy} onClick={()=>act(item,'revisar')}>Restaurar para revisar</Button>:<>
       <Button disabled={!!busy} onClick={()=>act(item,'parse')}>{item.state==='nuevo'||item.state==='error'?'Analizar entrada':'Recuperar borrador'}</Button>
+      {item.state==='revisar'&&<Button disabled={!!busy} onClick={()=>act(item,'reparse')}>Volver a analizar</Button>}
       {item.state==='revisar'&&<Button disabled={!!busy} onClick={()=>act(item,'listo')}>He revisado: marcar listo</Button>}
       <Button disabled={!!busy} onClick={()=>act(item,'descartado')}>Descartar</Button>
      </>}

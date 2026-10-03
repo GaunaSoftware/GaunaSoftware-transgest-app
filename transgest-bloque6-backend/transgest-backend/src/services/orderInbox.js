@@ -12,6 +12,14 @@ const TYPES = {
 };
 const fail = (message,status=422) => {throw Object.assign(Error(message),{status});};
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+async function publicItem(row){
+ const {encrypted_payload,...safe}=row;
+ if(!encrypted_payload)return safe;
+ const payload=JSON.parse(decryptSecret(encrypted_payload));
+ const email=payload.attachments?.find(file=>file.mediaType==='message/rfc822');
+ if(email){const mail=await require('mailparser').simpleParser(Buffer.from(email.base64,'base64'),{skipImageLinks:true,skipHtmlToText:true,skipTextToHtml:true});safe.email_subject=String(mail.subject||'').slice(0,300);}
+ return safe;
+}
 function validatePayload(body={}) {
  const texto=String(body.texto??body.text??'').trim();
  if(texto.length>20000)fail('El texto supera 20.000 caracteres. Divide la entrada.');
@@ -80,11 +88,12 @@ async function expandEmails(payload){
  }
  return validatePayload({...payload,texto:texts.filter(Boolean).join('\n\n'),attachments});
 }
-async function claim(db,company,id,actor){
+async function claim(db,company,id,actor,{reanalyze=false}={}){
  return db.transaction(async tx=>{
   const item=await get(tx,company,id,{payload:true,lock:true});
   if(item.state==='descartado')fail('La entrada está descartada. Restáurala para revisarla.',409);
-  if(item.result)return {item,replay:true};
+  if(reanalyze&&!['nuevo','revisar','error'].includes(item.state))fail('Solo se pueden volver a analizar entradas pendientes de revisión.',409);
+  if(item.result&&!reanalyze)return {item,replay:true};
   if(item.processing_at&&Date.now()-new Date(item.processing_at).getTime()<300000)fail('La entrada se está analizando. Actualiza en unos instantes.',409);
   const token=crypto.randomUUID();
   await tx.query("UPDATE ai_inbox_items SET processing_token=$3,processing_at=NOW(),error=NULL,state='nuevo',updated_at=NOW() WHERE id=$1 AND empresa_id=$2",[id,company,token]);
@@ -133,4 +142,4 @@ function inboundConfiguration(company,env=process.env){
  const configured=env.ORDERS_INBOUND_ENABLED==='true'&&/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(domain)&&String(env.ORDERS_INBOUND_WEBHOOK_SECRET||'').length>=32;
  return {configured,address:configured?`pedidos+${String(company).replace(/-/g,'')}@${domain}`:null,guidance:configured?'Conector configurado; la entrega depende del DNS y proveedor de correo.':'Entrada por correo pendiente de configurar; puedes pegar texto o subir EML y adjuntos.'};
 }
-module.exports={validatePayload,fingerprint,receive,get,claim,finish,changeState,lockForCreation,created,event,inboundConfiguration,expandEmails,UUID,MAX_TOTAL,TYPES};
+module.exports={validatePayload,fingerprint,receive,get,claim,finish,changeState,lockForCreation,created,event,inboundConfiguration,expandEmails,publicItem,UUID,MAX_TOTAL,TYPES};

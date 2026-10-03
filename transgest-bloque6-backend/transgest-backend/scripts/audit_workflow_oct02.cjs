@@ -1,6 +1,8 @@
 const assert=require('node:assert/strict'),crypto=require('crypto');
 module.exports=async({db,base,company,token,client,vehicle,password})=>{
  let checks=0;
+ const emailDraft=require('../src/routes/pedidos')._test.extractAiPedidoDraft('Necesitamos cargar un camion en Ciudad A, Provincia A, para entregar en Ciudad B.\nCargar 03/10/2026\n24.000kg hora de entrega 12:00 04/10/2026');
+ assert.equal(emailDraft.origen,'CIUDAD A, PROVINCIA A');assert.equal(emailDraft.destino,'CIUDAD B');assert.equal(emailDraft.peso_kg,24000);assert.equal(emailDraft.fecha_carga,'2026-10-03');assert.equal(emailDraft.fecha_descarga,'2026-10-04');assert.equal(emailDraft.hora_descarga,'12:00');checks+=6;
  async function call(method,path,body,status=200,auth=token){const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
  const point=await call('POST','/puntos-interes',{nombre:'Centro QA Oct02',direccion:'Calle Prueba 17',codigo_postal:'02640',ciudad:'Almansa',provincia:'Albacete',pais:'España',lat:38.866,lng:-1.097,tipo:'ambos',punto_general:true,ventana:'08:00 - 14:00'},201);
  await call('POST',`/puntos-interes/${point.id}/clientes`,{cliente_id:client.id});

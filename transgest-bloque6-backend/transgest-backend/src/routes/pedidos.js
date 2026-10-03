@@ -4700,6 +4700,7 @@ function extractAiPedidoDraft(text = "") {
   const raw = String(text || "");
   const clean = normalizeAiText(raw);
   const lower = clean.toLowerCase();
+  const prose=require('../services/orderTextHints').orderTextHints(clean);
   const supplierOrder = extractSupplierOrderHints(clean);
   const orden = extractOrdenCargaHints(clean);
   const lineValue = label => {
@@ -4710,16 +4711,16 @@ function extractAiPedidoDraft(text = "") {
   const clienteNombre = orden?.cliente_nombre || lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
     /\bcliente\s+(?:es\s+)?([A-ZÁÉÍÓÚÜÑ0-9][^\n,;]{2,80})/i,
   ]);
-  const origen = orden?.origen || lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
+  const origen = orden?.origen || lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || prose.origin || pickAiMatch(clean, [
     /\b(?:carga|recogida|origen)\s+(?:en|desde)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bdesde\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const destino = orden?.destino || lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
+  const destino = orden?.destino || lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || prose.destination || pickAiMatch(clean, [
     /\b(?:descarga|entrega|destino)\s+(?:en|a)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bhasta\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date") || supplierOrder.fecha_carga;
-  const fechaDescargaRaw = lineValue("fecha descarga|fecha de descarga|entrega dia|descarga dia|delivery date|unloading date");
+  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date") || supplierOrder.fecha_carga || prose.loadDate;
+  const fechaDescargaRaw = lineValue("fecha descarga|fecha de descarga|entrega dia|descarga dia|delivery date|unloading date") || prose.unloadDate;
   const anyDate = pickAiMatch(clean, [/\b(?:dia|fecha)\s+(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/i]);
   const horaCarga = normalizePedidoTime(lineValue("hora carga|hora de carga|ventana carga|pickup time|loading time") || pickAiMatch(clean, [/\b(?:carga|recogida|loading|pickup)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
   const horaDescarga = normalizePedidoTime(lineValue("hora descarga|hora de descarga|hora entrega|ventana descarga|delivery time|unloading time") || pickAiMatch(clean, [/\b(?:descarga|entrega|delivery|unloading)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
@@ -4739,7 +4740,7 @@ function extractAiPedidoDraft(text = "") {
   ]).toUpperCase().replace(/\s+/g, "-");
   const pesoKgValue = pesoTon
     ? Math.round((parseLocaleNumber(pesoTon[1]) || 0) * 1000)
-    : (pesoKg ? parseLocaleNumber(pesoKg[1]) : (orden?.peso_kg ?? null));
+    : (prose.weightKg ?? (pesoKg ? parseLocaleNumber(pesoKg[1]) : (orden?.peso_kg ?? null)));
   const importeNumberRaw = String(importeRaw || "").match(/(\d+(?:[,.]\d{1,2})?)/)?.[1] || "";
   const importe = orden?.importe ?? supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
   const toneladas = Number.isFinite(pesoKgValue) && pesoKgValue > 0
@@ -8408,10 +8409,10 @@ router.get('/ai-inbox/entries',async(req,res)=>{
   const states=['nuevo','revisar','listo','creado','descartado','error'];
   const state=String(req.query.state||'');if(state&&!states.includes(state))return res.status(400).json({error:'Estado no válido'});
   const page=Math.max(1,Math.min(100000,parseInt(req.query.page,10)||1));
-  const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
+  const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at,encrypted_payload FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
   const counts=(await db.query('SELECT state,COUNT(*)::int AS count FROM ai_inbox_items WHERE empresa_id=$1 GROUP BY state',[company])).rows;
   const inbound=orderInbox.inboundConfiguration(company);
-  res.json({items:rows,counts,page,page_size:25,inbound:inbound.configured?inbound:await require('../services/orderMailbox').inboxStatus(db,company)});
+  res.json({items:await Promise.all(rows.map(row=>orderInbox.publicItem(row))),counts,page,page_size:25,inbound:inbound.configured?inbound:await require('../services/orderMailbox').inboxStatus(db,company)});
  }catch(e){res.status(e.status||500).json({error:e.message});}
 });
 router.get('/ai-inbox/entries/:entry',async(req,res)=>{
@@ -8494,7 +8495,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     inboxEntry = req.body?.inbox_id
       ? await orderInbox.get(db,empresaId,req.body.inbox_id)
       : await orderInbox.receive(db,empresaId,req.user.id,req.body);
-    analysis = await orderInbox.claim(db,empresaId,inboxEntry.id,req.user.id);
+    analysis = await orderInbox.claim(db,empresaId,inboxEntry.id,req.user.id,{reanalyze:req.body?.reanalyze===true});
     if(analysis.replay)return res.json({...analysis.item.result,inbox_id:inboxEntry.id,inbox_state:analysis.item.state,duplicate:true,pedido_id:analysis.item.pedido_id});
     req.body = await orderInbox.expandEmails(analysis.item.payload);
   const textoOriginal = String(req.body?.texto || req.body?.text || "").trim();
@@ -10559,6 +10560,6 @@ router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
 router.getCartaPorte = getCartaPorte;
-router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox, pedidoListSearch };
+router._test = { extractAiPedidoDraft, crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox, pedidoListSearch };
 
 module.exports = router;

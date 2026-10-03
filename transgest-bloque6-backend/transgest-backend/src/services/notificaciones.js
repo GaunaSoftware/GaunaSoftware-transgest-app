@@ -91,6 +91,7 @@ async function notificarUsuariosCliente({
 
 async function listarNotificaciones(empresaId, usuarioId, { limit = 50, includeRead = false, audience = "" } = {}) {
   await ensureNotificacionesSchema();
+  await require('./transportDocumentCoverage').resolveDecaNotifications(db, empresaId, {usuarioId});
   const max = Math.min(Math.max(Number(limit) || 50, 1), 100);
   const showRead = includeRead === true || String(includeRead || "").toLowerCase() === "true";
   const audienceKey = String(audience || "").trim().toLowerCase();

@@ -10,6 +10,23 @@ jest.mock('../services/api',()=>({
  anularFirmaOperacion:jest.fn(),guardarFirmaEntrega:jest.fn(),
 }));
 
+test('fulfilled DeCA requests do not warn again and both original versions stay accessible',async()=>{
+ global.IS_REACT_ACT_ENVIRONMENT=true;
+ getFirmasOperacion.mockResolvedValue([]);
+ const host=document.createElement('div');document.body.appendChild(host);const root=createRoot(host);
+ const versions=[{id:'v2',version:2,estado:'activa',source:'transgest',created_at:'2026-10-02T15:42:19Z'},
+  {id:'v1',version:1,estado:'superada',source:'transgest',created_at:'2026-10-02T15:39:18Z'}];
+ const request={created_at:'2026-10-02T15:39:13Z'};
+ try{
+  await act(async()=>root.render(<TransportDocumentVersions pedidoId="pedido-1" data={{status:{ready:true},solicitud_deca:request,versiones:versions}} onChange={()=>{}}/>));
+  expect(host.textContent).not.toContain('DeCA solicitado a tráfico');
+  expect(host.textContent).toContain('Consultar versiones (2)');
+  expect([...host.querySelectorAll('button')].filter(button=>button.textContent==='Descargar original')).toHaveLength(2);
+  await act(async()=>root.render(<TransportDocumentVersions pedidoId="pedido-1" data={{status:{ready:false},solicitud_deca:request,versiones:versions}} onChange={()=>{}}/>));
+  expect(host.textContent).toContain('Pendiente de completar los originales vigentes de todos los envíos');
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
+
 test('a replacement DeCA keeps the issue action visible but requires its reason',async()=>{
  global.IS_REACT_ACT_ENVIRONMENT=true;
  getFirmasOperacion.mockResolvedValue([]);

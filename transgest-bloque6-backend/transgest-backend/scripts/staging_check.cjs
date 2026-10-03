@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { configureStaging, prepareDatabase, MARKER, EXPECTED_DATABASE } = require('./staging_guard.cjs');
-const { validateRecipients } = require('./staging_mail_guard.cjs');
+const { validateRecipients, installMailGuard } = require('./staging_mail_guard.cjs');
 const { createGateway } = require('./staging_gateway.cjs');
 
 async function main() {
@@ -46,6 +46,16 @@ async function main() {
   for (const mail of [{ to: 'client@real.invalid' }, { to: 'qa@example.invalid', bcc: 'client@real.invalid' }, { to: 'qa@example.invalid', envelope: { to: ['client@real.invalid'] } }, { raw: 'To: client@real.invalid' }, { to: 'qa@example.invalid' }]) {
     assert.throws(() => validateRecipients(mail, mail.to === 'qa@example.invalid' && !mail.bcc && !mail.envelope ? '' : 'qa@example.invalid'));
   }
+  const nodemailer=require('nodemailer'),originalTransport=nodemailer.createTransport;
+  try {
+    let delivered=0;
+    nodemailer.createTransport=()=>({sendMail:async()=>{delivered++;return {messageId:'synthetic-only'};}});
+    installMailGuard({TRANSGEST_STAGING:'true',STAGING_EMAIL_UNRESTRICTED:'true'});
+    await nodemailer.createTransport({}).sendMail({to:'any@example.invalid',bcc:'another@example.invalid'});
+    assert.equal(delivered,1,'Explicit unrestricted mode reaches the configured SMTP boundary without a list');
+    installMailGuard({TRANSGEST_STAGING:'true',STAGING_EMAIL_ALLOWLIST:''});
+    await assert.rejects(nodemailer.createTransport({}).sendMail({to:'any@example.invalid'}),{code:'STAGING_RECIPIENT_BLOCKED'});
+  } finally {nodemailer.createTransport=originalTransport;}
 
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'transgest-staging-check-'));
   fs.writeFileSync(path.join(folder, 'index.html'), '<html>STAGING FRONTEND</html>');

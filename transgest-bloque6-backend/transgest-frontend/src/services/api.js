@@ -53,7 +53,7 @@ async function parseApiResponse(res) {
   return text ? { raw_text: text } : {};
 }
 
-function friendlyApiError(message, status, requestId, path = "") {
+function friendlyApiError(message, status, requestId, path = "", code = "") {
   const raw = String(message || "").trim();
   const lower = raw.toLowerCase();
   const moduloLabel =
@@ -98,6 +98,12 @@ function friendlyApiError(message, status, requestId, path = "") {
   if (status === 404) return "No se encontro el registro solicitado.";
   if (status === 409) return raw || "No se pudo guardar porque hay un conflicto con datos ya existentes.";
   if (status === 422) return raw || "Hay datos del formulario que no son validos.";
+  // These routes return fixed, sanitized provider diagnostics. All other 5xx
+  // responses retain the generic message instead of exposing server details.
+  if (raw && status >= 500 && (
+    (path === '/email/test' && code === 'SMTP_CONNECTION_FAILED') ||
+    (/^\/email\/order-mailbox\/(test|sync)$/.test(path) && code === 'IMAP_CONNECTION_FAILED')
+  )) return raw;
   if (status >= 500) {
     return requestId
       ? `No se pudo completar ${moduloLabel}. Codigo de seguimiento: ${requestId}.`
@@ -237,7 +243,8 @@ async function apiFetch(path, options = {}) {
       data.error || data.message || data.mensaje || validationMsg || fallbackText || `Error ${res.status}`,
       res.status,
       requestId,
-      path
+      path,
+      data.code
     );
     rememberApiError({
       status: res.status,

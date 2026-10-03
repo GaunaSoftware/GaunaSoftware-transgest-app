@@ -10,6 +10,8 @@ router.use(authenticate);
 router.use((req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
 const EID = req => req.empresaId || req.user?.empresa_id;
 const mailbox=require('../services/orderMailbox');
+const {smtpFailure}=require('../services/mailConnectionErrors');
+const logger=require('../services/logger');
 const {requirePlanFeature,requireModulePermission}=require('../middleware/auth');
 router.use('/order-mailbox',SOLO_GERENTE,requirePlanFeature('ai'),requireModulePermission('empresa'),requireModulePermission('pedidos'),(req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
 router.get('/order-mailbox',async(req,res)=>{
@@ -19,7 +21,10 @@ router.put('/order-mailbox',async(req,res)=>{
  try{res.json(await mailbox.save(db,EID(req),req.user.id,req.body));}catch(e){res.status(e.status||500).json({error:e.message});}
 });
 for(const action of ['test','sync'])router.post(`/order-mailbox/${action}`,require('express-rate-limit')({windowMs:60000,max:4,keyGenerator:req=>EID(req),standardHeaders:true,legacyHeaders:false}),async(req,res)=>{
- try{res.json(await mailbox.run(db,EID(req),{test:action==='test',actor:req.user.id}));}catch(e){res.status(e.status||500).json({error:e.message});}
+ try{res.json(await mailbox.run(db,EID(req),{test:action==='test',actor:req.user.id}));}catch(e){
+  logger.warn('Prueba de recepción IMAP fallida',{event:'imap_test_error',request_id:req.id,empresa_id:EID(req),code:e.code||'IMAP_INTERNAL',status:e.status||500});
+  res.status(e.status||500).json({error:e.code==='IMAP_CONNECTION_FAILED'||e.status<500?e.message:'No se pudo completar la recepción de correo.',code:e.code,request_id:req.id});
+ }
 });
 
 const ESTADOS_ENVIO_FACTURA = ['emitida', 'enviada', 'cobrada', 'vencida', 'reclamada', 'sin_cobrar'];
@@ -160,7 +165,7 @@ router.put("/config", SOLO_GERENTE, async (req,res) => {
   try {
     const cfg = await saveEmpresaEmailConfig(EID(req), req.body || {}, req.user?.id || null);
     res.json({ ok:true, config: cfg });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) { res.status(e.status||500).json({ error: e.status?e.message:'No se pudo guardar la configuración de correo.', request_id:req.id }); }
 });
 
 // Test de envío manual
@@ -174,7 +179,7 @@ router.post("/test", SOLO_GERENTE, async (req,res) => {
       trigger:"test",
       require_company:true,
       destinatario,
-      plantilla:"pedido_confirmado",
+      plantilla:"correo_gauna_test",
       empresa_id: EID(req),
       datos:{ numero:"TEST-0001", ruta:"Madrid → Barcelona", fecha_carga:"hoy", mercancia:"Prueba de email" }
     });
@@ -182,8 +187,10 @@ router.post("/test", SOLO_GERENTE, async (req,res) => {
     await markEmailConfigTest(EID(req), true).catch(() => {});
     res.json({ ok:true,messageId:result.messageId });
   } catch(e) {
-    await markEmailConfigTest(EID(req), false, e.message).catch(() => {});
-    res.status(500).json({ error: e.message });
+    const failure=smtpFailure(e);
+    await markEmailConfigTest(EID(req), false, failure.message).catch(() => {});
+    logger.warn('Prueba SMTP fallida',{event:'smtp_test_error',request_id:req.id,empresa_id:EID(req),code:failure.code,provider_code:e.code,status:failure.status});
+    res.status(failure.status).json({error:failure.message,code:failure.code,request_id:req.id});
   }
 });
 

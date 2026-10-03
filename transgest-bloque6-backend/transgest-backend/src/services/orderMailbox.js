@@ -108,7 +108,8 @@ async function run(db,company,{test=false,actor=null,connector=connect}={}) {
  } catch(error) {
   const message=connectionError(error);
   await db.query('UPDATE empresa_order_mailbox SET last_error=$3 WHERE empresa_id=$1 AND lease_token=$2',[company,token,message]);
-  throw Object.assign(new Error(message),{status:error.status||502});
+  const configurationError=['ENOTFOUND','EAI_AGAIN'].includes(error.code)||/CERT|TLS|SSL/.test(error.code||'')||error.authenticationFailed||['AUTHENTICATIONFAILED','AUTHORIZATIONFAILED'].includes(error.serverResponseCode);
+  throw Object.assign(new Error(message),{status:error.status||(configurationError?422:502),code:'IMAP_CONNECTION_FAILED'});
  } finally {connection?.close();await db.query('UPDATE empresa_order_mailbox SET lease_token=NULL,lease_until=NULL WHERE empresa_id=$1 AND lease_token=$2',[company,token]);}
 }
 async function inboxStatus(db,company) {

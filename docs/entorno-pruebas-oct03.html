@@ -7,7 +7,7 @@
 <li>Web y servidor en una misma dirección HTTPS. Una etiqueta «PRUEBAS · Datos independientes» identifica la copia. Las direcciones de documentos, QR y correos apuntarán a esa copia.</li>
 <li>Base nueva, sin datos ni certificados de TLM o Asensi. El arranque rechaza bases existentes sin la identificación específica de pruebas.</li>
 <li>Secretos y contraseñas generados por Render. No se muestran en registros ni se guardan en GitHub.</li>
-<li>Los correos usan SMTP real, con una lista obligatoria de destinatarios de pruebas. Hasta configurarla se bloquean todos los envíos.</li>
+<li>Los correos usan SMTP real y pueden enviarse a cualquier dirección, sin lista de destinatarios, por petición expresa del usuario el 3 de octubre. El servidor de pruebas usa <code>STAGING_EMAIL_UNRESTRICTED=true</code>; se conserva la autenticación SMTP y la verificación TLS.</li>
 <li>Despliegues automáticos desactivados. No se mezcla ni despliega esta rama a producción.</li>
 </ul>
 <h2>Coste comprobado en Render</h2>
@@ -20,7 +20,7 @@
 <h2>Acceso y configuración para las pruebas</h2><ol>
 <li>Abre <a href="https://transgest-workflow-test-oct02.onrender.com/">la copia de pruebas</a>. Comprueba la etiqueta «PRUEBAS · Datos independientes»; no uses transgest.app para verificar este bloque.</li>
 <li>Accede con empresa <code>TG-PRUEBAS</code> y usuario <code>gerencia@example.invalid</code>. La contraseña está en <code>STAGING_MANAGER_PASSWORD</code> de <a href="https://dashboard.render.com/web/srv-db0d5hfavr4c73f5v97g/env">Environment del servidor de pruebas en Render</a>: copia su valor y pégalo en el acceso. El navegador de esta tarea queda abierto con la sesión de pruebas iniciada. El superadmin de pruebas usa <code>superadmin@example.invalid</code> y <code>STAGING_ADMIN_PASSWORD</code>. No pegues las contraseñas en el chat.</li>
-<li>Configurar un buzón SMTP de pruebas y, si se quiere probar recepción, otro IMAP dedicado. Autorizar únicamente correos controlados por el equipo en <code>STAGING_EMAIL_ALLOWLIST</code>, separados por comas. No conectar un buzón que reciba pedidos reales.</li>
+<li>Configurar un buzón SMTP y, si se quiere probar recepción, un buzón IMAP dedicado en Mi empresa → Correo / Bandeja IA. No hace falta registrar previamente los destinatarios. Para DonDominio: <code>smtp.dondominio.com:587</code> con STARTTLS y <code>imap.dondominio.com:993</code> con TLS. La contraseña vacía conserva la que está guardada cifrada.</li>
 <li>Configurar la IA en la copia de pruebas, con una clave y límites de consumo propios. GPS y WhatsApp también necesitan sus credenciales de pruebas; no se copian de producción automáticamente.</li>
 <li>Crear clientes, vehículos y pedidos ficticios, y comprobar el flujo completo. No enviar facturas o registros fiscales a sistemas reales. La integración NO VERI*FACTU y los certificados quedan fuera de esta activación.</li>
 </ol>
@@ -38,10 +38,10 @@
 <h2>Primeras pruebas a realizar</h2><ul>
 <li>Icono del navegador: debe ser el símbolo suministrado en «LOGO NUEVO 2». El logotipo con el texto TransGest se conserva.</li>
 <li>Adjuntar documentación dentro de un pedido con tema claro y oscuro; revisar el contraste.</li>
-<li>Enviar una orden a un correo autorizado, aceptar, confirmar matrículas, cargar, revisar DeCA, marcar salida y descarga, subir albaranes y comprobar que aparecen en el mismo pedido.</li>
+<li>Enviar una orden a un correo de pruebas, aceptar, confirmar matrículas, cargar, revisar DeCA, marcar salida y descarga, subir albaranes y comprobar que aparecen en el mismo pedido.</li>
 <li>Cambiar los colores de la empresa y verificar la barra lateral y las opciones activas.</li>
-<li>Probar SMTP, recepción IMAP y correo con IA, guardado de credenciales y errores visibles. Confirmar que se rechaza cualquier destinatario fuera de la lista de pruebas.</li>
+<li>Probar SMTP, recepción IMAP y correo con IA, guardado de credenciales y errores visibles. SMTP funciona sin lista de destinatarios. La primera prueba IMAP solo comprueba el buzón y establece el cursor; no importa mensajes anteriores.</li>
 <li>Revisar Mesa de tráfico en escritorio y móvil, filtros del Dashboard y el resto de casos del <a href="informe-pruebas-oct02.html">informe general</a>.</li>
 </ul>
-<p>Queda pendiente configurar SMTP/IMAP, destinatarios de pruebas, IA, GPS y WhatsApp para verificar conexiones reales. No se han enviado mensajes ni usado créditos IA. El flujo completo de aceptación, carga, documentos, entrega y facturación se validará con los casos del informe. El eCMR adaptado y la bolsa de cargas interna siguen pendientes y no se presentan como terminados.</p>
+<p>El usuario ha configurado SMTP e IMAP. Se detectó que el envío quedaba bloqueado por la lista de pruebas y que el proveedor rechazaba el acceso IMAP; se corrigió el host de recepción a imap.dondominio.com y se prepararon mensajes de diagnóstico visibles, conservando la contraseña cifrada. El envío sin listas se habilita por petición expresa. La conexión real se volverá a comprobar tras desplegar. IA, GPS y WhatsApp siguen pendientes de validación externa; no se han usado créditos IA. El flujo completo de aceptación, carga, documentos, entrega y facturación se validará con los casos del informe. El eCMR adaptado y la bolsa de cargas interna siguen pendientes y no se presentan como terminados.</p>
 </article></html>

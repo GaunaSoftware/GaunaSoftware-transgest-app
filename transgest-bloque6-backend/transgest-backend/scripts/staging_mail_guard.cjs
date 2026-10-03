@@ -19,6 +19,9 @@ function validateRecipients(mail, allowlist) {
 
 function installMailGuard(env = process.env) {
   if (env.TRANSGEST_STAGING !== 'true') throw new Error('La protección de correo solo puede usarse en pruebas.');
+  // The owner can explicitly enable ordinary delivery in this isolated test
+  // environment. This does not bypass SMTP authentication or TLS checks.
+  if (env.STAGING_EMAIL_UNRESTRICTED === 'true') return;
   const createTransport = nodemailer.createTransport;
   nodemailer.createTransport = function (...args) {
     const transport = createTransport.apply(this, args);

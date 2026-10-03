@@ -68,6 +68,8 @@ projects:
                 generateValue: true
               - key: STAGING_EMAIL_ALLOWLIST
                 value: ""
+              - key: STAGING_EMAIL_UNRESTRICTED
+                value: "true"
         databases:
           - name: transgest-workflow-test-oct02-db
             region: frankfurt

@@ -16,7 +16,12 @@ export default function OrderMailboxSettings(){
    if(action==='toggle'){data=await saveOrderMailbox({...config,enabled:!config.enabled});setMessage(data.enabled?'Recepción activada: comprobación cada cinco minutos.':'Recepción desactivada.');}
    if(action==='sync'){const result=await syncOrderMailbox();data=result.config;setMessage(`${result.received} entradas nuevas recogidas. Revísalas en Pedidos → Bandeja IA.`);window.dispatchEvent(new Event('tms:inbox-changed'));}
    setConfig(data);setDraft({...data,password:''});setDirty(false);
-  }catch(e){setError(e.message);}finally{setBusy(false);}
+  }catch(e){
+   setError(e.message);
+   if(action==='test'||action==='sync'){
+    try{const current=await getOrderMailbox();setConfig(current);setDraft({...current,password:''});}catch{/* Keep the original failure visible if status cannot be refreshed. */}
+   }
+  }finally{setBusy(false);}
  }
  return <Card className="order-mailbox-settings">
   <h3>Recepción de pedidos · Bandeja IA</h3>

@@ -35,7 +35,7 @@ module.exports=async function({db,company,user,base,token,password,transportComp
  assert.equal((await db.query("SELECT COUNT(*)::int AS n FROM pedido_docs WHERE pedido_id=$1 AND empresa_id=$2 AND tipo='pod'",[sharedOrder.id,company])).rows[0].n,1);
  const vehicle=crypto.randomUUID();await db.query("INSERT INTO vehiculos(id,empresa_id,matricula,tipo) VALUES($1,$2,'QA-NET-001','tractora')",[vehicle,transportCompany]);
  await db.query('UPDATE pedidos SET vehiculo_id=$1 WHERE id=$2 AND empresa_id=$3',[vehicle,trip.id,transportCompany]);
- const now=new Date().toISOString();await require('../src/services/vehicleTracking').record(db,{empresaId:transportCompany,vehiculoId:vehicle,provider:'app',input:{lat:40.4,lng:-3.7,recorded_at:now,accuracy_m:10}});
+ const now=new Date().toISOString();await require('../src/services/vehicleTracking').record(db,{empresaId:transportCompany,vehiculoId:vehicle,provider:'app_chofer',input:{lat:40.4,lng:-3.7,recorded_at:now,accuracy_m:10}});
  const state=await request('GET',path+'/seguimiento/'+sharedOrder.id);assert.equal(state.gps.status,'reciente');assert.equal(state.gps.position.lat,40.4);assert.equal(state.eta.value,null);
  await request('GET',path+'/seguimiento/'+sharedOrder.id,null,404,other);
  const estimated={value:new Date(Date.now()+600000).toISOString(),status:'estimado',provider:'osrm',definition:'Ensayo sintético'};

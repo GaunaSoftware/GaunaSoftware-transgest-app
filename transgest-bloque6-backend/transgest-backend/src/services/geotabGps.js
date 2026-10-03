@@ -1,4 +1,5 @@
 const HOST = 'my.geotab.com';
+const { canAutoLink } = require('./gpsSource');
 const HOST_RE = /^(?:[a-z0-9-]+\.)*geotab\.com$/i;
 
 function credentials(secret) {
@@ -73,7 +74,7 @@ function positions(snapshotData, vehicles) {
   for (const vehicle of vehicles) { const key=plate(vehicle.matricula);if(key)plateCounts.set(key,(plateCounts.get(key)||0)+1); }
   const devicePlateCounts = new Map();
   for (const device of snapshotData.devices) { const key=plate(device.licensePlate);if(key)devicePlateCounts.set(key,(devicePlateCounts.get(key)||0)+1); }
-  const byPlate = new Map(vehicles.filter(v => plateCounts.get(plate(v.matricula))===1 &&
+  const byPlate = new Map(vehicles.filter(v => canAutoLink(v,'geotab') && plateCounts.get(plate(v.matricula))===1 &&
     !(v.gps_provider === 'geotab' && v.gps_external_id))
     .map(v => [plate(v.matricula),v]));
   const output=[]; let unmatched=0;

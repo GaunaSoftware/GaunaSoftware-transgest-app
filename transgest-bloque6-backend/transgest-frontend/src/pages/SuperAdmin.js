@@ -810,6 +810,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
   const cfgGpsLimite = cfgGps?.limite_mensual || 0;
   const cfgGpsUpdatedAt = cfgGps?.updated_at;
   const gpsActivoEmpresa = data?.gps_active?.[empresaId] || "";
+  const gpsActivosEmpresa = data?.gps_active_providers?.[empresaId] || [gpsActivoEmpresa].filter(Boolean);
   const cfgWebhookGps = data?.gps_webhooks?.find(c => c.empresa_id === empresaId && c.provider === gpsProvider);
   useEffect(() => {
     setIaQuota(selectedEmpresa?.ia_limite_mensual ?? 0);
@@ -823,8 +824,8 @@ export function IntegracionesAdmin({ saFetchFn }) {
     });
   }, [empresaId, provider, cfgEmpresa?.empresa_id, cfgEmpresa?.provider, cfgEmpresa?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setGpsProvider(gpsActivoEmpresa || "locatel");
-  }, [empresaId, gpsActivoEmpresa]);
+    setGpsProvider(gpsActivosEmpresa[0] || "locatel");
+  }, [empresaId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setShowGpsProviderPicker(false);
   }, [empresaId]);
@@ -1228,7 +1229,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
     : (gpsGlobalOk ? "Fallback global" : "Sin clave de respaldo");
   const visibleGpsProviders = showGpsProviderPicker
     ? gpsProviders
-    : [gpsProvider || gpsActivoEmpresa || gpsProviders[0]].filter(Boolean);
+    : Array.from(new Set([...gpsActivosEmpresa, gpsProvider || gpsProviders[0]])).filter(Boolean);
   const aiGlobalStatus = data?.global?.[aiForm.provider] || {};
   const aiGlobalOk = !!aiGlobalStatus.global_configured;
   const fiscalRows = (data?.empresas || []).map((empresa) => {
@@ -1893,7 +1894,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10,flexWrap:"wrap"}}>
               <div>
               <div style={{fontSize:13,fontWeight:900,color:"#e2e8f0"}}>GPS y telemetria</div>
-                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>Solo puede quedar un proveedor GPS activo por empresa.</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginTop:3}}>Puedes activar varios proveedores. Cada vehículo usa el GPS que tenga asignado; si no tiene GPS, usa la app del conductor.</div>
               </div>
               <span style={integrationStatusChip(gpsReady, !gpsReady)}>{gpsEffectiveSource}</span>
             </div>
@@ -1907,7 +1908,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
                   onClick={()=>setShowGpsProviderPicker(p=>!p)}
                   style={{...SaaS.btn,padding:"5px 8px",fontSize:10,marginTop:6,color:"#93c5fd",borderColor:"rgba(147,197,253,.24)"}}
                 >
-                  {showGpsProviderPicker ? "Ocultar proveedores" : "Cambiar proveedor"}
+                  {showGpsProviderPicker ? "Ver proveedores configurados" : "Añadir / configurar proveedor"}
                 </button>
               </div>
               <div>
@@ -1929,7 +1930,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
               {gpsProvider==='geotab'&&<GeotabCredentials key={`${empresaId}-${gpsProvider}`} value={gpsForm.api_key} configured={!!cfgGps?.key_mask} disabled={savingIntegration} inputStyle={input} onChange={api_key=>setGpsForm(previous=>({...previous,api_key,use_global:false}))}/>}
             </div>
             <div style={{...integrationButtonRow,marginTop:10}}>
-              <button onClick={guardarGpsEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar GPS activo</button>
+              <button onClick={guardarGpsEmpresa} style={{...SaaS.btnOk,height:36}}>Guardar este proveedor</button>
               <button onClick={()=>probarEmpresa(gpsProvider)} disabled={testingProvider===gpsProvider} style={{...SaaS.btn,height:36}}>
                 {testingProvider===gpsProvider ? "Diagnosticando..." : "Diagnosticar"}
               </button>
@@ -1938,7 +1939,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
             </div>
             <div style={{fontSize:11,color:"#64748b",lineHeight:1.45,marginTop:8}}>
               Respaldo global de {labels[gpsProvider] || gpsProvider}: <strong style={{color:gpsGlobalOk ? "#34d399" : "#94a3b8"}}>{gpsGlobalOk ? `configurado (${gpsGlobalStatus.global_source || "global"})` : "sin configurar"}</strong>.
-              {gpsActivoEmpresa && gpsActivoEmpresa !== gpsProvider && <span style={{color:"#fbbf24",fontWeight:800}}> Activo ahora: {labels[gpsActivoEmpresa] || gpsActivoEmpresa}.</span>}
+              <span style={{fontWeight:800}}> Proveedores activos: {gpsActivosEmpresa.map(p=>labels[p]||p).join(', ') || 'ninguno'}.</span>
             </div>
           </div>
         </div>
@@ -2329,7 +2330,7 @@ export function IntegracionesAdmin({ saFetchFn }) {
         </div>
         <div className="sa-gps-only" style={{display:"block",fontSize:11,color:"#64748b",marginTop:10}}>
           {selectedEmpresa ? `${selectedEmpresa.nombre}: ` : ""}
-          al guardar un GPS queda como unico proveedor activo para esa empresa.
+          guardar o desactivar este proveedor no cambia los demás. Asigna el proveedor de cada matrícula desde Flota → Gestión de flota y GPS.
         </div>
         <div className="sa-fiscal-only" style={{display:"block",fontSize:11,color:"#64748b",marginTop:6}}>
           La configuracion fiscal sensible se mantiene en la propia empresa para respetar APIs, certificados y credenciales separadas por cliente.

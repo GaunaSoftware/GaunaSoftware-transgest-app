@@ -14,7 +14,7 @@ const style = key
   : "https://tiles.openfreemap.org/styles/liberty";
 const empty = { type: "FeatureCollection", features: [] };
 
-export default function RouteMapCanvas({ points = [], geometry = [], vehicle, stableFrame = false, compact = false }) {
+export default function RouteMapCanvas({ points = [], geometry = [], vehicle, stableFrame = false, compact = false, fleet = false }) {
   const container = useRef(null);
   const mapRef = useRef(null);
   const fitRef = useRef(() => {});
@@ -65,7 +65,35 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
     } else {
       map.getSource("pedido-ruta").setData(route);
     }
-    const stopMarkers = markers.features.map(feature => {
+    let removeFleetListeners = () => {};
+    if (fleet) {
+      if (!map.getSource('fleet-vehicles')) {
+        map.addSource('fleet-vehicles', { type:'geojson', data:markers, cluster:true, clusterRadius:35, clusterMaxZoom:16 });
+        map.addLayer({id:'fleet-clusters',type:'circle',source:'fleet-vehicles',filter:['has','point_count'],paint:{'circle-color':'#0f766e','circle-radius':16,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+        map.addLayer({id:'fleet-cluster-count',type:'symbol',source:'fleet-vehicles',filter:['has','point_count'],layout:{'text-field':['to-string',['get','point_count_abbreviated']],'text-size':12,'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff'}});
+        map.addLayer({id:'fleet-vehicle-pins',type:'circle',source:'fleet-vehicles',filter:['!', ['has','point_count']],paint:{'circle-color':['get','color'],'circle-radius':7,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
+        map.addLayer({id:'fleet-vehicle-labels',type:'symbol',source:'fleet-vehicles',filter:['!', ['has','point_count']],layout:{'text-field':['get','number'],'text-size':11,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#163438','text-halo-color':'#fff','text-halo-width':2}});
+      } else map.getSource('fleet-vehicles').setData(markers);
+      const onCluster = async event => {
+        const feature=event.features?.[0];
+        if (!feature) return;
+        const source=map.getSource('fleet-vehicles');
+        try {
+          const leaves=await source.getClusterLeaves(feature.properties.cluster_id, Math.min(feature.properties.point_count,500),0);
+          const content=document.createElement('div'),heading=document.createElement('strong');
+          heading.textContent=`${feature.properties.point_count} vehículos en esta zona`;
+          content.append(heading);
+          leaves.forEach(leaf=>{const line=document.createElement('div');line.textContent=leaf.properties.number;content.append(line);});
+          const zoom=document.createElement('button');zoom.type='button';zoom.textContent='Ampliar grupo';content.append(zoom);
+          const popup=new maplibregl.Popup({offset:18}).setLngLat(feature.geometry.coordinates).setDOMContent(content).addTo(map);
+          zoom.addEventListener('click',async()=>{const level=await source.getClusterExpansionZoom(feature.properties.cluster_id);map.easeTo({center:feature.geometry.coordinates,zoom:level});popup.remove();});
+        } catch (_) { setError('No se ha podido abrir el grupo de vehículos. Vuelve a intentarlo.'); }
+      };
+      const onVehicle=event=>{const feature=event.features?.[0];if(feature)new maplibregl.Popup({offset:12}).setLngLat(feature.geometry.coordinates).setText(feature.properties.label).addTo(map);};
+      map.on('click','fleet-clusters',onCluster);map.on('click','fleet-vehicle-pins',onVehicle);map.on('click','fleet-vehicle-labels',onVehicle);
+      removeFleetListeners=()=>{map.off('click','fleet-clusters',onCluster);map.off('click','fleet-vehicle-pins',onVehicle);map.off('click','fleet-vehicle-labels',onVehicle);};
+    }
+    const stopMarkers = (fleet ? [] : markers.features).map(feature => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "tg-route-stop-marker";
@@ -82,7 +110,8 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
     fitRef.current = () => {
       if (!positions.length) return;
       const bounds = positions.reduce((result, point) => result.extend(point), new maplibregl.LngLatBounds(positions[0], positions[0]));
-      map.fitBounds(bounds, { padding: Math.min(55, map.getContainer().clientWidth / 6), maxZoom: 14, duration: 0 });
+      const padding=Math.min(55,map.getContainer().clientWidth/6);
+      map.fitBounds(bounds, { padding: fleet ? {top:padding,left:padding,right:padding,bottom:85} : padding, maxZoom: 14, duration: 0 });
     };
     const frameKey = JSON.stringify(positions);
     if (positions.length && (!stableFrame || !fittedRef.current)) {
@@ -90,13 +119,13 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
       // Wait for the complete route before freezing its frame.
       if (line.length >= 2 || !stableFrame) fittedRef.current = frameKey;
     }
-    return () => stopMarkers.forEach(marker => marker.remove());
-  }, [loaded, points, geometry, vehicle, stableFrame]);
+    return () => {stopMarkers.forEach(marker => marker.remove());removeFleetListeners();};
+  }, [loaded, points, geometry, vehicle, stableFrame, fleet]);
 
   return (
     <div data-map-engine="maplibre">
       <div style={{ position: "relative", height: compact ? "180px" : "clamp(280px, 38vh, 440px)" }}>
-        <div ref={container} aria-label="Mapa de la ruta del pedido" style={{ position: "absolute", inset: 0 }} />
+        <div ref={container} aria-label={fleet ? 'Mapa de vehículos' : 'Mapa de la ruta del pedido'} style={{ position: "absolute", inset: 0 }} />
         <button type="button" title="Centrar ruta" aria-label="Centrar ruta" onClick={() => fitRef.current()} style={{ position: "absolute", top: 10, left: 10, width: 34, height: 34, background: "white", color: "#20252b", border: "1px solid #bbc5ca", borderRadius: 4, cursor: "pointer", fontSize: 22 }}>&#8982;</button>
       </div>
       {error && <div role="alert" style={{ padding: 10, fontSize: 12 }}>{error} <button type="button" onClick={() => setRetry(value => value + 1)}>Reintentar mapa</button></div>}

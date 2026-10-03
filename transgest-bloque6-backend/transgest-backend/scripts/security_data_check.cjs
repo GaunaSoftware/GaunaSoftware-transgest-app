@@ -135,6 +135,31 @@ async function main() {
     assert.equal(ownPosition.data.updated,1,JSON.stringify(ownPosition.data));
     assert.equal((await pg.query('SELECT empresa_id FROM gps_position_log')).rows[0].empresa_id,A);
 
+    // Two active connectors share a company, but not vehicle assignments or token namespaces.
+    const keys=require('../src/services/apiKeys');
+    await keys.setCompanyApiConfig(A,'gps_generic',{api_key:'fake-gps-generic',use_global:false});
+    await keys.setCompanyApiConfig(A,'locatel',{api_key:'fake-gps-locatel',use_global:false});
+    const locatelHash=require('node:crypto').createHash('sha256').update('locatel-A-secret').digest('hex');
+    await pg.query("INSERT INTO gps_webhook_tokens(empresa_id,provider,token_hash) VALUES($1,'locatel',$2)",[A,locatelHash]);
+    const locatelHeaders={headers:{'x-transgest-gps-token':'locatel-A-secret'},params:{empresaId:A,provider:'locatel'}};
+    await pg.query("UPDATE vehiculos SET gps_external_id='shared-id' WHERE empresa_id=$1 AND matricula='A-1234'",[A]);
+    await pg.query("INSERT INTO vehiculos(empresa_id,matricula,gps_provider,gps_external_id) VALUES($1,'A-5678','locatel','shared-id'),($1,'APP-ONLY','manual',NULL)",[A]);
+    const stamp=new Date().toISOString();
+    const second=await invoke('gps_webhook','post','/webhook/:empresaId/:provider',A,null,{external_id:'shared-id',lat:41,lng:-2,recorded_at:stamp},locatelHeaders);
+    assert.equal(second.code,200,JSON.stringify(second.data));assert.equal(second.data.updated,1);
+    assert.equal(second.data.vehiculos[0].matricula,'A-5678');
+    const wrongProvider=await invoke('gps_webhook','post','/webhook/:empresaId/:provider',A,null,{matricula:'A-1234',external_id:'different-id',lat:42,lng:-2,recorded_at:stamp},locatelHeaders);
+    assert.equal(wrongProvider.data.updated,0);
+    const appOnly=await invoke('gps_webhook','post','/webhook/:empresaId/:provider',A,null,{matricula:'APP-ONLY',lat:42,lng:-2,recorded_at:stamp},locatelHeaders);
+    assert.equal(appOnly.data.updated,0);
+    assert.equal((await pg.query("SELECT gps_provider FROM vehiculos WHERE empresa_id=$1 AND matricula='A-1234'",[A])).rows[0].gps_provider,'gps_generic');
+    const wrongToken=await invoke('gps_webhook','post','/webhook/:empresaId/:provider',A,null,{external_id:'shared-id',lat:42,lng:-2}, {...gpsHeaders,params:{empresaId:A,provider:'locatel'}});
+    assert.equal(wrongToken.code,401);
+    await keys.setCompanyApiConfig(A,'locatel',{activo:false});
+    assert.equal((await invoke('gps_webhook','post','/webhook/:empresaId/:provider',A,null,{external_id:'shared-id',lat:42,lng:-2},locatelHeaders)).code,409);
+    const stillActive=await invoke('gps_webhook','post','/webhook/:empresaId/:provider',A,null,{external_id:'shared-id',lat:40,lng:-3,recorded_at:stamp},gpsHeaders);
+    assert.equal(stillActive.data.updated,1);assert.equal(stillActive.data.vehiculos[0].matricula,'A-1234');
+
     await pg.exec(`CREATE TABLE factura_envios_fiscales(id UUID DEFAULT gen_random_uuid(),empresa_id UUID,sistema TEXT,response JSONB,provider_uuid TEXT,created_at TIMESTAMPTZ DEFAULT NOW())`);
     await pg.query("INSERT INTO factura_envios_fiscales(empresa_id,sistema,response) VALUES($1,'verifactu',$2)",[B,JSON.stringify({provider_uuid:'existing-B-provider-uuid'})]);
     const fiscalQueue=require('../src/services/fiscalQueueState');

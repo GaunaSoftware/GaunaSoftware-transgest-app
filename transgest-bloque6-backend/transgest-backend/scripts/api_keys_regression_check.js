@@ -41,8 +41,15 @@ async function main() {
     assert.equal((await keys.resolveApiKey(a,'openai')).key,'');
     await keys.setCompanyApiConfig(a,'locatel',{api_key:'qa-fake-gps-one',use_global:false});
     await keys.setCompanyApiConfig(a,'movildata',{api_key:'qa-fake-gps-two',use_global:false});
-    assert.equal((await keys.getCompanyApiConfig(a,'locatel')).activo,false);
+    assert.equal((await keys.getCompanyApiConfig(a,'locatel')).activo,true);
     assert.equal((await keys.getCompanyApiConfig(a,'movildata')).activo,true);
+    assert.equal((await keys.resolveApiKey(a,'locatel')).key,'qa-fake-gps-one');
+    assert.equal((await keys.resolveApiKey(a,'movildata')).key,'qa-fake-gps-two');
+    assert.equal((await keys.resolveApiKey(b,'movildata')).key,'');
+    await keys.setCompanyApiConfig(a,'locatel',{activo:false});
+    assert.equal((await keys.getCompanyApiConfig(a,'movildata')).activo,true);
+    await keys.setCompanyApiConfig(a,'movildata',{limite_mensual:10});
+    assert.equal((await keys.getCompanyApiConfig(a,'locatel')).activo,false,'Saving another connector must not reactivate this one');
     await assert.rejects(keys.setGlobalApiKey('claveicon','qa-fake-global-clavei'),{status:400});
     await keys.setCompanyApiConfig(a,'claveicon',{api_key:'qa-fake-tlm-clavei',use_global:true});
     assert.equal((await keys.resolveApiKey(a,'claveicon')).key,'qa-fake-tlm-clavei');
@@ -50,7 +57,7 @@ async function main() {
     assert.equal((await keys.resolveApiKey(b,'claveicon')).key,'');
     assert.equal((await keys.publicStatusForProvider('claveicon',b)).company_configured,false);
     assert.ok(!(await keys.getCompanyApiConfig(a,'claveicon')).encrypted_key.includes('qa-fake-tlm-clavei'));
-    console.log('OK claves: cifrado, aislamiento, upsert sin duplicados, modo explicito, borrado persistente y GPS unico.');
+    console.log('OK claves: cifrado, aislamiento, upsert, borrado persistente y varios GPS independientes sin reactivar conectores.');
   } finally {
     Object.assign(db,original);
     if(savedEnv===undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY=savedEnv;

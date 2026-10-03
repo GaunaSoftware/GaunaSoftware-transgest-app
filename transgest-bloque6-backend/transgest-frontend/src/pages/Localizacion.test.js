@@ -90,3 +90,15 @@ test('expires a signal locally if refreshing fails, exposes the failure and supp
   expect(node.querySelector('[role=alert]').textContent).toContain('Consulta temporalmente no disponible');
   expect(node.querySelector('header button').disabled).toBe(false);
 });
+
+test('refreshes multiple GPS providers independently and keeps the mixed fleet visible if one fails', async () => {
+  getGpsProviders.mockResolvedValue({active_provider:'',active_providers:['geotab','movildata','locatel']});
+  refreshFleetGps.mockImplementation(provider=>provider==='geotab'?Promise.reject(Error('Sin conexión')):Promise.resolve({updated:3}));
+  getFleetLocations.mockResolvedValue({generated_at:capturedAt,items:[vehicle('GPS-A'),{...vehicle('GPS-B'),provider:'movildata'},{...vehicle('APP'),provider:'app_chofer'}]});
+  await act(async()=>root.render(<Localizacion/>));
+  expect(refreshFleetGps.mock.calls).toEqual([['geotab'],['movildata']]);
+  expect(node.querySelector('[role=alert]').textContent).toContain('Geotab: Sin conexión');
+  expect(node.querySelector('[role=status]').textContent).toContain('Movildata: 3 posiciones recibidas');
+  expect(node.querySelector('[data-testid=fleet-map]').textContent).toBe('GPS-A,GPS-B,APP');
+  expect(node.querySelectorAll('article')).toHaveLength(3);
+});

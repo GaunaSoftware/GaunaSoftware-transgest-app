@@ -137,3 +137,6 @@
  .traffic-location-summary>div:nth-child(-n+2){border-bottom:1px solid var(--border)}
  body:has(.traffic-location-agenda) button[title="Avisos importantes"]{width:44px!important;height:44px!important;right:12px!important;bottom:calc(12px + env(safe-area-inset-bottom))!important;font-size:11px!important}
 }
+
+.traffic-location-mobile-day>div{display:grid;justify-items:center;min-width:0}
+.traffic-location-mobile-day .traffic-location-mobile-today{font-size:11px;width:auto;min-height:28px;padding:3px 12px}

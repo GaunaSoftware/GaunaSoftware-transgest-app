@@ -20,7 +20,6 @@ function normalizarTab(value) {
 
 export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
   const [tab, setTab] = useState(() => normalizarTab(initialTab));
-  const [showWeekly, setShowWeekly] = useState(false);
   const nuevoPedido=()=>{setRuntimeFocus("tms_pedidos_focus",{source:"gestion_trafico",view:tab,action:"nuevo"});window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"pedidos"}));};
 
   useEffect(() => {
@@ -71,7 +70,7 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
         ))}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {tab === "cuadrante" && <><TrafficLocationAgenda onNewOrder={nuevoPedido} /><section className="traffic-weekly-detail"><button type="button" aria-expanded={showWeekly} onClick={()=>setShowWeekly(value=>!value)}>{showWeekly?'Ocultar':'Abrir'} cuadrante semanal detallado</button>{showWeekly&&<GestionTrafico initialVista="cuadrante" hideInternalTabs onViewChange={setTab} />}</section></>}
+        {tab === "cuadrante" && <TrafficLocationAgenda onNewOrder={nuevoPedido} />}
         {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs onViewChange={setTab} />}
         {tab === "optimizacion" && <GestionTrafico initialVista="optimizacion" hideInternalTabs />}
       </div>

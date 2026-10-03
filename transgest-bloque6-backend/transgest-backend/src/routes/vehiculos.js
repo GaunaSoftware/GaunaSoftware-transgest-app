@@ -3,6 +3,7 @@ const express = require("express");
 const db = require("../services/db");
 const { authenticate, GERENTE_O_TRAFICO, requireRole } = require("../middleware/auth");
 const { resolveApiKey, recordApiUsage } = require("../services/apiKeys");
+const syncGpsForOpenView = require("../services/gpsSyncWindow").createGpsSyncWindow();
 
 const r1 = express.Router();
 r1.use(authenticate);
@@ -1554,18 +1555,24 @@ r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
         error: `Falta configurar la API de ${GPS_PROVIDERS[provider]} para esta empresa o como clave global.`,
       });
     }
-    let result = { updated: 0, received: 0, unmatched: 0 };
-    if (provider === "movildata") {
-      result = await syncMovildataPositions(empresaId, resolved.key);
-    } else if (provider === "geotab") {
-      result = await syncGeotabPositions(empresaId, resolved.key);
-    } else {
-      result = await syncWebhookOnlyProvider(empresaId, provider);
-    }
-    await recordApiUsage(empresaId, provider, 1).catch(() => {});
+    const collect = async () => {
+      const result = provider === "movildata"
+        ? await syncMovildataPositions(empresaId, resolved.key)
+        : provider === "geotab"
+        ? await syncGeotabPositions(empresaId, resolved.key)
+        : await syncWebhookOnlyProvider(empresaId, provider);
+      await recordApiUsage(empresaId, provider, 1).catch(() => {});
+      return result;
+    };
+    // Keep the existing role, module, active-provider and quota checks above.
+    // Ignore company IDs from the body; only the authenticated company is read.
+    const result = req.body.source === "locate"
+      ? await syncGpsForOpenView(empresaId, provider, collect)
+      : await collect();
     res.json({
         ok: true,
         provider,
+        cached: !!result.cached,
         updated: result.updated || 0,
         linked: result.linked || 0,
         received_vehicles: result.receivedVehicles || 0,

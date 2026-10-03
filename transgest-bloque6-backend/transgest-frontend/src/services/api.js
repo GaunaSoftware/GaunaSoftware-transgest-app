@@ -777,6 +777,9 @@ export const actualizarPosicionVehiculo = (id, data) => apiFetch(`/vehiculos/${i
 export const getPosicionesVehiculo = (id) => apiFetch(`/vehiculos/${id}/posiciones`);
 export const sincronizarPosicionesVehiculo = (id, data = {}) => apiFetch(`/vehiculos/${id}/posiciones/sync`, { method:"POST", body:data });
 export const sincronizarGpsVehiculos = (provider) => apiFetch("/vehiculos/gps/sync", { method:"POST", body:{ provider } });
+export const refreshFleetGps = (provider) => apiFetch("/vehiculos/gps/sync", {
+  method:"POST", body:{provider, source:"locate"}, silentSuccess:true, silentError:true, timeoutMs:45000,
+});
 
 // ── Choferes ──────────────────────────────────────────
 export const getChoferes    = (activo = "true") => apiFetch(`/choferes?activo=${encodeURIComponent(activo)}`);

@@ -110,7 +110,8 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
     fitRef.current = () => {
       if (!positions.length) return;
       const bounds = positions.reduce((result, point) => result.extend(point), new maplibregl.LngLatBounds(positions[0], positions[0]));
-      map.fitBounds(bounds, { padding: Math.min(55, map.getContainer().clientWidth / 6), maxZoom: 14, duration: 0 });
+      const padding=Math.min(55,map.getContainer().clientWidth/6);
+      map.fitBounds(bounds, { padding: fleet ? {top:padding,left:padding,right:padding,bottom:85} : padding, maxZoom: 14, duration: 0 });
     };
     const frameKey = JSON.stringify(positions);
     if (positions.length && (!stableFrame || !fittedRef.current)) {

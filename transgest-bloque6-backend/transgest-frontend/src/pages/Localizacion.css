@@ -2,3 +2,4 @@
 .tg-localizacion .tg-location-list{grid-auto-rows:max-content}
 .tg-localizacion .maplibregl-ctrl button{padding:0;background:transparent;border:0;border-radius:0;width:29px;height:29px}
 .tg-localizacion .maplibregl-popup-content{max-height:220px;overflow:auto;color:var(--text);font-size:12px;line-height:1.6}
+.tg-localizacion .maplibregl-ctrl-attrib{font-size:10px;line-height:16px}

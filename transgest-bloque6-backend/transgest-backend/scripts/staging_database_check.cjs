@@ -56,13 +56,20 @@ async function main() {
     const app = req('express')();
     app.use(req('express').json());
     app.use('/auth', auth);
+    app.use('/informes', req('./routes/informes'));
     server = app.listen(0, '127.0.0.1');
     await new Promise(resolve => server.on('listening', resolve));
     const response = await fetch(`http://127.0.0.1:${server.address().port}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'gerencia@example.invalid', password: process.env.STAGING_MANAGER_PASSWORD, codigo_empresa: 'TG-PRUEBAS' }) });
     const result = await response.json();
     assert.equal(response.status, 200, result.error);
     assert.ok(result.token);
-    console.log('OK: fresh isolated schema, startup migrations, idempotent private access and manager login. No SMTP/AI calls or production data.');
+    const summaryResponse = await fetch(`http://127.0.0.1:${server.address().port}/informes/bi/resumen?periodo=mes`, { headers: { Authorization: `Bearer ${result.token}` } });
+    const summary = await summaryResponse.json();
+    assert.equal(summaryResponse.status, 200, summary.error);
+    assert.equal(summary.kpis.realizados, 0);
+    assert.equal(summary.kpis.facturado, 0);
+    assert.equal(summary.kpis.paralizacion, 0);
+    console.log('OK: fresh isolated schema, startup migrations, idempotent private access, manager login and real BI summary SQL on a fresh database. No SMTP/AI calls or production data.');
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
     await pg.close();

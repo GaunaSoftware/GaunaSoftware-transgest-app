@@ -595,6 +595,17 @@ export const interpretarPedidoIA = (data) =>
 export const getAiInboxRuns = (limit = 30) =>
   apiFetch(`/pedidos/ai-inbox/runs?limit=${encodeURIComponent(limit)}`, { silentSuccess:true });
 export const getOrderInbox = ({page=1,state='',summary=false}={}) => apiFetch(`/pedidos/ai-inbox/entries?page=${page}&state=${encodeURIComponent(state)}${summary?'&summary=true':''}`,{silentSuccess:true});
+export const getOrderInboxEntry = id => apiFetch(`/pedidos/ai-inbox/entries/${encodeURIComponent(id)}`,{silentSuccess:true});
+// Read an existing protected attachment for the inbox's plain-text original view.
+export async function readOrderInboxOriginal(id,index){
+  const token=getToken(),path=`/pedidos/ai-inbox/entries/${encodeURIComponent(id)}/attachments/${index}`;
+  const response=await fetch(apiUrl(path),{headers:token?{Authorization:`Bearer ${token}`}:{},signal:AbortSignal.timeout(20000)});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el correo.');
+  if(!response.ok){const data=await parseApiResponse(response);throw new Error(friendlyApiError(data.error||`Error ${response.status}`,response.status,extractRequestId(response,data),path));}
+  const text=await response.text();
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el correo.');
+  return text;
+}
 export const changeOrderInboxState = (id,body) => apiFetch(`/pedidos/ai-inbox/entries/${id}`,{method:'PATCH',body,silentSuccess:true});
 export const getAiInboxStatus = () =>
   apiFetch("/pedidos/ai-inbox/status", { silentSuccess:true });

@@ -1,12 +1,17 @@
 // Display-only summaries. The complete locations and planning remain on the order.
+import {displayOrderLocation} from '../../utils/orderTown';
 const text=value=>String(value||'').trim();
 const points=value=>{try{const rows=Array.isArray(value)?value:JSON.parse(value||'[]');return Array.isArray(rows)?rows:[];}catch{return [];}};
 const short=value=>{const label=text(value);return label.length>40?`${label.slice(0,37).trimEnd()}…`:label;};
+const location=(order,kind)=>{
+ const verified=displayOrderLocation(order,kind),first=points(kind==='carga'?order.puntos_carga:order.puntos_descarga)[0]||{};
+ // Keep the saved spelling after the shared helper has validated the location.
+ return text([first.poblacion,first.ciudad,first.city,first.localidad,first.municipio].find(value=>text(value).toUpperCase()===verified.toUpperCase()))||verified;
+};
 
 export function trafficRouteSummary(order){
- const load=points(order.puntos_carga)[0]||{},unload=points(order.puntos_descarga)[0]||{};
- const origin=short(load.ciudad||load.poblacion||load.localidad||order.origen||'Origen pendiente');
- const destination=short(unload.ciudad||unload.poblacion||unload.localidad||order.destino||'Destino pendiente');
+ const origin=short(location(order,'carga'));
+ const destination=short(location(order,'descarga'));
  return {origin,destination,label:`${origin} → ${destination}`,full:`${order.origen||'Origen pendiente'} → ${order.destino||'Destino pendiente'}`};
 }
 

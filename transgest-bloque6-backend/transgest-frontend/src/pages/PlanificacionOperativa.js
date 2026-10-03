@@ -1,4 +1,4 @@
-import { PageHeader } from "../ui";
+import { PageHeader, Tabs } from "../ui";
 import { setRuntimeFocus } from "../services/runtimeFocus";
 import "./traffic/traffic.css";
 import { useEffect, useState } from "react";
@@ -36,44 +36,15 @@ export default function PlanificacionOperativa({ initialTab = "cuadrante" }) {
       color: "var(--text)",
       fontFamily: "'DM Sans',sans-serif",
     }}>
+      <section className="traffic-shell-surface">
+      <div className="traffic-module-tabs"><Tabs idPrefix="traffic-module" label="Secciones de Mesa de tráfico" items={TABS.map(item=>({value:item.id,label:item.label}))} value={tab} onChange={setTab}/></div>
       {tab!=="cuadrante"&&<header className="traffic-shell-heading"><PageHeader title="Mesa de tráfico" description="Planifica, asigna y controla tus viajes en tiempo real."/><button onClick={nuevoPedido}>+ Nuevo pedido</button></header>}
-      <div className="tg-planificacion-tabs" style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "10px 16px",
-        borderBottom: "1px solid var(--border)",
-        background: "var(--bg2)",
-        overflowX: "auto",
-        flexShrink: 0,
-      }}>
-        {TABS.map(item => (
-          <button
-            key={item.id}
-            type="button"
-            aria-pressed={tab===item.id}
-            onClick={() => setTab(item.id)}
-            style={{
-              flex: "0 0 auto",
-              padding: "8px 14px",
-              borderRadius: 8,
-              border: tab === item.id ? "1px solid var(--accent)" : "1px solid var(--border)",
-              background: tab === item.id ? "var(--accent)" : "var(--bg4)",
-              color: tab === item.id ? "#fff" : "var(--text4)",
-              fontWeight: 800,
-              fontSize: 12,
-              cursor: "pointer",
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div id="traffic-module-panel" role="tabpanel" aria-labelledby={`traffic-module-${tab}`} className="traffic-shell-panel">
         {tab === "cuadrante" && <TrafficLocationAgenda onNewOrder={nuevoPedido} />}
         {tab === "grupajes" && <GestionTrafico initialVista="grupajes" hideInternalTabs onViewChange={setTab} />}
         {tab === "optimizacion" && <GestionTrafico initialVista="optimizacion" hideInternalTabs />}
       </div>
+      </section>
     </div>
   );
 }

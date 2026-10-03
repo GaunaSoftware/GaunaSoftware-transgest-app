@@ -86,6 +86,25 @@
   background: var(--sa-panel-soft); color: var(--sa-text-soft); font: 800 11px/1 "DM Sans", sans-serif; cursor: pointer;
 }
 .sa-action-primary { background: var(--sa-accent); border-color: var(--sa-accent); color: #fff; }
+.sa-claveicon-summary { margin-top: 16px; color: var(--sa-text); }
+.sa-claveicon-summary summary { cursor: pointer; font-weight: 700; }
+.sa-claveicon-summary dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; margin-block: 12px; }
+.sa-claveicon-summary dt { color: var(--sa-muted); font-size: 12px; }
+.sa-claveicon-summary dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.sa-claveicon-summary form { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 12px; }
+.sa-claveicon-summary label { display: grid; gap: 5px; font-size: 12px; }
+.sa-claveicon-code { flex: 1 1 160px; }
+.sa-claveicon-key { flex: 2 1 280px; }
+.sa-claveicon-summary input { width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--sa-border-strong); background: var(--sa-input); color: var(--sa-text); font: inherit; }
+.sa-claveicon-summary .sa-action { min-height: 44px; }
+.sa-claveicon-summary .sa-action:disabled { opacity: .6; cursor: not-allowed; }
+.sa-claveicon-summary p { margin-top: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.sa-claveicon-help { color: var(--sa-muted); font-size: 12px; }
+.sa-claveicon-help a { color: var(--sa-accent); }
+.sa-claveicon-error { color: #fca5a5; }
+.sa-claveicon-message { color: #5eead4; }
+.sa-theme-light .sa-claveicon-error { color: #b91c1c; }
+.sa-theme-light .sa-claveicon-message { color: #047857; }
 .sa-action-demo { background: rgba(16,185,129,.10); border-color: rgba(16,185,129,.25); color: #34d399; }
 .sa-action-danger { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.20); color: #f87171; }
 .sa-content { width: 100%; max-width: 1500px; margin: 0 auto; padding: 22px 24px 40px; }
@@ -234,6 +253,7 @@
 .sa-connection-context p { flex: 1 1 240px; margin: 0; color: var(--sa-muted); font-size: 12px; line-height: 1.6; }
 .sa-connection-context .sa-segmented { margin: 0; }
 .sa-connection-context select { margin: 0 !important; }
+.sa-gps-only>div[style*="grid-template-columns"]{align-items:start!important}.sa-gps-only label{display:block;margin-bottom:4px}.sa-gps-only :is(input,select){box-sizing:border-box;max-width:100%}.sa-gps-only>div[style*="grid-template-columns"]>div{min-width:0}.sa-geotab-credentials{grid-column:1/-1;min-width:0;padding:14px;border:1px solid var(--sa-border);border-radius:8px;background:var(--sa-panel)}.sa-geotab-credentials h4{margin:0 0 8px}.sa-geotab-credentials :is(p,small){font-size:12px;line-height:1.5;color:var(--sa-muted);overflow-wrap:anywhere}.sa-geotab-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}.sa-geotab-fields label{display:grid;gap:5px;font-size:12px;color:var(--sa-text)}.sa-geotab-import{margin:12px 0;display:grid!important;gap:6px;font-size:12px}.sa-geotab-import input{width:100%}.sa-geotab-credentials [role=alert]{color:var(--sa-danger,#b91c1c)}
 .sa-connection-cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,170px),1fr)); gap: 12px; margin-bottom: 20px; }
 .sa-connection-cards button { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 156px; padding: 18px; border: 1px solid var(--sa-border); border-radius: 10px; text-align: left; background: var(--sa-panel-soft); color: var(--sa-text); font: inherit; cursor: pointer; }
 .sa-connection-cards button:hover { border-color: var(--sa-accent); background: var(--sa-accent-soft); }

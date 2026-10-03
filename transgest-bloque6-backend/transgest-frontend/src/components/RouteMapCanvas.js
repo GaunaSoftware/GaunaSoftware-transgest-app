@@ -70,7 +70,7 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
       if (!map.getSource('fleet-vehicles')) {
         map.addSource('fleet-vehicles', { type:'geojson', data:markers, cluster:true, clusterRadius:35, clusterMaxZoom:16 });
         map.addLayer({id:'fleet-clusters',type:'circle',source:'fleet-vehicles',filter:['has','point_count'],paint:{'circle-color':'#0f766e','circle-radius':16,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
-        map.addLayer({id:'fleet-cluster-count',type:'symbol',source:'fleet-vehicles',filter:['has','point_count'],layout:{'text-field':['get','point_count_abbreviated'],'text-size':12},paint:{'text-color':'#fff'}});
+        map.addLayer({id:'fleet-cluster-count',type:'symbol',source:'fleet-vehicles',filter:['has','point_count'],layout:{'text-field':['to-string',['get','point_count_abbreviated']],'text-size':12,'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff'}});
         map.addLayer({id:'fleet-vehicle-pins',type:'circle',source:'fleet-vehicles',filter:['!', ['has','point_count']],paint:{'circle-color':['get','color'],'circle-radius':7,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
         map.addLayer({id:'fleet-vehicle-labels',type:'symbol',source:'fleet-vehicles',filter:['!', ['has','point_count']],layout:{'text-field':['get','number'],'text-size':11,'text-offset':[0,1.5],'text-anchor':'top'},paint:{'text-color':'#163438','text-halo-color':'#fff','text-halo-width':2}});
       } else map.getSource('fleet-vehicles').setData(markers);

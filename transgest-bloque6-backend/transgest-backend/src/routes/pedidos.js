@@ -10356,6 +10356,16 @@ async function getCartaPorte(req, res) {
 router.get("/:id/carta-porte", getCartaPorte);
 
 // GPS and tracking retain the existing company/driver authorization boundary.
+router.get('/:id/telemetry',async(req,res)=>{
+  try{const company=await authorizeTransportDocument(req,res);if(!company)return;
+    res.setHeader('Cache-Control','private, no-store');
+    res.json({...await require('../services/tripTelemetry').read(db,company,req.params.id),can_request:['gerente','trafico'].includes(req.user.rol)});
+  }catch(error){res.status(error.status||500).json({error:'No se pudo consultar el resumen GPS del viaje.'});}
+});
+router.post('/:id/telemetry',GERENTE_O_TRAFICO,async(req,res)=>{
+  try{res.status(202).json(await require('../services/tripTelemetry').request(db,req.empresaId||req.user.empresa_id,req.params.id));}
+  catch(error){res.status(error.status||500).json({error:error.status?error.message:'No se pudo solicitar el resumen GPS del viaje.'});}
+});
 router.get('/:id/tracking',async(req,res)=>{
   try {const empresaId=await authorizeTransportDocument(req,res);if(!empresaId)return;
     const order=(await db.query('SELECT * FROM pedidos WHERE empresa_id=$1 AND id=$2',[empresaId,req.params.id])).rows[0];

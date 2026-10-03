@@ -2,6 +2,7 @@ import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import VehicleTrackingPanel from './VehicleTrackingPanel';
 import {getPedidoTracking} from '../services/api';
+jest.mock('./TripTelemetryPanel',()=>()=>null);
 jest.mock('../services/api',()=>({getPedidoTracking:jest.fn(),calcularPedidoEta:jest.fn(),guardarPedidoTrackingConfig:jest.fn()}));
 test('tracking removes a stale marker, keeps API errors visible and ignores a previous order response',async()=>{
  global.IS_REACT_ACT_ENVIRONMENT=true;jest.useFakeTimers();

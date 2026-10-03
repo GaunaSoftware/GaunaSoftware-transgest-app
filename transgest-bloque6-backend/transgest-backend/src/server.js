@@ -1480,6 +1480,7 @@ async function startServer() {
     try { require('./services/mobilePush').startScheduler(); } catch { logger.warn('Notificaciones móviles sin iniciar'); }
     try { require('./services/orderMailbox').startScheduler(); } catch { logger.warn('Recepción de pedidos por correo sin iniciar'); }
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
+    try { require('./services/tripTelemetry').startScheduler(); } catch(e) {logger.warn('Resúmenes GPS: '+e.message);}
     require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
     require('./services/importDocuments').createImportDocuments().resume().catch(e => logger.warn('Documentos pendientes: ' + e.message));
     const documentStorage = new (require('./services/DocumentStorageProvider').DatabaseDocumentStorageProvider)();

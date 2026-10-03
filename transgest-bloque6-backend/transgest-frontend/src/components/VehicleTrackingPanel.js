@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {Button} from '../ui';
 import {getPedidoTracking,getPortalPedidoTracking,calcularPedidoEta,guardarPedidoTrackingConfig} from '../services/api';
+import TripTelemetryPanel from './TripTelemetryPanel';
 
 export default function VehicleTrackingPanel({pedidoId,onPosition,onArrival,customer=false}){
  const [state,setState]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[clock,setClock]=useState(Date.now());
@@ -30,5 +31,6 @@ export default function VehicleTrackingPanel({pedidoId,onPosition,onArrival,cust
     {stop&&<><label>Radio (m)<input name="radius" type="number" min="30" max="3000" defaultValue={stop.radius_m} required/></label><label>Histéresis de salida (m)<input name="hysteresis" type="number" min="10" max="1000" defaultValue={stop.hysteresis_m} required/></label></>}
     <Button type="submit" disabled={busy}>Guardar umbrales</Button></form></details>}
   </>}
+  {!customer&&state?.status==='finalizado'&&<TripTelemetryPanel pedidoId={pedidoId}/>}
  </section>;
 }

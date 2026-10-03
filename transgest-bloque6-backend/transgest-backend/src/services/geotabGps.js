@@ -57,7 +57,50 @@ async function snapshot(secret, transport = fetch) {
   ]);
   if (!Array.isArray(devices) || !Array.isArray(statuses)) throw Object.assign(Error('Geotab devolvió datos de vehículos no válidos.'),{status:502});
   if (devices.length >= 5000 || statuses.length >= 5000) throw Object.assign(Error('La flota supera el límite de una consulta Geotab; se necesita paginación antes de sincronizar.'),{status:422});
-  return {devices,statuses};
+  const ids=[...new Set(statuses.flatMap(s=>(s.statusData||[]).map(r=>String(r.diagnostic?.id||r.diagnostic||''))).filter(Boolean))];
+  let diagnostics=[],telemetryError=null;
+  if(ids.length>500)telemetryError='La flota tiene más sensores de los que admite una consulta de metadatos.';
+  if(ids.length && ids.length<=500)try {
+    diagnostics=await call(host,'Get',{typeName:'Diagnostic',search:{ids},resultsLimit:501,credentials:deviceCredentials},transport);
+    if(!Array.isArray(diagnostics)||diagnostics.length>500)throw Error('Metadatos de sensores incompletos.');
+  }catch(error){diagnostics=[];telemetryError='No se pudieron consultar los metadatos de los sensores Geotab.';}
+  return {devices,statuses,diagnostics,telemetryError};
+}
+
+// Date-bounded reads are used for a single assigned vehicle. Never sum an entire
+// Geotab Trip which merely overlaps the commercial order's time interval.
+async function history(secret,externalId,from,to,transport=fetch,beforeCall=async()=>{},options={}) {
+  const start=Date.parse(from),end=Date.parse(to);
+  if(!externalId||!Number.isFinite(start)||!Number.isFinite(end)||start>=end||end-start>31*86400000||end>Date.now()+60000)
+    throw Object.assign(Error('El historial necesita un vehículo y un período real de hasta 31 días.'),{status:422});
+  async function request(host,method,params){await beforeCall();return call(host,method,params,transport);}
+  const auth=await request(HOST,'Authenticate',credentials(secret));
+  if(!auth?.credentials?.sessionId)throw Object.assign(Error('Geotab no devolvió una sesión válida.'),{status:502});
+  const host=safeHost(auth.path),session=auth.credentials;let requests=0;
+  async function range(typeName,search,a,b) {
+    if(++requests>100)throw Object.assign(Error('Historial demasiado extenso; no se ha guardado un recorrido parcial.'),{status:422});
+    const rows=await request(host,'Get',{typeName,search:{...search,deviceSearch:{id:externalId},fromDate:new Date(a).toISOString(),toDate:new Date(b).toISOString()},resultsLimit:5000,credentials:session});
+    if(!Array.isArray(rows))throw Error('Geotab devolvió un historial inválido.');
+    if(rows.length>=5000){if(b-a<=1000)throw Error('Historial saturado; no se ha truncado.');const mid=Math.floor((a+b)/2);return [...await range(typeName,search,a,mid),...await range(typeName,search,mid,b)];}
+    return rows.filter(r=>String(r.device?.id||r.device||'')===String(externalId));
+  }
+  const current=await request(host,'Get',{typeName:'DeviceStatusInfo',search:{deviceSearch:{id:externalId}},resultsLimit:2,credentials:session});
+  if(!Array.isArray(current))throw Error('Geotab devolvió sensores de vehículo inválidos.');
+  const ids=[...new Set(['DiagnosticOdometerId','DiagnosticTotalFuelUsedId',...current.flatMap(s=>(s.statusData||[]).map(r=>String(r.diagnostic?.id||r.diagnostic||''))).filter(Boolean)])];
+  if(ids.length>500)throw Error('Demasiados sensores para consultar el historial.');
+  const diagnostics=await request(host,'Get',{typeName:'Diagnostic',search:{ids},resultsLimit:501,credentials:session});
+  if(!Array.isArray(diagnostics)||diagnostics.length>=501)throw Error('Metadatos de sensores inválidos.');
+  const telemetry=require('./vehicleTelemetry');
+  const relevant=ids.map(id=>diagnostics.find(d=>d.id===id)||{id}).filter(d=>{
+    const metric=telemetry.classify(d)?.metric;return metric&&(!options.metrics||options.metrics.includes(metric));
+  });
+  const positions=options.includePositions===false?[]:await range('LogRecord',{},start,end),samples=[],warnings=[];
+  for(const diagnostic of relevant)try{
+    const readings=await range('StatusData',{diagnosticSearch:{id:diagnostic.id}},start,end);
+    samples.push(...telemetry.geotabSamples([{device:{id:externalId},statusData:readings}],[diagnostic],Date.now(),true));
+  }catch(error){warnings.push(`Sin historial de ${diagnostic.name||diagnostic.id}.`);}
+  const unique=new Map(positions.filter(p=>p.id).map(p=>[p.id,p]));
+  return {positions:[...unique.values()].sort((a,b)=>Date.parse(a.dateTime)-Date.parse(b.dateTime)),samples,warnings,requests:requests+3};
 }
 
 function plate(value) { return String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,''); }
@@ -95,4 +138,4 @@ function positions(snapshotData, vehicles) {
   return {positions:output,unmatched};
 }
 
-module.exports={credentials,safeHost,call,snapshot,positions};
+module.exports={credentials,safeHost,call,snapshot,positions,history};

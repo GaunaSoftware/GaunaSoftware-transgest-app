@@ -1,0 +1,6 @@
+.tg-trip-telemetry { border:1px solid var(--border); border-radius:12px; padding:14px; margin-top:12px; color:var(--text); min-width:0; overflow-wrap:anywhere; }
+.tg-trip-telemetry > summary { font-weight:700; cursor:pointer; }
+.tg-trip-telemetry-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); gap:10px; }
+.tg-trip-telemetry-metrics > p { margin:0; padding:12px; border:1px solid var(--border); background:var(--bg3); border-radius:10px; line-height:1.6; }
+.tg-trip-telemetry small { color:var(--text3); }
+.tg-trip-telemetry .tgui-button { max-width:100%; white-space:normal; }

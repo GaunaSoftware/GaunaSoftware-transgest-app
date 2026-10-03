@@ -63,6 +63,11 @@ async function record(db,{empresaId,vehiculoId,provider,input,externalId,raw={},
   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))',[`${empresaId}:gps:${vehiculoId}`]);
   const vehicle=(await tx.query('SELECT id,gps_provider FROM vehiculos WHERE empresa_id=$1 AND id=$2 FOR UPDATE',[empresaId,vehiculoId])).rows[0];
   if(!vehicle)fail('Vehículo no encontrado','VEHICLE_NOT_FOUND',404);
+  if(GPS_PROVIDERS.includes(provider)){
+   const telemetry=require('./vehicleTelemetry'),samples=telemetry.providerSamples(input);
+   if(samples.length&&(await tx.query("SELECT to_regclass('public.vehicle_telemetry_log') AS name")).rows[0]?.name)
+    await telemetry.store(tx,{empresaId,vehiculoId,provider,externalId,samples});
+  }
   const row=(await tx.query(`INSERT INTO gps_position_log(empresa_id,vehiculo_id,provider,external_id,lat,lng,velocidad_kmh,odometro_km,raw,recorded_at,ingestion_key)
    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(empresa_id,ingestion_key) WHERE ingestion_key IS NOT NULL DO NOTHING RETURNING id`,[empresaId,vehiculoId,provider,externalId||null,p.lat,p.lng,p.velocidad_kmh,p.odometro_km,JSON.stringify({...raw,accuracy_m:p.accuracy_m,heading:p.heading,timestamp_source:p.timestamp_source}),p.recorded_at,key])).rows[0];
   if(!row)return {ok:true,idempotent:true};
@@ -70,7 +75,8 @@ async function record(db,{empresaId,vehiculoId,provider,input,externalId,raw={},
   // vehicle position and drives operational geofence observations.
   const selected=provider===positionSource(vehicle)||(provider==='manual'&&!assignedGps(vehicle));
   if(!selected)return {ok:true,id:row.id,idempotent:false,recorded_at:p.recorded_at,selected_source:false};
-  await tx.query(`UPDATE vehiculos SET ubicacion_actual=$3,ubicacion_fuente=$4,ubicacion_ts=$5,gps_lat=$6,gps_lng=$7,km_actuales=COALESCE($8,km_actuales)
+  await tx.query(`UPDATE vehiculos SET ubicacion_actual=$3,ubicacion_fuente=$4,ubicacion_ts=$5,gps_lat=$6,gps_lng=$7,
+   km_actuales=CASE WHEN $8::numeric IS NOT NULL AND (km_actuales IS NULL OR $8>=km_actuales) THEN $8 ELSE km_actuales END
    WHERE empresa_id=$1 AND id=$2 AND (ubicacion_fuente IS DISTINCT FROM $4 OR ubicacion_ts IS NULL OR ubicacion_ts<=$5::timestamptz)`,[empresaId,vehiculoId,`${p.lat}, ${p.lng}`,provider,p.recorded_at,p.lat,p.lng,p.odometro_km]);
   await evaluateGeofences(tx,empresaId,vehiculoId,{...p,provider},row.id);
   return {ok:true,id:row.id,idempotent:false,recorded_at:p.recorded_at};

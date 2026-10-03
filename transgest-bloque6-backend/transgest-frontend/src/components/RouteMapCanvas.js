@@ -14,7 +14,7 @@ const style = key
   : "https://tiles.openfreemap.org/styles/liberty";
 const empty = { type: "FeatureCollection", features: [] };
 
-export default function RouteMapCanvas({ points = [], geometry = [], vehicle, stableFrame = false, compact = false, fleet = false }) {
+export default function RouteMapCanvas({ points = [], geometry = [], segments = [], vehicle, stableFrame = false, compact = false, fleet = false }) {
   const container = useRef(null);
   const mapRef = useRef(null);
   const fitRef = useRef(() => {});
@@ -50,7 +50,9 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
     const map = mapRef.current;
     if (!loaded || !map) return;
     const line = geometry.map(point => [point.lng, point.lat]);
-    const route = line.length >= 2 ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } } : empty;
+    const parts=segments.filter(s=>s.length>=2).map(s=>s.map(p=>[p.lng,p.lat]));
+    const route = parts.length ? {type:'Feature',properties:{},geometry:{type:'MultiLineString',coordinates:parts}}
+      : line.length >= 2 ? { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: line } } : empty;
     const markers = { type: "FeatureCollection", features: points.map((point, index) => ({
       type: "Feature", properties: {
         number: String(point.stopNumber || index + 1), label: `${point.label || "Parada"}${point.tone?.label ? ` · ${point.tone.label}` : ""}`,
@@ -106,7 +108,7 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
         .setPopup(new maplibregl.Popup({ offset: 20 }).setText(feature.properties.label))
         .addTo(map);
     });
-    const positions = [...line, ...markers.features.map(feature => feature.geometry.coordinates)];
+    const positions = [...line,...parts.flat(), ...markers.features.map(feature => feature.geometry.coordinates)];
     fitRef.current = () => {
       if (!positions.length) return;
       const bounds = positions.reduce((result, point) => result.extend(point), new maplibregl.LngLatBounds(positions[0], positions[0]));
@@ -120,7 +122,7 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
       if (line.length >= 2 || !stableFrame) fittedRef.current = frameKey;
     }
     return () => {stopMarkers.forEach(marker => marker.remove());removeFleetListeners();};
-  }, [loaded, points, geometry, vehicle, stableFrame, fleet]);
+  }, [loaded, points, geometry, segments, vehicle, stableFrame, fleet]);
 
   return (
     <div data-map-engine="maplibre">

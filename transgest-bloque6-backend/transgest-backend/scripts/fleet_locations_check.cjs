@@ -42,6 +42,7 @@ const originalAuth = auth.authenticate, originalQuery = db.query, originalTransa
       CREATE TABLE vehiculos(id uuid, empresa_id uuid, matricula text, estado text,
         gps_provider text, activo boolean, clase text, tipo text, chofer_id uuid);
       CREATE TABLE choferes(id uuid, empresa_id uuid, nombre text, apellidos text);
+      ALTER TABLE vehiculos ADD COLUMN gps_external_id text;
       CREATE TABLE gps_position_log(id uuid, empresa_id uuid, vehiculo_id uuid, provider text,
         lat numeric, lng numeric, velocidad_kmh numeric, recorded_at timestamptz, raw jsonb);
     `);

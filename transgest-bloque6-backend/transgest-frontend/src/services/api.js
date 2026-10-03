@@ -516,6 +516,8 @@ export async function getPedidosResumenLista(params = {}, options = {}) {
   }
 }
 export const getPedido      = (id)        => apiFetch(`/pedidos/${id}`);
+export const getPedidoTelemetry = id => apiFetch(`/pedidos/${id}/telemetry`,{silentSuccess:true});
+export const requestPedidoTelemetry = id => apiFetch(`/pedidos/${id}/telemetry`,{method:'POST',silentSuccess:true});
 export const verificarOrdenColaborador = id => apiFetch(`/pedidos/${id}/orden-colaborador`);
 export const getProduct = () => apiFetch('/producto');
 export const plannerLoadingApi = (path="",options={}) => apiFetch(`/planner-loading${path}`,options);

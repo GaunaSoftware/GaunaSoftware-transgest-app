@@ -1,6 +1,7 @@
 import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import TrafficLocationAgenda from './TrafficLocationAgenda';
+import {localDate,addDays} from './useTrafficDateWindow';
 import {getEmpresaConfig,getPedidosResumenLista,getPlanDiario,editarPedido} from '../../services/api';
 
 jest.mock('../../context/AuthContext',()=>({useAuth:()=>({puedeEditar:()=>true})}));
@@ -8,7 +9,7 @@ jest.mock('../../services/api',()=>({
  getEmpresaConfig:jest.fn(),getPedidosResumenLista:jest.fn(),getPlanDiario:jest.fn(),editarPedido:jest.fn(),
 }));
 
-const day=()=>{const now=new Date();now.setDate(now.getDate()-(now.getDay()+6)%7);return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;};
+const day=()=>localDate();
 
 test('traffic board keeps own fleet first, groups pending loads, and folds rows and side panel',async()=>{
  global.IS_REACT_ACT_ENVIRONMENT=true;
@@ -39,7 +40,7 @@ test('traffic board keeps own fleet first, groups pending loads, and folds rows 
   const vehicleHeader=host.querySelector('tr:not(.traffic-location-group) th[scope="row"]');
   await act(async()=>vehicleHeader.dispatchEvent(new MouseEvent('dblclick',{bubbles:true})));
   expect(vehicleHeader.closest('tr').classList.contains('traffic-location-row-collapsed')).toBe(true);
-  expect(vehicleHeader.closest('tr').querySelector('td[colspan="7"]').textContent).toContain('1 viaje en la semana visible');
+  expect(vehicleHeader.closest('tr').querySelector('td[colspan="7"]').textContent).toContain('1 viaje en el período visible');
   const fold=host.querySelector('[aria-label="Plegar cargas pendientes"]');
   await act(async()=>fold.click());
   expect(host.querySelector('#plan-pendientes').hidden).toBe(true);
@@ -51,7 +52,9 @@ test('traffic board keeps own fleet first, groups pending loads, and folds rows 
   expect(previousDay.disabled).toBe(false);
   await act(async()=>nextDay.click());
   expect(previousDay.disabled).toBe(false);
-  expect(host.querySelector('thead th.traffic-mobile-selected').textContent).toContain('mar');
+  expect(host.querySelector('[aria-label="Primer día a consultar"]').value).toBe(addDays(date,1));
+  await act(async()=>host.querySelector('.traffic-location-week-controls button:last-child').click());
+  expect(host.querySelector('[aria-label="Primer día a consultar"]').value).toBe(date);
  }finally{await act(async()=>root.unmount());host.remove();localStorage.removeItem('tg_traffic_pending_collapsed');}
 });
 

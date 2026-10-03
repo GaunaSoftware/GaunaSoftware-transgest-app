@@ -1,3 +1,4 @@
+const { supplierLedgerSummary } = require("../services/supplierLedgerSummary");
 const { cacheMiddleware } = require("../services/cache");
 // src/routes/colaboradores.js
 const express = require("express");
@@ -244,13 +245,7 @@ function situacionFacturaProveedor(f = {}) {
 }
 
 function resumenPagosProveedor(viajes = [], facturas = [], pagos = []) {
-  const totalViajes = viajes.reduce((s, p) => s + Number(p.importe_colaborador || p.precio_colaborador || 0), 0);
-  const totalFacturado = facturas.reduce((s, f) => s + Number(f.total || 0), 0);
-  const totalPagado = pagos
-    .filter(p => ["pagado", "pagada"].includes(String(p.estado || "").toLowerCase()))
-    .reduce((s, p) => s + Number(p.importe || 0), 0);
-  const pendienteFactura = Math.max(0, totalViajes - totalFacturado);
-  const pendientePago = Math.max(0, totalFacturado - totalPagado);
+  const {totalViajes,totalFacturado,totalPagado,pendienteFactura,pendientePago,received} = supplierLedgerSummary(viajes,facturas,pagos);
   return {
     total_viajes: totalViajes,
     total_facturado: totalFacturado,
@@ -258,7 +253,7 @@ function resumenPagosProveedor(viajes = [], facturas = [], pagos = []) {
     pendiente_factura: pendienteFactura,
     pendiente_pago: pendientePago,
     pagos_registrados: pagos.length,
-    facturas_recibidas: facturas.length,
+    facturas_recibidas: received.length,
     estado: pendientePago > 0 ? "pendiente_pago" : pendienteFactura > 0 ? "pendiente_factura" : "al_dia",
   };
 }
@@ -642,11 +637,7 @@ function isQaRequest(req) {
 }
 
 function renderLiquidacionColaboradorHtml({ colaborador, viajes, facturas, pagos, documentos = [], vehiculos = [], token = "" }) {
-  const totalViajes = viajes.reduce((s, p) => s + Number(p.importe_colaborador || p.precio_colaborador || 0), 0);
-  const totalFacturado = facturas.reduce((s, f) => s + Number(f.total || 0), 0);
-  const totalPagado = pagos.filter(p => String(p.estado || "") === "pagado").reduce((s, p) => s + Number(p.importe || 0), 0);
-  const pendienteFactura = Math.max(0, totalViajes - totalFacturado);
-  const pendientePago = Math.max(0, totalFacturado - totalPagado);
+  const {totalViajes,totalFacturado,totalPagado,pendienteFactura,pendientePago} = supplierLedgerSummary(viajes,facturas,pagos);
   const estadoProveedor = estadoFacturasProveedor(facturas);
   const pagosResumen = resumenPagosProveedor(viajes, facturas, pagos);
   const documentosResumen = resumenDocumentosProveedor(documentos);
@@ -787,6 +778,7 @@ function renderLiquidacionColaboradorHtml({ colaborador, viajes, facturas, pagos
       ${token ? `<a class="download" href="/api/v1/colaboradores/public/liquidacion/${htmlEscape(token)}/descargar">Descargar informe HTML</a>
       <a class="download" style="background:#334155;margin-left:8px" href="/api/v1/colaboradores/public/portal/${htmlEscape(token)}/informe-acciones">Informe de acciones</a>
       <a class="download" style="background:#0f766e;margin-left:8px" href="/api/v1/colaboradores/public/portal/${htmlEscape(token)}/operativa">Modo conductor</a>` : ""}
+      ${colaborador.notas ? `<h2>Observaciones del colaborador</h2><div class="hint">${htmlEscape(colaborador.notas).replace(/\n/g,"<br>")}</div>` : ""}
       <h2>Portal proveedor</h2>
       <div class="warn">
         Puedes revisar tus viajes, confirmar la liquidacion y subir albaranes firmados por viaje. Para subir una factura primero debe existir albaran, POD o CMR del viaje; asi administracion recibe la factura con soporte documental.
@@ -1338,7 +1330,7 @@ async function getLiquidacionPublicData(tokenValue) {
     pedidoScopeId ? Promise.resolve({ rows: [] }) : db.query(
       `SELECT cf.*, p.numero, p.referencia_cliente
            FROM colaborador_facturas cf
-           LEFT JOIN pedidos p ON p.id=cf.pedido_id
+           LEFT JOIN pedidos p ON p.id=cf.pedido_id AND p.empresa_id=cf.empresa_id
           WHERE cf.empresa_id=$1 AND cf.colaborador_id=$2
             AND ($3::uuid IS NULL OR cf.pedido_id=$3)
           ORDER BY cf.fecha DESC, cf.created_at DESC
@@ -3140,7 +3132,7 @@ router.get("/:id/facturas", async (req,res)=>{
     const { rows } = await db.query(
       `SELECT cf.*, p.numero, p.referencia_cliente, p.fecha_carga, p.fecha_descarga
          FROM colaborador_facturas cf
-         LEFT JOIN pedidos p ON p.id=cf.pedido_id
+         LEFT JOIN pedidos p ON p.id=cf.pedido_id AND p.empresa_id=cf.empresa_id
         WHERE ${where.join(" AND ")}
         ORDER BY cf.fecha DESC, cf.created_at DESC
         LIMIT 500`,
@@ -3160,7 +3152,7 @@ router.post("/:id/facturas", GERENTE_O_TRAFICO, async (req,res)=>{
       base, iva_pct, iva_regimen, total, estado, archivo_base64, archivo_mime, notas,
     } = req.body || {};
     const colaborador = await db.query(
-      "SELECT id, tipo_iva, iva_regimen FROM colaboradores WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, tipo_iva, iva_regimen, notas FROM colaboradores WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     if (!colaborador.rows[0]) return res.status(404).json({ error: "Colaborador no encontrado" });
@@ -3228,7 +3220,7 @@ router.post("/:id/facturas", GERENTE_O_TRAFICO, async (req,res)=>{
         estado || "pendiente",
         archivo_base64 || null,
         archivo_mime || null,
-        notas || null,
+        notas || colaborador.rows[0].notas || null,
         req.user?.id || null,
       ]
     );
@@ -3247,7 +3239,7 @@ router.put("/:id/facturas/:facturaId", GERENTE_O_TRAFICO, async (req,res)=>{
     } = req.body || {};
 
     const colaborador = await db.query(
-      "SELECT id, tipo_iva, iva_regimen FROM colaboradores WHERE id=$1 AND empresa_id=$2",
+      "SELECT id, tipo_iva, iva_regimen, notas FROM colaboradores WHERE id=$1 AND empresa_id=$2",
       [req.params.id, empresaId]
     );
     if (!colaborador.rows[0]) return res.status(404).json({ error: "Colaborador no encontrado" });
@@ -3390,6 +3382,8 @@ router.delete("/:id/pagos/:pagoId", GERENTE_O_TRAFICO, async (req,res)=>{
   try {
     await ensureColaboradorOpsSchema();
     const empresaId = req.empresaId || req.user?.empresa_id;
+    await require("../services/supplierInvoicePayments").ensure(db);
+    if((await db.query("SELECT id FROM colaborador_pagos WHERE id=$1 AND empresa_id=$2 AND factura_proveedor_id IS NOT NULL",[req.params.pagoId,empresaId])).rows.length)return res.status(409).json({error:"El pago de una factura revisada se conserva con su auditoría y no puede borrarse desde el registro antiguo."});
     await db.query(
       "DELETE FROM colaborador_pagos WHERE id=$1 AND colaborador_id=$2 AND empresa_id=$3",
       [req.params.pagoId, req.params.id, empresaId]

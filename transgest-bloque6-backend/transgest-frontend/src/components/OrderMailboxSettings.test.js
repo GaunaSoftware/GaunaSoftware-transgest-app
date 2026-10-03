@@ -16,6 +16,7 @@ test('incomplete settings stay inactive; verification is required before activat
   const ready={...cfg,email:'pedidos@example.invalid',host:'imap.example.invalid',username:'pedidos',has_password:true,missing:[],state:'pendiente_prueba'};
   saveOrderMailbox.mockResolvedValue(ready);await act(async()=>button('Guardar recepción').click());
   expect(button('Probar recepción').disabled).toBe(false);expect(button('Activar recepción').disabled).toBe(true);
+  getOrderMailbox.mockResolvedValue({...ready,state:'error',last_error:'Acceso IMAP rechazado'});
   testOrderMailbox.mockRejectedValue(new Error('Acceso IMAP rechazado'));await act(async()=>button('Probar recepción').click());
   expect(host.querySelector('[role="alert"]').textContent).toContain('Acceso IMAP rechazado');expect(button('Activar recepción').disabled).toBe(true);
   const verified={...ready,verified_at:'2026-09-27T10:00:00Z',state:'desactivado'};

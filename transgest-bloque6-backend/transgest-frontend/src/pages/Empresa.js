@@ -2,10 +2,11 @@ import OrderMailboxSettings from '../components/OrderMailboxSettings';
 import {testCompanyEmail} from '../services/api';
 import FiscalRepresentation from '../components/FiscalRepresentation';
 import DriverLocationsSettings from "../components/DriverLocationsSettings";
+import CompanyPoints from "../components/CompanyPoints";
 import DataQuality from "../components/DataQuality";
 import { PAYMENT_METHODS, validateCompanyPaymentSettings, formatCompanyPaymentTerms } from "../utils/companyPayment";
 import { useState, useEffect, useCallback } from "react";
-import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getFacturaPlantilla, guardarFacturaPlantilla, eliminarFacturaPlantilla, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
+import { getEmpresa, saveEmpresa, getEmpresaBackend, saveEmpresaBackend, getEmailConfig, saveEmailConfig, getEmailConfigBackend, saveEmailConfigBackend, getEmailLogBackend, getEmpresaConfig, setConfigTrafico, setConfigPrecios, setConfigAlertas, getLogo, subirLogo, eliminarLogo, getFacturaPlantilla, guardarFacturaPlantilla, eliminarFacturaPlantilla, getEmpresaFiscalConfig, saveEmpresaFiscalConfig, testEmpresaFiscalConfig, getEmpresaFiscalQueueSummary, getEmpresaIntegracionesStatus, getPuestaMarchaComercial, descargarPuestaMarchaInforme, getJornadaDiariaOperativa, descargarJornadaDiariaInforme, solicitarBackupEmpresa, getControlCobrosConfig, guardarControlCobrosConfig, actualizarCapitalTesoreria, getCalendarioLaboral, getCalendarioLaboralCcaa, getToken, getWhatsappConfig, probarWhatsappConfig, guardarWhatsappConfig, getWhatsappLog } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify, promptDialog } from "../services/notify";
 import { getEmpresaPlanLocal, normalizePlan } from "../utils/planFeatures";
@@ -19,8 +20,8 @@ const S = {
   sub:    { fontSize:12, color:"var(--text4)", marginBottom:24 },
   section:{ background:"var(--card-bg)", border:"1px solid var(--border)", borderRadius:12, padding:"20px 22px", marginBottom:16, boxShadow:"var(--shadow-card)" },
   secTitle:{ fontFamily:"'Syne',sans-serif", fontSize:13, fontWeight:700, color:"var(--text)", marginBottom:16, display:"flex", alignItems:"center", gap:8 },
-  grid2:  { display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 14px" },
-  grid3:  { display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:"6px 14px" },
+  grid2:  { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,260px),1fr))", gap:"6px 14px" },
+  grid3:  { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,220px),1fr))", gap:"6px 14px" },
   lbl:    { display:"block", fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:".07em", color:"var(--text5)", marginBottom:4, marginTop:10 },
   inp:    { background:"var(--input-bg)", border:"1px solid var(--border2)", color:"var(--text)", padding:"8px 12px", borderRadius:7, fontFamily:"'DM Sans',sans-serif", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" },
   btn:    { padding:"8px 18px", borderRadius:7, border:"none", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"'DM Sans',sans-serif", display:"inline-flex", alignItems:"center", gap:6 },
@@ -102,7 +103,7 @@ export default function Empresa() {
   const [plantillaBusy, setPlantillaBusy] = useState(false);
   const esGerente = user?.rol === "gerente";
   // Sesion de superadmin (soporte) impersonando la empresa: solo entonces se
-  // muestran Tesorería, WhatsApp y ajustes fiscales de soporte. El correo de
+  // muestran Tesorería y ajustes fiscales de soporte. El correo de
   // empresa lo prepara gerencia, con autorización adicional en el servidor.
   const esSuperadmin = (() => {
     try {
@@ -756,7 +757,7 @@ export default function Empresa() {
     { id:"factura", l:"Configuración facturas" },
     { id:"ubicaciones", l:"Puntos/Ubicaciones" },
     ...(esGerente ? [{ id:"email", l:"Correo / Bandeja IA" }] : []),
-    ...(esSuperadmin ? [{ id:"whatsapp", l:"WhatsApp" }] : []),
+    ...(esGerente ? [{ id:"whatsapp", l:"WhatsApp" }] : []),
     { id:"trafico_cfg", l:"Config. Tráfico" },
     { id:"calidad_datos", l:"Calidad de datos" },
   ];
@@ -1007,7 +1008,7 @@ export default function Empresa() {
         ))}
       </div>
 
-      {tab === "ubicaciones" && <DriverLocationsSettings/>}
+      {tab === "ubicaciones" && <><CompanyPoints/><details style={{marginTop:16}}><summary>Bases y accesos rápidos de la app del chófer</summary><DriverLocationsSettings/></details></>}
 
       {/* ── Datos fiscales ── */}
       {tab==="calidad_datos" && <DataQuality/>}
@@ -2683,7 +2684,7 @@ export default function Empresa() {
               </div>
               <div>
                 <label style={S.lbl}>App secret</label>
-                <input type="password" style={S.inp} value={whatsappCfg.app_secret || ""} onChange={fw("app_secret")} placeholder={whatsappCfg.app_secret_masked || "Opcional para validar firma webhook"} disabled={!esGerente}/>
+                <input type="password" style={S.inp} value={whatsappCfg.app_secret || ""} onChange={fw("app_secret")} placeholder={whatsappCfg.app_secret_masked || "Firma de seguridad de los webhooks de Meta"} disabled={!esGerente}/>
               </div>
               <div>
                 <label style={S.lbl}>Verify token webhook</label>
@@ -2708,6 +2709,7 @@ export default function Empresa() {
 
           <div style={S.section}>
             <div style={S.secTitle}>Plantillas aprobadas en Meta</div>
+            <p style={S.info}>Las credenciales se guardan cifradas en el servidor para esta empresa. Un campo secreto vacío conserva su valor. Guarda los cambios y prueba la conexión. Meta requiere un número Business, token con permisos y plantillas aprobadas; la prueba no envía mensajes ni confirma por sí sola la recepción del webhook.</p>
             <div style={{fontSize:12,color:"var(--text4)",lineHeight:1.55,marginBottom:12}}>
               Estos nombres deben coincidir con las plantillas aprobadas en WhatsApp Manager. Mientras no haya credenciales, sirven para dejar preparado el contrato de envio.
             </div>
@@ -2720,6 +2722,7 @@ export default function Empresa() {
                 <label style={S.lbl}>Orden colaborador</label>
                 <input style={S.inp} value={whatsappCfg.templates?.orden_colaborador || ""} onChange={fwt("orden_colaborador")} disabled={!esGerente}/>
               </div>
+              <div><label style={S.lbl}>Aviso al conductor</label><input style={S.inp} value={whatsappCfg.templates?.aviso_chofer || 'aviso_pedido_chofer'} onChange={fwt('aviso_chofer')} disabled={!esGerente}/></div>
               <div>
                 <label style={S.lbl}>Documentacion pendiente</label>
                 <input style={S.inp} value={whatsappCfg.templates?.docs_pendientes || ""} onChange={fwt("docs_pendientes")} disabled={!esGerente}/>
@@ -2736,6 +2739,7 @@ export default function Empresa() {
               <button style={{...S.btn,background:"var(--accent)",color:"#fff",opacity:savingWhatsapp?0.65:1}} onClick={guardarWhatsapp} disabled={savingWhatsapp}>
                 {savingWhatsapp ? "Guardando..." : "Guardar WhatsApp"}
               </button>
+              <button style={S.btn} disabled={savingWhatsapp} onClick={async()=>{setSavingWhatsapp(true);try{const result=await probarWhatsappConfig();setWhatsappCfg(result.config);setIntegracionesStatus(await getEmpresaIntegracionesStatus());notify(result.message,result.ready?'success':'warning');}catch(e){notify(e.message,'error');}finally{setSavingWhatsapp(false);}}}>Probar conexión sin enviar mensajes</button>
               <button style={{...S.btn,background:"var(--bg4)",color:"var(--text2)",border:"1px solid #1e2d45"}} onClick={()=>getWhatsappLog().then(rows=>setWhatsappLog(Array.isArray(rows) ? rows : [])).catch(e=>notify(e.message, "error"))}>
                 Actualizar log
               </button>

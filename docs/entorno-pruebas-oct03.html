@@ -1,0 +1,49 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Entorno de pruebas · TransGest</title>
+<style>body{font:16px/1.6 system-ui;color:#163b38;background:#f3f8f7;max-width:900px;padding:24px;margin:auto}article{background:white;border:1px solid #cfe4df;border-radius:16px;padding:24px}h1,h2{line-height:1.25}li{margin:8px 0}.pending{background:#fff3d7;padding:14px;border-radius:8px}table{border-collapse:collapse;width:100%}td,th{padding:10px;border-bottom:1px solid #d9e9e5;text-align:left}code{overflow-wrap:anywhere}</style>
+<article><h1>Probar los cambios sin publicarlos en TransGest</h1>
+<p class="pending"><strong>Activado el 3 de octubre de 2026.</strong> Abre <a href="https://transgest-workflow-test-oct02.onrender.com/">TransGest · entorno de pruebas</a>. La sesión de gerencia se ha comprobado. Los mensajes observados en transgest.app se revisarán cuando puedan reproducirse aquí.</p>
+<h2>Qué incluye la configuración</h2><ul>
+<li>Una copia de la web y del servidor desde la rama <code>codex/workflow-oct02</code>, con su propia base PostgreSQL en el espacio «Staging - Importación» de Render.</li>
+<li>Web y servidor en una misma dirección HTTPS. Una etiqueta «PRUEBAS · Datos independientes» identifica la copia. Las direcciones de documentos, QR y correos apuntarán a esa copia.</li>
+<li>Base nueva, sin datos ni certificados de TLM o Asensi. El arranque rechaza bases existentes sin la identificación específica de pruebas.</li>
+<li>Secretos y contraseñas generados por Render. No se muestran en registros ni se guardan en GitHub.</li>
+<li>Los correos usan SMTP real y pueden enviarse a cualquier dirección, sin lista de destinatarios, por petición expresa del usuario el 3 de octubre. El servidor de pruebas usa <code>STAGING_EMAIL_UNRESTRICTED=true</code>; se conserva la autenticación SMTP y la verificación TLS.</li>
+<li>Despliegues automáticos desactivados. No se mezcla ni despliega esta rama a producción.</li>
+</ul>
+<h2>Coste comprobado en Render</h2>
+<table><thead><tr><th>Recurso</th><th>Coste mensual base</th></tr></thead><tbody>
+<tr><td>Servidor de pruebas · 0,5 CPU y 512 MB</td><td>7 USD</td></tr>
+<tr><td>PostgreSQL de pruebas · 0,1 CPU y 256 MB</td><td>6 USD</td></tr>
+<tr><td>Almacenamiento de la base · 1 GB, sin crecimiento automático</td><td>0,30 USD</td></tr>
+<tr><td><strong>Total base</strong></td><td><strong>13,30 USD/mes</strong></td></tr></tbody></table>
+<p>Coste base autorizado por el usuario. Importes antes de impuestos y de posibles consumos adicionales del proveedor. La base se factura proporcionalmente al tiempo. Los dos recursos ya se han creado en «Staging - Importación». Render bloquea los puertos habituales de SMTP en el servidor gratuito; el servidor de pago permite probar correos reales cuando se configure un buzón. <a href="https://render.com/docs/free">Limitaciones de Render Free</a>.</p>
+<h2>Acceso y configuración para las pruebas</h2><ol>
+<li>Abre <a href="https://transgest-workflow-test-oct02.onrender.com/">la copia de pruebas</a>. Comprueba la etiqueta «PRUEBAS · Datos independientes»; no uses transgest.app para verificar este bloque.</li>
+<li>Accede con empresa <code>TG-PRUEBAS</code> y usuario <code>gerencia@example.invalid</code>. La contraseña está en <code>STAGING_MANAGER_PASSWORD</code> de <a href="https://dashboard.render.com/web/srv-db0d5hfavr4c73f5v97g/env">Environment del servidor de pruebas en Render</a>: copia su valor y pégalo en el acceso. El navegador de esta tarea queda abierto con la sesión de pruebas iniciada. El superadmin de pruebas usa <code>superadmin@example.invalid</code> y <code>STAGING_ADMIN_PASSWORD</code>. No pegues las contraseñas en el chat.</li>
+<li>Configurar un buzón SMTP y, si se quiere probar recepción, un buzón IMAP dedicado en Mi empresa → Correo / Bandeja IA. No hace falta registrar previamente los destinatarios. Para DonDominio: <code>smtp.dondominio.com:587</code> con STARTTLS y <code>imap.dondominio.com:993</code> con TLS. La contraseña vacía conserva la que está guardada cifrada.</li>
+<li>Configurar la IA en la copia de pruebas, con una clave y límites de consumo propios. GPS y WhatsApp también necesitan sus credenciales de pruebas; no se copian de producción automáticamente.</li>
+<li>Crear clientes, vehículos y pedidos ficticios, y comprobar el flujo completo. No enviar facturas o registros fiscales a sistemas reales. La integración NO VERI*FACTU y los certificados quedan fuera de esta activación.</li>
+</ol>
+<h2>Comprobaciones realizadas en Render</h2><ul>
+<li>Despliegue real identificado por la revisión <code>fbc4c33b7439a852ab5467aa7258c03158d8eac8</code>; web HTTPS, archivos compilados e iconos disponibles. Render confirma el despliegue activo del 3 de octubre a las 13:23.</li>
+<li>Base PostgreSQL 18 disponible, 1 GB y crecimiento automático desactivado; tráfico externo bloqueado y conexión privada del servidor operativa.</li>
+<li>Migraciones completas; comprobación de salud con base conectada y esquema preparado. La API privada rechaza peticiones sin sesión.</li>
+<li>Inicio de sesión de gerencia; Dashboard con resumen económico cargado; cliente ficticio creado como revisado y conservado después de actualizar el servidor; alta de vehículo ficticio guardada.</li>
+<li>Nuevo pedido desde Dashboard comienza en «1 · Transporte y mercancía»; el cliente de pruebas está disponible para pedidos. Estos controles no sustituyen las pruebas del viaje completo.</li>
+<li>Mesa de tráfico comprobada en escritorio y a 390 px: vista diaria en móvil, leyendas conservadas, matrícula ficticia visible y sin desbordamiento horizontal de la página. La asignación de viajes y el panel con muchas cargas requieren datos de prueba adicionales.</li>
+<li>Se corrigieron dos fallos encontrados al activar: archivo compartido ausente en la compilación del contenedor y consulta BI a un nombre antiguo del importe de paralización. También se verificó esa consulta con el esquema vacío completo.</li>
+<li>Actualizaciones del servidor y sincronización del Blueprint en modo manual. El PR 91 permanece en borrador y no se fusiona a producción.</li>
+</ul>
+<p>Datos creados para empezar: <strong>CLIENTE DE PRUEBAS - NO REAL</strong> y vehículo <strong>0000-TST</strong>. No contienen datos de clientes reales. Las credenciales de proveedores, buzones y certificados de producción no se han copiado.</p>
+<h2>Primeras pruebas a realizar</h2><ul>
+<li>Icono del navegador: debe ser el símbolo suministrado en «LOGO NUEVO 2». El logotipo con el texto TransGest se conserva.</li>
+<li>Adjuntar documentación dentro de un pedido con tema claro y oscuro; revisar el contraste.</li>
+<li>Enviar una orden a un correo de pruebas, aceptar, confirmar matrículas, cargar, revisar DeCA, marcar salida y descarga, subir albaranes y comprobar que aparecen en el mismo pedido.</li>
+<li>Cambiar los colores de la empresa y verificar la barra lateral y las opciones activas.</li>
+<li>Probar SMTP, recepción IMAP y correo con IA, guardado de credenciales y errores visibles. SMTP funciona sin lista de destinatarios. La primera prueba IMAP solo comprueba el buzón y establece el cursor; no importa mensajes anteriores.</li>
+<li>Revisar Mesa de tráfico en escritorio y móvil, filtros del Dashboard y el resto de casos del <a href="informe-pruebas-oct02.html">informe general</a>.</li>
+</ul>
+<p>SMTP real comprobado el 3 de octubre a las 13:26:39: el servidor ha aceptado el mensaje «TransGest · prueba de correo» desde noreply@gauna.es hacia manuelberrueco98@gmail.com, autorizado por el usuario, y el registro muestra «enviado». Esto confirma la aceptación SMTP; la llegada a la bandeja del destinatario no se ha verificado. El envío a cualquier dirección, sin listas, ya está activo por petición expresa. No se han enviado pruebas a otros destinatarios.</p>
+<p>Recepción IMAP comprobada después del despliegue, con <code>imap.dondominio.com:993</code> y la contraseña cifrada conservada. DonDominio sigue rechazando la autenticación; la pantalla muestra el motivo y «Requiere revisión». El usuario debe revisar el acceso IMAP del buzón noreply@gauna.es y, si corresponde, introducir y guardar su contraseña actual desde Mi empresa → Correo / Bandeja IA → Recepción de pedidos, sin enviarla al chat. No se ha activado la recepción ni se ha importado el historial del buzón. Este fallo es del acceso IMAP, previo a la interpretación por IA. <a href="https://www.dondominio.com/es/help/258/configurar-cuentas-correo-en-windows-10/">Configuración oficial de DonDominio</a>.</p>
+<p>IA, GPS y WhatsApp siguen pendientes de validación externa; no se han usado créditos IA. El flujo completo de aceptación, carga, documentos, entrega y facturación se validará con los casos del informe. El eCMR adaptado y la bolsa de cargas interna siguen pendientes y no se presentan como terminados.</p>
+</article></html>

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { getBiWorkspace } from "../../services/api";
 import { Drawer, Select, KpiCard, Button, DataTable, MobileDataCard, EmptyState } from "../../ui";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 const euros=n=>n == null ? "—" : Number(n).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
@@ -7,6 +8,15 @@ export default function DashboardBI({ onClose, period, setPeriod, metrics, clien
   const [order,setOrder]=useState("total");
   const [limit,setLimit]=useState("all");
   const [measure,setMeasure]=useState("all");
+  const [operational,setOperational]=useState({loading:true,data:null,error:''});
+  useEffect(()=>{
+    const controller=new AbortController();let active=true;
+    setOperational({loading:true,data:null,error:''});
+    getBiWorkspace({periodo:period,vista:'operaciones'},controller.signal)
+      .then(data=>{if(active)setOperational({loading:false,data:data.operations,error:''});})
+      .catch(e=>{if(active)setOperational({loading:false,data:null,error:e.message||'No se pudo consultar la actividad operativa.'});});
+    return ()=>{active=false;controller.abort();};
+  },[period]);
 
   const rows=useMemo(()=>clients.filter(c=>String(c.name||"").toLocaleLowerCase("es").includes(query.toLocaleLowerCase("es"))).sort((a,b)=>order==="name" ? String(a.name).localeCompare(String(b.name),"es") : Number(b[order]||0)-Number(a[order]||0)).slice(0,limit==="all" ? undefined : Number(limit)),[clients,query,order,limit]);
   const topShare=clientSummary?.participacion_principal;
@@ -22,7 +32,7 @@ export default function DashboardBI({ onClose, period, setPeriod, metrics, clien
     <div className="dashboard-bi-controls"><Select label="Periodo del análisis BI" value={period} onChange={e=>setPeriod(e.target.value)}>{[['mes','Mes actual'],['7d','Últimos 7 días'],['3m','Últimos 90 días'],['6m','Últimos 180 días'],['1y','Últimos 365 días'],['all','Todo el histórico']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select><Button disabled={loading||!!error} onClick={csv}>Exportar indicadores</Button></div>
     {loading&&<p role="status">Actualizando análisis…</p>}{error&&<p role="alert">{error} Los indicadores no están disponibles; no equivale a ausencia de actividad.</p>}
     {!loading && !error && metadata && <p className="dashboard-caption">{metadata.periodo.desde} — {metadata.fecha_corte}. Los márgenes son parciales; los costes no registrados no se consideran ceros confirmados.</p>}
-    <div className="dashboard-bi-kpis">{cards.map(([label,value,detail])=><KpiCard key={label} label={label} value={euros(value)} detail={detail} tone={label==='Margen realizado'&&value<0?'danger':'neutral'}/>)}</div>
+    <div className="dashboard-bi-kpis">{cards.map(([label,value,detail])=><KpiCard key={label} label={label} value={euros(value)} detail={detail} tone={label==='Margen directo parcial'&&value<0?'danger':'neutral'}/>)}</div>
     <div className="dashboard-bi-facts"><span><strong>{metrics.realizados}</strong> viajes realizados</span><span><strong>{euros(metrics.eurKm)}</strong> por km total (cargado + vacío)</span><span><strong>{metrics.margenPct == null ? '—' : Number(metrics.margenPct).toLocaleString('es-ES')+'%'}</strong> margen realizado</span><span><strong>{metrics.facturas}</strong> facturas</span></div>
     <h3>Qué conviene revisar</h3><ul className="dashboard-bi-insights">{metrics.sinFactura>0&&<li>{euros(metrics.sinFactura)} de viajes realizados pendientes de facturar.</li>}{metrics.pendiente>0&&<li>{euros(metrics.pendiente)} pendientes de cobro.</li>}{metrics.margen<0&&<li>El coste de los viajes realizados supera su venta en {euros(-metrics.margen)}.</li>}{metrics.pod>0&&<li>{metrics.pod} viajes realizados sin POD.</li>}{metrics.sinKm>0&&<li>{metrics.sinKm} pedidos sin kilómetros: revisar antes de comparar rentabilidad por km.</li>}{!error&&!loading&&metrics.margen!=null&&!metrics.sinFactura&&!metrics.pendiente&&metrics.margen>=0&&!metrics.pod&&!metrics.sinKm&&<li>No se detectan pendientes en estos indicadores del periodo.</li>}</ul>
     <div className="dashboard-bi-controls"><h3>Evolución del ingreso gestionado</h3><Select label="Serie financiera" value={measure} onChange={e=>setMeasure(e.target.value)}><option value="all">Ambas series</option><option value="facturado">Facturado</option><option value="pendiente">Realizado sin factura</option></Select></div>{series.length?<div className="dashboard-bi-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={series}><XAxis dataKey="name" tick={{fill:'var(--text3)',fontSize:11}}/><YAxis tick={{fill:'var(--text3)',fontSize:11}}/><Tooltip formatter={euros} contentStyle={{background:'var(--card-bg)',borderColor:'var(--border)'}}/>{measure!=="pendiente"&&<Bar dataKey="facturado" name="Facturado" fill="var(--accent)"/>}{measure!=="facturado"&&<Bar dataKey="pendiente" name="Realizado sin factura" fill="#82cdb8"/>}</BarChart></ResponsiveContainer></div>:<EmptyState title={error ? "No se pudo consultar la evolución" : loading ? "Calculando evolución" : "Sin movimientos financieros en este periodo"}/>}
@@ -30,6 +40,22 @@ export default function DashboardBI({ onClose, period, setPeriod, metrics, clien
     <h3>Clientes · ingreso gestionado</h3><p className="dashboard-caption">Filtra y ordena el desglose. La participación se calcula sobre todos los clientes del periodo; los KPI superiores mantienen ese alcance.</p>
     <div className="dashboard-bi-controls"><input aria-label="Buscar cliente en BI" placeholder="Buscar cliente…" value={query} onChange={e=>setQuery(e.target.value)}/><Select label="Orden del desglose" value={order} onChange={e=>setOrder(e.target.value)}><option value="total">Mayor ingreso</option><option value="pendiente">Mayor pendiente de facturar</option><option value="facturado">Mayor facturación</option><option value="name">Nombre</option></Select><Select label="Número de clientes" value={limit} onChange={e=>setLimit(e.target.value)}><option value="all">Todos</option><option value="5">Top 5</option><option value="10">Top 10</option></Select><Button onClick={exportRows} disabled={loading||!!error||!rows.length}>Exportar clientes</Button></div>
     <DataTable rows={rows} rowKey={r=>r.name} columns={[{key:'name',label:'Cliente'},{key:'facturado',label:'Facturado',render:r=>euros(r.facturado)},{key:'pendiente',label:'Sin facturar',render:r=>euros(r.pendiente)},{key:'total',label:'Gestionado',render:r=>euros(r.total)},{key:'share',label:'Participación',render:r=>r.share == null ? '—' : Number(r.share).toLocaleString('es-ES',{maximumFractionDigits:1})+'%'}]} renderMobile={r=><MobileDataCard title={r.name} amount={euros(r.total)} subtitle={`Facturado: ${euros(r.facturado)} · Sin facturar: ${euros(r.pendiente)}`}/>}/>
-    <p className="dashboard-caption">El análisis conserva los criterios de facturación y costes del programa. Los indicadores operativos se actualizan por separado en el Dashboard.</p>
+    <h3>Operaciones y servicio</h3>
+    <p className="dashboard-caption">Mismo periodo del análisis. Se utilizan las horas reales registradas; las fechas previstas no sustituyen a los eventos que faltan.</p>
+    {operational.loading&&<p role="status">Consultando tiempos y servicio…</p>}
+    {operational.error&&<p role="alert">{operational.error}</p>}
+    {operational.data&&<>
+      <div className="dashboard-bi-kpis">{[['puntualidad_recogida','Puntualidad en carga'],['puntualidad_entrega','Puntualidad en entrega'],['otif','Entrega puntual y completa'],['pod_pendiente','Entregas sin albarán']].map(([key,label])=>{
+        const m=operational.data.metricas?.[key];
+        return <KpiCard key={key} label={label} value={m?.valor==null?'—':Number(m.valor).toLocaleString('es-ES',{maximumFractionDigits:1})+(m.unidad==='%'?' %':'')} detail={`${m?.cobertura?.evaluables??0} de ${m?.cobertura?.total??0} evaluables`} />;
+      })}</div>
+      <DataTable rows={Object.entries(operational.data.tiempos||{}).map(([key,v])=>({key,...v}))} rowKey={r=>r.key} columns={[
+        {key:'key',label:'Tiempo',render:r=>({espera_carga:'Espera en carga',carga_efectiva:'Carga',espera_descarga:'Espera en descarga',descarga_efectiva:'Descarga',recepcion_pod:'Recepción de albaranes',trayecto:'Trayecto hasta descarga'})[r.key]||r.key},
+        {key:'media',label:'Media (min)',render:r=>r.media==null?'—':r.media.toLocaleString('es-ES')},
+        {key:'p90',label:'90 % de los casos (min)',render:r=>r.p90==null?'—':r.p90.toLocaleString('es-ES')},
+        {key:'cobertura',label:'Paradas evaluables',render:r=>`${r.cobertura.evaluables} / ${r.cobertura.total}`},
+      ]} renderMobile={r=><MobileDataCard title={({espera_carga:'Espera en carga',carga_efectiva:'Carga',espera_descarga:'Espera en descarga',descarga_efectiva:'Descarga',recepcion_pod:'Recepción de albaranes',trayecto:'Trayecto hasta descarga'})[r.key]||r.key} amount={r.media==null?'Sin datos':`${r.media.toLocaleString('es-ES')} min`} subtitle={`${r.cobertura.evaluables} de ${r.cobertura.total} evaluables · P90 ${r.p90??'—'} min`}/>}/>
+      <p className="dashboard-caption">El trayecto incluye descansos y paradas. La entrega completa requiere cantidades contrastadas; si no constan, no se da por cumplida.</p>
+    </>}
   </Drawer>;
 }

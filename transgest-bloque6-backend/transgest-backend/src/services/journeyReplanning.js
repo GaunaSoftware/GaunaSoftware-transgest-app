@@ -57,7 +57,7 @@ async function replan(tx,{empresaId,pedidoId,actorId,body}){
      }
      const holidays=(await tx.query("SELECT id FROM chofer_vacaciones_solicitudes WHERE empresa_id=$1 AND chofer_id=ANY($2::uuid[]) AND LOWER(estado) IN ('aprobada','aprobado','aceptada') AND fecha_inicio<=(NOW() AT TIME ZONE 'Europe/Madrid')::date AND fecha_fin>=(NOW() AT TIME ZONE 'Europe/Madrid')::date LIMIT 1",[empresaId,drivers])).rows;
      if(holidays.length)fail('El conductor tiene vacaciones aprobadas hoy.');
-     const conflict=(await tx.query(`SELECT numero FROM pedidos WHERE empresa_id=$1 AND NOT(id=ANY($2::uuid[])) AND estado::text IN ('en_curso','descarga','cargando','espera_carga','espera_descarga') AND (vehiculo_id=ANY($3::uuid[]) OR remolque_id=ANY($3::uuid[]) OR chofer_id=ANY($4::uuid[]) OR chofer2_id=ANY($4::uuid[])) LIMIT 1`,[empresaId,members.map(p=>p.id),vehicles,drivers])).rows[0];
+     const conflict=(await tx.query(`SELECT numero FROM pedidos WHERE empresa_id=$1 AND NOT(id=ANY($2::uuid[])) AND estado::text IN ('en_curso','descarga','cargado','cargando','espera_carga','espera_descarga') AND (vehiculo_id=ANY($3::uuid[]) OR remolque_id=ANY($3::uuid[]) OR chofer_id=ANY($4::uuid[]) OR chofer2_id=ANY($4::uuid[])) LIMIT 1`,[empresaId,members.map(p=>p.id),vehicles,drivers])).rows[0];
      if(conflict)fail('Hay otro viaje en curso con estos recursos: '+conflict.numero);
      const now=new Date().toISOString();
      relief={anterior:assignment,siguiente:next,ubicacion:location,received_at:now,actor_id:actorId,motivo:reason,paradas_completadas:journey.stops.filter(s=>s.estado==='finalizada').map(s=>s.id)};

@@ -1,0 +1,82 @@
+# Manual opt-in: this file is not the production Blueprint.
+# All names are new; do not rename them to a production resource.
+previews:
+  generation: "off"
+projects:
+  - name: My project
+    environments:
+      - name: Staging - Importación
+        services:
+          - type: web
+            name: transgest-workflow-test-oct02
+            runtime: docker
+            repo: https://github.com/GaunaSoftware/GaunaSoftware-transgest-app
+            branch: codex/workflow-oct02
+            region: frankfurt
+            plan: 0.5c-512mb
+            numInstances: 1
+            autoDeployTrigger: "off"
+            dockerfilePath: ./transgest-bloque6-backend/deploy/staging/Dockerfile
+            dockerContext: .
+            healthCheckPath: /health
+            envVars:
+              - key: NODE_ENV
+                value: production
+              - key: TRANSGEST_STAGING
+                value: "true"
+              - key: ALLOW_DEMO_SEED
+                value: "false"
+              - key: DEMO_SHOWCASE_SEED
+                value: "false"
+              - key: DB_HOST
+                fromDatabase:
+                  name: transgest-workflow-test-oct02-db
+                  property: host
+              - key: DB_PORT
+                fromDatabase:
+                  name: transgest-workflow-test-oct02-db
+                  property: port
+              - key: DB_NAME
+                fromDatabase:
+                  name: transgest-workflow-test-oct02-db
+                  property: database
+              - key: DB_USER
+                fromDatabase:
+                  name: transgest-workflow-test-oct02-db
+                  property: user
+              - key: DB_PASSWORD
+                fromDatabase:
+                  name: transgest-workflow-test-oct02-db
+                  property: password
+              - key: DB_POOL_MAX
+                value: "5"
+              - key: JWT_SECRET
+                generateValue: true
+              - key: USER_JWT_SECRET
+                generateValue: true
+              - key: SUPERADMIN_JWT_SECRET
+                generateValue: true
+              - key: ACCOUNTING_SSO_JWT_SECRET
+                generateValue: true
+              - key: API_KEYS_ENCRYPTION_SECRET
+                generateValue: true
+              - key: DOC_CONTROL_SECRET
+                generateValue: true
+              - key: STAGING_MANAGER_PASSWORD
+                generateValue: true
+              - key: STAGING_ADMIN_PASSWORD
+                generateValue: true
+              - key: STAGING_EMAIL_ALLOWLIST
+                value: ""
+              - key: STAGING_EMAIL_UNRESTRICTED
+                value: "true"
+        databases:
+          - name: transgest-workflow-test-oct02-db
+            region: frankfurt
+            plan: 0.1c-256mb
+            databaseName: transgest_workflow_test_oct02
+            user: transgest_workflow_test_oct02
+            postgresMajorVersion: "18"
+            diskSizeGB: 1
+            storageAutoscalingEnabled: false
+            ipAllowList: []

@@ -43,7 +43,7 @@ async function processCompany(company,{automatic=false,max_envios}={}) {
   if (!lease.rows.length) throw Object.assign(new Error('Ya hay una revisión de cobros en curso.'),{status:409});
   const result={ok:true,revisadas:0,reclamadas:0,sin_cobrar:0,emails:0,emails_simulados:0,emails_fallidos:0,sin_destinatario:0,envios_por_verificar:0};
   try {
-    const {rows}=await db.query(`SELECT f.*,c.nombre AS cliente_nombre,c.email,c.email_facturacion,e.nombre AS empresa_nombre,(f.reclamacion_hasta<CURRENT_DATE) AS reclamacion_agotada
+    const {rows}=await db.query(`SELECT f.*,c.nombre AS cliente_nombre,c.email,c.email_facturacion,c.email_facturas,e.nombre AS empresa_nombre,(f.reclamacion_hasta<CURRENT_DATE) AS reclamacion_agotada
       FROM facturas f JOIN clientes c ON c.id=f.cliente_id AND c.empresa_id=f.empresa_id JOIN empresas e ON e.id=f.empresa_id
       WHERE f.empresa_id=$1 AND f.estado IN ('emitida','enviada','vencida','reclamada') AND f.total>0
       AND f.fecha_vencimiento<CURRENT_DATE AND f.revision_cobro_at<=CURRENT_DATE
@@ -60,7 +60,7 @@ async function processCompany(company,{automatic=false,max_envios}={}) {
       if (round>Math.min(cfg.max_envios_reclamacion,clamp(max_envios,cfg.max_envios_reclamacion,1,20))) continue;
       const days=Math.max(3,Number(f.aviso_cobro_dias || cfg.dias_entre_reclamaciones));
       if (f.reclamacion_ultimo_envio_at && Date.now()-new Date(f.reclamacion_ultimo_envio_at).getTime()<days*86400000) continue;
-      const recipients=[...new Set([f.email_facturacion,f.email].flatMap(v=>String(v||'').split(/[;,]/)).map(v=>v.trim().toLowerCase()).filter(v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)))];
+      const recipients=[...new Set([f.email_facturacion||f.email_facturas||f.email].flatMap(v=>String(v||'').split(/[;,]/)).map(v=>v.trim().toLowerCase()).filter(v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)))];
       if (!recipients.length) {result.sin_destinatario++;continue;}
       if (!cfg.envio_email_auto) continue;
       for (const recipient of recipients) {
@@ -72,7 +72,7 @@ async function processCompany(company,{automatic=false,max_envios}={}) {
         if (!claimed.rows.length) continue;
         const delivery=claimed.rows[0].id;
         try {
-          const sent=await email.enviarEmail({trigger:'factura_reclamacion',destinatario:recipient,plantilla:'factura_reclamacion',empresa_id:company,
+          const sent=await email.enviarEmail({trigger:'factura_reclamacion',destinatario:recipient,plantilla:'factura_reclamacion',empresa_id:company,require_company:true,
             datos:{empresa:f.empresa_nombre,cliente:f.cliente_nombre,numero:f.numero,total:f.total,fecha_vencimiento:f.fecha_vencimiento},
             meta:{factura_id:f.id,factura_numero:f.numero,cliente_id:f.cliente_id,envio_id:delivery}});
           const simulated=sent?.simulado===true;

@@ -34,9 +34,9 @@ async function main() {
     const start=performance.now();
     const population=await readFlowPopulation(db,company), summary=summarizeFlow(population);
     assert.equal(summary.alcance.total,1504);
-    assert.equal(summary.estados.some(row=>row.key==='cargado'),false);
+    assert.equal(summary.estados.some(row=>row.key==='cargado'),true);
     assert.equal(summary.alcance.cargas_finalizadas_sin_salida,1501);
-    assert.equal(summary.estados.reduce((sum,row)=>sum+row.total,0)+summary.alcance.cargas_finalizadas_sin_salida,1504);
+    assert.equal(summary.estados.reduce((sum,row)=>sum+row.total,0),1504);
     assert.equal(summary.estados.find(row=>row.key==='espera_carga').total,1);
     assert.equal(summary.estados.find(row=>row.key==='espera_descarga').total,1);
     assert.equal(summary.alcance.sin_desglose,1);

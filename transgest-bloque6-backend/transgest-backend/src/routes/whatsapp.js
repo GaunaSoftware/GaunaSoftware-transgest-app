@@ -119,7 +119,7 @@ router.get("/status", SOLO_GERENTE, async (req, res) => {
   try {
     res.json(await getWhatsappStatus(EID(req)));
   } catch(e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status||500).json({ error:e.status?e.message:"No se pudo consultar el estado de WhatsApp." });
   }
 });
 
@@ -136,9 +136,11 @@ router.put("/config", SOLO_GERENTE, async (req, res) => {
     const config = await saveEmpresaWhatsappConfig(EID(req), req.body || {}, req.user?.id || null);
     res.json({ ok: true, config });
   } catch(e) {
-    res.status(500).json({ error: e.message });
+    res.status(e.status||500).json({ error:e.status?e.message:"No se pudo guardar WhatsApp. Revisa los datos y la custodia de credenciales del servidor." });
   }
 });
+
+router.post('/test',SOLO_GERENTE,async(req,res)=>{try{res.json(await require('../services/whatsapp').testEmpresaWhatsapp(EID(req)));}catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo probar la conexión WhatsApp.'});}});
 
 router.get("/log", SOLO_GERENTE, async (req, res) => {
   try {

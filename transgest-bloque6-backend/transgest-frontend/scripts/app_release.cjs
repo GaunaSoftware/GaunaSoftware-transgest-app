@@ -10,7 +10,7 @@ function nativeFingerprint(){
   return hash(JSON.stringify(native)+files.sort().map(p=>p+'\n'+fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n')).join('\n'));
 }
 function prepare(){
-  let revision=process.env.VERCEL_GIT_COMMIT_SHA;
+  let revision=process.env.VERCEL_GIT_COMMIT_SHA||process.env.RENDER_GIT_COMMIT;
   if(!revision){try{revision=cp.execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();}catch{revision='development';}}
   if(process.env.VERCEL_ENV==='production' && !/^[a-f0-9]{40}$/.test(revision))throw new Error('La publicación necesita una revisión Git identificable.');
   const releases=JSON.parse(fs.readFileSync(path.resolve(root,'../transgest-backend/src/data/productReleases.json')));

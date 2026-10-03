@@ -48,7 +48,7 @@ export function CommercialNav({ active }) {
   </nav>;
 }
 
-function ClientSummary({ client, onClose, onEdit, canEdit, globalRoutes }) {
+function ClientSummary({ client, onClose, onEdit, canEdit, globalRoutes, renderPoints }) {
   const [tab, setTab] = useState("resumen");
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -67,9 +67,10 @@ function ClientSummary({ client, onClose, onEdit, canEdit, globalRoutes }) {
         : [["CIF / NIF", client.cif], ["Dirección", [client.calle || client.direccion, client.municipio || client.ciudad].filter(Boolean).join(", ")], ["Teléfono", client.telefono], ["Contacto", client.contacto_nombre || client.contacto], ["Email", client.email], ["Página web", client.web]];
   return <div className="clients-detail-content">
     <header className="clients-detail-heading"><ClientImage value={client.imagen_data} name={client.nombre} /><div><h2>{client.nombre}</h2><Badge tone={tone(client)}>{status(client)}</Badge>{client.pendiente_revision && <Badge tone="warning">Pendiente de revisión</Badge>}</div><Button aria-label="Cerrar resumen de cliente" onClick={onClose}>×</Button></header>
-    <Tabs idPrefix="client-detail" label="Ficha del cliente" value={tab} onChange={setTab} items={[["resumen", "Resumen"], ["contactos", "Contactos"], ["direcciones", "Direcciones"], ["condiciones", "Condiciones"], ["rutas", "Rutas y tarifas"]].map(([value,label]) => ({value,label}))} />
+    <Tabs idPrefix="client-detail" label="Ficha del cliente" value={tab} onChange={setTab} items={[["resumen", "Resumen"], ["contactos", "Contactos"], ["direcciones", "Direcciones"], ["puntos", "Puntos"], ["condiciones", "Condiciones"], ["rutas", "Rutas y tarifas"]].map(([value,label]) => ({value,label}))} />
     <div id="client-detail-panel" role="tabpanel" aria-labelledby={`client-detail-${tab}`}>
-      {tab !== "rutas" && <Card className="clients-info"><header><h3>{tab === "resumen" ? "Información general" : tab === "contactos" ? "Contactos" : tab === "direcciones" ? "Direcciones" : "Condiciones comerciales"}</h3>{canEdit && <Button onClick={() => onEdit(tab === "condiciones" ? "facturacion" : "datos")}>Editar</Button>}</header><dl>{info.map(([label,value]) => <div key={label}><dt>{label}</dt><dd>{value || "Sin indicar"}</dd></div>)}</dl>{tab === "direcciones" && <Button onClick={() => onEdit("puntos")}>Gestionar puntos y direcciones</Button>}</Card>}
+      {tab === "puntos" && renderPoints?.(client)}
+      {tab !== "rutas" && tab !== "puntos" && <Card className="clients-info"><header><h3>{tab === "resumen" ? "Información general" : tab === "contactos" ? "Contactos" : tab === "direcciones" ? "Direcciones" : "Condiciones comerciales"}</h3>{canEdit && <Button onClick={() => onEdit(tab === "condiciones" ? "facturacion" : "datos")}>Editar</Button>}</header><dl>{info.map(([label,value]) => <div key={label}><dt>{label}</dt><dd>{value || "Sin indicar"}</dd></div>)}</dl>{tab === "direcciones" && <Button onClick={() => onEdit("puntos")}>Gestionar puntos y direcciones</Button>}</Card>}
       {(tab === "resumen" || tab === "rutas") && <Card className="clients-info"><header><h3>Rutas y tarifas {!loading && `(${routes.length})`}</h3><Button onClick={() => onEdit("rutas")}>Ver todas</Button></header>
         {error && <p role="status">No se han podido actualizar las tarifas. Se muestran las rutas disponibles en el listado.</p>}
         <DataTable loading={loading} rows={routes.slice(0, tab === "rutas" ? 10 : 5)} emptyTitle="Sin rutas asociadas" columns={[{key:"origen",label:"Origen"},{key:"destino",label:"Destino"},{key:"precio",label:"Precio acordado",render:r => <span className="clients-price">{money(r.precio_base ?? r.precio)}<small> / {r.tarifa_tipo === "kg" ? "100 kg" : r.tarifa_tipo || "viaje"}</small></span>}]} />
@@ -80,7 +81,7 @@ function ClientSummary({ client, onClose, onEdit, canEdit, globalRoutes }) {
   </div>;
 }
 
-export default function ClientsWorkspace({ clientes, rutas, loading, error, reload, q, setQ, mostrarBaja, setMostrarBaja, soloPendientes, setSoloPendientes, onEdit, onDelete, onReviewed, canEdit }) {
+export default function ClientsWorkspace({ clientes, rutas, loading, error, reload, q, setQ, mostrarBaja, setMostrarBaja, soloPendientes, setSoloPendientes, onEdit, onDelete, onReviewed, canEdit, renderPoints }) {
   const [selectedId, setSelectedId] = useState(null);
   const [state, setState] = useState("");
   const [size, setSize] = useState(10);
@@ -101,7 +102,7 @@ export default function ClientsWorkspace({ clientes, rutas, loading, error, relo
   }
   const actions = c => <DropdownMenu label={`Acciones de ${c.nombre}`} items={[{label:"Ver resumen",onClick:()=>setSelectedId(c.id)},{label:"Abrir ficha",onClick:()=>onEdit(c,"datos")}, ...(canEdit ? [{label:"Editar cliente",onClick:()=>onEdit(c,"datos")}, ...(c.pendiente_revision ? [{label:"Marcar revisado",onClick:()=>onReviewed(c)}] : []), {label:"Dar de baja",danger:true,onClick:()=>onDelete(c)}] : [])]} />;
   const columns = [{key:"nombre",label:"Cliente",render:c => <button className="clients-name" onClick={() => setSelectedId(c.id)}><ClientImage value={c.imagen_data} name={c.nombre} />{c.nombre}</button>},{key:"cif",label:"CIF",render:c=>c.cif || "—"},{key:"ciudad",label:"Ciudad",render:c=>c.municipio || c.ciudad || "—"},{key:"contacto",label:"Contacto",render:c=>c.contacto_nombre || c.contacto || c.telefono || "—"},{key:"estado",label:"Estado",render:c=><Badge tone={tone(c)}>{status(c)}</Badge>},{key:"revision",label:"Revisión",render:c=><Badge tone={c.pendiente_revision ? "warning" : "neutral"}>{c.pendiente_revision ? "Pendiente" : "Revisado"}</Badge>},{key:"actions",label:"Acciones",render:actions}];
-  const detail = selected && <ClientSummary key={selected.id} client={selected} globalRoutes={rutas} canEdit={canEdit} onClose={() => setSelectedId(null)} onEdit={tab => onEdit(selected,tab)} />;
+  const detail = selected && <ClientSummary key={selected.id} client={selected} globalRoutes={rutas} canEdit={canEdit} renderPoints={renderPoints} onClose={() => setSelectedId(null)} onEdit={tab => onEdit(selected,tab)} />;
   return <Page className="clients-page"><PageHeader title="Clientes" description="Gestiona tu cartera de clientes, sus datos, rutas, tarifas y condiciones comerciales." actions={<><Button onClick={exportList} disabled={loading || !visible.length}>Exportar</Button>{canEdit && <Button variant="primary" onClick={() => onEdit(null,"datos")}>+ Nuevo cliente</Button>}</>} />
     <CommercialNav active="clientes" />
     <div className={`clients-workspace${selected && !mobile ? " clients-workspace--selected" : ""}`}>

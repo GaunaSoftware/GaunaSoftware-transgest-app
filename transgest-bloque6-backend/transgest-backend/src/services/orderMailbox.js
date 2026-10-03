@@ -3,6 +3,8 @@ const {encryptSecret,decryptSecret}=require('./apiKeys');
 const {resolveDestination}=require('./webhookTransport');
 const inbox=require('./orderInbox');
 const MAX_MESSAGE=6*1024*1024;
+const schemas=new WeakMap();
+function ensureSchema(db){if(!schemas.has(db))schemas.set(db,db.query(require('node:fs').readFileSync(require('node:path').join(__dirname,'../../scripts/migrations/20260928_company_order_mailbox.sql'),'utf8')).catch(error=>{schemas.delete(db);throw error;}));return schemas.get(db);}
 const fail=(message,status=422)=>{throw Object.assign(new Error(message),{status});};
 const text=(v,max=255)=>String(v||'').trim().slice(0,max);
 function publicConfig(row={}) {
@@ -10,7 +12,7 @@ function publicConfig(row={}) {
  return {email:row.email||'',provider:row.provider||'otro',host:row.host||'',port:993,username:row.username||'',password:'',has_password:!!row.secret_encrypted,folder:row.folder||'INBOX',enabled:!!row.enabled,verified_at:row.verified_at||null,last_sync_at:row.last_sync_at||null,last_received:row.last_received||0,last_error:row.last_error||'',missing,
   state:missing.length?'pendiente_configuracion':row.last_error?'error':!row.verified_at?'pendiente_prueba':row.enabled?'activo':'desactivado'};
 }
-async function read(db,company,lock=false) {return (await db.query(`SELECT * FROM empresa_order_mailbox WHERE empresa_id=$1${lock?' FOR UPDATE':''}`,[company])).rows[0]||{};}
+async function read(db,company,lock=false) {if(!lock)await ensureSchema(db);return (await db.query(`SELECT * FROM empresa_order_mailbox WHERE empresa_id=$1${lock?' FOR UPDATE':''}`,[company])).rows[0]||{};}
 async function status(db,company){return publicConfig(await read(db,company));}
 async function allowed(db,company) {
  const row=(await db.query('SELECT * FROM empresas WHERE id=$1',[company])).rows[0];
@@ -19,6 +21,7 @@ async function allowed(db,company) {
 }
 async function save(db,company,actor,input={}) {
  await allowed(db,company);
+ await ensureSchema(db);
  const email=text(input.email).toLowerCase(),host=text(input.host,200).toLowerCase(),username=text(input.username),folder=text(input.folder,200)||'INBOX',provider=text(input.provider,50)||'otro';
  if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))fail('Dirección del buzón no válida.');
  if(host&&!/^(?=.{1,200}$)[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,}$/.test(host))fail('Indica el nombre público del servidor IMAP, sin URL ni puerto.');
@@ -55,6 +58,10 @@ async function connect(row) {
 }
 function connectionError(error) {
  if(error.status)return error.message;
+ if(/descifrar/i.test(error.message||''))return 'La contraseña guardada no se puede descifrar con la configuración actual del servidor. Soporte debe revisar la clave de custodia; después puedes volver a guardar la contraseña del buzón.';
+ if(['ENOTFOUND','EAI_AGAIN'].includes(error.code))return 'No se pudo resolver el servidor IMAP. Comprueba su nombre con el proveedor del correo.';
+ if(['ETIMEDOUT','ECONNREFUSED','ETIMEOUT'].includes(error.code))return 'El servidor IMAP no respondió en el puerto 993. Comprueba que permite conexiones externas con TLS.';
+ if(/CERT|TLS|SSL/.test(error.code||''))return 'El certificado TLS del servidor IMAP no es válido o no coincide con su nombre. Solicita al proveedor su servidor IMAP correcto; no se ha desactivado la verificación del certificado.';
  if(error.authenticationFailed||['AUTHENTICATIONFAILED','AUTHORIZATIONFAILED'].includes(error.serverResponseCode))return 'El proveedor ha rechazado el acceso. Revisa usuario y contraseña de aplicación; si exige OAuth, usa la conexión del proveedor cuando esté habilitada.';
  return 'No se pudo completar la conexión IMAP cifrada. Revisa servidor, credenciales, carpeta y permisos del proveedor.';
 }
@@ -62,6 +69,7 @@ function connectionError(error) {
 // same cursor concurrently. Configuration changes are blocked while it is held.
 async function run(db,company,{test=false,actor=null,connector=connect}={}) {
  await allowed(db,company);
+ await ensureSchema(db);
  const token=crypto.randomUUID();
  const row=(await db.query(`UPDATE empresa_order_mailbox SET lease_token=$2,lease_until=now()+interval '90 seconds'
   WHERE empresa_id=$1 AND (lease_until IS NULL OR lease_until<now()) RETURNING *`,[company,token])).rows[0];
@@ -100,7 +108,8 @@ async function run(db,company,{test=false,actor=null,connector=connect}={}) {
  } catch(error) {
   const message=connectionError(error);
   await db.query('UPDATE empresa_order_mailbox SET last_error=$3 WHERE empresa_id=$1 AND lease_token=$2',[company,token,message]);
-  throw Object.assign(new Error(message),{status:error.status||502});
+  const configurationError=['ENOTFOUND','EAI_AGAIN'].includes(error.code)||/CERT|TLS|SSL/.test(error.code||'')||error.authenticationFailed||['AUTHENTICATIONFAILED','AUTHORIZATIONFAILED'].includes(error.serverResponseCode);
+  throw Object.assign(new Error(message),{status:error.status||(configurationError?422:502),code:'IMAP_CONNECTION_FAILED'});
  } finally {connection?.close();await db.query('UPDATE empresa_order_mailbox SET lease_token=NULL,lease_until=NULL WHERE empresa_id=$1 AND lease_token=$2',[company,token]);}
 }
 async function inboxStatus(db,company) {
@@ -116,9 +125,10 @@ function startScheduler() {
   if(busy)return;busy=true;
   try {
    const db=require('./db');
+   await ensureSchema(db);
    const rows=(await db.query('SELECT empresa_id FROM empresa_order_mailbox WHERE enabled=true AND verified_at IS NOT NULL ORDER BY last_sync_at NULLS FIRST LIMIT 50')).rows;
    for(const row of rows){try{await run(db,row.empresa_id);}catch{/* The tenant status stores a sanitized, actionable error. */}}
   }catch{require('./logger').warn('No se pudo ejecutar la recepción de pedidos por correo.');}finally{busy=false;}
  },5*60*1000);timer.unref();
 }
-module.exports={publicConfig,status,save,run,inboxStatus,startScheduler,connect,connectionError,MAX_MESSAGE};
+module.exports={ensureSchema,publicConfig,status,save,run,inboxStatus,startScheduler,connect,connectionError,MAX_MESSAGE};

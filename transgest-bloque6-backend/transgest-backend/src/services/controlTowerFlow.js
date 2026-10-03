@@ -2,7 +2,7 @@ const { withTransportProgress } = require('./transportProgress');
 
 const FLOW_STATES = Object.freeze([
   ['pendiente', 'Pendiente de asignar'], ['confirmado', 'Confirmado'], ['espera_carga', 'En espera de carga'],
-  ['cargando', 'Cargando'], ['en_transito', 'En tránsito'],
+  ['cargando', 'Cargando'], ['cargado', 'Cargado'], ['en_transito', 'En tránsito'],
   ['en_curso', 'En tránsito · sin desglose'], ['espera_descarga', 'En espera de descarga'],
   ['descarga', 'Descargando'], ['entregado', 'Entregado'], ['incidencia', 'Incidencia'],
 ]);
@@ -33,7 +33,7 @@ function summarizeFlow(rows) {
   }
   const definitions = new Map(FLOW_STATES);
   // Preserve any future/legacy state rather than silently omitting its orders.
-  for (const key of count.keys()) if (!definitions.has(key) && key !== 'cargado') definitions.set(key, key);
+  for (const key of count.keys()) if (!definitions.has(key)) definitions.set(key, key);
   return {
     estados: [...definitions].map(([key, label]) => ({ key, label, total: count.get(key) || 0 })),
     legacy: [...legacy].map(([estado, total]) => ({ estado, total })),

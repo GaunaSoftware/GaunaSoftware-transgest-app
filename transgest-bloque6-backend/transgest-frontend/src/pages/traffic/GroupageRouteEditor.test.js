@@ -24,9 +24,9 @@ test('layout and route remain independent; invalid delivery-first move is reject
  expect(notify).toHaveBeenCalledWith('La descarga debe ir después de su carga.','warning');
 });
 test('gross mass is never treated as payload capacity',()=>{
- expect(capacidadRemolque({masa_total_kg:40000}).peso).toBe(24000);
+ expect(capacidadRemolque({masa_total_kg:40000}).peso).toBeNull();
  expect(capacidadRemolque({masa_total_kg:40000,carga_max_kg:22000}).peso).toBe(22000);
- expect(capacidadRemolque(null).metros).toBe(13.65);
+ expect(capacidadRemolque(null).metros).toBeNull();
 });
 
 test('strict groupage capacity uses the selected body or trailer without standard dimensions',()=>{

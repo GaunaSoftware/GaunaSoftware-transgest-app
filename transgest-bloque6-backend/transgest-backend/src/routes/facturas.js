@@ -446,12 +446,12 @@ router.get("/bloqueos-documentales", GERENTE_O_CONTABLE, async (req, res) => {
     const pedidosRows = pedidos.rows.map((p) => ({
       ...p,
       bloqueos: ["POD/albaran pendiente"],
-      accion: "Pedir o adjuntar soporte antes de facturar.",
+      accion: "Documentación pendiente: puedes facturar y adjuntarla después.",
     }));
     const facturasRows = facturas.rows.map((f) => ({
       ...f,
       bloqueos: [`${Number(f.pedidos_sin_soporte || 0)} pedido(s) sin soporte`],
-      accion: f.estado === "borrador" ? "Completar documentacion antes de emitir." : "Revisar adjuntos antes de reclamar o cerrar cobro.",
+      accion: f.estado === "borrador" ? "Documentación pendiente: revisar y adjuntar cuando esté disponible." : "Revisar adjuntos antes de reclamar o cerrar cobro.",
     }));
     const cobrosRows = cobros.rows.map((f) => ({
       ...f,
@@ -1098,11 +1098,11 @@ router.post("/", GERENTE_O_CONTABLE,
   async(req,res,next)=>{try{
     if(req.body.workflow_pedidos_ids!==undefined){
       const ids=req.body.workflow_pedidos_ids;
-      const clausePercent=req.body.fuel_clause_percent,clauseConfirmed=req.body.fuel_clause_confirmed;
+      const clausePercent=req.body.fuel_clause_percent,clauseConfirmed=req.body.fuel_clause_confirmed,invoiceFormat=req.body.invoice_format;
       if(!Array.isArray(ids)||!ids.length||ids.length>200||ids.some(id=>typeof id!=='string'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)))return res.status(400).json({error:'Selecciona entre 1 y 200 pedidos válidos'});
       const rows=(await db.query('SELECT id,cliente_id FROM pedidos WHERE empresa_id=$1 AND id=ANY($2::uuid[])',[req.empresaId||req.user.empresa_id,ids])).rows;
       if(rows.length!==new Set(ids).size||new Set(rows.map(r=>r.cliente_id)).size!==1)return res.status(400).json({error:'El lote debe contener pedidos autorizados de un solo cliente'});
-      req.body={workflow_pedidos_ids:ids,cliente_id:rows[0].cliente_id,pedidos_ids:ids,serie:'A',estado:'borrador',lineas:[{concepto:'Preparando lote',cantidad:1,precio_unit:0}],...(clausePercent!==undefined?{fuel_clause_percent:clausePercent,fuel_clause_confirmed:clauseConfirmed}:{})};
+      req.body={workflow_pedidos_ids:ids,invoice_format:invoiceFormat,cliente_id:rows[0].cliente_id,pedidos_ids:ids,serie:'A',estado:'borrador',lineas:[{concepto:'Preparando lote',cantidad:1,precio_unit:0}],...(clausePercent!==undefined?{fuel_clause_percent:clausePercent,fuel_clause_confirmed:clauseConfirmed}:{})};
     }next();
   }catch(e){next(e);}},
   body("cliente_id").isUUID(),
@@ -1207,12 +1207,17 @@ router.post("/", GERENTE_O_CONTABLE,
         appliedFuelClause=fuelService.fuelClause(fuelOrders,req.body.fuel_clause_percent);
         if(req.body.workflow_pedidos_ids){
           if(readiness.some(r=>r.estado!=='listo'))throw Object.assign(new Error('Revisa los pedidos actuales antes de preparar el lote'),{status:409});
-          const baseRequest=readiness.map(r=>[r.id,r.huella]);
+          const customerMode=(await client.query('SELECT modo_facturacion FROM clientes WHERE id=$1 AND empresa_id=$2',[cliente_id,empresaId])).rows[0]?.modo_facturacion;
+          const formatService=require('../services/invoiceFormat');
+          const format=formatService.invoiceFormat(req.body.invoice_format,customerMode);
+          const baseRequest={formato:format,pedidos:readiness.map(r=>[r.id,r.huella])};
           workflowHash=require('crypto').createHash('sha256').update(JSON.stringify(appliedFuelClause?{pedidos:baseRequest,clausula_gasoil:appliedFuelClause.percentage}:baseRequest)).digest('hex');
           const previous=(await client.query('SELECT f.* FROM invoice_workflow_operations o JOIN facturas f ON f.id=o.factura_id AND f.empresa_id=o.empresa_id WHERE o.empresa_id=$1 AND o.request_hash=$2',[empresaId,workflowHash])).rows[0];
           if(previous)return previous;
-          lineas=fuelService.fuelInvoiceLinesForOrders(fuelOrders,appliedFuelClause);
+          lineas=formatService.invoiceLinesForFormat(fuelOrders,appliedFuelClause,format);
         }
+        if(borradoresPrevios.size)throw Object.assign(new Error('Uno de los viajes ya está reservado en un borrador. Abre ese borrador para continuar; no se ha creado otra factura.'),{status:409});
+        observaciones=require('../services/invoiceFormat').invoiceObservations(observaciones,fuelOrders);
         fuelService.validateFuelInvoiceLines(fuelOrders, lineas, appliedFuelClause);
       }
       if(plannerPreparation) lineas=await require('../services/plannerInvoice').saleLines(client,empresaId,plannerPreparation,cliente_id);
@@ -1222,22 +1227,6 @@ router.post("/", GERENTE_O_CONTABLE,
         if(!original || String(original.cliente_id)!==String(cliente_id) || ['borrador','rectificada'].includes(original.estado))throw Object.assign(new Error('La factura original no pertenece al cliente o no puede rectificarse.'),{status:409});
       }
       const cobrosConfig = await getCobrosConfig(empresaId, client);
-      const borradoresPreviosArr = [...borradoresPrevios];
-      if (borradoresPreviosArr.length) {
-        const frozen=await client.query('SELECT id FROM factura_registros_fiscales WHERE factura_id=ANY($1::uuid[]) AND empresa_id=$2',[borradoresPreviosArr,empresaId]);
-        if(frozen.rows.length)throw Object.assign(new Error('Hay un borrador con emisión fiscal iniciada. No se puede reagrupar.'),{status:409});
-        await client.query(
-          `DELETE FROM factura_pedidos
-            WHERE pedido_id = ANY($1::uuid[])
-              AND factura_id = ANY($2::uuid[])`,
-          [pedidosIdsUnicos, borradoresPreviosArr]
-        );
-        await client.query(
-          "UPDATE pedidos SET factura_id=NULL WHERE id = ANY($1::uuid[]) AND empresa_id=$2",
-          [pedidosIdsUnicos, empresaId]
-        );
-      }
-
       // Generar número correlativo
       const año = new Date(fecha || Date.now()).getFullYear();
       const numero = await require("../services/invoiceNumber").nextInvoiceNumber(client, empresaId, serie, año);
@@ -1336,19 +1325,6 @@ router.post("/", GERENTE_O_CONTABLE,
         ).catch(e => logger.warn("No se pudieron vincular albaranes a factura:", e.message));
       }
 
-      if (borradoresPreviosArr.length) {
-        await client.query(
-          `DELETE FROM facturas f
-            WHERE f.id = ANY($1::uuid[])
-              AND f.empresa_id=$2
-              AND f.estado='borrador' AND NOT EXISTS (SELECT 1 FROM factura_registros_fiscales fr WHERE fr.factura_id=f.id)
-              AND NOT EXISTS (
-                SELECT 1 FROM factura_pedidos fp WHERE fp.factura_id=f.id
-              )`,
-          [borradoresPreviosArr, empresaId]
-        );
-      }
-
       if(workflowHash)await client.query('INSERT INTO invoice_workflow_operations(empresa_id,request_hash,factura_id) VALUES($1,$2,$3) ON CONFLICT(empresa_id,request_hash) DO UPDATE SET factura_id=$3',[empresaId,workflowHash,fac.id]);
       return fac;
     });
@@ -1399,16 +1375,6 @@ router.patch("/:id/estado", PUEDE_CAMBIAR_ESTADO_FACTURA,
     if (estadoAntes === 'borrador' && estado !== 'borrador') {
       const issue=await require('../services/billingData').billingProblem(db,factura.cliente_id,empresaId);
       if(issue)return res.status(422).json({error:issue,code:'DATOS_FISCALES_INCOMPLETOS'});
-    }
-
-    if (estado === "enviada") {
-      const sinSoporte = await getFacturaPedidosSinSoporte(factura.id, empresaId);
-      if (sinSoporte.length) {
-        return res.status(409).json({
-          error: `No se puede marcar como enviada: faltan albaranes/POD en ${sinSoporte.length} pedido(s).`,
-          pedidos_sin_soporte: sinSoporte.map(p => ({ id: p.id, numero: p.numero })),
-        });
-      }
     }
 
     if(estadoAntes==='borrador') {

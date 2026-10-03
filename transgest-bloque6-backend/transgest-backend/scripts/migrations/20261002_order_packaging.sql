@@ -1,0 +1,1 @@
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS embalaje TEXT;

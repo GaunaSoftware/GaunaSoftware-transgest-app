@@ -1,3 +1,5 @@
+import { supplierLedgerSummary } from "../utils/supplierLedgerSummary";
+import { inferSupplierType } from "../utils/supplierType";
 import SupplierInvoiceReview from "./colaboradores/SupplierInvoiceReview";
 import React, { useState, useEffect, useCallback } from "react";
 import { getColaboradores, crearColaborador, editarColaborador,
@@ -107,11 +109,7 @@ function estadoDocumentoColaborador(doc = {}) {
 function buildLiquidacionColaboradorHtml({ colaborador = {}, viajes = [], facturas = [], pagos = [], documentos = [] } = {}) {
   const generated = new Date().toLocaleString("es-ES");
   const money = value => `${Number(value || 0).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;
-  const totalViajes = viajes.reduce((s, p) => s + Number(p.importe_colaborador || p.precio_colaborador || 0), 0);
-  const totalFacturado = facturas.reduce((s, f) => s + Number(f.total || 0), 0);
-  const totalPagado = pagos.filter(p => String(p.estado || "") === "pagado").reduce((s, p) => s + Number(p.importe || 0), 0);
-  const pendientePago = Math.max(0, totalFacturado - totalPagado);
-  const pendienteFactura = Math.max(0, totalViajes - totalFacturado);
+  const {totalViajes,totalFacturado,totalPagado,pendientePago,pendienteFactura} = supplierLedgerSummary(viajes,facturas,pagos);
   const estadoProveedor = estadoPagosProveedor({ facturas, pagos });
   const docsCaducados = documentos.filter(d => estadoDocumentoColaborador(d).dias !== null && estadoDocumentoColaborador(d).dias < 0);
   const docsProximos = documentos.filter(d => {
@@ -167,16 +165,17 @@ function buildLiquidacionColaboradorHtml({ colaborador = {}, viajes = [], factur
       <h1>Liquidacion de colaborador</h1>
       <div class="sub">${escapeHtml(colaborador.nombre || "Colaborador")} - generado el ${escapeHtml(generated)} desde TransGest.</div>
       <div class="grid">
-        <div class="box"><div class="metric amber">${escapeHtml(money(totalViajes))}</div><div class="muted">A pagar por viajes</div></div>
+        <div class="box"><div class="metric amber">${escapeHtml(money(totalViajes))}</div><div class="muted">Precio acordado por viajes (sin impuestos)</div></div>
         <div class="box"><div class="metric green">${escapeHtml(money(totalFacturado))}</div><div class="muted">Facturas recibidas</div></div>
         <div class="box"><div class="metric green">${escapeHtml(money(totalPagado))}</div><div class="muted">Pagado registrado</div></div>
         <div class="box"><div class="metric ${pendientePago > 0 ? "red" : "green"}">${escapeHtml(money(pendientePago))}</div><div class="muted">Pendiente de pago</div></div>
-        <div class="box"><div class="metric ${pendienteFactura > 0 ? "amber" : "green"}">${escapeHtml(money(pendienteFactura))}</div><div class="muted">Pendiente de factura</div></div>
+        <div class="box"><div class="metric ${pendienteFactura > 0 ? "amber" : "green"}">${escapeHtml(money(pendienteFactura))}</div><div class="muted">Pendiente de factura (base de servicios)</div></div>
         <div class="box"><div class="metric ${estadoProveedor.vencidas.length ? "red" : "green"}">${estadoProveedor.vencidas.length}</div><div class="muted">Facturas vencidas proveedor</div></div>
         <div class="box"><div class="metric ${estadoProveedor.proximas.length ? "amber" : "green"}">${estadoProveedor.proximas.length}</div><div class="muted">Vencen en 7 dias</div></div>
         <div class="box"><div class="metric ${docsCaducados.length ? "red" : docsProximos.length ? "amber" : "green"}">${documentos.length}</div><div class="muted">Documentos registrados</div></div>
         <div class="box"><div class="metric ${docsCaducados.length ? "red" : "green"}">${docsCaducados.length}</div><div class="muted">Documentos caducados</div></div>
       </div>
+      ${colaborador.notas ? `<h2>Observaciones del colaborador</h2><div class="sub">${escapeHtml(colaborador.notas).replace(/\n/g,"<br>")}</div>` : ""}
       <h2>Viajes del periodo/listado</h2>
       <table><thead><tr><th>Referencia</th><th>Fecha</th><th>Ruta</th><th>Cliente</th><th class="money">Importe</th></tr></thead><tbody>${viajeRows || "<tr><td colspan='5'>Sin viajes.</td></tr>"}</tbody></table>
       <h2>Facturas recibidas</h2>
@@ -202,7 +201,7 @@ function ModalFacturaColab({ colaborador, viaje, factura, onClose, onSaved }) {
     iva_regimen: ivaInicial.value,
     total: factura?.total ? Number(factura.total).toFixed(2) : (importe ? (importe * (1 + ivaInicial.pct / 100)).toFixed(2) : ""),
     estado: factura?.estado || "pendiente",
-    notas: factura?.notas || "",
+    notas: factura?.notas || colaborador?.notas || "",
   });
   const [saving, setSaving] = useState(false);
   const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
@@ -764,9 +763,7 @@ function TabViajesFacturasColab({ colaborador, canEdit }) {
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  const totalViajes = viajes.reduce((s,p)=>s+Number(p.importe_colaborador || p.precio_colaborador || 0),0);
-  const totalFacturado = facturas.reduce((s,f)=>s+Number(f.total || 0),0);
-  const totalPagado = pagos.filter(p=>p.estado==="pagado").reduce((s,p)=>s+Number(p.importe || 0),0);
+  const {totalViajes,totalFacturado,totalPagado} = supplierLedgerSummary(viajes,facturas,pagos);
   const totalPendienteFactura = facturas
     .filter(f=>!f.numero_factura || f.estado==="pendiente")
     .reduce((s,f)=>s+Number(f.total || 0),0);
@@ -1235,7 +1232,16 @@ function ModalColaborador({ editando, onClose, onSaved }) {
     forma_pago:"Transferencia bancaria", tipo_iva:21, iva_regimen:"general",
   });
   const [saving, setSaving] = useState(false);
-  const f = k => e => setForm(p=>({...p,[k]:upperFromEvent(k, e)}));
+  const [manualType,setManualType]=useState(false);
+  const f = k => e => {
+    const value=upperFromEvent(k,e);
+    if(k==='tipo')setManualType(true);
+    setForm(prev=>{
+      const next={...prev,[k]:value};
+      const inferred=['nombre','cif'].includes(k)&&!manualType?inferSupplierType(next.nombre,next.cif):null;
+      return inferred?{...next,tipo:inferred}:next;
+    });
+  };
   const fb = k => e => setForm(p=>({...p,[k]:e.target.checked}));
   const fIva = e => {
     const opt = IVA_OPCIONES.find(o => o.value === e.target.value) || IVA_OPCIONES[0];
@@ -1308,7 +1314,7 @@ function ModalColaborador({ editando, onClose, onSaved }) {
             </select>
           </div>
 
-          <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Notas</label><textarea style={{...S.inp,resize:"vertical",minHeight:70}} value={form.notas||""} onChange={f("notas")}/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={S.lbl}>Observaciones del colaborador</label><small>Solo en su liquidación y registro de factura de proveedor.</small><textarea style={{...S.inp,resize:"vertical",minHeight:70}} value={form.notas||""} onChange={f("notas")}/></div>
           {editando && (
             <label style={{gridColumn:"1/-1",display:"flex",alignItems:"center",gap:8,marginTop:10,fontSize:12,color:"var(--text3)"}}>
               <input type="checkbox" checked={!!form.pendiente_revision} onChange={fb("pendiente_revision")}/>
@@ -1461,7 +1467,7 @@ export default function Colaboradores() {
               {revisandoLiquidaciones ? "Revisando..." : "Revisar liquidaciones"}
             </button>
           )}
-          {['gerente','trafico','administrativo'].includes(user?.rol)&&puedeVer('pedidos')&&<a href="/transportistas/conexiones" style={{...S.btn,color:'var(--text)',border:'1px solid var(--border)'}}>TransGest Network</a>}
+          {['gerente','trafico','administrativo'].includes(user?.rol)&&puedeVer('pedidos')&&<button onClick={()=>window.dispatchEvent(new CustomEvent("tms:navegar",{detail:"network"}))} style={{...S.btn,color:"var(--text)",border:"1px solid var(--border)"}}>TransGest Network</button>}
           {canEdit && <button style={{...S.btn,background:"var(--accent)",color:"#fff"}} onClick={()=>{setEditando(null);setModal(true);}}>+ Nuevo colaborador</button>}
         </div>
       </div>

@@ -1,0 +1,44 @@
+const {supplierLedgerSummary}=require('../src/services/supplierLedgerSummary');
+const assert=require('node:assert/strict'),{PGlite}=require('@electric-sql/pglite');
+const {saveCustomerRouteTerms,orderCommercialTerms}=require('../src/services/commercialRouteTerms');
+const {invoiceFormat,invoiceLinesForFormat,invoiceObservations}=require('../src/services/invoiceFormat');
+const {validateFuelInvoiceLines,fuelClause}=require('../src/services/invoiceFuelLines');
+const {saveSupplierTripPayment,date}=require('../src/services/supplierTripPayment');
+const id=n=>`${String(n).padStart(8,'0')}-1111-4111-8111-111111111111`;
+async function main(){const pg=new PGlite(),c=id(1),other=id(2),client=id(3),client2=id(4),route=id(5),point=id(6),supplier=id(7),order=id(8),actor=id(9);
+ try{
+  const ledger=supplierLedgerSummary([{id:order,precio_colaborador:300}],[{numero_factura:'',base:300,total:363},{pedido_id:order,numero_factura:'F1',base:100,total:121},{numero_factura:'EXTRA',base:50,total:60.5}],[{estado:'pagado',importe:40}]);
+  assert.equal(ledger.pendienteFactura,200);assert.equal(ledger.pendientePago,141.5);assert.equal(ledger.totalFacturado,181.5);assert.equal(ledger.received.length,2);
+  await pg.exec(`CREATE TABLE clientes(id uuid PRIMARY KEY,empresa_id uuid);CREATE TABLE puntos_interes(id uuid PRIMARY KEY,empresa_id uuid,activo boolean);
+   CREATE TABLE rutas(id uuid PRIMARY KEY,empresa_id uuid,cliente_id uuid,notas text,observaciones_factura text);
+   CREATE TABLE ruta_precios_cliente(ruta_id uuid,cliente_id uuid,notas text,observaciones_factura text,origen_punto_id uuid,destino_punto_id uuid);
+   CREATE TABLE colaboradores(id uuid PRIMARY KEY,empresa_id uuid);
+   CREATE TABLE pedidos(id uuid PRIMARY KEY,empresa_id uuid,colaborador_id uuid,precio_colaborador numeric);
+   CREATE TABLE pedido_colaborador_pagos(id uuid DEFAULT gen_random_uuid(),pedido_id uuid UNIQUE,empresa_id uuid,colaborador_id uuid,factura_nombre text,factura_data text,fecha_recepcion date,fecha_pago_calculada date,fecha_pago_real date,importe numeric,pagado boolean,documentacion_recibida boolean,fecha_documentacion_recepcion date,notas_pago text,created_by uuid,updated_by uuid,updated_at timestamptz);
+   CREATE TABLE pedido_eventos(pedido_id uuid,empresa_id uuid,tipo text,actor_tipo text,actor_id uuid,detalle jsonb);`);
+  await pg.query('INSERT INTO puntos_interes VALUES($1,$2,true)',[point,c]);
+  await pg.query('INSERT INTO rutas VALUES($1,$2,$3,$4,$5)',[route,c,client,'Antes de las 12','Base']);
+  await pg.query('INSERT INTO ruta_precios_cliente(ruta_id,cliente_id) VALUES($1,$2),($1,$3)',[route,client,client2]);
+  await pg.transaction(tx=>saveCustomerRouteTerms(tx,c,client,route,{origen_punto_id:point,notas:'Solo mañanas',observaciones_factura:'Referencia privada del cliente'}));
+  const terms=await orderCommercialTerms(pg,c,actor,{cliente_id:client,tarifa_notas_confirmadas:'Solo mañanas'},null,route);
+  assert.equal(terms.observaciones_factura,'Referencia privada del cliente');assert.equal(JSON.parse(terms.tarifa_instrucciones).texto,'Solo mañanas');
+  assert.equal((await pg.query('SELECT notas FROM ruta_precios_cliente WHERE cliente_id=$1',[client2])).rows[0].notas,null);
+  await assert.rejects(()=>orderCommercialTerms(pg,c,actor,{cliente_id:client},null,route),e=>e.status===409);
+  await assert.rejects(()=>saveCustomerRouteTerms(pg,other,client,route,{origen_punto_id:point}),e=>e.status===404);
+  assert.deepEqual(await orderCommercialTerms(pg,c,actor,{}, {ruta_id:route,cliente_id:client},route),{});
+  const orders=[{id:order,numero:'P1',importe:108,importe_revision_combustible:8,peso_kg:5000,tipo_precio:'tonelada',precio_base_sin_combustible:20,importe_paralizacion:5},{id:id(10),numero:'P2',importe:216,importe_revision_combustible:16,peso_kg:10000,tipo_precio:'tonelada',precio_base_sin_combustible:20}];
+  for(const mode of ['detalle','detalle_combustible_agrupado','linea','kg']){const clause=fuelClause(orders,7.5),lines=invoiceLinesForFormat(orders,clause,mode);validateFuelInvoiceLines(orders,lines,clause);assert.equal(Math.round(lines.reduce((n,l)=>n+l.cantidad*l.precio_unit,0)*100),32750);}
+  assert.equal(invoiceFormat(null,'por_viaje'),'individual');assert.throws(()=>invoiceFormat(null,'segun_factura'));assert.throws(()=>invoiceLinesForFormat(orders,null,'individual'));assert.equal(invoiceObservations('Nota',[{observaciones_factura:'Nota'},{observaciones_factura:'Otra'}]),'Nota\nOtra');
+  await pg.query('INSERT INTO colaboradores VALUES($1,$2)',[supplier,c]);await pg.query('INSERT INTO pedidos VALUES($1,$2,$3,315)',[order,c,supplier]);
+  const save=input=>pg.transaction(tx=>saveSupplierTripPayment(tx,c,order,actor,input));
+  await save({documentacion_recibida:true,fecha_documentacion_recepcion:'2026-10-02',notas_pago:'Revisada'});
+  const paid=await save({pagado:true,fecha_pago_real:'2026-10-03',importe:'315,25'});
+  assert.equal(paid.documentacion_recibida,true);assert.equal(paid.notas_pago,'Revisada');assert.equal(Number(paid.importe),315.25);
+  await save({pagado:true,fecha_pago_real:'2026-10-03'});assert.equal((await pg.query('SELECT count(*)::int n FROM pedido_colaborador_pagos')).rows[0].n,1);
+  await assert.rejects(()=>save({importe:'NaN'}),e=>e.status===400);await assert.rejects(()=>save({factura_data:'data:application/pdf;base64,AAAA'}));
+  await assert.rejects(()=>pg.transaction(tx=>saveSupplierTripPayment(tx,other,order,actor,{})),e=>e.status===404);
+  assert.throws(()=>date('2026-02-30'));assert.throws(()=>date('nonsense'));
+  await assert.rejects(()=>pg.transaction(async tx=>{await saveSupplierTripPayment(tx,c,order,actor,{notas_pago:'No conservar'});throw Error('rollback');}));assert.equal((await pg.query('SELECT notas_pago FROM pedido_colaborador_pagos')).rows[0].notas_pago,'Revisada');
+  console.log('PASS isolated customer route terms, accepted order snapshot, invoice formats/fuel exact cents, transactional supplier documents/payment and tenant isolation');
+ }finally{await pg.close();}}
+main().catch(error=>{console.error(error);process.exitCode=1;});

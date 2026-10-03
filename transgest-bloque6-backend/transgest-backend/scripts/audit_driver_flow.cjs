@@ -68,7 +68,7 @@ module.exports = async function auditDriverFlow({ base, fetch, db, managerToken,
   assert.deepEqual((await download(publicRoute)).body,originalBytes,'Public QR serves the exact authorized PDF');
   const repeated=await request('POST',`/pedidos/${order.id}/documento-control-digital/generar`,{},200,managerToken);
   assert.equal(repeated.versiones.length,1,'Repeated issue preserves the version');
-  assert.equal(loadedTrip.estado, 'en_curso', 'The legacy state remains compatible');
+  assert.equal(loadedTrip.estado, 'cargado', 'Completar la carga no equivale a salir');
   assert.equal(loadedTrip.estado_operativo?.codigo, 'cargado', 'Loading completion is not departure');
   for (const endpoint of ['/pedidos', '/pedidos/resumen-lista']) {
     const listing = await request('GET', `${endpoint}?q=${encodeURIComponent(order.numero)}`);

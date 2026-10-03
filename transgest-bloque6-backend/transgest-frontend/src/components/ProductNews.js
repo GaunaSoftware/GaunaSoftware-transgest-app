@@ -15,7 +15,7 @@ export default function ProductNews() {
     setNews(null);setClosed(false);setError('');setBusy(false);
     if(!key || loading || user?.debe_cambiar_password)return;
     let active=true;
-    getUserRelease(build.releaseId).then(n=>{if(active)setNews({...n,accountKey:key});}).catch(()=>{/* Retry at the next login; never invent a dismissal. */});
+    getUserRelease(build.releaseId).then(n=>{if(active && n?.id && Array.isArray(n.items))setNews({...n,accountKey:key});}).catch(()=>{/* Retry at the next login; never invent a dismissal. */});
     return()=>{active=false;};
   },[key,loading,user?.debe_cambiar_password]);
   const visible=!!news && news.accountKey===key && !news.dismissed && !closed;

@@ -2,13 +2,8 @@
 const net=require('node:net');
 const assert=require('node:assert/strict');
 const nodemailer=require('nodemailer');
-const fs=require('node:fs');
-const path=require('node:path');
-const vm=require('node:vm');
 async function main() {
-  const source=fs.readFileSync(path.join(__dirname,'../src/services/email.js'),'utf8');
-  const templateSource=source.slice(source.indexOf('const PLANTILLAS = {'),source.indexOf('// ── Función principal de envío'));
-  const testMail=vm.runInNewContext(`${templateSource}\nPLANTILLAS.correo_gauna_test()`,{});
+  const testMail=require('../src/services/email').PLANTILLAS.correo_gauna_test();
   assert(testMail.text && testMail.html && !/href=|cid:|contraseña/i.test(testMail.html),
     'The SMTP diagnostic must be a simple message, not an account invitation');
   const messages=[];const sockets=new Set();

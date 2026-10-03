@@ -109,6 +109,8 @@ async function saveEmpresaWhatsappConfig(empresaId, data = {}, userId = null) {
   const templates = data.templates && typeof data.templates === "object" && !Array.isArray(data.templates)
     ? { ...DEFAULT_TEMPLATES, ...data.templates }
     : DEFAULT_TEMPLATES;
+  for(const key of ['phone_number_id','waba_id'])if(data[key]&&!/^\d{5,30}$/.test(String(data[key]).trim()))throw Object.assign(Error('El identificador de Meta debe contener solo números.'),{status:400});
+  if(Object.values(templates).some(value=>typeof value!=='string'||!/^([a-z0-9_]{1,100})$/.test(value)))throw Object.assign(Error('Las plantillas deben usar su nombre de Meta: letras minúsculas, números y guion bajo.'),{status:400});
   await db.query(`
     INSERT INTO empresa_whatsapp_config
       (empresa_id,phone_number_id,waba_id,access_token_encrypted,access_token_mask,app_secret_encrypted,app_secret_mask,
@@ -126,6 +128,7 @@ async function saveEmpresaWhatsappConfig(empresaId, data = {}, userId = null) {
       templates=$10,
       activo=$11,
       simular_sin_credenciales=$12,
+      last_test_at=NULL,last_test_ok=NULL,last_error=NULL,
       updated_by=$13,
       updated_at=NOW()
   `, [
@@ -284,7 +287,7 @@ function templateParamsFromPedido(pedido = {}) {
 }
 
 async function sendMetaCloudMessage({ cfg, phone, templateName, message, pedido }) {
-  const graphVersion = process.env.WHATSAPP_GRAPH_VERSION || "v20.0";
+  const graphVersion = process.env.WHATSAPP_GRAPH_VERSION || "v25.0";
   const url = `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(cfg.phone_number_id)}/messages`;
   const payload = templateName
     ? {
@@ -426,7 +429,8 @@ async function getWhatsappStatus(empresaId) {
   return {
     provider: "meta_cloud",
     configured,
-    ready: configured && cfg.activo,
+    ready: configured && cfg.activo && cfg.last_test_ok === true,
+    last_test_at:cfg.last_test_at,last_test_ok:cfg.last_test_ok,last_error:cfg.last_error,
     activo: cfg.activo,
     phone_number_id_configured: !!cfg.phone_number_id,
     waba_id_configured: !!cfg.waba_id,
@@ -442,8 +446,50 @@ async function getWhatsappStatus(empresaId) {
   };
 }
 
+async function testEmpresaWhatsapp(company,{request=fetch}={}) {
+ const cfg=await getEmpresaWhatsappConfig(company,true);
+ if(!cfg?.phone_number_id||!cfg?.waba_id||!cfg?.access_token)throw Object.assign(new Error('Completa y guarda Phone Number ID, WABA ID y el token de Meta antes de probar.'),{status:400});
+ const version=process.env.WHATSAPP_GRAPH_VERSION||'v25.0';
+ const read=async(path)=>{
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+  try{const response=await request('https://graph.facebook.com/'+version+'/'+path,{headers:{Authorization:'Bearer '+cfg.access_token},signal:controller.signal});
+   const data=await response.json().catch(()=>({}));
+   if(!response.ok)throw Object.assign(new Error(response.status===401||data.error?.code===190?'Meta ha rechazado el token. Revisa su vigencia y permisos de WhatsApp Business.':'No se pudo consultar la cuenta en Meta. Revisa los identificadores y permisos del token.'),{status:502});
+   return data;
+  }finally{clearTimeout(timer);}
+ };
+ const pages=async(path)=>{
+   const rows=[];let after='';
+   for(let page=0;page<20;page++){
+     const result=await read(path+(after?'&after='+encodeURIComponent(after):''));rows.push(...(result.data||[]));
+     if(!result.paging?.next)return rows;
+     const cursor=result.paging?.cursors?.after;
+     if(!cursor||cursor===after)throw Object.assign(Error('Meta no permitió completar la lista de la cuenta. Repite la prueba.'),{status:502});
+     after=cursor;
+   }
+   throw Object.assign(Error('No se pudo revisar la lista completa de la cuenta. Contacta con soporte.'),{status:502});
+ };
+ try{
+  const phone=await read(encodeURIComponent(cfg.phone_number_id)+'?fields=id,display_phone_number,verified_name');
+  const numbers=await pages(encodeURIComponent(cfg.waba_id)+'/phone_numbers?fields=id&limit=100');
+  if(!numbers.some(n=>String(n.id)===String(cfg.phone_number_id)))throw Object.assign(new Error('El número no aparece en esta cuenta WABA. Comprueba que ambos identificadores pertenecen a la misma empresa.'),{status:422});
+  const templates=await pages(encodeURIComponent(cfg.waba_id)+'/message_templates?fields=name,status,language&limit=100');
+  const approved=templates.filter(t=>t.status==='APPROVED'&&/^es(?:_|$)/.test(t.language||''));
+  const required=[...new Set(Object.values(cfg.templates||{}).filter(Boolean))];
+  const missing=required.filter(name=>!approved.some(t=>t.name===name));
+  const message=missing.length?'Conexión correcta. Faltan plantillas aprobadas en español: '+missing.join(', '):'Conexión y plantillas verificadas. No se han enviado mensajes.';
+  await db.query('UPDATE empresa_whatsapp_config SET last_test_at=now(),last_test_ok=$2,last_error=$3 WHERE empresa_id=$1',[company,!missing.length,missing.length?message:null]);
+  return {ok:true,ready:!missing.length,phone:phone.display_phone_number,name:phone.verified_name,missing_templates:missing,message,config:await getEmpresaWhatsappConfig(company)};
+ }catch(error){
+  const message=error.status?error.message:'Meta no respondió a la prueba de conexión. Comprueba la conexión y vuelve a intentarlo.';
+  await db.query('UPDATE empresa_whatsapp_config SET last_test_at=now(),last_test_ok=false,last_error=$2 WHERE empresa_id=$1',[company,message]);
+  throw Object.assign(new Error(message),{status:error.status||502});
+ }
+}
+
 module.exports = {
   DEFAULT_TEMPLATES,
+  testEmpresaWhatsapp,
   ensureWhatsappTables,
   getEmpresaWhatsappConfig,
   saveEmpresaWhatsappConfig,

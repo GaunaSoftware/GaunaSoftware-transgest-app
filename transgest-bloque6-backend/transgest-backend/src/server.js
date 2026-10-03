@@ -241,6 +241,7 @@ function pedidosAuthUnlessPublic(req, res, next) {
   if (req.path.startsWith("/public/")) return next();
   return authenticate(req, res, (err) => {
     if (err) return next(err);
+    if (/^\/(?:colaborador-pagos\/pendientes|[^/]+\/colaborador-pago)$/.test(req.path))return requireModulePermission('facturacion')(req,res,next);
     if (req.user.rol !== 'chofer' && /^\/[^/]+\/chofer-docs(?:\/|$)/.test(req.path)) {
       return requireModulePermission('documentos')(req,res,next);
     }
@@ -1479,6 +1480,7 @@ async function startServer() {
     try { require("./services/weeklyBiReports").startScheduler(); } catch (e) { logger.warn("BI semanal: " + e.message); }
     try { require('./services/mobilePush').startScheduler(); } catch { logger.warn('Notificaciones móviles sin iniciar'); }
     try { require('./services/orderMailbox').startScheduler(); } catch { logger.warn('Recepción de pedidos por correo sin iniciar'); }
+    try { pedidosRoutes.startSupplierDocumentNotifier?.(); } catch(e){logger.warn('Correos de DeCA: '+e.message);}
     try { vehiculosRoutes.startGpsScheduler?.(); } catch (e) { logger.warn("GPS poller: " + e.message); }
     require('./services/importEngine').createImportEngine().resume().catch(e => logger.warn('Importación pendiente: ' + e.message));
     require('./services/importDocuments').createImportDocuments().resume().catch(e => logger.warn('Documentos pendientes: ' + e.message));

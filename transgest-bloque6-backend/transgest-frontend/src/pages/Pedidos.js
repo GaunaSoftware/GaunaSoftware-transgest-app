@@ -56,6 +56,7 @@ import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfi
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, promptDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
+import { orderFocusFilters } from "../utils/orderFocusFilters";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import ModalNuevoClienteRapido from "./orders/NewCustomerModal";
@@ -581,7 +582,7 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
     merged.destino = "";
   }
   const {
-    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
+    _tarifaNotas, _tarifaNotasAceptadas, _routePointMissing, _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
     chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, facturado, cliente_email, cliente_telefono,
     chofer2_nombre, remolque_id, mantener_asignacion, mantener_cargas, mantener_descargas, ...formClean
@@ -631,7 +632,7 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   const merged = normalizePedidoTarifaDraft(cargoPayload({ ...basePedido, ...overrides }));
   const geoMerged = withPedidoGeoDefaults(merged);
   const {
-    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
+    _tarifaNotas, _tarifaNotasAceptadas, _routePointMissing, _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
     colaborador_nombre, chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, factura_estado, factura_id,
     facturado, cliente_email, cliente_telefono,
@@ -644,6 +645,7 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   } = merged;
   const payload = sanitizePedidoPayload({
     ...formClean,
+    tarifa_notas_confirmadas: _tarifaNotasAceptadas ? _tarifaNotas : undefined,
     origen_pais: geoMerged.origen_pais,
     origen_provincia: geoMerged.origen_provincia || null,
     destino_pais: geoMerged.destino_pais,
@@ -740,7 +742,7 @@ function buildPedidoCriticalAlertKey(item) {
   ].filter(Boolean).join("::");
 }
 
-const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
+const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","cargado","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
 const ESTADOS_ACTIVOS = ESTADOS_RAW.filter(estado => !["entregado", "cancelado"].includes(estado));
 const LABEL_ESTADO = Object.fromEntries(ESTADOS_RAW.map(estado => [estado, transportStateMeta(estado).label]));
 
@@ -833,7 +835,7 @@ function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   if (["cancelado","incidencia"].includes(estado)) return issues;
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
   const hasManualMatricula = Boolean(String(pedido?.matricula_manual || "").trim());
-  const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
+  const needsOperationalData = ["confirmado", "cargado", "en_curso", "descarga", "entregado"].includes(estado);
   const needsDeliveryData = ["descarga", "entregado"].includes(estado);
   if (!toDateInputValue(pedido?.fecha_carga)) issues.push("Falta fecha de carga");
   if (needsOperationalData) {
@@ -1885,8 +1887,10 @@ function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
 
 function applyRouteEndpointsFromSavedPoints(draft = {}, ruta = {}) {
   let next = { ...draft };
-  const puntoCarga = findPuntoInteresForRouteEndpoint(ruta.origen || next.origen, next.cliente_id, "carga");
-  const puntoDescarga = findPuntoInteresForRouteEndpoint(ruta.destino || next.destino, next.cliente_id, "descarga");
+  const exact=(key,text,side)=>ruta[key] ? getPuntosInteres().find(p=>String(p.id)===String(ruta[key])) : findPuntoInteresForRouteEndpoint(text,next.cliente_id,side);
+  const puntoCarga=exact('origen_punto_id',ruta.origen||next.origen,'carga');
+  const puntoDescarga=exact('destino_punto_id',ruta.destino||next.destino,'descarga');
+  next._routePointMissing=[ruta.origen_punto_id&&!puntoCarga?'carga':null,ruta.destino_punto_id&&!puntoDescarga?'descarga':null].filter(Boolean);
   if (puntoCarga) next = applyPuntoCargaToDraft(next, puntoCarga);
   if (puntoDescarga) next = applyPuntoDescargaToDraft(next, puntoDescarga);
   return next;
@@ -3455,7 +3459,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   );
 }
 
-function PuntoInteresModal({ initial, onClose, onSave }) {
+export function PuntoInteresModal({ initial, onClose, onSave }) {
   const initialPoint = normalizePuntoInteresForForm(initial || {});
   const geoRequestRef = React.useRef(0);
   function inferPuntoGeoDraft(draft = {}) {
@@ -6398,7 +6402,7 @@ function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
   const incidencia = estado === "incidencia" || pedido?.incidencia_activa === true;
   if (incidencia) return { key:"incidencia", label:"Incidencia", color:"#ef4444", bg:"rgba(239,68,68,.16)", border:"rgba(239,68,68,.55)" };
   if (tipo === "carga") {
-    if (pasos.carga_ok || ["en_curso","espera_descarga","descarga","entregado","facturado"].includes(estado)) {
+    if (pasos.carga_ok || ["cargado","en_curso","espera_descarga","descarga","entregado","facturado"].includes(estado)) {
       return { key:"ok", label:"Carga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
     }
     if (estado === "cargando" || pasos.carga_proceso || pasos.carga_iniciada) {
@@ -6453,7 +6457,8 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
     : pasos.descarga_ok || ["entregado","facturado"].includes(estado) ? "entregado"
     : pasos.descarga_iniciada || estado === "descarga" ? "descarga"
     : pasos.posicionado_descarga ? "espera_descarga"
-    : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso" ? "en_curso"
+    : pasos.viaje_iniciado || estado === "en_curso" ? "en_curso"
+    : pasos.carga_ok || estado === "cargado" ? "cargado"
     : pasos.carga_proceso || pasos.carga_iniciada ? "cargando"
     : estado;
   const mapStateMeta = transportStateMeta(pedido?.estado_operativo ? pedido : mapState);
@@ -7624,6 +7629,8 @@ async function guardar({sendWorkflow = false, forceWorkflow = false} = {}) {
     setEditorStep(1); notify(bloqueoClienteModal.message, "error");
     return;
   }
+  if(form._routePointMissing?.length){setEditorStep(1);notify('No se ha cargado el punto exacto de '+form._routePointMissing.join(' y ')+'. Actualiza los puntos y vuelve a seleccionar la tarifa.','warning');return;}
+  if(form._tarifaNotas && !form._tarifaNotasAceptadas && (!editando?.id || String(form.ruta_id)!==String(editando.ruta_id))){setEditorStep(1);notify('Revisa y acepta las instrucciones de la tarifa.','warning');return;}
   if (rutaIncompatible) {
     setEditorStep(1); notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
     return;
@@ -7997,6 +8004,8 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   const minimoUnidades = normalizeMinimoUnidadesRuta(ruta, tarifaTipo);
   const next = {
     ...draft,
+    _tarifaNotas:String(ruta.notas||" ").trim(),
+    _tarifaNotasAceptadas:draft._tarifaNotas===String(ruta.notas||" ").trim()&&draft._tarifaNotasAceptadas===true,
     tipo_precio: tarifaTipo,
     precio_unitario: precioFinal,
     precio_base_sin_combustible: precioBase,
@@ -8700,7 +8709,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     requiere_cinchas: true,
     pendiente_completar: true,
     aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
-    _focus_asignacion: focus.source !== "gestion_trafico" || focus.view !== "grupajes",
+    _focus_asignacion: false,
     _nuevo_desde_trafico: true,
     ...(focus.source === "almacen_palets" ? {
       cliente_id: defaults.cliente_id || "",
@@ -8822,8 +8831,8 @@ export default function Pedidos() {
   useEffect(()=>{
     if(!aiDisponible)return;let active=true;
     const refresh=()=>getOrderInbox({summary:true}).then(data=>{if(active)setInboxCount(data.counts.filter(row=>!['creado','descartado'].includes(row.state)).reduce((n,row)=>n+row.count,0));}).catch(()=>{if(active)setInboxCount(null);});
-    refresh();window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
-    return()=>{active=false;window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
+    refresh();const timer=setInterval(refresh,30000);window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
+    return()=>{active=false;clearInterval(timer);window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
   },[aiDisponible]);
   const [focusPedido] = useState(() => readPedidosFocus());
   // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de
@@ -8847,10 +8856,12 @@ export default function Pedidos() {
   const _rangoSemanaActual = currentWeekRangeLocal();
   const [filtroEst,  setFiltroEst]  = useState(() => (focusPedido?.estado && !focusPedido?.pedido_id) ? String(focusPedido.estado) : "todos");
   const [filtroMes,  setFiltroMes]  = useState("");
-  const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
+  const [filtroFechasCustom, setFiltroFechasCustom] = useState(() => Boolean(orderFocusFilters(focusPedido).from || orderFocusFilters(focusPedido).to));
   const [mostrarHistorico, setMostrarHistorico] = useState(Boolean(focusPedido?.pedido_id));
-  const [filtroDesde, setFiltroDesde] = useState("");
-  const [filtroHasta, setFiltroHasta] = useState("");
+  const [filtroDesde, setFiltroDesde] = useState(() => orderFocusFilters(focusPedido).from);
+  const [filtroHasta, setFiltroHasta] = useState(() => orderFocusFilters(focusPedido).to);
+  const [focusIds, setFocusIds] = useState(() => orderFocusFilters(focusPedido).ids);
+  const [focusTitle, setFocusTitle] = useState(() => orderFocusFilters(focusPedido).title);
   const [filtroCliente,setFiltroCliente]=useState("");
   const [q,          setQ]          = useState(() => focusPedido?.pedido_id ? (focusPedido?.numero || "") : "");
   const [soloCriticos, setSoloCriticos] = useState(false);
@@ -8912,7 +8923,7 @@ export default function Pedidos() {
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
 
 
-  const hayFiltrosPedidos = Boolean(debouncedQ.trim() || filtroEst !== "todos" || filtroCliente || filtroSinAsignacion || filtroPendienteCompletar || filtroColaborador || soloCriticos);
+  const hayFiltrosPedidos = Boolean(focusIds !== null || debouncedQ.trim() || filtroEst !== "todos" || filtroCliente || filtroSinAsignacion || filtroPendienteCompletar || filtroColaborador || soloCriticos);
 
 
   useEffect(() => {
@@ -9127,6 +9138,7 @@ export default function Pedidos() {
     try {
       const params = {};
       params.incluir_incidencias = "false";
+      if (focusIds !== null) params.pedido_ids = JSON.stringify(focusIds);
       if (filtroEst === "activos") {
         params.estado = ESTADOS_ACTIVOS.join(",");
       }
@@ -9207,7 +9219,7 @@ export default function Pedidos() {
         if (!silent) setLoadError(e.message || "No se pudieron cargar los viajes.");
       }
     finally { if (!listadoCargado && !silent) setLoading(false); }
-  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico, hayFiltrosPedidos]);
+  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico, hayFiltrosPedidos, focusIds]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
@@ -9283,6 +9295,8 @@ export default function Pedidos() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const resetFocusFilters = () => {
+      setFocusIds(null);
+      setFocusTitle("");
       setFiltroMes("");
       setFiltroFechasCustom(false);
       setFiltroDesde("");
@@ -9329,6 +9343,14 @@ export default function Pedidos() {
       if (focus.estado) {
         resetFocusFilters();
         setFiltroEst(String(focus.estado));
+        const scope = orderFocusFilters(focus);
+        setFocusIds(scope.ids);
+        setFocusTitle(scope.title);
+        if (scope.from || scope.to) {
+          setFiltroFechasCustom(true);
+          setFiltroDesde(scope.from);
+          setFiltroHasta(scope.to);
+        }
         if (focus.operativo === "carga") {
           setFiltroFechasCustom(true);
           setFiltroHasta(new Date().toISOString().slice(0, 10));
@@ -9366,7 +9388,7 @@ export default function Pedidos() {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
       return false;
     }
-    const confirmaCargaReal = estado === "en_curso" &&
+    const confirmaCargaReal = ["cargado", "en_curso"].includes(estado) &&
       ["confirmado", "espera_carga", "cargando"].includes(String(p?.estado || "").toLowerCase()) &&
       !p?.carga_real_at;
     const incidenciaTexto = String(extra.incidencia || "").trim();
@@ -10346,11 +10368,11 @@ export default function Pedidos() {
           };
           return {origin:origin.label, destination:destination.label, loads:loads.length, unloads:unloads.length, originMissing:origin.missing, destinationMissing:destination.missing, loadDetails:loads.map((stop,i)=>detail(stop,i,"carga")).join("\n"), unloadDetails:unloads.map((stop,i)=>detail(stop,i,"descarga")).join("\n")};
         }}
-        filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
+        filters={{q,setQ,scopeTitle:focusTitle,state:filtroEst,setState:value=>{setFocusIds(null);setFocusTitle("");setFiltroEst(value);},client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
           setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},
           history:mostrarHistorico,setHistory:value => {setMostrarHistorico(value);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);},
           incomplete:filtroPendienteCompletar,setIncomplete:setFiltroPendienteCompletar,external:filtroColaborador,setExternal:setFiltroColaborador,unassigned:filtroSinAsignacion,setUnassigned:setFiltroSinAsignacion,critical:soloCriticos,setCritical:setSoloCriticos,
-          reset:() => {setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
+          reset:() => {setFocusIds(null);setFocusTitle("");setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
         }}
       />
 

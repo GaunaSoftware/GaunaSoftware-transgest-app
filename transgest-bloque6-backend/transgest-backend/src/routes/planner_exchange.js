@@ -68,7 +68,7 @@ router.get('/viajes/:id/albaran',wrap(async(req,res)=>{
 router.get('/seguimiento/:id',wrap(async(req,res)=>{
  const result=await db.transaction(async tx=>{
   const link=await linkFor(tx,req,'pedidos',true),order=(await tx.query('SELECT * FROM pedidos WHERE id=$1 AND empresa_id=$2',[link.viaje_id,link.transportista_empresa_id])).rows[0];
-  const operational=['espera_carga','cargando','en_curso','espera_descarga','descarga','incidencia'].includes(order.estado);
+  const operational=['espera_carga','cargando','cargado','en_curso','espera_descarga','descarga','incidencia'].includes(order.estado);
   const state=operational&&(link.scopes.includes('gps')||link.scopes.includes('eta'))?await require('../services/vehicleTracking').snapshot(tx,link.transportista_empresa_id,order):null;
   let eta={value:null,status:'sin_datos',reason:'El transportista no ha calculado una ETA por carretera vigente.'};
   if(link.scopes.includes('eta')&&state?.status==='reciente'){

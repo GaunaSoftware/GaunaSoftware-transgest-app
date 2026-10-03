@@ -226,7 +226,8 @@ export default function OrderRouteFields({ S, nombreBusqueda, form, clientes, se
                     </button>}
                   </div>
                 );
-              })()}<OrderDisclosure title="Cambiar origen / destino y gestionar puntos" initiallyOpen={!form.origen || !form.destino}><div className="tg-pedido-form-grid-2"><div>
+              })()}{(form._tarifaNotas || form.tarifa_instrucciones?.texto) && <OrderDisclosure title="Instrucciones de la tarifa" initiallyOpen={true}><p style={{whiteSpace:'pre-wrap'}}>{form._tarifaNotas || form.tarifa_instrucciones.texto}</p>
+              {(!editando?.id || String(form.ruta_id)!==String(editando.ruta_id)) ? <label><input type="checkbox" checked={!!form._tarifaNotasAceptadas} onChange={e=>setForm(p=>({...p,_tarifaNotasAceptadas:e.target.checked}))}/> He leído y acepto estas instrucciones para el pedido.</label> : <small>Instrucciones aceptadas al guardar el pedido.</small>}</OrderDisclosure>}<OrderDisclosure title="Cambiar origen / destino y gestionar puntos" initiallyOpen={!form.origen || !form.destino}><div className="tg-pedido-form-grid-2"><div>
                 <label style={S.label}>Origen (carga) *</label>
                 <EndpointAutocomplete
                   inputStyle={S.input}

@@ -10,7 +10,7 @@ async function driverTrackingContext(db,{empresaId,chofer,now=Date.now()}) {
   const external=(await db.query("SELECT recorded_at FROM gps_position_log WHERE empresa_id=$1 AND vehiculo_id=$2 AND provider NOT IN ('manual','app_chofer') AND raw->>'timestamp_source'='device' AND lat IS NOT NULL AND lng IS NOT NULL ORDER BY recorded_at DESC LIMIT 1",[empresaId,vehicle.id])).rows[0];
   const ms=Date.parse(external?.recorded_at);
   if(ms>=now-300000&&ms<=now+60000)return {allowed:false,reason:'gps_externo_reciente'};
-  const active=(await db.query("SELECT id FROM pedidos WHERE empresa_id=$1 AND chofer_id=$2 AND vehiculo_id=$3 AND estado::text IN ('en_curso','descarga','espera_carga','espera_descarga')",[empresaId,chofer.id,vehicle.id])).rows;
+  const active=(await db.query("SELECT id FROM pedidos WHERE empresa_id=$1 AND chofer_id=$2 AND vehiculo_id=$3 AND estado::text IN ('cargando','cargado','en_curso','descarga','espera_carga','espera_descarga')",[empresaId,chofer.id,vehicle.id])).rows;
   return {allowed:true,jornada_id:jornada.id,vehiculo_id:vehicle.id,active_trip_ids:active.map(p=>p.id),lease_seconds:120};
 }
 module.exports={driverTrackingContext};

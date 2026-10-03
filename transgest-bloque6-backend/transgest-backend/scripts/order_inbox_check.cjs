@@ -38,8 +38,16 @@ const inbox=require('../src/services/orderInbox'),{verifySignature}=require('../
   assert.throws(()=>inbox.validatePayload({attachments:Array(9).fill({})}));
   const eml=Buffer.from('Message-ID: <mime-test@example.invalid>\r\nSubject: Carga de prueba\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="BOUNDARY"\r\n\r\n--BOUNDARY\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n'+Buffer.from(body.texto).toString('base64')+'\r\n--BOUNDARY\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename="orden.txt"\r\nContent-Transfer-Encoding: base64\r\n\r\n'+Buffer.from('Mercancia: cemento 20 palets').toString('base64')+'\r\n--BOUNDARY--');
   const mime=await inbox.receive(db,a,u,{attachments:[{name:'correo.eml',base64:eml.toString('base64')}]});
+  const display=await inbox.publicItem((await db.query('SELECT * FROM ai_inbox_items WHERE id=$1',[mime.id])).rows[0]);
+  assert.equal(display.email_subject,'Carga de prueba');assert.equal(display.encrypted_payload,undefined);
+  const renewed=await inbox.claim(db,a,mime.id,u);await inbox.finish(db,a,mime.id,renewed.token,u,result);
+  const rerun=await inbox.claim(db,a,mime.id,u,{reanalyze:true});assert.ok(rerun.token);assert.equal(rerun.replay,undefined);
+  await assert.rejects(inbox.claim(db,b,mime.id,u,{reanalyze:true}),{status:404});
+  await inbox.finish(db,a,mime.id,rerun.token,u,{pedido:{...result.pedido,peso_kg:24000}});
+  assert.equal((await inbox.get(db,a,mime.id)).result.pedido.peso_kg,24000);
+  await assert.rejects(inbox.claim(db,a,item.id,u,{reanalyze:true}),{status:409});
   const decoded=await inbox.expandEmails((await inbox.get(db,a,mime.id,{payload:true})).payload);assert.match(decoded.texto,/Madrid/);assert.equal(decoded.attachments[0].name,'orden.txt');assert.ok(mime.message_hash);
-  const failed=await inbox.claim(db,a,mime.id,u);await inbox.finish(db,a,mime.id,failed.token,u,null,'fixture failure');assert.equal((await inbox.get(db,a,mime.id)).state,'error');assert.ok((await inbox.claim(db,a,mime.id,u)).token);
+  const failed=await inbox.claim(db,a,mime.id,u,{reanalyze:true});await inbox.finish(db,a,mime.id,failed.token,u,null,'fixture failure');assert.equal((await inbox.get(db,a,mime.id)).state,'error');assert.ok((await inbox.claim(db,a,mime.id,u)).token);
   const secret=crypto.randomBytes(32).toString('hex'),raw=Buffer.from('{}'),ts=String(Math.floor(Date.now()/1000));
   const sig='sha256='+crypto.createHmac('sha256',secret).update(ts+'.').update(raw).digest('hex');
   assert.equal(verifySignature(raw,ts,sig,secret),true);assert.equal(verifySignature(Buffer.from('{"x":1}'),ts,sig,secret),false);assert.equal(verifySignature(raw,ts,sig,secret,Date.now()+600000),false);

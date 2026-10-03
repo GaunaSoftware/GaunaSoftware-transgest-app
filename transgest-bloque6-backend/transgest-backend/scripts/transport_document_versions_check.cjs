@@ -13,6 +13,8 @@ async function main(){
   for(const file of ['20260926_operational_model.sql','20260926_operational_model_groupage.sql','20260926_transport_document_versions.sql'])await pg.exec(fs.readFileSync(path.join(__dirname,'migrations',file),'utf8'));
   await pg.exec(fs.readFileSync(path.join(__dirname,'migrations/20260926_transport_document_versions.sql'),'utf8'));
   await pg.query('INSERT INTO pedidos(id,empresa_id,updated_at) VALUES($1,$2,NOW())',[order,company]);
+  await pg.exec(`CREATE TABLE notificaciones_internas(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),empresa_id uuid,usuario_id uuid,tipo text,data jsonb,leida boolean DEFAULT false,read_at timestamptz);`);
+  const request = (await pg.query("INSERT INTO notificaciones_internas(empresa_id,usuario_id,tipo,data) VALUES($1,$2,'deca_solicitado',$3) RETURNING id",[company,crypto.randomUUID(),JSON.stringify({pedido_id:order})])).rows[0].id;
   const d={codigo_control:'SINTETICO',referencia_pedido:'QA-DeCA-001',fecha_transporte:'2026-09-26',cargador_contractual:{nombre:'Cargador sintético SL',nif:'SINTETICO-NO-VALIDO',domicilio:'Calle de ensayo 1, Madrid'},transportista_efectivo:{nombre:'Transportista de prueba',nif:'SINTETICO-NO-VALIDO'},empresa:{nombre:'DEMOSTRACIÓN SINTÉTICA'},origen:{nombre:'Almacén de ensayo',direccion:'Madrid, España'},destino:{nombre:'Destino sintético',direccion:'Valencia, España',destinatario:'Destinatario de prueba'},mercancia:{descripcion:'Cerámica de ensayo',peso_kg:1250,bultos:64,embalaje:'Paletizado'},vehiculo:{tractora:'QA-0000'},cargas:[],descargas:[],observaciones:'DATOS SINTÉTICOS. Documento de prueba sin valor para un transporte real.'};
   const args={empresaId:company,pedidoId:order,payload:{documento:d},baseUrl:'https://example.invalid',reason:'Ensayo inicial'};
   d.observaciones_publicas=d.observaciones;d.observaciones='NOTA INTERNA QUE NO SE PUBLICA';
@@ -27,6 +29,7 @@ async function main(){
   // The first document is generated with known, complete data before service starts.
   // Loading changes require a new version and review before departure.
   const first=await service.issue(db,args);assert.equal(first.created,true);
+  assert.equal((await pg.query('SELECT leida FROM notificaciones_internas WHERE id=$1',[request])).rows[0].leida,true,'Issuing the original closes its pending request within the transaction');
   const repeated=await service.issue(db,args);assert.equal(repeated.id,first.id);assert.equal(repeated.created,false);
   const initial=(await service.list(db,company,order))[0];const token=new URL(initial.public_url).searchParams.get('token');
   assert.deepEqual(initial.payload.documento.chofer,{nombre:'CONDUCTOR DE ENSAYO'},'Se conserva únicamente el nombre del conductor');

@@ -2211,10 +2211,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
   }
   const decaRequest = (await db.query("SELECT created_at FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.solicitado' ORDER BY created_at DESC LIMIT 1", [empresaId,ctx.pedido.id])).rows[0] || null;
   const decaReceived = (await db.query("SELECT created_at FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.recibido_cargador' ORDER BY created_at DESC LIMIT 1", [empresaId,ctx.pedido.id])).rows[0] || null;
-  const current = versions.find(v=>v.estado==='activa');
-  const coversShipment = (version,shipmentId) => version.estado==='activa' &&
-    (String(version.envio_id||'')===String(shipmentId) || version.payload?.envio_ids?.some(id=>String(id)===String(shipmentId)));
-  const allShipmentsCovered = !shipments.length ? !!current : shipments.every(shipment=>versions.some(version=>coversShipment(version,shipment.id)));
+  const {current,ready:allShipmentsCovered} = require('../services/transportDocumentCoverage').documentCoverage(versions,shipments);
   if (current) {
     payload.documento = {...current.payload.documento,sistema:'qr_url'};
     payload.status = {...payload.status,ready:allShipmentsCovered,summary:allShipmentsCovered?`DeCA ${current.source==='external'?'externo':'TransGest'} · versión ${current.version}`:'Falta el DeCA de uno o más envíos. Solicítalo antes de salir.',faltantes:allShipmentsCovered?[]:['DeCA de todos los envíos'],version_id:current.id};
@@ -2234,7 +2231,7 @@ async function buildPedidoDocumentoControlResponse(req, ctx, empresaId) {
     versiones: versions.map(({payload: archivedPayload,...metadata})=>metadata),
     envios: shipments,
     envios_previstos: expectedShipments,
-    solicitud_deca: decaRequest ? { created_at: decaRequest.created_at } : null,
+    solicitud_deca: decaRequest ? { created_at: decaRequest.created_at, estado:allShipmentsCovered?'atendida':'pendiente' } : null,
     recepcion_cargador: decaReceived ? { created_at: decaReceived.created_at } : null,
     consolidacion_permitida:ctx.empresa?.documento_control?.permitir_consolidado===true,
     puntos_envio: require('../services/driverStops').driverStops(ctx.pedido).map(p=>({id:p.id,tipo:p.tipo,label:p.label})),
@@ -3171,6 +3168,7 @@ function renderColaboradorDocumentoControlBox(docControl) {
 }
 
 async function notifyDeCaTraffic(empresaId, pedidoId, numero, received, createdBy = null) {
+  if ((await getColaboradorDocumentoControlPayload(null,pedidoId,empresaId)).status.ready) return;
   const recipients = (await db.query(`SELECT DISTINCT m.usuario_id AS id FROM usuario_empresas m JOIN usuarios u ON u.id=m.usuario_id
     WHERE m.empresa_id=$1 AND m.activo=true AND u.activo=true AND m.rol IN ('trafico','gerente')`, [empresaId])).rows;
   const title = received ? 'DeCA recibido del cargador: adjuntar original' : 'DeCA solicitado al no recibirlo del cargador';
@@ -6975,10 +6973,9 @@ router.post('/:id/documento-control-digital/solicitar', async(req,res)=>{
     if (req.user?.rol === 'chofer' && !order?.carga_real_at) return res.status(409).json({error:'Finaliza la carga antes de indicar si el cargador entregó el DeCA.'});
     const versions = await transportDocuments.list(db,empresaId,req.params.id);
     const shipmentIds = (await db.query('SELECT id FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,req.params.id])).rows.map(row=>String(row.id));
-    const active = versions.filter(version=>version.estado==='activa');
-    const covered = shipmentIds.length ? shipmentIds.every(id=>active.some(version=>String(version.envio_id||'')===id||version.payload?.envio_ids?.some(value=>String(value)===id))) : active.length>0;
-    if (covered) return res.status(409).json({error:'Los DeCA vigentes ya están disponibles. Comprueba los originales antes de solicitar otro.'});
-    const missing = shipmentIds.length ? shipmentIds.filter(id=>!active.some(version=>String(version.envio_id||'')===id||version.payload?.envio_ids?.some(value=>String(value)===id))).sort().join(',') : '*';
+    const coverage = require('../services/transportDocumentCoverage').documentCoverage(versions,shipmentIds.map(id=>({id})));
+    if (coverage.ready) return res.status(409).json({error:'Los DeCA vigentes ya están disponibles. Comprueba los originales antes de solicitar otro.'});
+    const missing = shipmentIds.length ? coverage.missingIds.sort().join(',') : '*';
     const prior = (await db.query("SELECT id FROM pedido_eventos WHERE empresa_id=$1 AND pedido_id=$2 AND tipo='documento_control.solicitado' AND detalle->>'missing'=$3 AND created_at>NOW()-INTERVAL '6 hours' LIMIT 1",[empresaId,req.params.id,missing])).rows[0];
     if (prior) return res.json({ok:true,already_requested:true});
     await db.query("INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,actor_id,detalle) VALUES($1,$2,'documento_control.solicitado','usuario',$3,$4::jsonb)",[

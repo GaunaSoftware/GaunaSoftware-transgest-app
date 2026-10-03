@@ -8,7 +8,7 @@ async function summary(db, empresaId, pedidoId) {
   const versiones = rows.map(v => ({id:v.id, version:v.version, envio_id:v.envio_id,
     filename:v.filename, pdf_hash:v.pdf_hash, source:v.source, url:v.public_url}));
   const shipments = rows.length ? (await db.query('SELECT id FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,pedidoId])).rows : [];
-  const ready = rows.length>0 && shipments.every(s=>rows.some(v=>v.envio_id===s.id||v.payload?.envio_ids?.includes(s.id)));
+  const {ready} = require('./transportDocumentCoverage').documentCoverage(rows,shipments);
   return {source:'versioned_originals', versiones, status:{ready},
     soporte_url:versiones[0]?.url || '', remision:{download_url:versiones[0]?.url || ''}};
 }

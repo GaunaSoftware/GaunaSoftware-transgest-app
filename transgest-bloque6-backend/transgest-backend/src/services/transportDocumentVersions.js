@@ -195,7 +195,10 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
     // regenera los bytes conservados detrás de un QR anterior.
     const materialHash = hash(canonical({ source, documento: d, pdf: bytes ? hash(bytes) : null, envio_id: shipmentId,
       ...(source === 'transgest' ? {template_version:DECA_TEMPLATE_VERSION} : {}) }));
-    if (previous?.material_hash === materialHash) return { id: previous.id, created: false };
+    if (previous?.material_hash === materialHash) {
+      await require('./transportDocumentCoverage').resolveDecaNotifications(tx, empresaId, {pedidoId});
+      return { id: previous.id, created: false };
+    }
     if (previous && !String(reason || '').trim()) fail('Indica el motivo de la nueva versión', 'VERSION_REASON_REQUIRED', 422);
     const version = Number((await tx.query('SELECT COALESCE(MAX(version),0)+1 AS n FROM transport_document_versions WHERE empresa_id=$1 AND pedido_id=$2 AND scope_key=$3', [empresaId, pedidoId, scope])).rows[0].n);
     const id = crypto.randomUUID(), token = crypto.randomBytes(32).toString('base64url'), generatedAt = new Date().toISOString();
@@ -207,6 +210,7 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
     await tx.query(`INSERT INTO transport_document_versions(id,empresa_id,pedido_id,envio_id,viaje_id,scope_key,version,source,payload,payload_hash,material_hash,pdf,pdf_hash,filename,reason,created_by,created_at,token_hash,public_url,retention_until,metadata)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,($17::timestamptz+INTERVAL '1 year')::date,$20)`,
       [id,empresaId,pedidoId,shipmentId,trip?.id||null,scope,version,source,JSON.stringify(snapshot),hash(canonical(snapshot)),materialHash,pdf,hash(pdf),`DeCA-${id}-v${version}.pdf`,reason||'Emisión inicial',actorId||null,generatedAt,hash(token),url,JSON.stringify({native_pdf:source==='transgest'?'generated':'uploader_declared_text_detected',external_original:source==='external',...(source==='transgest'?{template_version:DECA_TEMPLATE_VERSION}:{}),validation:'No certifica contenido, firma ni cumplimiento del documento externo'})]);
+    await require('./transportDocumentCoverage').resolveDecaNotifications(tx, empresaId, {pedidoId});
     return { id, created: true, version };
   });
 }

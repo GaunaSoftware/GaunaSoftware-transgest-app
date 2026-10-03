@@ -58,19 +58,25 @@ async function main() {
   let documentReads = 0;
   const context = {supplierEmailData,publicBaseUrl:()=> 'https://example.invalid',colaboradorPrecioLabel:()=> '400,00 EUR',
     ensurePedidoOrdenCargaNumero:async()=>({numero:'OC-QA-01'}),buildSupplierLoadOrderPdf:async()=>Buffer.from('%PDF-synthetic'),
-    getColaboradorDocumentoControlPayload:async()=>{documentReads++;return null;},enviarEmail:async message=>{sent.push(message);return {messageId:'qa'};},
+    getColaboradorDocumentoControlPayload:async()=>{documentReads++;return {status:{ready:true},versiones:[{id:'deca-qa'}]};},
+    transportDocuments:{read:async()=>({filename:'deca-qa.pdf',pdf:Buffer.from('%PDF-synthetic-original')})},db:{},
+    enviarEmail:async message=>{sent.push(message);return {messageId:'qa'};},
     logPedidoEvento:async()=>{},logColaboradorDocumentoControl:async()=>{},buildColaboradorMapLinks:()=>[],
-    crypto:require('node:crypto'),logger:{warn(){}},Date};
+    crypto:require('node:crypto'),logger:{warn(){}},Date,Buffer};
   vm.runInNewContext(source.slice(source.indexOf('async function sendColaboradorEmail('),source.indexOf('function colaboradorPrecioLabel(')),context);
   for (const stage of ['confirmar','carga','camino','descarga']) await context.sendColaboradorEmail({},order,stage,'test-token');
   sent.forEach((message,index)=>{
     assert.equal(message.destinatario,order.colaborador_email);assert.equal(message.empresa_id,order.empresa_id);
     assert.match(message.datos.url,new RegExp('/colaborador/'+['confirmar','carga','camino','descarga'][index]+'/test-token$'));
-    assert.equal(message.datos.cargas[0].nombre,'Planta Norte');assert.equal(message.attachments.length,index===1?1:0);
+    assert.equal(message.datos.cargas[0].nombre,'Planta Norte');assert.equal(message.attachments.length,[1,2].includes(index)?1:0);
   });
   assert.equal(documentReads,1,'solo consultar/remitir DeCA en el aviso de salida');
   assert.equal(sent[1].attachments[0].contentType,'application/pdf');
   assert.equal(sent[1].datos.orden_carga_numero,'OC-QA-01');
+  assert.deepEqual(sent[2].attachments[0].content,Buffer.from('%PDF-synthetic-original'),'El correo de salida adjunta el original vigente');
+  context.getColaboradorDocumentoControlPayload=async()=>({status:{ready:false},versiones:[]});
+  await assert.rejects(context.sendColaboradorEmail({},order,'camino','test-token'),{status:409});
+  assert.equal(sent.length,4,'No se envía el correo de salida cuando falta el DeCA');
   console.log('PASS correos por etapas, puntos y horarios propios, CTA, PDF tras aceptar, privacidad, enlaces seguros y SMTP aislado.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

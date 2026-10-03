@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const { PGlite } = require('@electric-sql/pglite');
 const { readFleetLocations, locationForVehicle } = require('../src/services/fleetLocations');
+const { createGpsSyncWindow } = require('../src/services/gpsSyncWindow');
 const auth = require('../src/middleware/auth');
 const db = require('../src/services/db');
 const company = '11111111-1111-4111-8111-111111111111';
@@ -14,6 +15,28 @@ const originalAuth = auth.authenticate, originalQuery = db.query;
   const pg = new PGlite();
   let server;
   try {
+    let clock = 0, reads = 0, release;
+    const sync = createGpsSyncWindow({ now: () => clock });
+    const first = sync(company, 'geotab', () => { reads++; return new Promise(resolve => { release = resolve; }); });
+    await Promise.resolve();
+    const second = sync(company, 'geotab', () => { throw Error('Duplicate provider call'); });
+    release({ updated: 14 });
+    assert.equal((await first).updated, 14);
+    assert.equal((await second).cached, true);
+    assert.equal(reads, 1);
+    assert.equal((await sync(otherCompany, 'geotab', async () => ({ updated: 2 }))).updated, 2);
+    assert.equal((await sync(company, 'movildata', async () => ({ updated: 3 }))).updated, 3);
+    assert.equal((await sync(company, 'geotab', async () => { throw Error('Too soon'); })).cached, true);
+    clock = 60000;
+    assert.equal((await sync(company, 'geotab', async () => ({ updated: 4 }))).updated, 4);
+    let failedReads = 0;
+    const failed = () => { failedReads++; throw Error('Provider unavailable'); };
+    await assert.rejects(sync(company, 'locatel', failed), /Provider unavailable/);
+    await assert.rejects(sync(company, 'locatel', failed), /Provider unavailable/);
+    assert.equal(failedReads, 1);
+    clock += 60000;
+    assert.equal((await sync(company, 'locatel', async () => ({ updated: 1 }))).updated, 1);
+    await assert.rejects(sync(null, 'geotab', failed), { status: 401 });
     await pg.exec(`
       CREATE TABLE vehiculos(id uuid, empresa_id uuid, matricula text, estado text,
         gps_provider text, activo boolean, clase text, tipo text, chofer_id uuid);
@@ -66,6 +89,7 @@ const originalAuth = auth.authenticate, originalQuery = db.query;
     delete require.cache[require.resolve('../src/routes/vehiculos')];
     const router = require('../src/routes/vehiculos');
     const app = express();
+    app.use(express.json());
     app.use('/vehiculos', auth.authenticate, auth.requireModulePermission('vehiculos'), router);
     auth.authenticate = originalAuth;
     server = app.listen(0, '127.0.0.1');
@@ -75,13 +99,18 @@ const originalAuth = auth.authenticate, originalQuery = db.query;
     });
     for (const [who, status] of [[null, 401], ['driver', 403], ['revoked', 403]]) {
       assert.equal((await call(who)).status, status);
+      const deniedSync = await fetch(`http://127.0.0.1:${server.address().port}/vehiculos/gps/sync`, {
+        method: 'POST', headers: { 'content-type': 'application/json', ...(who ? { 'x-test-user': who } : {}) },
+        body: JSON.stringify({ provider: 'geotab', source: 'locate', empresa_id: otherCompany }),
+      });
+      assert.equal(deniedSync.status, status);
     }
     const response = await call('manager');
     assert.equal(response.status, 200);
     assert.match(response.headers.get('cache-control'), /no-store/);
     assert.equal((await response.json()).items[0].matricula, '2418-LPH');
     assert.equal((await (await call('other')).json()).items[0].matricula, 'PRIVATE');
-    console.log('PASS LOCATE: real SQL and HTTP route, company isolation, permissions, GPS priority, driver fallback, stale/invalid/undated signals, active tractors only. Synthetic local fixtures; no provider calls.');
+    console.log('PASS LOCATE: company-scoped GPS request sharing, cooldown and failed-read recovery; real SQL and HTTP route, company isolation, permissions, GPS priority, driver fallback, stale/invalid/undated signals, active tractors only. Synthetic local fixtures; no provider calls.');
   } finally {
     auth.authenticate = originalAuth;
     db.query = originalQuery;

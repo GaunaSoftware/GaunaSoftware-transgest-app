@@ -40,7 +40,11 @@ async function httpAccess(db){
  }
 }
 async function main(){
- const pg=new PGlite(),db={query:(...args)=>pg.query(...args),transaction:fn=>pg.transaction(fn)};
+ const pg=new PGlite();
+ // Reproduce pg's production timestamp parser (millisecond precision) while
+ // retaining the exact textual generation token returned by the worker.
+ const parsed=async(client,...args)=>{const result=await client.query(...args);for(const row of result.rows)if(row.requested_at)row.requested_at=new Date(row.requested_at);return result;};
+ const db={query:(...args)=>parsed(pg,...args),transaction:fn=>pg.transaction(tx=>fn({query:(...args)=>parsed(tx,...args)}))};
  try{
   assert.equal(telemetry.classify({id:'DiagnosticOdometerId'}).scale,.001);
   assert.equal(telemetry.classify({id:'DiagnosticOutsideTemperatureId',name:'Outside temperature',unitOfMeasure:{id:'UnitOfMeasureDegreesCelsiusId'}}),null);
@@ -78,6 +82,7 @@ async function main(){
   await pg.query("INSERT INTO pedidos(id,empresa_id,vehiculo_id,colaborador_id,estado,carga_real_at,descarga_real_at,km_vacio) VALUES($1,$2,$3,NULL,'confirmado',$4,$5,0)",[orderId,company,vehicle,stamp(60),stamp(120)]);
   await pg.query("UPDATE pedidos SET estado='entregado' WHERE id=$1",[orderId]);
   const queued=(await trips.read(db,company,orderId));assert.equal(queued.status,'pending');assert.equal(queued.data.context.external_id,'b1');
+  await pg.query("UPDATE pedido_telemetry_reports SET requested_at='2026-10-03 12:00:00.123456+00' WHERE pedido_id=$1",[orderId]);
   const dependencies={resolveKey:async()=>({key:'synthetic'}),assertUsage:async()=>{},recordUsage:async()=>{},fetchHistory:async()=>({positions:[{id:'gps1',latitude:38,longitude:-1,dateTime:stamp(60),speed:0},{id:'gps2',latitude:38.01,longitude:-1,dateTime:stamp(61),speed:20}],samples:readings,warnings:[],requests:4})};
   assert.equal(await trips.drain(db,dependencies),true);
   const report=await trips.read(db,company,orderId);assert.equal(report.status,'ready');assert.equal(report.data.loaded.distance.value,50);assert.equal(report.data.loaded.fuel.value,15);assert.equal(report.data.empty.applied,true);

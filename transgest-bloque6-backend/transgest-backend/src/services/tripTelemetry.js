@@ -114,18 +114,20 @@ async function calculate(db,job,{fetchHistory,resolveKey,recordUsage,assertUsage
  return report;
 }
 async function drain(db,deps={}) {
+ // Keep the generation token as PostgreSQL text: pg's Date parser drops
+ // microseconds, so comparing a parsed Date would leave a live job processing.
  const job=await db.transaction(async tx=>(await tx.query(`UPDATE pedido_telemetry_reports SET status='processing',locked_at=NOW(),attempts=attempts+1
   WHERE (empresa_id,pedido_id)=(SELECT empresa_id,pedido_id FROM pedido_telemetry_reports
    WHERE (status IN ('pending','retry') AND available_at<=NOW()) OR (status='processing' AND locked_at<NOW()-INTERVAL '30 minutes')
-   ORDER BY requested_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`)).rows[0]);
+   ORDER BY requested_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *,requested_at::text AS request_token`)).rows[0]);
  if(!job)return false;
  try{const data=await calculate(db,job,deps);
   await db.query(`UPDATE pedido_telemetry_reports SET status='ready',data=$3,locked_at=NULL,updated_at=NOW()
-   WHERE empresa_id=$1 AND pedido_id=$2 AND requested_at=$4`,[job.empresa_id,job.pedido_id,JSON.stringify(data),job.requested_at]);
+   WHERE empresa_id=$1 AND pedido_id=$2 AND requested_at=$4::timestamptz`,[job.empresa_id,job.pedido_id,JSON.stringify(data),job.request_token]);
  }catch(error){require('./logger').warn('No se pudo recuperar el resumen GPS del viaje',{empresa_id:job.empresa_id,pedido_id:job.pedido_id,attempt:job.attempts,error:error.message});
  await db.query(`UPDATE pedido_telemetry_reports SET status=$3,locked_at=NULL,available_at=NOW()+INTERVAL '5 minutes',
-   data=jsonb_set(data,'{error}',$4::jsonb),updated_at=NOW() WHERE empresa_id=$1 AND pedido_id=$2 AND requested_at=$5`,
-   [job.empresa_id,job.pedido_id,job.attempts<5?'retry':'error',JSON.stringify('No se ha podido recuperar el historial GPS. Revisa el conector y vuelve a solicitarlo.'),job.requested_at]);}
+   data=jsonb_set(data,'{error}',$4::jsonb),updated_at=NOW() WHERE empresa_id=$1 AND pedido_id=$2 AND requested_at=$5::timestamptz`,
+   [job.empresa_id,job.pedido_id,job.attempts<5?'retry':'error',JSON.stringify('No se ha podido recuperar el historial GPS. Revisa el conector y vuelve a solicitarlo.'),job.request_token]);}
  return true;
 }
 let timer,running=false;

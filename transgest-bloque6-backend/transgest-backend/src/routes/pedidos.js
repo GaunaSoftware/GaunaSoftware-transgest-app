@@ -8620,16 +8620,31 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       (byName.length === 1 && normalizeOrderTaxId(byName[0].cif) !== cifKey)
     ));
     const candidates = byTax.length ? byTax : byName;
-    const clienteMatch = !conflictingIdentity && candidates.length === 1 &&
+    const documentClient = !conflictingIdentity && candidates.length === 1 &&
       normalizeAiParty(candidates[0].nombre) !== normalizeAiParty(draft.transportista_detectado)
       ? candidates[0] : null;
+    const senderIdentity = await require('../services/orderClientSender').findSenderClient(db,empresaId,req.body.email_senders);
+    const senderConflict = senderIdentity.client && (conflictingIdentity ||
+      (documentClient && documentClient.id !== senderIdentity.client.id) ||
+      (cifKey && normalizeOrderTaxId(senderIdentity.client.cif) !== cifKey) ||
+      (nameKey && normalizeAiParty(senderIdentity.client.nombre) !== nameKey) ||
+      normalizeAiParty(senderIdentity.client.nombre) === normalizeAiParty(draft.transportista_detectado));
+    const clienteMatch = senderConflict || senderIdentity.ambiguous
+      ? null : senderIdentity.client || documentClient;
     if (clienteMatch) {
       draft.cliente_id = clienteMatch.id;
       draft.cliente_nombre = clienteMatch.nombre;
-      suggestions.push({ type: "cliente", label: "Cliente encontrado", detail: clienteMatch.nombre, confidence: byTax.length ? 0.98 : 0.92 });
+      draft.cliente_cif = clienteMatch.cif || draft.cliente_cif;
+      suggestions.push(senderIdentity.client
+        ? {type:"cliente_remitente",label:"Cliente identificado por el remitente",detail:`${senderIdentity.sender} → ${clienteMatch.nombre}`,confidence:0.98}
+        : { type: "cliente", label: "Cliente encontrado", detail: clienteMatch.nombre, confidence: byTax.length ? 0.98 : 0.92 });
     } else {
       draft.cliente_id = null;
-      issues.push({ key: "cliente_id", severity: "alta", message: conflictingIdentity
+      issues.push({ key: "cliente_id", severity: "alta", message: senderConflict
+        ? 'El remitente y los datos del documento señalan clientes distintos. Selecciona el cliente correcto antes de guardar.'
+        : senderIdentity.ambiguous
+        ? 'El correo tiene varios remitentes o el remitente está vinculado a varios clientes. Selecciona el cliente correcto antes de guardar.'
+        : conflictingIdentity
         ? 'El NIF y el nombre señalan clientes distintos. Verifica el cargador contractual antes de guardar.'
         : `No se ha podido asociar de forma unívoca el cliente${draft.cliente_nombre ? ` ${draft.cliente_nombre}` : ''}. Selecciónalo o créalo antes de guardar.` });
     }

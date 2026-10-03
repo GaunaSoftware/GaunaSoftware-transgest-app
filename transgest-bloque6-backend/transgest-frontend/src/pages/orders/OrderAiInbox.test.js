@@ -6,13 +6,14 @@ jest.mock('../../services/api',()=>({getOrderInbox:jest.fn(),interpretarPedidoIA
 test('inbox restores a draft without creating an order, shows API errors and rejects a stale list response',async()=>{
  global.IS_REACT_ACT_ENVIRONMENT=true;
  const node=document.createElement('div');document.body.append(node);const root=createRoot(node),prepared=jest.fn();
- const item={id:'entry-a',state:'revisar',version:2,filename:'Orden sintética',email_subject:'Carga sintética',created_at:'2026-09-26T10:00:00Z'};
+ const item={id:'entry-a',state:'revisar',version:2,filename:'Orden sintética',email_subject:'Carga sintética',email_from:'pedidos@example.invalid',created_at:'2026-09-26T10:00:00Z'};
  getOrderInbox.mockResolvedValue({items:[item],counts:[{state:'revisar',count:1}],inbound:{configured:false,guidance:'Correo pendiente de configurar'}});
  interpretarPedidoIA.mockResolvedValue({inbox_id:item.id,pedido:{origen:'Madrid'}});
  try{
   await act(async()=>root.render(<OrderAiInbox onPrepared={prepared}/>));
   expect(node.textContent).toContain('Correo pendiente');
   expect(node.textContent).toContain('Carga sintética');
+  expect(node.textContent).toContain('Remitente: pedidos@example.invalid');
   await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent==='Recuperar borrador').click());
   expect(interpretarPedidoIA).toHaveBeenCalledWith({inbox_id:item.id});expect(prepared).toHaveBeenCalledWith({inbox_id:item.id,pedido:{origen:'Madrid'}});expect(changeOrderInboxState).not.toHaveBeenCalled();
   await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent==='Volver a analizar').click());

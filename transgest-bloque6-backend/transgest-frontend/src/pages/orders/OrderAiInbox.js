@@ -23,6 +23,7 @@ export default function OrderAiInbox({onPrepared,onOpenOrder,revision}){
   {data?.items?.length===0&&<p>No hay entradas en este estado.</p>}
   {data?.items?.map(item=><article key={item.id} style={{padding:'12px 0',borderBottom:'1px solid var(--border2)'}}>
    <div><strong>{item.email_subject||item.filename||'Texto de pedido'}</strong> · {labels[item.state]}{item.processing_at?' · Análisis en curso':''}</div>
+   {item.email_from&&<p>Remitente: <strong>{item.email_from}</strong></p>}
    <p>{new Date(item.created_at).toLocaleString('es-ES')}{item.error&&` · ${item.error}`}</p>
    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
     {item.state==='creado'?<Button disabled={!!busy} onClick={()=>act(item,'open')}>Ver pedido creado</Button>:<>

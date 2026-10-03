@@ -381,6 +381,7 @@ function buildClienteForm(cliente) {
     dias_pago: plazoPago,
     dias_pago_custom: PLAZOS_PAGO_CLIENTE.includes(plazoPago) ? "" : plazoPago,
     emails_albaranes: normalizeEmailListText(source.emails_albaranes || ""),
+    emails_remitentes_pedidos: normalizeEmailListText(source.emails_remitentes_pedidos || ""),
   };
 }
 
@@ -484,6 +485,11 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
     if (!form.nombre) { notify("El nombre es obligatorio", "warning"); return; }
     if(form.bloqueado && !String(form.bloqueo_motivo||" ").trim()){notify("Selecciona el motivo del bloqueo.","warning");return;}
     const emailsAlbaranes = splitEmailList(form.emails_albaranes);
+    const emailsRemitentes = splitEmailList(form.emails_remitentes_pedidos);
+    if (emailsRemitentes.length > 20 || emailsRemitentes.some(v => !isValidEmail(v))) {
+      notify("Revisa los correos remitentes de pedidos: admite hasta 20 direcciones válidas.", "warning");
+      return;
+    }
     const invalidEmails = emailsAlbaranes.filter(v => !isValidEmail(v));
     if (invalidEmails.length) {
       notify(`Revisa estos correos de albaranes: ${invalidEmails.join(", ")}`, "warning");
@@ -512,6 +518,7 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
         contacto: form.contacto_nombre || "",
         vencimiento: normalizePlazoPagoCliente(form.dias_pago === "Personalizado" ? form.dias_pago_custom : form.dias_pago),
         emails_albaranes: emailsAlbaranes.join("\n"),
+        emails_remitentes_pedidos: emailsRemitentes.join("\n"),
       };
       const saved = esNuevo ? await crearCliente(payload) : await editarCliente(cliente.id, payload);
       if (!saved?.id) throw new Error("El servidor no ha confirmado el cliente. No repitas el alta: recarga la lista y revisa la API.");
@@ -868,6 +875,11 @@ function FichaCliente({ cliente, onClose, onSaved, rutasGlobales, clientesExiste
               <div key={k}><label style={S.lbl}>{l}</label>
               <input style={S.inp} value={form[k]||""} onChange={f(k)} placeholder={ph||""}/></div>
             ))}
+            <div style={{gridColumn:"1/-1"}}>
+              <label htmlFor="cliente-order-senders" style={S.lbl}>Correos desde los que envía pedidos</label>
+              <textarea id="cliente-order-senders" style={{...S.inp,minHeight:76,resize:"vertical"}} value={form.emails_remitentes_pedidos||""} onChange={f("emails_remitentes_pedidos")} placeholder="pedidos@cliente.com" aria-describedby="cliente-order-senders-help" disabled={!canEdit} />
+              <div id="cliente-order-senders-help" style={{fontSize:11,color:"var(--text4)",marginTop:5}}>Una dirección por línea. Si el remitente coincide con uno de estos correos o con el email principal, la Bandeja IA selecciona este cliente al interpretar el correo. Revisa los datos antes de guardar el pedido.</div>
+            </div>
             <div style={{gridColumn:"1/-1",background:"var(--bg3)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:6}}>
                 <div>

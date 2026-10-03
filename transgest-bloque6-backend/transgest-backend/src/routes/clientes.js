@@ -12,6 +12,7 @@ const { authenticate, requireRole, GERENTE_O_CONTABLE } = require("../middleware
 
 const { normalizeClientImage } = require("../services/clientImage");
 const { customerNeedsReview } = require("../services/customerReview");
+const { normalizeSenderEmails } = require("../services/orderClientSender");
 const router = express.Router();
 // Coincide con los perfiles que ya tienen edición de Clientes. El acceso al
 // módulo (incluidas las revocaciones por usuario) se comprueba en server.js.
@@ -26,7 +27,7 @@ const CLIENTES_CREATE_BASE_COLUMNS = new Set([
   "fiscal_num_ext", "fiscal_piso_puerta", "fiscal_cod_postal",
   "fiscal_municipio", "fiscal_provincia", "fiscal_pais_iso", "web",
   "contacto_telefono", "email_facturacion", "email_facturas", "email_pedidos",
-  "emails_albaranes", "iban", "horario_carga", "horario_descarga",
+  "emails_albaranes", "emails_remitentes_pedidos", "iban", "horario_carga", "horario_descarga",
   "minimo_facturable_toneladas", "limite_riesgo", "modo_facturacion",
   "bloqueado", "bloqueo_motivo", "pendiente_revision",
 ]);
@@ -297,6 +298,7 @@ function normalizeClienteWrite(body = {}) {
   const vencimiento = String(firstDefined(body, ["dias_pago", "vencimiento"], "") || "").trim();
   return {
     ...body,
+    emails_remitentes_pedidos: normalizeSenderEmails(body.emails_remitentes_pedidos),
     direccion,
     cp,
     ciudad,
@@ -340,6 +342,7 @@ async function persistClienteExtendedFields(clienteId, empresaId, data = {}) {
     email_pedidos: data.email_pedidos || null,
     email_facturas: data.email_facturacion || null,
     emails_albaranes: data.emails_albaranes || null,
+    emails_remitentes_pedidos: data.emails_remitentes_pedidos,
     iban: data.iban || null,
     horario_carga: data.horario_carga || null,
     horario_descarga: data.horario_descarga || null,
@@ -1012,6 +1015,7 @@ router.post("/", GESTION_FICHA_CLIENTE,
       email_pedidos: email_pedidos || null,
       email_facturas: email_facturacion || null,
       emails_albaranes: emails_albaranes || null,
+      emails_remitentes_pedidos: clienteData.emails_remitentes_pedidos || null,
       iban: iban || null,
       horario_carga: horarioCargaNorm,
       horario_descarga: horarioDescargaNorm,

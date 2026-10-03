@@ -17,7 +17,7 @@ async function publicItem(row){
  if(!encrypted_payload)return safe;
  const payload=JSON.parse(decryptSecret(encrypted_payload));
  const email=payload.attachments?.find(file=>file.mediaType==='message/rfc822');
- if(email){const mail=await require('mailparser').simpleParser(Buffer.from(email.base64,'base64'),{skipImageLinks:true,skipHtmlToText:true,skipTextToHtml:true});safe.email_subject=String(mail.subject||'').slice(0,300);}
+ if(email){const mail=await require('mailparser').simpleParser(Buffer.from(email.base64,'base64'),{skipImageLinks:true,skipHtmlToText:true,skipTextToHtml:true});safe.email_subject=String(mail.subject||'').slice(0,300);safe.email_from=(mail.from?.value||[]).map(item=>item.address).filter(Boolean).join(', ').slice(0,500);}
  return safe;
 }
 function validatePayload(body={}) {
@@ -75,10 +75,13 @@ async function receive(db,company,actor,body){
 }
 // Decode MIME only. All order interpretation continues through the existing parser.
 async function expandEmails(payload){
- const texts=[payload.texto],attachments=[];let decodedBytes=0;
+ const texts=[payload.texto],attachments=[],senders=[];let decodedBytes=0;
  for(const file of payload.attachments){
   if(file.mediaType!=='message/rfc822'){attachments.push(file);continue;}
   const mail=await require('mailparser').simpleParser(Buffer.from(file.base64,'base64'),{skipImageLinks:true,skipTextToHtml:true});
+  // Only the original MIME From header supplies identity, never body text,
+  // Reply-To, a quoted forwarded message or caller-provided sender metadata.
+  senders.push(...(mail.from?.value||[]).map(item=>item.address).filter(Boolean));
   texts.push([mail.subject?`Asunto: ${mail.subject}`:'',mail.text||''].filter(Boolean).join('\n'));
   for(const part of mail.attachments||[]){
    decodedBytes+=part.content.length;if(decodedBytes>MAX_TOTAL)fail('Los adjuntos del email superan 7 MB.');
@@ -86,7 +89,7 @@ async function expandEmails(payload){
    attachments.push({name:part.filename||`adjunto-${attachments.length+1}`,mediaType:part.contentType,base64:part.content.toString('base64')});
   }
  }
- return validatePayload({...payload,texto:texts.filter(Boolean).join('\n\n'),attachments});
+ return {...validatePayload({...payload,texto:texts.filter(Boolean).join('\n\n'),attachments}),email_senders:senders};
 }
 async function claim(db,company,id,actor,{reanalyze=false}={}){
  return db.transaction(async tx=>{

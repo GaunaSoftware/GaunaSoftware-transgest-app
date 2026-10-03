@@ -88,6 +88,7 @@ async function main(){
  const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',email_pedidos:'orders-client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
  require('node:assert/strict').ok(client.id,'Debe crearse el cliente de prueba');
  require('node:assert/strict').equal((await db.query('SELECT email_pedidos FROM clientes WHERE id=$1 AND empresa_id=$2',[client.id,company])).rows[0]?.email_pedidos,'orders-client@example.invalid');
+ evidence.orderSenders=await require('./audit_order_senders.cjs')({db,call,company,client});
  const contactSupplier=await call('Crear colaborador con correos por finalidad','POST','/colaboradores',{tipo:'empresa',nombre:'Proveedor de correos',cif:'B87654321',email:'general-supplier@example.invalid',email_pedidos:'orders-supplier@example.invalid',email_facturacion:'billing-supplier@example.invalid',pendiente_revision:false});
  require('node:assert/strict').ok(contactSupplier.id,'Debe crearse el colaborador de prueba');
  const supplierContact=(await db.query('SELECT email_pedidos,email_facturacion FROM colaboradores WHERE id=$1 AND empresa_id=$2',[contactSupplier.id,company])).rows[0];
@@ -494,7 +495,8 @@ async function main(){
   ['Guardar taller usuario B con lectura anterior',409],['Montar segundo neumático en posición ocupada',409],
   ['Bloquear carta de porte de otro viaje',403],['Bloquear resumen económico ida-retorno al chófer',403],
   ['Rechazar jornada sin confirmar conjunto',400],['Rechazar km de cierre iguales',400],
-  ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403]
+  ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403],
+  ['Rechazar remitentes inválidos',400]
  ]);
  for(const c of evidence.checks) {if(expectedErrors.has(c.label))assert.equal(c.status,expectedErrors.get(c.label),JSON.stringify(c));else assert.ok(c.status>=200 && c.status<300,JSON.stringify(c));}
  evidence.workflowOct02=await require('./audit_workflow_oct02.cjs')({db,base,company,token,client,vehicle,password});

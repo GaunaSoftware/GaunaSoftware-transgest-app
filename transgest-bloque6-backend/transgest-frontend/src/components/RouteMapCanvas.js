@@ -72,7 +72,7 @@ export default function RouteMapCanvas({ points = [], geometry = [], vehicle, st
       button.textContent = feature.properties.number;
       button.title = feature.properties.label;
       button.setAttribute("aria-label", `${feature.properties.number}: ${feature.properties.label}`);
-      Object.assign(button.style, { width: "34px", height: "34px", padding: "0", borderRadius: "50%", border: "3px solid white", background: feature.properties.color, color: "white", fontSize: "14px", fontWeight: "700", cursor: "pointer", boxShadow: "0 1px 4px #0005" });
+      Object.assign(button.style, { minWidth: "34px", width: feature.properties.number.length > 3 ? "auto" : "34px", height: "34px", padding: feature.properties.number.length > 3 ? "0 6px" : "0", borderRadius: "50%", border: "3px solid white", background: feature.properties.color, color: "white", fontSize: "14px", fontWeight: "700", cursor: "pointer", boxShadow: "0 1px 4px #0005" });
       return new maplibregl.Marker({ element: button })
         .setLngLat(feature.geometry.coordinates)
         .setPopup(new maplibregl.Popup({ offset: 20 }).setText(feature.properties.label))

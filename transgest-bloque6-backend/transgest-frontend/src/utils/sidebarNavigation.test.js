@@ -3,6 +3,15 @@ import { normalizePlan, planHasFeature } from './planFeatures';
 
 const item = (id, children) => ({ id, label: id, ...(children ? { children } : {}) });
 
+test('Localización belongs to Operations once and remains hidden without its upstream permission', () => {
+  const modules = [{ items: [item('pedidos'), item('localizacion'), item('vehiculos')] }];
+  const entries = organizeSidebar(modules, [], 'gerente')[0].items;
+  expect(entries.find(entry => entry.id === 'nav_operaciones').children.map(entry => entry.id)).toEqual(['pedidos', 'localizacion']);
+  expect(flattenNavigation(entries).filter(entry => entry.id === 'localizacion')).toHaveLength(1);
+  const restricted = organizeSidebar([{ items: [item('pedidos')] }], [], 'trafico')[0].items;
+  expect(flattenNavigation(restricted).some(entry => entry.id === 'localizacion')).toBe(false);
+});
+
 test('the new navigation keeps only modules already granted to the user', () => {
   const available = [item('dashboard'), item('clientes'), item('rutas'), item('tarifas'),
     item('control_horario'), item('avisos'), item('actividad'), item('empresa'), item('importacion')];

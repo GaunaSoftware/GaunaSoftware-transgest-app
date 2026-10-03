@@ -916,6 +916,15 @@ async function syncVehiculoStatusAux({ empresaId, vehiculoId, estado, updatedBy 
   await upsertVehiculoExt({ empresaId, vehiculoId, data: next, updatedBy });
 }
 
+r1.get("/localizacion", async (req, res) => {
+  res.set("Cache-Control", "private, no-store");
+  try {
+    res.json(await require("../services/fleetLocations").readFleetLocations(db, req.empresaId || req.user?.empresa_id));
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.status ? e.message : "No se pudo consultar la localización de la flota." });
+  }
+});
+
 r1.get("/", async (req, res) => {
   const empresaId = req.empresaId || req.user?.empresa_id;
   const { activo } = req.query;

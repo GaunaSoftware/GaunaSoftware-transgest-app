@@ -32,6 +32,7 @@ const Clientes     = lazy(() => import("./pages/Clientes"));
 const Pedidos      = lazy(() => import("./pages/Pedidos"));
 const Rutas        = lazy(() => import("./pages/Rutas"));
 const CalculadorPortes = lazy(() => import("./pages/CalculadorPortes"));
+const Localizacion = lazy(() => import("./pages/Localizacion"));
 const Vehiculos    = lazy(() => import("./pages/Vehiculos"));
 const Choferes     = lazy(() => import("./pages/Choferes"));
 const Colaboradores= lazy(() => import("./pages/Colaboradores"));
@@ -215,6 +216,7 @@ const MODULOS_POR_PLAN = {
 
 function planPermite(plan, moduloId) {
   if (moduloId === "clientes_grupo") return planPermite(plan, "clientes");
+  if (moduloId === "localizacion") return planPermite(plan, "vehiculos");
   if (moduloId === "vehiculos_tractoras" || moduloId === "vehiculos_remolques") return planPermite(plan, "vehiculos");
   if (moduloId === "app_mecanico") return planPermite(plan, "taller");
   if (!Object.prototype.hasOwnProperty.call(MODULOS_POR_PLAN, plan)) return false;
@@ -258,6 +260,7 @@ function filtrarModulosPorPermisos(modulos, permisos, rol) {
     return regla ? regla.ver !== false : false;
   };
   const puedeVerCompat = id => {
+    if (id === "localizacion") return puedeVer("vehiculos");
     if (puedeVer(id)) return true;
     if (id === "vehiculos_tractoras" || id === "vehiculos_remolques") return puedeVer("vehiculos");
     if (id === "app_mecanico") return puedeVer("taller");
@@ -318,6 +321,7 @@ const MODULOS_GERENTE = [
     { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Trafico" },
     { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
+    { id:"localizacion", icon:IC.rutas, label:"Localización" },
   ]},
   { titulo:"Trafico", items:[
     { id:"solicitudes", icon:IC.docs, label:"Peticiones viaje" },
@@ -400,6 +404,7 @@ const MODULOS_TRAFICO = [
     { id:"pedidos", icon:IC.pedidos, label:"Pedidos / Trafico" },
     { id:"gestion_trafico", icon:IC.cuadrante, label:"Mesa de trafico" },
     { id:"control_tower", icon:IC.tower, label:"Control Tower" },
+    { id:"localizacion", icon:IC.rutas, label:"Localización" },
   ]},
   { titulo:"Comercial y red", items:[
     { id:"clientes_grupo", icon:IC.clientes, label:"Clientes", children:[
@@ -501,6 +506,7 @@ const VISTAS = {
   pedidos:      <Pedidos />,
   rutas:        <Rutas />,
   calculador_portes: <CalculadorPortes />,
+  localizacion: <Localizacion />,
   vehiculos:    <Vehiculos />,
   vehiculos_tractoras: <Vehiculos initialTipo="tractoras" />,
   vehiculos_remolques: <Vehiculos initialTipo="remolques" />,
@@ -567,6 +573,7 @@ const GUIDED_MODULE_LABELS = {
   colaboradores: "Colaboradores",
   vehiculos_tractoras: "Tractoras",
   vehiculos_remolques: "Remolques",
+  localizacion: "Localización",
   vehiculos: "Vehículos",
   choferes: "Chóferes",
   taller: "Taller",

@@ -760,6 +760,7 @@ export const borrarRuta     = (id)        => apiFetch(`/rutas/${id}`, { method:"
 
 // ── Vehículos ─────────────────────────────────────────
 export const getVehiculos   = ()          => apiFetch("/vehiculos");
+export const getFleetLocations = () => apiFetch("/vehiculos/localizacion", { silentSuccess: true });
 export const getVehiculoEventos = (id)    => apiFetch(`/vehiculos/${id}/eventos`);
 export const crearVehiculo  = (data)      => apiFetch("/vehiculos", { method:"POST", body:data });
 export const asignarRemolque     = (id, remolque_id, data = {}) => apiFetch(`/vehiculos/${id}/remolque`, { method:"PATCH", body:{ remolque_id, ...data } });

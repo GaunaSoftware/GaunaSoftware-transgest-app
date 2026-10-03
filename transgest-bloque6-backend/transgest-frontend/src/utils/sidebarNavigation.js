@@ -24,7 +24,7 @@ export function organizeSidebar(modules, financeTabs, role) {
   const items = [
     take("dashboard", "Dashboard"), take("agenda", "Agenda"), take("ia", "TransGest Intelligence"),
     group("nav_operaciones", "Operaciones", "pedidos", [
-      take("pedidos", "Pedidos / tráfico"), take("gestion_trafico", "Mesa de tráfico"), take("control_tower", "Control Tower"),
+      take("pedidos", "Pedidos / tráfico"), take("gestion_trafico", "Mesa de tráfico"), take("control_tower", "Control Tower"), take("localizacion", "Localización"),
       take("solicitudes", "Peticiones de viaje"), take("calculador_portes", "Calculador de portes"), take("plan_diario"), take("palets", "Gestión de almacén"),
     ]),
     group("nav_clientes", "Clientes", "clientes_grupo", [

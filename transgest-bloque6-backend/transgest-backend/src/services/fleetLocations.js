@@ -25,7 +25,7 @@ function locationForVehicle(vehicle, rows, {now=Date.now(), staleSeconds=900}={}
 }
 async function readFleetLocations(db, company, options={}) {
   if(!company)throw Object.assign(Error('Empresa no identificada'),{status:401});
-  const vehicles=(await db.query(`SELECT v.id,v.matricula,v.estado,v.gps_provider,
+  const vehicles=(await db.query(`SELECT v.id,v.matricula,v.estado,v.gps_provider,v.gps_external_id,
     trim(concat_ws(' ',ch.nombre,ch.apellidos)) AS chofer_nombre
     FROM vehiculos v LEFT JOIN choferes ch ON ch.id=v.chofer_id AND ch.empresa_id=v.empresa_id
     WHERE v.empresa_id=$1 AND v.activo=true
@@ -36,7 +36,8 @@ async function readFleetLocations(db, company, options={}) {
     vehiculo_id,provider,lat,lng,velocidad_kmh,recorded_at,raw
     FROM gps_position_log WHERE empresa_id=$1 AND vehiculo_id=ANY($2::uuid[])
     ORDER BY vehiculo_id,provider,recorded_at DESC,id DESC`,[company,vehicles.map(v=>v.id)])).rows:[];
-  return {generated_at:new Date(options.now??Date.now()).toISOString(),items:vehicles.map(v=>locationForVehicle(v,rows,options)),
+  const telemetry=await require('./vehicleTelemetry').latestForFleet(db,company,vehicles,options.now??Date.now());
+  return {generated_at:new Date(options.now??Date.now()).toISOString(),items:vehicles.map(v=>({...locationForVehicle(v,rows,options),telemetry:telemetry.get(String(v.id))||[]})),
     definition:'Cada vehículo usa su GPS asignado; si no tiene GPS, usa la app del conductor. Las capturas sin fecha verificada o de más de 15 minutos no se muestran como posición actual.'};
 }
 module.exports={locationForVehicle,readFleetLocations,observation};

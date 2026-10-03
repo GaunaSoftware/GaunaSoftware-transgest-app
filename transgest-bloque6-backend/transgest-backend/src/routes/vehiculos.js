@@ -626,6 +626,9 @@ async function syncGeotabPositions(empresaId, secret) {
   const vehicles = (await db.query(`SELECT id,matricula,gps_provider,gps_external_id FROM vehiculos
     WHERE empresa_id=$1 AND activo IS DISTINCT FROM false`,[empresaId])).rows;
   const matched = geotab.positions(snapshot, vehicles);
+  const telemetry=require('../services/vehicleTelemetry');
+  const samples=telemetry.geotabSamples(snapshot.statuses,snapshot.diagnostics);
+  let telemetryCount=0;
   let updated=0,linked=0;
   for (const item of matched.positions) {
     if (item.vehicle.gps_provider !== 'geotab' || item.vehicle.gps_external_id !== item.deviceId) {
@@ -639,8 +642,11 @@ async function syncGeotabPositions(empresaId, secret) {
       raw:{source:'geotab_api',bearing:item.bearing},recordedAt:item.recordedAt});
     updated++;
   }
+  const assigned=(await db.query("SELECT id,gps_external_id FROM vehiculos WHERE empresa_id=$1 AND gps_provider='geotab' AND activo IS DISTINCT FROM false",[empresaId])).rows;
+  const byDevice=require('../services/gpsSource').uniqueIndex(assigned,v=>String(v.gps_external_id||''));
+  for(const [deviceId,vehicle] of byDevice)telemetryCount+=await telemetry.store(db,{empresaId,vehiculoId:vehicle.id,provider:'geotab',externalId:deviceId,samples:samples.filter(s=>s.deviceId===deviceId)});
   return {updated,linked,received:matched.positions.length+matched.unmatched,
-    unmatched:matched.unmatched,receivedVehicles:snapshot.devices.length};
+    unmatched:matched.unmatched,receivedVehicles:snapshot.devices.length,telemetry_received:telemetryCount,telemetry_error:snapshot.telemetryError};
 }
 
 async function getActiveGpsProviders(empresaId) {
@@ -1582,6 +1588,8 @@ r1.post("/gps/sync", GERENTE_O_TRAFICO, async (req, res) => {
         received: result.received || 0,
         unmatched: result.unmatched || 0,
         webhook_only: !!result.webhook_only,
+        telemetry_received: result.telemetry_received || 0,
+        telemetry_error: result.telemetry_error || null,
         link_error: result.link_error || null,
         positions_error: result.positions_error || null,
         fallback_used: !!result.fallback_used,

@@ -92,8 +92,8 @@ jobs:
         run: node scripts/transport_email_check.cjs
       - name: Regresiones de plan diario, permisos y documentos de chofer
         run: npm run daily-plan:regression
-      - name: Localización de flota, señales y permisos
-        run: node scripts/fleet_locations_check.cjs
+      - name: Localización, telemetría, recorrido real y permisos
+        run: npm run gps:regression
       - name: SSRF, aislamiento SQL, secretos y SMTP local
         run: npm run security:regression
       - name: Auditoría funcional, facturación, cobros e integraciones

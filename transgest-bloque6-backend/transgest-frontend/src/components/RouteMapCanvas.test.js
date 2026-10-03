@@ -38,3 +38,11 @@ test('fleet markers cluster overlapping trucks and expose all plates without lar
   await act(async()=>content.querySelector('button').click());
   expect(maps.__map.easeTo).toHaveBeenCalledWith({center:[-1,38],zoom:15});
 });
+test('actual route keeps missing GPS intervals as separate segments',async()=>{
+ const segments=[[{lat:38,lng:-1},{lat:38.1,lng:-1.1}],[{lat:39,lng:-2},{lat:39.1,lng:-2.1}]];
+ await act(async()=>root.render(<RouteMapCanvas segments={segments}/>));
+ await act(async()=>maps.__map.on.mock.calls.find(c=>c[0]==='style.load')[1]());
+ const route=maps.__map.addSource.mock.calls.find(c=>c[0]==='pedido-ruta')[1].data;
+ expect(route.geometry.type).toBe('MultiLineString');expect(route.geometry.coordinates).toHaveLength(2);
+ expect(route.geometry.coordinates[0]).toHaveLength(2);expect(route.geometry.coordinates[1]).toHaveLength(2);
+});

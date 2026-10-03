@@ -28,7 +28,7 @@ export default function Localizacion(){
             const label=sourceLabels[providers[i]];
             if(result.status==='rejected'){warnings.push(`${label}: ${result.reason.message}`);return;}
             const value=result.value;
-            const problem=value.positions_error||value.link_error||(value.auth_error?'El proveedor ha rechazado el acceso a las posiciones.':'');
+            const problem=value.positions_error||value.link_error||value.telemetry_error||(value.auth_error?'El proveedor ha rechazado el acceso a las posiciones.':'');
             if(problem)warnings.push(`${label}: ${problem}`);
             summaries.push(`${label}: ${value.updated||0} posiciones recibidas`);
           });
@@ -52,6 +52,9 @@ export default function Localizacion(){
     {syncSummary&&<p className="tg-location-help" role="status">{syncSummary}</p>}
     <input aria-label="Buscar vehículo o conductor" placeholder="Buscar matrícula o conductor…" value={q} onChange={e=>setQ(e.target.value)}/>
     <div className="tg-location-layout"><div className="tg-location-map"><RouteMapCanvas points={points} fleet/><p>{points.length} vehículos con posición reciente · Consulta: {date(data?.generated_at)}</p><p>Los números agrupan vehículos cercanos. Pulsa un grupo para ver sus matrículas o amplía el mapa.</p></div>
-      <div className="tg-location-list">{items.map(v=><article key={v.id}><strong>{v.matricula}</strong><span>{v.chofer_nombre||'Sin conductor asignado'}</span><span className={v.position?'tg-location-ok':''}>{labels[v.status]||'Sin datos'}</span><small>{sourceLabels[v.provider]||v.provider||'Sin fuente'}{v.fallback?' · alternativa al GPS':''}</small><small>{date(v.last_recorded_at)}</small>{v.position&&<a href={`https://www.google.com/maps/search/?api=1&query=${v.position.lat},${v.position.lng}`} target="_blank" rel="noreferrer">Ver posición en Google Maps</a>}</article>)}{!loading&&!items.length&&<p>No hay vehículos que coincidan con la búsqueda.</p>}</div></div>
+      <div className="tg-location-list">{items.map(v=><article key={v.id}><strong>{v.matricula}</strong><span>{v.chofer_nombre||'Sin conductor asignado'}</span><span className={v.position?'tg-location-ok':''}>{labels[v.status]||'Sin datos'}</span><small>{sourceLabels[v.provider]||v.provider||'Sin fuente'}{v.fallback?' · alternativa al GPS':''}</small><small>{date(v.last_recorded_at)}</small>
+        {(v.telemetry||[]).filter(t=>['odometer_km','frigo_temperature_c','engine_hours'].includes(t.metric)).map(t=><small key={`${t.metric}:${t.sensor}`}>
+          {t.metric==='odometer_km'?'Odómetro':t.metric==='engine_hours'?'Horas de motor':`Frigo · ${t.label}`}: {Number(t.value).toLocaleString('es-ES',{maximumFractionDigits:1})} {t.unit} · {date(t.recorded_at)}{now-Date.parse(t.recorded_at)>900000?' · lectura antigua':''}</small>)}
+        {v.position&&<a href={`https://www.google.com/maps/search/?api=1&query=${v.position.lat},${v.position.lng}`} target="_blank" rel="noreferrer">Ver posición en Google Maps</a>}</article>)}{!loading&&!items.length&&<p>No hay vehículos que coincidan con la búsqueda.</p>}</div></div>
   </section>;
 }

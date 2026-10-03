@@ -1,8 +1,11 @@
+import PointEditor from "../components/PointEditor";
+import RutaMapa from "../components/RutaMapa";
+import { useRef } from "react";
 import { Modal } from "../ui";
 import { CommercialNav } from "./clients/CommercialViews";
 import { useState, useEffect, useMemo } from "react";
 import { routeMargin } from '../utils/routeMargin';
-import { getRutas, crearRuta, editarRuta, borrarRuta, getRutaPrecios, editarRutaPrecios, getClientes, importarRutas } from "../services/api";
+import { getPuntosInteres, getRutaAnalisis, getRutas, crearRuta, editarRuta, borrarRuta, getRutaPrecios, editarRutaPrecios, getClientes, importarRutas } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, notify } from "../services/notify";
 
@@ -129,6 +132,10 @@ export default function Rutas(){
   const [saving,setSaving]=useState(false);
   const [showPrecios,setShowPrecios]=useState(null);
   const [preciosData,setPreciosData]=useState(null);
+  const [preciosError,setPreciosError]=useState("");
+  const [analysis,setAnalysis]=useState(null), [points,setPoints]=useState([]), [pointEditor,setPointEditor]=useState(null);
+  const priceRequest = useRef(0);
+  useEffect(()=>{let active=true;getPuntosInteres().then(p=>{if(active)setPoints(Array.isArray(p)?p:[]);}).catch(()=>{});return()=>{active=false;};},[]);
   const [expandedClientes,setExpandedClientes]=useState({});
   const [expandedVehiculos,setExpandedVehiculos]=useState({});
   const [filtroCliente,setFiltroCliente]=useState("todos");
@@ -164,7 +171,7 @@ export default function Rutas(){
   };
   useEffect(()=>{cargar();},[]);
 
-  const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const f=k=>e=>setForm(p=>({...p,[k]:e.target.value,...(k==="origen"?{origen_punto_id:null}:k==="destino"?{destino_punto_id:null}:{})}));
 
   function leerArchivoBase64(file) {
     return new Promise((resolve, reject) => {
@@ -245,9 +252,13 @@ export default function Rutas(){
   }
 
   async function verPrecios(ruta){
-    setShowPrecios(ruta);
-    try{const d=await getRutaPrecios(ruta.id);setPreciosData(d);}
-    catch(e){setPreciosData(null);}
+    const request=++priceRequest.current;
+    setShowPrecios(ruta);setPreciosData(null);setPreciosError("");setAnalysis(null);
+    const results=await Promise.allSettled([getRutaPrecios(ruta.id),getRutaAnalisis(ruta.id)]);
+    if(request!==priceRequest.current)return;
+    if(results[0].status==='fulfilled')setPreciosData(results[0].value);
+    else setPreciosError(results[0].reason.message || 'No se pudo consultar la tarifa.');
+    setAnalysis(results[1].status==='fulfilled'?results[1].value:{error:'No se pudieron consultar los tiempos de los viajes.'});
   }
 
   function abrirModal(ruta=null){
@@ -257,10 +268,10 @@ export default function Rutas(){
   }
 
   function toggleCliente(cid){
-    setExpandedClientes(p=>({...p,[cid]:!p[cid]}));
+    setExpandedClientes(p=>({...p,[cid]:p[cid]===false}));
   }
   function toggleVehiculo(key){
-    setExpandedVehiculos(p=>({...p,[key]:!p[key]}));
+    setExpandedVehiculos(p=>({...p,[key]:p[key]===false}));
   }
 
   // Group rutas by cliente, then by tipo_vehiculo
@@ -271,7 +282,7 @@ export default function Rutas(){
       .filter(r=>!q || [r.origen,r.destino,r.cliente_nombre,r.notas].some(v=>String(v||"").toLowerCase().includes(q)))
       .filter(r=>filtroTipo==="todos" || String(r.tipo_vehiculo||"cualquiera")===filtroTipo)
       .filter(r=>filtroTarifa==="todos" || String(r.tarifa_tipo||"viaje")===filtroTarifa)
-      .filter(r=>!soloMargenNegativo || calcularMargenRuta(r).margen < 0);
+      .filter(r=>!soloMargenNegativo || (calcularMargenRuta(r).available && calcularMargenRuta(r).margen < 0));
 
     const byCliente={};
     filtered.forEach(r=>{
@@ -297,10 +308,10 @@ export default function Rutas(){
         <div>
           <h1 style={S.title}>Rutas y tarifas</h1>
           <div style={{fontSize:15,color:"#475569",maxWidth:820,lineHeight:1.45}}>
-            Configura rutas por cliente, minimos facturables, recargo de combustible y compatibilidad por tipo de remolque. En Pedidos solo aparecen las rutas del cliente seleccionado.
+            Configura tarifas por cliente, ruta y unidad de cobro, recargo de combustible y compatibilidad por tipo de remolque. En Pedidos solo aparecen las rutas del cliente seleccionado.
           </div>
         </div>
-        <div className="tg-rutas-filters" style={{display:"grid",gridTemplateColumns:"minmax(220px, 1.6fr) minmax(160px, .85fr) minmax(160px, .85fr) minmax(150px, .75fr) auto minmax(250px, 1.2fr) auto",gap:14,alignItems:"center",marginTop:26}}>
+        <div className="tg-rutas-filters tg-rutas-search" style={{display:"grid",gridTemplateColumns:"minmax(220px, 1.6fr) minmax(160px, .85fr) minmax(160px, .85fr) minmax(150px, .75fr) auto minmax(250px, 1.2fr) auto",gap:14,alignItems:"center",marginTop:26}}>
           <select value={filtroCliente} onChange={e=>setFiltroCliente(e.target.value)}
             style={{...S.inp}}>
             <option value="todos">Todos los clientes</option>
@@ -318,6 +329,7 @@ export default function Rutas(){
             <option value="todos">Todas tarifas</option>
             {opcionesTipoTarifa(form.tarifa_tipo).map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
+        </div><div className="tg-rutas-import">
           <button onClick={()=>setSoloMargenNegativo(v=>!v)}
             style={{...S.btn,background:soloMargenNegativo?"rgba(239,68,68,.10)":"var(--accent-soft)",color:soloMargenNegativo?"#ef4444":"var(--accent-xl)",border:soloMargenNegativo?"1px solid rgba(239,68,68,.24)":"1px solid var(--accent-border)",whiteSpace:"nowrap"}}>
             Margen negativo
@@ -335,7 +347,7 @@ export default function Rutas(){
           </span>
           {canEdit&&(
             <button style={{...S.btn,background:"linear-gradient(180deg,var(--accent),var(--accent-xl))",color:"#fff",border:"1px solid var(--accent)",padding:"13px 22px",boxShadow:"0 12px 22px rgba(0,111,104,.18)"}} onClick={()=>abrirModal()}>
-              + Nueva ruta
+              + Nueva tarifa
             </button>
           )}
         </div>
@@ -344,7 +356,7 @@ export default function Rutas(){
       {loading
         ?<div style={{color:"var(--text4)",padding:40,textAlign:"center"}}>Cargando rutas...</div>
         :grouped.length===0
-          ?<div style={{color:"var(--text4)",padding:40,textAlign:"center"}}>No hay rutas. Crea la primera.</div>
+          ?<div style={{color:"var(--text4)",padding:40,textAlign:"center"}}>No hay rutas. Crea la primera tarifa.</div>
           :grouped.map(grupo=>{
             const cid=grupo.id;
             const isExpanded=expandedClientes[cid]!==false; // default expanded
@@ -376,7 +388,7 @@ export default function Rutas(){
                     {grupo.nombre}
                   </span>
                   <span style={{fontSize:12,color:"var(--text4)",marginLeft:4,padding:"3px 10px",borderRadius:999,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                    {grupo.rutas.length} ruta{grupo.rutas.length!==1?"s":""}
+                    {grupo.rutas.length} tarifa{grupo.rutas.length!==1?"s":""}
                   </span>
                   <span style={{marginLeft:"auto",fontSize:18,color:"var(--text)",lineHeight:1}}>
                     {isExpanded?"▲":"▼"}
@@ -403,7 +415,7 @@ export default function Rutas(){
                                 Tipo {tvLabel}
                               </span>
                               <span style={{fontSize:11,color:"var(--text4)"}}>
-                                ({porVehiculo[tv].length} ruta{porVehiculo[tv].length!==1?"s":""})
+                                ({porVehiculo[tv].length} tarifa{porVehiculo[tv].length!==1?"s":""})
                               </span>
                               <span style={{marginLeft:"auto",fontSize:12,color:"var(--text4)"}}>
                                 {tvExpanded?"^":"v"}
@@ -442,6 +454,7 @@ export default function Rutas(){
                                       title={`Ingreso total ${fmt2(calcularMargenRuta(r).ingresoTotal)} EUR - ingreso ${fmt2(calcularMargenRuta(r).ingresoKm)} EUR/km - coste ${fmt2(calcularMargenRuta(r).costeKm)} EUR/km - margen total ${fmt2(calcularMargenRuta(r).margen)} EUR`}>
                                       {r.km ? (() => {
                                         const m = calcularMargenRuta(r);
+                          if(!m.available)return <small>Sin cantidad de referencia para estimar margen</small>;
                                         return (
                                           <div style={{display:"grid",gap:2}}>
                                             <span style={{fontSize:11,color:"var(--text4)"}}>Ing. {fmt2(m.ingresoKm)}</span>
@@ -492,10 +505,10 @@ export default function Rutas(){
 
       {/* Modal Ruta */}
       {modal&&(
-        <Modal title={editando ? "Editar ruta" : "Nueva ruta"} onClose={() => setModal(false)} width={720}>
+        <Modal title={editando ? "Editar ruta" : "Nueva tarifa"} onClose={() => setModal(false)} width={720}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
-                <label style={S.label}>Cliente (opcional)</label>
+                <label style={S.label}>Cliente *</label>
                 <select value={form.cliente_id||""} onChange={f("cliente_id")} style={{...S.inp}}>
                   <option value="">Selecciona cliente</option>
                   {clientes.map(c=><option key={c.id} value={c.id}>{c.nombre}</option>)}
@@ -516,10 +529,20 @@ export default function Rutas(){
               <div>
                 <label style={S.label}>Origen *</label>
                 <input style={S.inp} value={form.origen||""} onChange={f("origen")} placeholder="MADRID"/>
+                <select style={S.inp} aria-label="Usar punto de Carga" value={form.origen_punto_id||""} onChange={e=>{
+                  const p=points.find(p=>p.id===e.target.value);
+                  setForm(prev=>({...prev,origen_punto_id:p?.id||null,...(p?{origen:p.nombre}:{} )}));
+                }}><option value="">Usar punto guardado…</option>{points.filter(p=>!p.cliente_id||String(p.cliente_id)===String(form.cliente_id)||(p.clientes_ids||[]).includes(form.cliente_id)).map(p=><option value={p.id} key={p.id}>{p.nombre} · {p.ciudad||p.direccion}</option>)}</select>
+                {canEdit && <button style={S.btn} type="button" onClick={()=>setPointEditor("origen")}>+ Guardar punto exacto</button>}
               </div>
               <div>
                 <label style={S.label}>Destino *</label>
                 <input style={S.inp} value={form.destino||""} onChange={f("destino")} placeholder="BARCELONA"/>
+                <select style={S.inp} aria-label="Usar punto de Descarga" value={form.destino_punto_id||""} onChange={e=>{
+                  const p=points.find(p=>p.id===e.target.value);
+                  setForm(prev=>({...prev,destino_punto_id:p?.id||null,...(p?{destino:p.nombre}:{} )}));
+                }}><option value="">Usar punto guardado…</option>{points.filter(p=>!p.cliente_id||String(p.cliente_id)===String(form.cliente_id)||(p.clientes_ids||[]).includes(form.cliente_id)).map(p=><option value={p.id} key={p.id}>{p.nombre} · {p.ciudad||p.direccion}</option>)}</select>
+                {canEdit && <button style={S.btn} type="button" onClick={()=>setPointEditor("destino")}>+ Guardar punto exacto</button>}
               </div>
               <div>
                 <label style={S.label}>Kilómetros</label>
@@ -538,8 +561,8 @@ export default function Rutas(){
                 <input type="number" step="0.01" style={S.inp} value={form.precio_base||""} onChange={f("precio_base")} placeholder="0"/>
               </div>
               <div>
-                <label style={S.label}>{(form.tarifa_tipo||"viaje") === "viaje" ? "Minimo facturable (EUR)" : "Minimo de unidades"}</label>
-                <input type="number" step="0.01" style={S.inp} value={(form.tarifa_tipo||"viaje") === "viaje" ? (form.minimo_facturable||"") : (form.minimo_unidades||"")} onChange={(form.tarifa_tipo||"viaje") === "viaje" ? f("minimo_facturable") : f("minimo_unidades")} placeholder="Opcional"/>
+                <label style={S.label}>{(form.tarifa_tipo||"viaje") === "viaje" ? "Minimo facturable (EUR)" : `Cantidad mínima a cobrar (${({tonelada:"t",kg:"100 kg",km:"km",hora:"h",palet:"palets"})[form.tarifa_tipo]||"unidades"})`}</label>
+                <input type="number" step="0.01" style={S.inp} value={(form.tarifa_tipo||"viaje") === "viaje" ? (form.minimo_facturable||"") : (form.minimo_unidades||"")} onChange={(form.tarifa_tipo||"viaje") === "viaje" ? f("minimo_facturable") : f("minimo_unidades")} placeholder="Opcional"/><small>Si se pacta un mínimo, se cobra esa cantidad aunque el servicio tenga menos unidades. No modifica la carga real.</small>
               </div>
               <div>
                 <label style={S.label}>Recargo combustible (%)</label>
@@ -550,8 +573,9 @@ export default function Rutas(){
                 <input type="number" step="1" style={S.inp} value={form.pct_subida||""} onChange={f("pct_subida")} placeholder="0"/>
               </div>
               <div style={{gridColumn:"1/-1"}}>
-                <label style={S.label}>Notas</label>
-                <input style={S.inp} value={form.notas||""} onChange={f("notas")} placeholder="Obs opcionales"/>
+                <label style={S.label}>Instrucciones operativas</label>
+                <input style={S.inp} value={form.notas||""} onChange={f("notas")} placeholder="Ej.: cargar solo por las mañanas"/><small>El pedido pedirá confirmar estas instrucciones antes de guardar.</small>
+                <label style={S.label}>Observaciones para la factura</label><textarea style={S.inp} value={form.observaciones_factura||""} onChange={f("observaciones_factura")}/><small>Este texto aparecerá en la factura del servicio.</small>
               </div>
             </div>
             <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
@@ -565,9 +589,10 @@ export default function Rutas(){
         </Modal>
       )}
 
+      {pointEditor && <PointEditor initial={{cliente_id:form.cliente_id,punto_general:!form.cliente_id,tipo:pointEditor==='origen'?'carga':'descarga'}} onClose={()=>setPointEditor(null)} onSave={point=>{setPoints(prev=>[...prev.filter(p=>p.id!==point.id),point]);setForm(prev=>({...prev,[pointEditor]:point.nombre,[pointEditor+'_punto_id']:point.id}));}}/>}
       {/* Modal Precios */}
       {showPrecios&&(
-        <Modal title={`Tarifa de ruta · ${showPrecios.origen} → ${showPrecios.destino}`} onClose={() => setShowPrecios(null)} width={1080}>
+        <Modal title={`Tarifa de ruta · ${showPrecios.origen} → ${showPrecios.destino}`} onClose={() => {priceRequest.current++;setShowPrecios(null);}} width={1080}>
             <div style={{fontSize:12,color:"var(--text4)",marginBottom:20}}>
               {showPrecios.km?`${showPrecios.km} km`:""}{showPrecios.peajes>0?` · Peajes: ${fmt2(showPrecios.peajes)} €`:""}
               {showPrecios.tipo_vehiculo&&showPrecios.tipo_vehiculo!=="cualquiera"
@@ -575,7 +600,18 @@ export default function Rutas(){
               }
               {showPrecios.cliente_nombre?` · Cliente: ${showPrecios.cliente_nombre}`:""}
             </div>
-            {!preciosData
+            <strong>{fmtTarifaVista(showPrecios)}</strong>
+            <RutaMapa compact points={['origen','destino'].map(field=>{
+              const p=points.find(p=>p.id===showPrecios[field+'_punto_id']);
+              return p ? {...p,label:p.nombre,tipo:field,query:[p.direccion,p.ciudad,p.provincia,p.pais].filter(Boolean).join(', ')} : {label:showPrecios[field],query:showPrecios[field],tipo:field};
+            })}/>
+            <section className="route-performance"><h3>Últimos viajes realizados · hasta 30 servicios</h3>
+              {!analysis ? <p role="status">Consultando tiempos registrados…</p> : analysis.error ? <p role="alert">{analysis.error}</p> : <>
+                <div className="route-performance-kpis">{[['trayecto','Trayecto'],['carga','Carga'],['descarga','Descarga'],['espera','Espera en puntos']].map(([key,label])=><div key={key}><small>{label}</small><strong>{analysis.indicadores[key].minutos==null?'Sin datos':analysis.indicadores[key].minutos+' min'}</strong><small>{analysis.indicadores[key].muestras} mediciones</small></div>)}</div>
+                <p>{analysis.fuente}</p>{!analysis.data.length ? <p>Esta ruta no tiene viajes terminados.</p> : <div className="route-history">{analysis.data.map(p=><button type="button" style={S.btn} key={p.id} onClick={()=>{sessionStorage.setItem('tms_pedidos_focus',JSON.stringify({pedido_id:p.id,numero:p.numero}));window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'pedidos'}));}}>{p.numero} · {String(p.fecha_carga||'').slice(0,10)}</button>)}</div>}
+              </>}
+            </section>
+            {preciosError ? <p role="alert">{preciosError} <button style={S.btn} onClick={()=>verPrecios(showPrecios)}>Reintentar</button></p> : !preciosData
               ?<div style={{color:"var(--text4)",textAlign:"center",padding:20}}>Cargando...</div>
               :<PreciosEditor ruta={showPrecios} data={preciosData} clientes={clientes} canEdit={canEdit} onClose={()=>{setShowPrecios(null);cargar();}}/>
             }

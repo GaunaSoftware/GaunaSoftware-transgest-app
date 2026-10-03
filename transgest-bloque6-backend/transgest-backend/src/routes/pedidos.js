@@ -25,6 +25,7 @@ const zlib = require("zlib");
 const pdfParse = require("pdf-parse");
 const { getPaginationParams, paginatedResponse } = require("../services/paginate");
 const { pedidoDateFilter } = require("../services/pedidoDateFilter");
+const { pedidoSelectionFilter } = require("../services/pedidoSelectionFilter");
 const { parseLocaleNumber, toneladasDesdePeso, MAX_TONELADAS_CAMION } = require("../utils/number");
 const { authenticate, requireRole, GERENTE_O_TRAFICO, GERENTE_O_CONTABLE, SOLO_GERENTE } = require("../middleware/auth");
 const GESTION_PEDIDOS_ESCRITURA = requireRole('gerente','trafico','administrativo');
@@ -542,6 +543,8 @@ async function ensureColaboradorWorkflowSchema() {
   if (!colaboradorWorkflowSchemaPromise) {
     colaboradorWorkflowSchemaPromise = (async () => {
       await db.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"').catch(() => {});
+      await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'cargado'");
+      await require("../services/commercialWorkflowSchema").ensureCommercialWorkflowSchema(db);
       await db.query("ALTER TYPE estado_pedido ADD VALUE IF NOT EXISTS 'incidencia'").catch(error => {
         logger.warn("No se pudo asegurar el estado incidencia en pedidos:", error.message);
       });
@@ -692,7 +695,8 @@ async function ensureColaboradorWorkflowSchema() {
       `).catch(() => {});
       await db.query(`ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS documentacion_recibida BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
       await db.query(`ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS fecha_documentacion_recepcion DATE`).catch(() => {});
-      await db.query(`ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS notas_pago TEXT`).catch(() => {});
+      await db.query(`ALTER TABLE pedido_colaborador_pagos ADD COLUMN IF NOT EXISTS notas_pago TEXT`);
+      await db.query("CREATE UNIQUE INDEX IF NOT EXISTS uq_pedido_colaborador_pago ON pedido_colaborador_pagos(pedido_id)");
       await db.query(`
         CREATE TABLE IF NOT EXISTS ai_inbox_runs (
           id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -1052,7 +1056,8 @@ async function notificarClienteEstadoPedido(pedido, estadoAnterior, estadoNuevo,
   const labels = {
     pendiente: "Pendiente",
     confirmado: "Confirmado",
-    en_curso: "En ruta",
+    cargado: "Cargado",
+    en_curso: "En tránsito",
     descarga: "En descarga",
     entregado: "Entregado",
     cancelado: "Cancelado",
@@ -1594,7 +1599,7 @@ async function assertClienteAdmiteNuevoPedido(client, req, clienteId, importeNue
           FROM pedidos p
          WHERE p.empresa_id = c.empresa_id
            AND p.cliente_id = c.id
-           AND p.estado::text IN ('confirmado','en_curso','descarga','entregado')
+           AND p.estado::text IN ('confirmado','cargado','en_curso','descarga','entregado')
            AND p.factura_id IS NULL
       ) p ON true
      WHERE c.id=$1 AND c.empresa_id=$2
@@ -2426,6 +2431,45 @@ async function archivarDocumentoControlPedido({ pedidoId, empresaId, appBaseUrl 
   return transportDocuments.issue(db,{empresaId,pedidoId,payload,envioId,consolidated,consolidationAllowed:ctx.empresa?.documento_control?.permitir_consolidado===true,actorId:userId,reason:versionReason,baseUrl:documentApiUrl,expectedUpdatedAt:expectedUpdatedAt||ctx.pedido.updated_at});
 }
 
+async function generateOrderDeCa(req,{pedidoId,empresaId,reason}) {
+  const ctx=await getPedidoDocumentoControlContext(pedidoId,empresaId);
+  if(!ctx?.pedido)throw Object.assign(Error('Pedido no encontrado.'),{status:404});
+  transportDocuments.assertReadyToIssue(ctx.pedido);
+  const shipments=require('../services/transportShipments').fromOrder(ctx.pedido);
+  const stops=require('../services/driverStops').driverStops(ctx.pedido);
+  const multi=stops.filter(s=>s.tipo==='carga').length>1||stops.filter(s=>s.tipo==='descarga').length>1;
+  const existing=(await db.query('SELECT id FROM pedidos_envios WHERE empresa_id=$1 AND pedido_id=$2',[empresaId,pedidoId])).rows;
+  const prepared=multi?await require('../services/transportShipments').ensureFromOrder(db,{empresaId,pedidoId,actorId:null,reason}):{envioIds:existing.map(s=>s.id),updatedAt:ctx.pedido.updated_at};
+  const targets=prepared.envioIds.length>1?prepared.envioIds:[null];
+  for(const envioId of targets)await archivarDocumentoControlPedido({pedidoId,empresaId,appBaseUrl:publicBaseUrl(req),documentApiUrl:publicDocumentApiUrl(req),motivo:'generacion_manual',envioId,versionReason:reason,expectedUpdatedAt:prepared.updatedAt});
+  return shipments;
+}
+async function readySupplierDocuments(req,pedidoId,empresaId){
+  const pedido=await getPedidoColaboradorData(pedidoId,empresaId);
+  if(!pedido?.colaborador_email||!pedido.colaborador_id||pedido.estado!=='cargado'||!pedido.colaborador_carga_confirmada_at)return null;
+  const decision=(await db.query("SELECT id FROM pedido_eventos WHERE pedido_id=$1 AND empresa_id=$2 AND tipo IN ('documento_control.solicitado','documento_control.recibido_cargador') LIMIT 1",[pedidoId,empresaId])).rows[0];
+  if(!decision)return null;
+  const control=await getColaboradorDocumentoControlPayload(req,pedidoId,empresaId);
+  if(!control.status.ready)return null;
+  return {pedido,versionKey:control.versiones.map(v=>v.id).sort().join(',')};
+}
+const supplierDocumentNotifier=require('../services/supplierDocumentNotifications').createSupplierDocumentNotifications({db,logger,
+  prepare:async job=>{const context=await readySupplierDocuments(null,job.pedido_id,job.empresa_id);return context&&context.versionKey===job.version_key&&context.pedido.colaborador_id===job.colaborador_id?context:null;},
+  send:async(context,job)=>{
+    const token=await createColaboradorToken(context.pedido,'camino',360);
+    const origin=new URL(job.base_url);
+    await sendColaboradorEmail({protocol:origin.protocol.replace(':',''),get:key=>key==='host'?origin.host:''},context.pedido,'camino',token,{messageId:`<deca-${job.id}@transgest.app>`,meta:{job_id:job.id,version_key:job.version_key}});
+    await logPedidoEvento(job.pedido_id,job.empresa_id,'colaborador.deca_enviado',{version_key:job.version_key,job_id:job.id},'sistema');
+    return {ok:true};
+  }
+});
+async function sendReadySupplierDocuments(req,pedidoId,empresaId){
+  const context=await readySupplierDocuments(req,pedidoId,empresaId);if(!context)return false;
+  const job=await supplierDocumentNotifier.enqueue({empresa_id:empresaId,pedido_id:pedidoId,colaborador_id:context.pedido.colaborador_id,version_key:context.versionKey,base_url:publicBaseUrl(req)});
+  if(job.status==='sent')return true;
+  return supplierDocumentNotifier.deliver(job.id);
+}
+
 async function ensurePedidoOrdenCargaSchema() {
   if (!pedidoOrdenCargaSchemaPromise) {
     pedidoOrdenCargaSchemaPromise = (async () => {
@@ -2891,7 +2935,7 @@ async function solicitarAlbaranesAdministracionSiFaltan(pedidoId, empresaId, use
 async function aplicarAutomatismosEntrega(pedidoId, empresaId, userId = null, options = {}) {
   const actual = await db.query("SELECT estado FROM pedidos WHERE id=$1 AND empresa_id=$2", [pedidoId, empresaId]);
   if (actual.rows[0]?.estado !== "entregado") return;
-  await crearFacturaBorradorPedido(pedidoId, empresaId, userId);
+  // Delivered trips remain available until accounting explicitly prepares an invoice.
   await vincularAlbaranesAFacturaPedido(pedidoId, empresaId);
   await solicitarAlbaranesAdministracionSiFaltan(pedidoId, empresaId, userId)
     .catch(e => logger.warn("No se pudo solicitar albaranes a administracion:", e.message));
@@ -2964,6 +3008,7 @@ function startAlbaranesReminderScheduler() {
   require("../services/deliveryAutomationQueue").start(aplicarAutomatismosEntrega);
   if (albaranesReminderSchedulerStarted) return;
   albaranesReminderSchedulerStarted = true;
+  require('../services/customerTripNotifications').createCustomerTripNotifications({db,send:enviarEmail,logger}).start();
   const run = async () => {
     const result = await procesarRecordatoriosAlbaranesPendientes();
     logger.info(`[Albaranes] Recordatorios diarios revisados=${result.revisados} enviados=${result.enviados} omitidos=${result.omitidos}`);
@@ -3000,7 +3045,7 @@ async function procesarPedidosEntregaVencida() {
      WHERE e.id = p.empresa_id
        AND COALESCE(e.estado,'activo') = 'activo'
        AND COALESCE(e.cfg_trafico->>'auto_incidencia','true') <> 'false'
-       AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga')
+       AND LOWER(p.estado::text) IN ('pendiente','confirmado','espera_carga','cargando','cargado','en_curso','espera_descarga','descarga')
        AND COALESCE(p.pendiente_completar,false) = false
        AND COALESCE(p.fecha_entrega, p.fecha_descarga) IS NOT NULL
        AND COALESCE(p.fecha_entrega, p.fecha_descarga)::date <= (NOW() AT TIME ZONE 'Europe/Madrid')::date - (CASE WHEN e.cfg_trafico->>'auto_incidencia_dias' ~ '^[1-9][0-9]*$' THEN (e.cfg_trafico->>'auto_incidencia_dias')::int ELSE 1 END)
@@ -3095,7 +3140,7 @@ function colaboradorPage(title, body) {
       main{max-width:720px;margin:32px auto;background:#fff;border:1px solid #d8e5e1;border-radius:12px;padding:24px}
       h1{margin:0 0 8px;font-size:24px} p{line-height:1.5;color:#475b54}
       label{display:block;font-size:12px;font-weight:700;text-transform:uppercase;color:#587068;margin:14px 0 5px}
-      input,textarea{width:100%;box-sizing:border-box;padding:11px;border:1px solid #c9d8d3;border-radius:8px;font-size:15px}
+      input,textarea,select{width:100%;box-sizing:border-box;padding:11px;border:1px solid #c9d8d3;border-radius:8px;font-size:15px}
       button,.btn{display:inline-block;margin-top:18px;background:#0f766e;color:#fff;border:0;border-radius:8px;padding:12px 16px;font-weight:800;text-decoration:none;cursor:pointer}
       .mapbtn{margin-top:10px;background:#2563eb}
       .muted{font-size:13px;color:#6c8179}.ok{background:#e7f7f2;border:1px solid #b9eadb;color:#0f766e;padding:12px;border-radius:8px}
@@ -3261,7 +3306,7 @@ async function logColaboradorDocumentoControl(pedidoId, empresaId, action, detal
   }
 }
 
-async function sendColaboradorEmail(req, pedido, accion, token) {
+async function sendColaboradorEmail(req, pedido, accion, token, options={}) {
   const base = publicBaseUrl(req);
   const links = {
     confirmar: `${base}/api/v1/pedidos/colaborador/confirmar/${token}`,
@@ -3286,21 +3331,23 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
     });
   }
   const docControl = accion === "camino" && pedido?.id ? await getColaboradorDocumentoControlPayload(req, pedido.id, pedido.empresa_id) : null;
-  const supportFromDownload = String(docControl?.remision?.download_url || "").replace(/([?&])download=1\b/, "").replace(/[?&]$/, "");
-  if (docControl?.documento) {
-    await logColaboradorDocumentoControl(pedido.id, pedido.empresa_id, "remitido", {
-      accion,
-      canal: "email_colaborador",
-      codigo_control: docControl.documento.codigo_control || null,
-      ready: !!docControl.status?.ready,
-    });
+  const decaAttachments=[];
+  if(accion==='camino') {
+    if(!docControl?.status?.ready)throw Object.assign(new Error('Faltan los DeCA de uno o más envíos.'),{status:409});
+    for(const version of docControl.versiones) {
+      const original=await transportDocuments.read(db,pedido.empresa_id,pedido.id,version.id);
+      if(!original?.pdf)throw new Error('No se pudo recuperar el original del DeCA.');
+      decaAttachments.push({filename:original.filename,content:Buffer.from(original.pdf),contentType:'application/pdf'});
+    }
   }
+  const supportFromDownload = String(docControl?.remision?.download_url || "").replace(/([?&])download=1\b/, "").replace(/[?&]$/, "");
   const emailResult = await enviarEmail({
+    messageId:options.messageId,meta:options.meta||{},
     trigger: `colaborador_${accion}`,
     destinatario: pedido.colaborador_email,
     plantilla,
     empresa_id: pedido.empresa_id,
-    attachments: orderPdf ? [{ filename: `orden-carga-${orderNumber.replace(/[^a-z0-9_-]/gi, "-")}.pdf`, content: orderPdf, contentType: "application/pdf" }] : [],
+    attachments: orderPdf ? [{ filename: `orden-carga-${orderNumber.replace(/[^a-z0-9_-]/gi, "-")}.pdf`, content: orderPdf, contentType: "application/pdf" }] : decaAttachments,
     datos: {
       ...supplierEmailData(pedido),
       empresa: pedido.empresa_nombre || "TransGest",
@@ -3322,6 +3369,14 @@ async function sendColaboradorEmail(req, pedido, accion, token) {
     },
   });
   if (emailResult?.simulado || emailResult?.error) throw Object.assign(new Error("El correo al colaborador no se ha enviado. Revisa la configuración SMTP y utiliza la prueba de envío antes de reenviar la carga."),{status:503});
+  if (docControl?.documento) {
+    await logColaboradorDocumentoControl(pedido.id, pedido.empresa_id, "remitido", {
+      accion,
+      canal: "email_colaborador",
+      codigo_control: docControl.documento.codigo_control || null,
+      ready: !!docControl.status?.ready,
+    });
+  }
   if (orderPdf) await logPedidoEvento(pedido.id, pedido.empresa_id, "colaborador.orden_carga_enviada", {
     numero: orderNumber,
     destinatario: pedido.colaborador_email,
@@ -3346,7 +3401,6 @@ router.get("/colaborador/confirmar/:token", async (req, res) => {
       <h1>Confirmar transporte</h1>
       <p><strong>${htmlEscape(data.empresa_nombre || "")}</strong> solicita confirmar el pedido <strong>${htmlEscape(data.numero)}</strong>.</p>
       ${renderColaboradorPedidoBox(data, { mostrarPrecio: true })}
-      ${renderColaboradorDocumentoControlBox(docControl)}
       <form method="post">
         <div class="grid">
           <div><label>Matricula tractora / vehiculo</label><input name="matricula_colaborador" required value="${htmlEscape(data.matricula_colaborador || "")}"/></div>
@@ -3435,15 +3489,33 @@ router.get("/colaborador/carga/:token", async (req, res) => {
   } catch(e) { res.status(500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
+router.get('/colaborador/deca-form.js', (_req,res)=>{
+  res.set('Cache-Control','private, no-store');
+  res.type('application/javascript').sendFile(path.join(__dirname,'../public/colaboradorDeca.js'));
+});
 function renderColaboradorDecisionDeca(token, data) {
+  const loads=require('../services/driverStops').driverStops(data).filter(s=>s.tipo==='carga');
+  const rows=require('../services/supplierCargoConfirmation').cargoRows(data);
+  const fields=rows.map(row=>`<div class="card"><h3>Envío ${row.index+1}: ${htmlEscape(row.label)}</h3>
+    <label>Carga de origen</label><select name="origen_${row.index}" required><option value="" ${row.origin===''?'selected':''}>Selecciona la carga de origen</option>${loads.map((stop,i)=>`<option value="${i}" ${String(row.origin)===String(i)?'selected':''}>${htmlEscape(stop.label)}</option>`).join('')}</select>
+    <label>Mercancía</label><input required name="mercancia_${row.index}" maxlength="500" value="${htmlEscape(row.mercancia)}">
+    <div class="grid"><div><label>Peso (kg)</label><input required inputmode="decimal" name="peso_${row.index}" value="${htmlEscape(row.peso_kg)}"></div>
+    <div><label>Bultos / unidades</label><input required inputmode="numeric" name="bultos_${row.index}" value="${htmlEscape(row.bultos)}"></div></div>
+    <label>Embalaje (si corresponde)</label><input name="embalaje_${row.index}" value="${htmlEscape(row.embalaje)}">
+  </div>`).join('');
   return `<h1>Carga registrada</h1>${renderColaboradorPedidoBox(data)}
     <div class="card"><h2>Documento de control tras la carga</h2>
-      <p>Indica si el cargador te ha facilitado el DeCA. Tráfico comprobará y adjuntará el original o preparará el documento antes de salir.</p>
-      <form method="post" action="/api/v1/pedidos/colaborador/carga/${htmlEscape(token)}/deca">
+      <p>Indica si el cargador te ha facilitado el DeCA. Si falta, confirma los datos del pedido con el chófer para preparar el documento.</p>
+      <form data-deca-decision method="post" action="/api/v1/pedidos/colaborador/carga/${htmlEscape(token)}/deca">
+        <input type="hidden" name="updated_at" value="${htmlEscape(data.updated_at instanceof Date?data.updated_at.toISOString():data.updated_at||'')}">
         <label style="text-transform:none;font-size:14px"><input type="radio" name="deca_origen" value="recibido" required style="width:auto"/> Sí, el cargador me ha facilitado el DeCA</label>
-        <label style="text-transform:none;font-size:14px"><input type="radio" name="deca_origen" value="solicitar" required style="width:auto"/> No me lo ha facilitado: solicitarlo a tráfico</label>
+        <label style="text-transform:none;font-size:14px"><input type="radio" name="deca_origen" value="solicitar" required style="width:auto"/> No me lo ha facilitado: preparar el DeCA</label>
+        <fieldset data-cargo-fields hidden disabled style="border:0;padding:0">
+          <p class="warn">Los datos se guardan en el pedido. Verifica con el chófer cada envío. Si falta una dirección o una parte del transporte, tráfico debe completarla en el pedido.</p>
+          ${fields}<label style="text-transform:none;font-size:14px"><input type="checkbox" name="verificado_chofer" value="true" required style="width:auto"> He contrastado la mercancía, los bultos, el peso y el origen con el chófer.</label>
+        </fieldset>
         <button type="submit">Confirmar respuesta y continuar</button>
-      </form>
+      </form><script src="/api/v1/pedidos/colaborador/deca-form.js" defer></script>
     </div>`;
 }
 
@@ -3454,7 +3526,7 @@ router.post("/colaborador/carga/:token", async (req, res) => {
     if (data.colaborador_carga_confirmada_at) return res.send(colaboradorPage('Documento de control tras la carga', renderColaboradorDecisionDeca(req.params.token, data)));
     const notas = String(req.body.notas || "").trim();
     await db.transaction(async client => {
-      const updated = await client.query(`UPDATE pedidos SET estado='en_curso', colaborador_carga_confirmada_at=NOW(),
+      const updated = await client.query(`UPDATE pedidos SET estado='cargado', updated_at=NOW(), colaborador_carga_confirmada_at=NOW(),
         carga_real_at=COALESCE(carga_real_at,NOW()), notas=TRIM(BOTH ' ' FROM CONCAT_WS(' | ',NULLIF(notas,''),$1::text))
         WHERE id=$2 AND empresa_id=$3 AND colaborador_carga_confirmada_at IS NULL RETURNING id`,
       [notas ? `CARGA COLABORADOR: ${notas}` : null, data.pedido_id, data.empresa_id]);
@@ -3463,7 +3535,7 @@ router.post("/colaborador/carga/:token", async (req, res) => {
         VALUES($1,$2,'colaborador.carga_confirmada','colaborador',$3::jsonb)`,
       [data.pedido_id, data.empresa_id, JSON.stringify({notas:notas || null})]);
     });
-    res.send(colaboradorPage('Documento de control tras la carga', renderColaboradorDecisionDeca(req.params.token, data)));
+    res.send(colaboradorPage('Documento de control tras la carga', renderColaboradorDecisionDeca(req.params.token, await getPedidoColaboradorData(data.pedido_id,data.empresa_id))));
   } catch(e) { res.status(e.status || 500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
 });
 
@@ -3474,31 +3546,28 @@ router.post('/colaborador/carga/:token/deca', async (req, res) => {
     if (!data.colaborador_carga_confirmada_at) return res.status(409).send(colaboradorPage('Carga pendiente', '<h1>Confirma primero la carga</h1>'));
     const decaOrigin = String(req.body.deca_origen || '').trim();
     if (!['recibido','solicitar'].includes(decaOrigin)) return res.status(400).send(colaboradorPage('Indica el origen del DeCA', renderColaboradorDecisionDeca(req.params.token, data)));
+    if(decaOrigin==='solicitar') {
+      await require('../services/supplierCargoConfirmation').saveConfirmation(db,{empresaId:data.empresa_id,pedidoId:data.pedido_id,colaboradorId:data.colaborador_id,input:req.body});
+      await logPedidoEvento(data.pedido_id,data.empresa_id,'documento_control.solicitado',{source:'colaborador',motivo:'cargador_no_entrego_original'},'colaborador');
+      await notifyDeCaTraffic(data.empresa_id,data.pedido_id,data.numero,false).catch(error=>logger.warn('Aviso DeCA:',error.message));
+      try {await generateOrderDeCa(req,{pedidoId:data.pedido_id,empresaId:data.empresa_id,reason:'Carga contrastada con el chófer por el colaborador'});}
+      catch(error) {return res.status(error.status||422).send(colaboradorPage('Completa el pedido',`<h1>No se pudo emitir el DeCA</h1><p>${htmlEscape(error.message)}</p><p>Tráfico debe completar estos datos en el pedido.</p><a class="btn" href="/api/v1/pedidos/colaborador/carga/${htmlEscape(req.params.token)}">Volver a revisar los datos</a>`));}
+    }
     await db.transaction(async client => {
       const claimed = await client.query('UPDATE colaborador_pedido_tokens SET usado_at=NOW() WHERE id=$1 AND usado_at IS NULL AND expires_at>NOW() RETURNING id', [data.token_id]);
       if (!claimed.rows.length) throw Object.assign(new Error('Este enlace ya se utilizó.'), { status:409 });
-      await client.query(`INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,detalle)
+      if(decaOrigin==='recibido')await client.query(`INSERT INTO pedido_eventos(pedido_id,empresa_id,tipo,actor_tipo,detalle)
         VALUES($1,$2,$3,'colaborador',$4::jsonb)`, [data.pedido_id,data.empresa_id,
         decaOrigin === 'recibido' ? 'documento_control.recibido_cargador' : 'documento_control.solicitado',
         JSON.stringify({source:'colaborador',motivo:decaOrigin === 'recibido' ? 'cargador_entrego_original' : 'cargador_no_entrego_original',missing:'*'})]);
     });
-    await notifyDeCaTraffic(data.empresa_id, data.pedido_id, data.numero, decaOrigin === 'recibido')
+    if(decaOrigin==='recibido')await notifyDeCaTraffic(data.empresa_id, data.pedido_id, data.numero, true)
       .catch(error => logger.warn('No se pudo avisar a tráfico sobre el DeCA:', error.message));
 
-    let caminoEnviado = false;
-    try {
-      const pedido = await getPedidoColaboradorData(data.pedido_id, data.empresa_id);
-      if (pedido?.colaborador_email) {
-        const tokenCamino = await createColaboradorToken(pedido, "camino", 360);
-        await sendColaboradorEmail(req, pedido, "camino", tokenCamino);
-        caminoEnviado = true;
-      }
-    } catch (error) {
-      logger.error("No se pudo enviar el siguiente paso al colaborador:", error.message);
-    }
+    const caminoEnviado = await sendReadySupplierDocuments(req,data.pedido_id,data.empresa_id).catch(error=>{logger.error('DeCA pendiente de remitir:',error.message);return false;});
     res.send(colaboradorPage("Carga registrada", `
       <h1>Carga registrada</h1>
-      <div class="ok">El pedido queda marcado como cargado. ${decaOrigin === 'recibido' ? 'Tráfico ha recibido el aviso para verificar y adjuntar el original del cargador.' : 'Hemos solicitado el DeCA a tráfico.'} ${caminoEnviado ? "Te hemos enviado otro correo para confirmar la salida hacia destino." : "No se pudo enviar el siguiente enlace; solicita a tráfico que revise el correo."}</div>
+      <div class="ok">El pedido queda marcado como cargado. ${decaOrigin === 'recibido' ? 'Tráfico ha recibido el aviso para verificar y adjuntar el original del cargador.' : 'Se ha preparado el DeCA con los datos verificados del pedido.'} ${caminoEnviado ? "Te hemos enviado otro correo para confirmar la salida hacia destino." : "Recibirás los originales y el enlace de salida al completar los documentos y confirmar el envío del correo. Si ya están preparados, el servidor reintentará el envío y tráfico podrá revisarlo desde el pedido."}</div>
       ${renderColaboradorAcuseBox("Acuse de carga registrada", data)}
     `));
   } catch(e) { res.status(e.status || 500).send(colaboradorPage("Error", `<h1>Error</h1><p>${htmlEscape(e.message)}</p>`)); }
@@ -3601,8 +3670,7 @@ router.post("/colaborador/descarga/:token", async (req, res) => {
         JSON.stringify({notas:notas || null,documentos:documentos.length,
           documentos_meta:documentos.map(doc=>({nombre:doc.name,mime:doc.mime,size_kb:doc.sizeKb}))})]);
     });
-    if (!alreadyDelivered) await crearFacturaBorradorPedido(data.pedido_id, data.empresa_id, null)
-      .catch(e => logger.error("No se pudo crear factura borrador automatica:", e.message));
+    // Do not create an invoice draft automatically when the carrier uploads POD.
     await vincularAlbaranesAFacturaPedido(data.pedido_id, data.empresa_id)
       .catch(e => logger.error("Albaranes guardados; no se pudieron vincular a factura:", e.message));
     if (!alreadyDelivered) await crearFacturaRecibidaColaborador(data.pedido_id, data.empresa_id, null)
@@ -3641,6 +3709,18 @@ router.get("/public/documento-control/:empresaId/:pedidoId", async (req,res) => 
 });
 
 router.use(authenticate);
+
+router.get('/:id/deca-envios',async(req,res)=>{
+  try{await supplierDocumentNotifier.ensure();const company=req.empresaId||req.user?.empresa_id;
+    const order=(await db.query('SELECT id FROM pedidos WHERE id=$1 AND empresa_id=$2',[req.params.id,company])).rows[0];if(!order)return res.status(404).json({error:'Pedido no encontrado.'});
+    res.json((await db.query('SELECT id,status,attempts,created_at,sent_at,last_error FROM pedido_deca_email_jobs WHERE empresa_id=$1 AND pedido_id=$2 ORDER BY created_at DESC LIMIT 20',[company,order.id])).rows);
+  }catch(e){res.status(500).json({error:'No se pudieron consultar los correos del DeCA.'});}
+});
+router.post('/:id/deca-envios/:jobId/reintentar',GERENTE_O_TRAFICO,async(req,res)=>{
+  try{res.json(await supplierDocumentNotifier.retry(req.empresaId||req.user?.empresa_id,req.params.id,req.params.jobId));}catch(e){res.status(e.status||500).json({error:e.status?e.message:'No se pudo programar el reintento.'});}
+});
+
+
 
 // Office-only graph: shared journeys may contain several customers/orders.
 // Driver/customer views must use their existing, individually authorized APIs.
@@ -3730,15 +3810,17 @@ async function initialCargoLength(client, empresaId, remolqueId, body = {}) {
   if (requestedMode === 'manual' || (!requestedMode && requestedLength > 0)) {
     return { mode: 'manual', length: requestedLength > 0 ? requestedLength : null };
   }
-  let trailerLength = null;
-  if (remolqueId) {
-    const { rows } = await client.query(
-      "SELECT data->>'metros_carga' AS metros_carga FROM vehiculos_ext WHERE empresa_id=$1 AND vehiculo_id=$2",
-      [empresaId, remolqueId]
-    );
-    trailerLength = parseLocaleNumber(rows[0]?.metros_carga);
-  }
-  return { mode: 'auto', length: trailerLength > 0 ? Math.min(13.65, trailerLength) : 13.65 };
+  const vehicleId=remolqueId||normalizePedidoUuid(body.vehiculo_id);
+  if(!vehicleId)return {mode:'auto',length:null};
+  const vehicle=(await client.query(`SELECT v.clase,e.data FROM vehiculos v LEFT JOIN vehiculos_ext e
+    ON e.vehiculo_id=v.id AND e.empresa_id=v.empresa_id WHERE v.empresa_id=$1 AND v.id=$2`,[empresaId,vehicleId])).rows[0];
+  if(!vehicle)return {mode:'auto',length:null};
+  const type=[vehicle.clase,vehicle.data?.tipo_carroceria].join(' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const unit=vehicle.data?.unidad_ocupacion;
+  if(unit==='m3'||unit==='unidades'||(!unit&&/cisterna|banera|volquete|volcador|silo|piso movil|portacoches/.test(type)))return {mode:'auto',length:null};
+  if(!remolqueId&&!/rigido/.test(type))return {mode:'auto',length:null};
+  const length=parseLocaleNumber(vehicle.data?.metros_carga);
+  return {mode:'auto',length:length>0?length:null};
 }
 const UUID_PEDIDO_FIELDS = new Set([
   "cliente_id", "ruta_id", "vehiculo_id", "chofer_id", "chofer2_id",
@@ -4616,6 +4698,7 @@ function extractAiPedidoDraft(text = "") {
   const raw = String(text || "");
   const clean = normalizeAiText(raw);
   const lower = clean.toLowerCase();
+  const prose=require('../services/orderTextHints').orderTextHints(clean);
   const supplierOrder = extractSupplierOrderHints(clean);
   const orden = extractOrdenCargaHints(clean);
   const lineValue = label => {
@@ -4626,16 +4709,16 @@ function extractAiPedidoDraft(text = "") {
   const clienteNombre = orden?.cliente_nombre || lineValue("cliente|cargador|empresa|customer|shipper|from|de") || supplierOrder.cliente_nombre || pickAiMatch(clean, [
     /\bcliente\s+(?:es\s+)?([A-ZÁÉÍÓÚÜÑ0-9][^\n,;]{2,80})/i,
   ]);
-  const origen = orden?.origen || lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || pickAiMatch(clean, [
+  const origen = orden?.origen || lineValue("origen|carga|recogida|lugar de carga|loading|pickup|pick up|load address") || supplierOrder.origen || prose.origin || pickAiMatch(clean, [
     /\b(?:carga|recogida|origen)\s+(?:en|desde)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bdesde\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const destino = orden?.destino || lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || pickAiMatch(clean, [
+  const destino = orden?.destino || lineValue("destino|descarga|entrega|lugar de descarga|unloading|delivery|deliver to|delivery address") || supplierOrder.destino || prose.destination || pickAiMatch(clean, [
     /\b(?:descarga|entrega|destino)\s+(?:en|a)?\s*([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
     /\bhasta\s+([A-ZÁÉÍÓÚÜÑ0-9][^\n;,.]{2,90})/i,
   ]);
-  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date") || supplierOrder.fecha_carga;
-  const fechaDescargaRaw = lineValue("fecha descarga|fecha de descarga|entrega dia|descarga dia|delivery date|unloading date");
+  const fechaCargaRaw = lineValue("fecha carga|fecha de carga|carga dia|fecha|pickup date|loading date|load date") || supplierOrder.fecha_carga || prose.loadDate;
+  const fechaDescargaRaw = lineValue("fecha descarga|fecha de descarga|entrega dia|descarga dia|delivery date|unloading date") || prose.unloadDate;
   const anyDate = pickAiMatch(clean, [/\b(?:dia|fecha)\s+(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/i]);
   const horaCarga = normalizePedidoTime(lineValue("hora carga|hora de carga|ventana carga|pickup time|loading time") || pickAiMatch(clean, [/\b(?:carga|recogida|loading|pickup)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
   const horaDescarga = normalizePedidoTime(lineValue("hora descarga|hora de descarga|hora entrega|ventana descarga|delivery time|unloading time") || pickAiMatch(clean, [/\b(?:descarga|entrega|delivery|unloading)[^\n]{0,50}\b(\d{1,2}[:.]\d{2})\b/i]));
@@ -4655,7 +4738,7 @@ function extractAiPedidoDraft(text = "") {
   ]).toUpperCase().replace(/\s+/g, "-");
   const pesoKgValue = pesoTon
     ? Math.round((parseLocaleNumber(pesoTon[1]) || 0) * 1000)
-    : (pesoKg ? parseLocaleNumber(pesoKg[1]) : (orden?.peso_kg ?? null));
+    : (prose.weightKg ?? (pesoKg ? parseLocaleNumber(pesoKg[1]) : (orden?.peso_kg ?? null)));
   const importeNumberRaw = String(importeRaw || "").match(/(\d+(?:[,.]\d{1,2})?)/)?.[1] || "";
   const importe = orden?.importe ?? supplierOrder.importe ?? parseLocaleNumber(importeRaw) ?? parseLocaleNumber(importeNumberRaw);
   const toneladas = Number.isFinite(pesoKgValue) && pesoKgValue > 0
@@ -5629,7 +5712,7 @@ async function assertUnicoViajeActivoChofer({ pedido, empresaId, estadoDestino }
        FROM pedidos
       WHERE empresa_id=$1
         AND id<>$2
-        AND estado::text IN ('en_curso','descarga')
+        AND estado::text IN ('cargado','en_curso','descarga')
         AND (
           ($3::uuid[] IS NOT NULL AND (chofer_id = ANY($3::uuid[]) OR chofer2_id = ANY($3::uuid[])))
           OR ($4::uuid IS NOT NULL AND vehiculo_id=$4)
@@ -5955,6 +6038,10 @@ router.get("/", async (req, res) => {
   }
   const dateFilter = pedidoDateFilter(req.query, params);
   if (dateFilter) where.push(dateFilter);
+    try {
+      const selectionFilter = pedidoSelectionFilter(req.query, params);
+      if (selectionFilter) where.push(selectionFilter);
+    } catch (error) { return res.status(400).json({ error: error.message }); }
   i = params.length + 1;
   if (pendiente_completar === "true")  { where.push("p.pendiente_completar IS TRUE"); }
   if (pendiente_completar === "false") { where.push("COALESCE(p.pendiente_completar,false) IS FALSE"); }
@@ -6127,7 +6214,7 @@ router.get("/chofer-ultimo-viaje", async (req, res) => {
         WHERE empresa_id=$1
           AND (($6::boolean AND vehiculo_id=$5) OR (NOT $6::boolean AND (chofer_id=$2 OR chofer2_id=$2)))
           AND ($3::uuid IS NULL OR id<>$3)
-          AND estado::text IN ('en_curso','descarga','entregado','facturado')
+          AND estado::text IN ('cargado','en_curso','descarga','entregado','facturado')
           AND NULLIF(TRIM(COALESCE(destino,'')),'') IS NOT NULL
           AND ($4::date IS NULL OR COALESCE(fecha_entrega, fecha_descarga, fecha_carga) <= $4::date)
         ORDER BY COALESCE(fecha_entrega, fecha_descarga, fecha_carga) DESC NULLS LAST, updated_at DESC NULLS LAST
@@ -6456,6 +6543,10 @@ router.get("/resumen-lista", async (req, res) => {
     }
     const dateFilter = pedidoDateFilter(req.query, params);
     if (dateFilter) where.push(dateFilter);
+    try {
+      const selectionFilter = pedidoSelectionFilter(req.query, params);
+      if (selectionFilter) where.push(selectionFilter);
+    } catch (error) { return res.status(400).json({ error: error.message }); }
     i = params.length + 1;
     if (pendiente_completar === "true") where.push("p.pendiente_completar IS TRUE");
     if (pendiente_completar === "false") where.push("COALESCE(p.pendiente_completar,false) IS FALSE");
@@ -6945,6 +7036,7 @@ router.post('/:id/documento-control-digital/externo',GERENTE_O_TRAFICO,async(req
     }
     const payload=buildDocumentoControlPayload({empresaId,pedido:ctx.pedido,empresa:ctx.empresa,cliente:ctx.cliente,colaborador:ctx.colaborador,appBaseUrl:publicBaseUrl(req)});
     await transportDocuments.issue(db,{empresaId,pedidoId:req.params.id,payload,source:'external',envioId,actorId:req.user.id,reason:req.body.motivo,baseUrl:publicDocumentApiUrl(req),externalPdf:req.body.pdf_base64,nativeConfirmed:req.body.pdf_nativo===true,expectedUpdatedAt});
+    await sendReadySupplierDocuments(req,req.params.id,empresaId).catch(error=>logger.warn('Original guardado; correo pendiente:',error.message));
     res.json(await buildPedidoDocumentoControlResponse(req,ctx,empresaId));
   }catch(e){res.status(e.status||500).json({error:e.message,code:e.code,fields:e.fields});}
 });
@@ -6967,7 +7059,7 @@ router.post("/:id/documento-control-digital/generar", async (req, res) => {
     const empresaId = req.empresaId || req.user.empresa_id;
     const ctx = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     if (!ctx?.pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    if(!['confirmado','en_curso','descarga','entregado','facturado'].includes(String(ctx.pedido.estado||'').toLowerCase()))
+    if(!['confirmado','cargado','en_curso','descarga','entregado','facturado'].includes(String(ctx.pedido.estado||'').toLowerCase()))
       return res.status(409).json({error:'Confirma el pedido antes de emitir el DeCA.',code:'ORDER_NOT_CONFIRMED'});
     const stops=require('../services/driverStops').driverStops(ctx.pedido);
     const multiStop=stops.filter(stop=>stop.tipo==='carga').length>1||stops.filter(stop=>stop.tipo==='descarga').length>1;
@@ -7005,6 +7097,7 @@ router.post("/:id/documento-control-digital/generar", async (req, res) => {
       : !issueOptions.consolidated&&shipmentIds.length>1?shipmentIds:[null];
     let repo=null;
     for(const envioId of targets)repo=await archivarDocumentoControlPedido({...issueOptions,envioId});
+    await sendReadySupplierDocuments(req,req.params.id,empresaId).catch(error=>logger.warn('DeCA guardado; correo pendiente:',error.message));
     const refreshed = await getPedidoDocumentoControlContext(req.params.id, empresaId);
     res.json({
       ok: true,
@@ -7670,7 +7763,8 @@ router.post("/:id/avisar-cliente", GERENTE_O_TRAFICO, async (req, res) => {
     const estadoLabels = {
       pendiente: "Pendiente",
       confirmado: "Confirmado",
-      en_curso: "En ruta",
+      cargado: "Cargado",
+    en_curso: "En tránsito",
       descarga: "En descarga",
       entregado: "Entregado",
       incidencia: "Incidencia",
@@ -8196,7 +8290,7 @@ router.post("/:id/chofer-docs", async (req, res) => {
   }
 });
 
-router.get("/colaborador-pagos/pendientes", GERENTE_O_TRAFICO, async (req, res) => {
+router.get("/colaborador-pagos/pendientes", requireRole('gerente','contable','administrativo','trafico'), async (req, res) => {
   try {
     await ensureColaboradorWorkflowSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
@@ -8246,7 +8340,7 @@ router.get("/colaborador-pagos/pendientes", GERENTE_O_TRAFICO, async (req, res) 
   }
 });
 
-router.get("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
+router.get("/:id/colaborador-pago", requireRole('gerente','contable','administrativo','trafico'), async (req, res) => {
   try {
     await ensureColaboradorWorkflowSchema();
     const empresaId = req.empresaId || req.user.empresa_id;
@@ -8295,91 +8389,14 @@ router.get("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
   }
 });
 
-router.put("/:id/colaborador-pago", GERENTE_O_TRAFICO, async (req, res) => {
-  try {
-    await ensureColaboradorWorkflowSchema();
-    const empresaId = req.empresaId || req.user.empresa_id;
-    const { rows: pedidoRows } = await db.query(
-      "SELECT id, colaborador_id, precio_colaborador FROM pedidos WHERE id=$1 AND empresa_id=$2",
-      [req.params.id, empresaId]
-    );
-    const pedido = pedidoRows[0];
-    if (!pedido) return res.status(404).json({ error: "Pedido no encontrado" });
-    const payload = normalizeColaboradorPagoPayload({
-      ...req.body,
-      colaborador_id: req.body?.colaborador_id || pedido.colaborador_id || null,
-      importe: req.body?.importe ?? pedido.precio_colaborador ?? 0,
-    });
-    if (payload.fecha_recepcion && !payload.fecha_pago_calculada) {
-      const perfil = await getEmpresaPerfilPagos(empresaId);
-      payload.fecha_pago_calculada = calcularFechaPagoColaborador(payload.fecha_recepcion, perfil);
-    }
-    const { rows } = await db.query(
-      `INSERT INTO pedido_colaborador_pagos
-         (pedido_id, empresa_id, colaborador_id, factura_nombre, factura_data, fecha_recepcion,
-          fecha_pago_calculada, fecha_pago_real, importe, pagado, documentacion_recibida,
-          fecha_documentacion_recepcion, notas_pago, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
-       ON CONFLICT (pedido_id) DO UPDATE SET
-         colaborador_id=EXCLUDED.colaborador_id,
-         factura_nombre=EXCLUDED.factura_nombre,
-         factura_data=EXCLUDED.factura_data,
-         fecha_recepcion=EXCLUDED.fecha_recepcion,
-         fecha_pago_calculada=EXCLUDED.fecha_pago_calculada,
-         fecha_pago_real=EXCLUDED.fecha_pago_real,
-         importe=EXCLUDED.importe,
-         pagado=EXCLUDED.pagado,
-         documentacion_recibida=EXCLUDED.documentacion_recibida,
-         fecha_documentacion_recepcion=EXCLUDED.fecha_documentacion_recepcion,
-         notas_pago=EXCLUDED.notas_pago,
-         updated_by=EXCLUDED.updated_by,
-         updated_at=NOW()
-       RETURNING id, pedido_id, colaborador_id, factura_nombre, factura_data, fecha_recepcion,
-                 fecha_pago_calculada, fecha_pago_real, importe, pagado, documentacion_recibida,
-                 fecha_documentacion_recepcion, notas_pago, created_at, updated_at`,
-      [
-        req.params.id,
-        empresaId,
-        payload.colaborador_id,
-        payload.factura_nombre,
-        payload.factura_data,
-        payload.fecha_recepcion,
-        payload.fecha_pago_calculada,
-        payload.fecha_pago_real,
-        payload.importe,
-        payload.pagado,
-        payload.documentacion_recibida,
-        payload.fecha_documentacion_recepcion,
-        payload.notas_pago,
-        req.user?.id || null,
-      ]
-    );
-    await logPedidoEvento(req.params.id, empresaId, "colaborador.pago_actualizado", {
-      pagado: payload.pagado,
-      fecha_recepcion: payload.fecha_recepcion,
-      fecha_pago_calculada: payload.fecha_pago_calculada,
-      fecha_pago_real: payload.fecha_pago_real,
-      importe: payload.importe,
-      factura_nombre: payload.factura_nombre,
-      documentacion_recibida: payload.documentacion_recibida,
-      fecha_documentacion_recepcion: payload.fecha_documentacion_recepcion,
-      notas_pago: payload.notas_pago,
-    }, "usuario", req.user?.id || null);
-    const row = rows[0];
-    res.json({
-      ...row,
-      fecha_recepcion: normalizePedidoDate(row.fecha_recepcion),
-      fecha_pago_calculada: normalizePedidoDate(row.fecha_pago_calculada),
-      fecha_pago_real: normalizePedidoDate(row.fecha_pago_real),
-      fecha_documentacion_recepcion: normalizePedidoDate(row.fecha_documentacion_recepcion),
-      importe: Number(row.importe || 0),
-      pagado: Boolean(row.pagado),
-      documentacion_recibida: Boolean(row.documentacion_recibida),
-      notas_pago: row.notas_pago || "",
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+router.put("/:id/colaborador-pago", requireRole('gerente','contable','administrativo','trafico'), require('../middleware/auth').requireModulePermission('facturacion'), async (req,res)=>{
+ try{
+  await ensureColaboradorWorkflowSchema();
+  const company=req.empresaId||req.user.empresa_id;
+  const profile=await getEmpresaPerfilPagos(company);
+  const row=await db.transaction(tx=>require('../services/supplierTripPayment').saveSupplierTripPayment(tx,company,req.params.id,req.user.id,req.body,{paymentDate:fecha=>calcularFechaPagoColaborador(fecha,profile)}));
+  res.json({...row,fecha_recepcion:normalizePedidoDate(row.fecha_recepcion),fecha_pago_calculada:normalizePedidoDate(row.fecha_pago_calculada),fecha_pago_real:normalizePedidoDate(row.fecha_pago_real),fecha_documentacion_recepcion:normalizePedidoDate(row.fecha_documentacion_recepcion),importe:Number(row.importe)});
+ }catch(error){logger.error('No se pudo guardar la gestión del pago: '+error.message);res.status(error.status||500).json({error:error.status?error.message:'No se pudo guardar la gestión del pago. La operación no se ha aplicado.',request_id:req.id});}
 });
 
 router.use('/ai-inbox', GERENTE_O_TRAFICO, require('../middleware/auth').requirePlanFeature('ai'), require('../middleware/auth').requireModulePermission('pedidos'), (req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
@@ -8389,10 +8406,10 @@ router.get('/ai-inbox/entries',async(req,res)=>{
   const states=['nuevo','revisar','listo','creado','descartado','error'];
   const state=String(req.query.state||'');if(state&&!states.includes(state))return res.status(400).json({error:'Estado no válido'});
   const page=Math.max(1,Math.min(100000,parseInt(req.query.page,10)||1));
-  const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
+  const rows=req.query.summary==='true'?[]:(await db.query(`SELECT id,state,filename,source_type,attachments,created_at,updated_at,version,pedido_id,error,processing_at,encrypted_payload FROM ai_inbox_items WHERE empresa_id=$1 AND ($2='' OR state=$2) ORDER BY created_at DESC,id LIMIT 25 OFFSET $3`,[company,state,(page-1)*25])).rows;
   const counts=(await db.query('SELECT state,COUNT(*)::int AS count FROM ai_inbox_items WHERE empresa_id=$1 GROUP BY state',[company])).rows;
   const inbound=orderInbox.inboundConfiguration(company);
-  res.json({items:rows,counts,page,page_size:25,inbound:inbound.configured?inbound:await require('../services/orderMailbox').inboxStatus(db,company)});
+  res.json({items:await Promise.all(rows.map(row=>orderInbox.publicItem(row))),counts,page,page_size:25,inbound:inbound.configured?inbound:await require('../services/orderMailbox').inboxStatus(db,company)});
  }catch(e){res.status(e.status||500).json({error:e.message});}
 });
 router.get('/ai-inbox/entries/:entry',async(req,res)=>{
@@ -8475,7 +8492,7 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
     inboxEntry = req.body?.inbox_id
       ? await orderInbox.get(db,empresaId,req.body.inbox_id)
       : await orderInbox.receive(db,empresaId,req.user.id,req.body);
-    analysis = await orderInbox.claim(db,empresaId,inboxEntry.id,req.user.id);
+    analysis = await orderInbox.claim(db,empresaId,inboxEntry.id,req.user.id,{reanalyze:req.body?.reanalyze===true});
     if(analysis.replay)return res.json({...analysis.item.result,inbox_id:inboxEntry.id,inbox_state:analysis.item.state,duplicate:true,pedido_id:analysis.item.pedido_id});
     req.body = await orderInbox.expandEmails(analysis.item.payload);
   const textoOriginal = String(req.body?.texto || req.body?.text || "").trim();
@@ -8600,16 +8617,31 @@ router.post("/ai-inbox/parse", GERENTE_O_TRAFICO, async (req, res) => {
       (byName.length === 1 && normalizeOrderTaxId(byName[0].cif) !== cifKey)
     ));
     const candidates = byTax.length ? byTax : byName;
-    const clienteMatch = !conflictingIdentity && candidates.length === 1 &&
+    const documentClient = !conflictingIdentity && candidates.length === 1 &&
       normalizeAiParty(candidates[0].nombre) !== normalizeAiParty(draft.transportista_detectado)
       ? candidates[0] : null;
+    const senderIdentity = await require('../services/orderClientSender').findSenderClient(db,empresaId,req.body.email_senders);
+    const senderConflict = senderIdentity.client && (conflictingIdentity ||
+      (documentClient && documentClient.id !== senderIdentity.client.id) ||
+      (cifKey && normalizeOrderTaxId(senderIdentity.client.cif) !== cifKey) ||
+      (nameKey && normalizeAiParty(senderIdentity.client.nombre) !== nameKey) ||
+      normalizeAiParty(senderIdentity.client.nombre) === normalizeAiParty(draft.transportista_detectado));
+    const clienteMatch = senderConflict || senderIdentity.ambiguous
+      ? null : senderIdentity.client || documentClient;
     if (clienteMatch) {
       draft.cliente_id = clienteMatch.id;
       draft.cliente_nombre = clienteMatch.nombre;
-      suggestions.push({ type: "cliente", label: "Cliente encontrado", detail: clienteMatch.nombre, confidence: byTax.length ? 0.98 : 0.92 });
+      draft.cliente_cif = clienteMatch.cif || draft.cliente_cif;
+      suggestions.push(senderIdentity.client
+        ? {type:"cliente_remitente",label:"Cliente identificado por el remitente",detail:`${senderIdentity.sender} → ${clienteMatch.nombre}`,confidence:0.98}
+        : { type: "cliente", label: "Cliente encontrado", detail: clienteMatch.nombre, confidence: byTax.length ? 0.98 : 0.92 });
     } else {
       draft.cliente_id = null;
-      issues.push({ key: "cliente_id", severity: "alta", message: conflictingIdentity
+      issues.push({ key: "cliente_id", severity: "alta", message: senderConflict
+        ? 'El remitente y los datos del documento señalan clientes distintos. Selecciona el cliente correcto antes de guardar.'
+        : senderIdentity.ambiguous
+        ? 'El correo tiene varios remitentes o el remitente está vinculado a varios clientes. Selecciona el cliente correcto antes de guardar.'
+        : conflictingIdentity
         ? 'El NIF y el nombre señalan clientes distintos. Verifica el cargador contractual antes de guardar.'
         : `No se ha podido asociar de forma unívoca el cliente${draft.cliente_nombre ? ` ${draft.cliente_nombre}` : ''}. Selecciónalo o créalo antes de guardar.` });
     }
@@ -9162,6 +9194,7 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
         destino_provincia: geoPedido.destino_provincia,
         cmr_tipo: req.body.cmr_tipo ? cmrTipoPedido(geoPedido.origen_pais, geoPedido.destino_pais, req.body.cmr_tipo) : geoPedido.cmr_tipo,
         peso_kg: req.body.peso_kg ?? peso_kg ?? null,
+        embalaje: req.body.embalaje !== undefined ? String(req.body.embalaje||" ").trim().slice(0,200)||null : undefined,
         km_ruta: req.body.km_ruta ?? null,
         km_vacio: req.body.km_vacio ?? null,
         volumen: req.body.volumen ?? null,
@@ -9255,8 +9288,10 @@ router.post("/", GESTION_PEDIDOS_ESCRITURA,
       }
       if (normalizedExtraFieldMap.colaborador_id) normalizedExtraFieldMap.coste_gasoil = 0;
       const supplierPriceUpdated = applySupplierPricing(normalizedExtraFieldMap, req.body);
+      const commercialTerms=await require("../services/commercialRouteTerms").orderCommercialTerms(client,empresaId,req.user.id,req.body,null,rutaIdNorm);
+      Object.assign(normalizedExtraFieldMap,commercialTerms);
       const extraFields = Object.entries(normalizedExtraFieldMap).filter(([k]) => (
-        (k in req.body) ||
+        (k in req.body) || (k in commercialTerms) ||
         (k === "precio_colaborador" && supplierPriceUpdated) ||
         ((k === "tipo_iva" || k === "iva_regimen") && ivaPedido) ||
         (cargoLength && ["metros_lineales", "carga_largo_m", "longitud_ocupada_mode"].includes(k)) ||
@@ -9426,7 +9461,7 @@ router.patch("/:id/estado",
     if (!(await usuarioPuedeGestionarPedido(req, rows[0]))) {
       return res.status(403).json({ error: "No puedes modificar este pedido" });
     }
-    if (req.user?.rol === "chofer" && !["espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","incidencia"].includes(estado)) {
+    if (req.user?.rol === "chofer" && !["espera_carga","cargando","cargado","en_curso","espera_descarga","descarga","entregado","incidencia"].includes(estado)) {
       return res.status(403).json({ error: "El chofer no puede aplicar este estado" });
     }
     if(req.user?.rol==='chofer'&&estado!=='incidencia'&&(require('../services/driverStops').driverStops(rows[0]).length>2||await require('../services/driverJourney').loadJourney(db,empresaId,req.params.id))){
@@ -9622,28 +9657,8 @@ router.patch("/:id/estado",
       await programarAutomatismosEntrega(req.params.id, empresaId, actorUsuarioId, { appBaseUrl: publicBaseUrl(req) });
     }
 
-    if (estado === "confirmado" || estado === "entregado") {
-      const { rows: cliRows } = await db.query("SELECT email, nombre FROM clientes WHERE id=$1 AND empresa_id=$2", [rows[0].cliente_id, empresaId]);
-      if (cliRows[0]?.email) {
-        const plantilla = estado === "confirmado" ? "pedido_confirmado" : "pedido_entregado";
-        enviarEmail({
-          trigger: plantilla,
-          destinatario: cliRows[0].email,
-          plantilla,
-          empresa_id: empresaId,
-          datos: {
-            numero:        rows[0].numero,
-            ruta:          `${rows[0].origen} -> ${rows[0].destino}`,
-            fecha_carga:   rows[0].fecha_carga,
-            fecha_entrega: rows[0].fecha_entrega || new Date().toLocaleDateString("es-ES"),
-            mercancia:     rows[0].mercancia,
-            destino:       rows[0].destino,
-          },
-        }).catch(e => logger.error("Email pedido:", e.message));
-      }
-    }
 
-    res.json({ ok: true, estado, facturacion_auto: estado === "entregado" });
+    res.json({ ok: true, estado, facturacion_auto: false });
     } catch (e) {
       if (e.status === 409 && e.code === "CHOFER_VIAJE_ACTIVO") {
         return res.status(409).json({ error: e.message, code: e.code, pedido_activo: e.pedido_activo || null });
@@ -9840,6 +9855,7 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
     destino_provincia: geoTouched ? geoPedidoUpdate.destino_provincia : undefined,
     cmr_tipo: geoTouched ? (body.cmr_tipo ? cmrTipoPedido(geoPedidoUpdate.origen_pais, geoPedidoUpdate.destino_pais, body.cmr_tipo) : geoPedidoUpdate.cmr_tipo) : undefined,
     mercancia: body.mercancia ?? null,
+    embalaje: body.embalaje !== undefined ? String(body.embalaje||" ").trim().slice(0,200)||null : undefined,
     peso_kg: body.peso_kg ?? null,
     bultos: body.bultos ?? null,
     volumen: body.volumen ?? null,
@@ -10031,7 +10047,11 @@ router.put("/:id", GESTION_PEDIDOS_ESCRITURA, async (req, res) => {
         await tx.query('UPDATE colaborador_pedido_tokens SET expires_at=NOW() WHERE pedido_id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
         await tx.query('UPDATE pedidos SET colaborador_precio_confirmado=false,colaborador_precio_confirmado_at=NULL WHERE id=$1 AND empresa_id=$2', [req.params.id,empresaId]);
       }
-      return tx.query(`UPDATE pedidos SET ${setClauses} WHERE id=$${values.length-1} AND empresa_id=$${values.length} RETURNING *`, values);
+      const routeField=fields.find(([key])=>key==='ruta_id');
+      const terms=await require('../services/commercialRouteTerms').orderCommercialTerms(tx,empresaId,req.user.id,body,current.rows[0],routeField?routeField[1]:current.rows[0].ruta_id);
+      const finalFields=[...fields,...Object.entries(terms)];
+      const finalValues=[...finalFields.map(([,value])=>value),req.params.id,empresaId];
+      return tx.query(`UPDATE pedidos SET ${finalFields.map(([key],i)=>`${key}=$${i+1}`).join(',')} WHERE id=$${finalValues.length-1} AND empresa_id=$${finalValues.length} RETURNING *`,finalValues);
     });
     if (!rows[0]) return res.status(404).json({ error: "Pedido no encontrado" });
     let pedidoActualizado = rows[0];
@@ -10557,10 +10577,11 @@ table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid
   } catch(e) { res.status(500).json({ error: e.message || "No se pudo generar el informe de evidencia de firma" }); }
 });
 
+router.startSupplierDocumentNotifier=()=>supplierDocumentNotifier.start();
 router.startAlbaranesReminderScheduler = startAlbaranesReminderScheduler;
 router.startPedidosVencidosScheduler = startPedidosVencidosScheduler;
 router.procesarRecordatoriosAlbaranesPendientes = procesarRecordatoriosAlbaranesPendientes;
 router.getCartaPorte = getCartaPorte;
-router._test = { crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox, pedidoListSearch };
+router._test = { extractAiPedidoDraft, crearFacturaBorradorPedido, pedidoConImporteVisible, calcPedidoImporteCanonical, calcPedidoImporteUpdate, renderColaboradorPedidoBox, pedidoListSearch };
 
 module.exports = router;

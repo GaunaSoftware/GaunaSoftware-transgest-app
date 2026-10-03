@@ -1,0 +1,38 @@
+const assert=require('node:assert/strict'),crypto=require('crypto');
+module.exports=async({db,base,company,token,client,vehicle,password})=>{
+ let checks=0;
+ const emailDraft=require('../src/routes/pedidos')._test.extractAiPedidoDraft('Necesitamos cargar un camion en Ciudad A, Provincia A, para entregar en Ciudad B.\nCargar 03/10/2026\n24.000kg hora de entrega 12:00 04/10/2026');
+ assert.equal(emailDraft.origen,'CIUDAD A, PROVINCIA A');assert.equal(emailDraft.destino,'CIUDAD B');assert.equal(emailDraft.peso_kg,24000);assert.equal(emailDraft.fecha_carga,'2026-10-03');assert.equal(emailDraft.fecha_descarga,'2026-10-04');assert.equal(emailDraft.hora_descarga,'12:00');checks+=6;
+ async function call(method,path,body,status=200,auth=token){const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth},...(body?{body:JSON.stringify(body)}:{})});const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));checks++;return data;}
+ const point=await call('POST','/puntos-interes',{nombre:'Centro QA Oct02',direccion:'Calle Prueba 17',codigo_postal:'02640',ciudad:'Almansa',provincia:'Albacete',pais:'España',lat:38.866,lng:-1.097,tipo:'ambos',punto_general:true,ventana:'08:00 - 14:00'},201);
+ await call('POST',`/puntos-interes/${point.id}/clientes`,{cliente_id:client.id});
+ await call('POST',`/puntos-interes/${point.id}/clientes`,{cliente_id:client.id});
+ let saved=(await call('GET','/puntos-interes?cliente_id='+client.id)).find(p=>p.id===point.id);assert.ok(saved);assert.equal(saved.cliente_id,null);assert.equal(saved.clientes_ids.filter(id=>id===client.id).length,1);
+ const foreign=(await db.query('SELECT id FROM clientes WHERE empresa_id<>$1 LIMIT 1',[company])).rows[0];await call('POST',`/puntos-interes/${point.id}/clientes`,{cliente_id:foreign.id},404);
+ const locations=await call('GET','/vehiculos/localizacion');assert.ok(locations.items.some(v=>v.id===vehicle.id));assert.ok(locations.items.every(v=>!v.position||v.status==='reciente'));
+ const route=await call('POST','/rutas',{cliente_id:client.id,origen:'Almansa',destino:'Madrid',precio_base:50,tarifa_tipo:'viaje',km:320,origen_punto_id:point.id,notas:'Cargar solo por la mañana',observaciones_factura:'Observación comercial QA'},201);assert.ok(route.id);
+ await call('POST','/pedidos',{cliente_id:client.id,ruta_id:route.id,origen:'Almansa',destino:'Madrid',fecha_carga:'2026-10-03',importe:50},409);
+ const order=await call('POST','/pedidos',{cliente_id:client.id,ruta_id:route.id,origen:'Almansa',destino:'Madrid',fecha_carga:'2026-10-03',importe:50,tarifa_notas_confirmadas:'Cargar solo por la mañana'},201);assert.ok(order.id);assert.match(order.observaciones_factura,/comercial/);
+ await call('GET',`/rutas/${route.id}/analisis`);
+ const customerRoute=await call('POST',`/clientes/${client.id}/rutas`,{origen:'Punto QA único',destino:'Destino QA único',precio_base:200,km:90,peajes:12.45,tiempo_h:1.75},201);
+ const rid=customerRoute.ruta_id||customerRoute.ruta?.id||customerRoute.id;
+ assert.ok(rid,JSON.stringify(customerRoute));
+ await call('PUT',`/clientes/${client.id}/rutas/${rid}`,{origen:'Punto QA único',destino:'Destino QA único',precio_base:225,km:90});
+ const after=(await db.query('SELECT peajes,tiempo_h FROM rutas WHERE id=$1 AND empresa_id=$2',[rid,company])).rows[0];
+ assert.equal(Number(after.peajes),12.45);assert.equal(Number(after.tiempo_h),1.75);
+ await call('PUT',`/clientes/${client.id}/rutas/${rid}`,{origen:'Punto QA único',destino:'Destino QA único',precio_base:225,km:-1},400);
+ await call('POST','/docs/vehiculo/'+vehicle.id+'/'+crypto.randomUUID()+'/analizar',{},404);
+ const cfg={activo:true,phone_number_id:'123456789',waba_id:'987654321',access_token:'SYNTHETIC_SECRET_NOT_REAL',app_secret:'SYNTHETIC_APP_SECRET',verify_token:'SYNTHETIC_VERIFY',templates:{pedido_cliente:'qa_cliente',orden_colaborador:'qa_proveedor',aviso_chofer:'qa_chofer',docs_pendientes:'qa_documentacion',entrega_recordatorio:'qa_entrega'}};
+ const stored=await call('PUT','/whatsapp/config',cfg);assert.ok(stored.ok);assert.ok(!JSON.stringify(stored).includes(cfg.access_token));
+ await call('PUT','/whatsapp/config',{...cfg,access_token:'',app_secret:'',verify_token:''});
+ const whatsapp=require('../src/services/whatsapp');const calls=[];
+ const request=async(url,options)=>{calls.push(url);assert.equal(options.headers.Authorization,'Bearer '+cfg.access_token);assert.ok(!options.method||options.method==='GET');const parsed=new URL(url);let data;
+   if(parsed.pathname.endsWith('/phone_numbers'))data={data:[{id:cfg.phone_number_id}]};
+   else if(parsed.pathname.endsWith('/message_templates'))data=parsed.searchParams.has('after')?{data:Object.values(cfg.templates).map(name=>({name,status:'APPROVED',language:'es_ES'}))}:{data:[],paging:{next:'ignored-untrusted-url',cursors:{after:'next-page'}}};
+   else data={id:cfg.phone_number_id,verified_name:'Empresa sintética',display_phone_number:'+34900000000'};
+   return {ok:true,json:async()=>data};};
+ const tested=await whatsapp.testEmpresaWhatsapp(company,{request});assert.equal(tested.ready,true);assert.equal(calls.length,4);
+ await assert.rejects(whatsapp.testEmpresaWhatsapp(company,{request:async()=>({ok:false,status:401,json:async()=>({error:{code:190,message:cfg.access_token}})})}),e=>e.status===502&&!e.message.includes(cfg.access_token));
+ const config=await call('GET','/whatsapp/config');assert.equal(config.last_test_ok,false);
+ return {checks,points:{linkWithoutChangingOwnership:true,search:true,duplicateSafe:true,foreignBlocked:true},commercialNotesAcknowledged:true,gpsNoInventedPosition:true,aiDocumentOwnership:true,whatsapp:{encryptedPreserved:true,pagination:true,readOnlyTest:true,sanitizedErrors:true},providers:'synthetic; no external messages'};
+};

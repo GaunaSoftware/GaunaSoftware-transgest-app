@@ -3,18 +3,39 @@
   "name": "TransGest TMS",
   "description": "Sistema de gestión de transporte profesional",
   "icons": [
-    { "src": "favicon.ico",  "sizes": "256x256",   "type": "image/x-icon" },
-    { "src": "logo192.png",  "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "logo512.png",  "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "favicon.ico?v=transgest-t-transparent-20261003",
+      "sizes": "256x256",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo192.png?v=transgest-t-transparent-20261003",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo512.png?v=transgest-t-transparent-20261003",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
   ],
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone"],
+  "display_override": [
+    "window-controls-overlay",
+    "standalone"
+  ],
   "theme_color": "#1a1f2e",
   "background_color": "#0d1017",
   "orientation": "portrait-primary",
-  "categories": ["business", "productivity", "navigation"],
+  "categories": [
+    "business",
+    "productivity",
+    "navigation"
+  ],
   "lang": "es",
   "shortcuts": [
     {
@@ -22,14 +43,24 @@
       "short_name": "Mis viajes",
       "description": "Ver los viajes asignados para hoy",
       "url": "/",
-      "icons": [{ "src": "favicon.ico", "sizes": "64x64" }]
+      "icons": [
+        {
+          "src": "favicon.ico?v=transgest-t-transparent-20261003",
+          "sizes": "64x64"
+        }
+      ]
     },
     {
       "name": "Reportar incidencia",
       "short_name": "Incidencia",
       "description": "Reportar una incidencia en ruta",
       "url": "/?tab=incidencia",
-      "icons": [{ "src": "favicon.ico", "sizes": "64x64" }]
+      "icons": [
+        {
+          "src": "favicon.ico?v=transgest-t-transparent-20261003",
+          "sizes": "64x64"
+        }
+      ]
     }
   ],
   "screenshots": [],

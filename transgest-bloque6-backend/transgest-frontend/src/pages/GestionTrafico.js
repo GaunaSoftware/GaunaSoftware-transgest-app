@@ -604,7 +604,7 @@ function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   const estado = String(targetEstado || pedido?.estado || "").toLowerCase();
   const issues = [];
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
-  const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
+  const needsOperationalData = ["confirmado", "cargado", "en_curso", "descarga", "entregado"].includes(estado);
   const needsDeliveryData = ["descarga", "entregado"].includes(estado);
 
   if (!toDateInputValue(pedido?.fecha_carga || pedido?.fecha_pedido)) {
@@ -2349,7 +2349,7 @@ export default function GestionTrafico({ initialVista = "cuadrante", soloOptimiz
         getPedidosResumenLista({ desde: desdeCarga, hasta: hastaCarga, limit: 1000 }, { timeoutMs: 45000, silentError: true }),
         getPedidosResumenLista({
           tipo_carga: "grupaje",
-          estado: "pendiente,confirmado,espera_carga,cargando,en_curso,espera_descarga,descarga,incidencia",
+          estado: "pendiente,confirmado,espera_carga,cargando,cargado,en_curso,espera_descarga,descarga,incidencia",
           facturado: "false",
           limit: 1000,
         }, { timeoutMs: 45000, silentError: true }),

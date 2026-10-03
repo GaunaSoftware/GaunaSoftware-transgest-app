@@ -51,7 +51,8 @@ async function main(){
    const updated=await driverJourneyContext(db,company,ids[0]);
    assert.equal(updated.paradas[i].completa,true);assert.equal(updated.proxima_parada?.id,stops[i+1]?.id);
    assert.ok(updated.paradas[i].espera_min>=0&&updated.paradas[i].duracion_min>=0);
-   assert.equal((await pg.query('SELECT estado FROM choferes WHERE id=$1',[driver])).rows[0].estado,i===3?'disponible':load?'en_ruta':'en_ruta');
+   assert.equal((await pg.query('SELECT estado FROM choferes WHERE id=$1',[driver])).rows[0].estado,i===3?'disponible':load?'carga':'en_ruta');
+   if(load)assert.equal((await pg.query('SELECT estado FROM pedidos WHERE id=$1',[stop.pedido_id])).rows[0].estado,'cargado','loading does not imply departure');
   }
   assert.equal((await pg.query('SELECT estado FROM viajes_operativos')).rows[0].estado,'entregado');
   assert.equal((await pg.query("SELECT count(*)::int n FROM viaje_paradas WHERE estado='finalizada'")).rows[0].n,4);

@@ -62,3 +62,10 @@ test('warehouse belongs to Operations once, and grouping never grants a hidden w
   const restricted=organizeSidebar([{items:[item('pedidos')]}],[],'trafico');
   expect(flattenNavigation(restricted[0].items).some(x=>x.id==='palets')).toBe(false);
 });
+
+test('GPS is under Operations and Network under Clients, with each permission checked upstream',()=>{
+ const entries=organizeSidebar([{items:[item('pedidos'),item('localizacion'),item('clientes_grupo',[item('clientes'),item('network')])]}],[],'gerente')[0].items;
+ expect(entries.find(x=>x.id==='nav_operaciones').children.map(x=>x.id)).toContain('localizacion');
+ expect(entries.find(x=>x.id==='nav_clientes').children.map(x=>x.id)).toContain('network');
+ for(const id of ['localizacion','network'])expect(flattenNavigation(entries).filter(x=>x.id===id)).toHaveLength(1);
+});

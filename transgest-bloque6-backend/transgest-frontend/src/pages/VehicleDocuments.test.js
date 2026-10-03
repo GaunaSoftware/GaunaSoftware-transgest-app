@@ -1,0 +1,26 @@
+import React,{act} from 'react';
+import {createRoot} from 'react-dom/client';
+import {ModalVehiculo} from './Vehiculos';
+import * as api from '../services/api';
+jest.mock('../services/api',()=>({getGpsProviders:jest.fn(),getDocsVehiculo:jest.fn(),analizarDocVehiculoNuevo:jest.fn(),analizarDocVehiculo:jest.fn(),crearDocVehiculo:jest.fn(),crearVehiculo:jest.fn(),asignarRemolque:jest.fn()}));
+jest.mock('../context/AuthContext',()=>({useAuth:()=>({puedeEditar:()=>true})}));
+jest.mock('../utils/planFeatures',()=>({getEmpresaPlanLocal:()=> 'enterprise',planHasFeature:()=>true}));
+jest.mock('../services/notify',()=>({notify:jest.fn(),confirmDialog:jest.fn()}));
+jest.mock('./fleet/VehiclePhotoEditor',()=>()=>null);
+global.IS_REACT_ACT_ENVIRONMENT=true;
+let node,root;
+beforeEach(()=>{node=document.createElement('div');document.body.append(node);root=createRoot(node);jest.clearAllMocks();api.getGpsProviders.mockResolvedValue({providers:[]});api.getDocsVehiculo.mockResolvedValue([]);api.crearVehiculo.mockResolvedValue({id:'new-vehicle'});api.asignarRemolque.mockResolvedValue({});});
+afterEach(()=>{act(()=>root.unmount());node.remove();});
+test('selects and reads a document before saving and sends the selected file with the new vehicle',async()=>{
+  const saved=jest.fn();api.analizarDocVehiculoNuevo.mockResolvedValue({fields:[{key:'matricula',label:'Matrícula',value:'0001-QAT',evidence:'Matrícula 0001-QAT'}]});
+  await act(async()=>root.render(<ModalVehiculo initialTab="docs" onClose={()=>{}} onSaved={saved}/>));
+  const picker=node.querySelector('[aria-label="Documento del vehículo"]'),file=new File(['%PDF-1.4 test'],'ficha.pdf',{type:'application/pdf'});
+  Object.defineProperty(picker,'files',{configurable:true,value:[file]});
+  await act(async()=>{picker.dispatchEvent(new Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,30));});
+  expect(api.crearVehiculo).not.toHaveBeenCalled();expect(api.crearDocVehiculo).not.toHaveBeenCalled();expect(api.analizarDocVehiculoNuevo.mock.calls[0][0].file_nombre).toBe('ficha.pdf');
+  expect(node.textContent).toContain('Pendiente de guardar');
+  act(()=>node.querySelector('section input[type=checkbox]').click());
+  await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent.startsWith('Aplicar 1')).click());
+  await act(async()=>[...node.querySelectorAll('button')].find(b=>b.textContent==='Guardar').click());
+  expect(api.crearVehiculo.mock.calls[0][0]).toMatchObject({matricula:'0001-QAT',documentos:[{file_nombre:'ficha.pdf'}]});expect(saved).toHaveBeenCalledTimes(1);
+});

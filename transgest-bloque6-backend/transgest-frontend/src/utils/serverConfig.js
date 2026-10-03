@@ -42,6 +42,8 @@ function normalizeUrl(raw) {
 
 // URL efectiva del backend (llamar en tiempo de carga de cada modulo).
 export function resolveApiBase() {
+  // The isolated staging bundle must never send credentials to an override.
+  if (process.env.REACT_APP_ENVIRONMENT === 'staging') return window.location.origin;
   const override = readOverride();
   if (override) return normalizeUrl(override);
   return DEFAULT_API_URL.replace(/\/+$/, "");

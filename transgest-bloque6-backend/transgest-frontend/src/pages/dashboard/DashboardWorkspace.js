@@ -1,7 +1,7 @@
 import AgendaToday from "../../components/AgendaToday";
 import { useNoticeCenter } from "../../components/NoticeCenter";
 import { displayOrderLocation } from '../../utils/orderTown';
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { useAuth } from "../../context/AuthContext";
 import { Button, Card, Icon, KpiCard, DataTable, MobileDataCard, EmptyState, Badge, TransportStateBadge } from "../../ui";
@@ -15,7 +15,7 @@ const money = n => Number(n || 0).toLocaleString("es-ES", { style: "currency", c
 const dayKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 const datePart = d => String(d || "").slice(0,10);
 const dateLabel = d => d ? new Date(`${datePart(d)}T12:00:00`).toLocaleDateString("es-ES") : "—";
-const activeStates = ["confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga"];
+const activeStates = ["confirmado","espera_carga","cargando","cargado","en_curso","espera_descarga","descarga"];
 const validInvoice = f => !["borrador","cancelada","anulada"].includes(String(f.estado || "").toLowerCase());
 
 function Section({ title, icon, action, children, className = "" }) {
@@ -25,7 +25,6 @@ function Section({ title, icon, action, children, className = "" }) {
 export default function DashboardWorkspace({ pedidos, facturas, vehiculos, choferes, alertas, tareas, loadErrors, reload, loading, today, navigate, openOrder, openAlert, advanced, showBI, monthSummary, monthSummaryLoading, monthSummaryError, onSnapshot, stateMeta }) {
   const { puedeVer, puedeEditar } = useAuth();
   const notices = useNoticeCenter(puedeVer("avisos"));
-  const [activeTab,setActiveTab] = useState('resumen');
   const data = useMemo(() => {
     const now = new Date(), todayKey = dayKey(now), month = todayKey.slice(0,7);
     const current = pedidos.filter(p => p.estado !== "cancelado");
@@ -54,13 +53,13 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     facturas.filter(f => validInvoice(f) && !["cobrada","rectificada"].includes(f.estado)).forEach(f => addDue(f.id,`Factura ${f.numero || ""}`,f.fecha_vencimiento,"facturacion","tms_facturacion_focus",{factura_id:f.id}));
     return {
       agenda, week, ranking, due:due.sort((a,b) => datePart(a.date).localeCompare(datePart(b.date))),
-      active:current.filter(p => !overdueOrder(p) && activeStates.includes(p.estado)).length,
+      active:current.filter(p => activeStates.includes(p.estado)).length,
       today:current.filter(p => datePart(p.fecha_carga)===todayKey).length,
       billed:invoices.reduce((s,f) => s+Number(f.base_imponible||0),0),
       incidents:current.filter(p => p.estado === "incidencia").length,
       recent:[...pedidos].sort((a,b) => String(b.fecha_pedido||b.created_at||b.fecha_carga||"").localeCompare(String(a.fecha_pedido||a.created_at||a.fecha_carga||""))).slice(0,5),
-      route:current.filter(p => !overdueOrder(p) && p.estado === "en_curso").length,
-      handling:current.filter(p => !overdueOrder(p) && ["cargando","descarga"].includes(p.estado)).length,
+      route:current.filter(p => p.estado === "en_curso").length,
+      handling:current.filter(p => ["cargando","descarga"].includes(p.estado)).length,
       workshop:vehiculos.filter(v => v.estado === "taller").length,
     };
   }, [pedidos,facturas,vehiculos,choferes]);
@@ -71,7 +70,7 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
   const monthRange = monthSummary?.periodo ? `${dateLabel(monthSummary.periodo.desde)} – ${dateLabel(monthSummary.periodo.hasta)}` : "mes actual";
   const billingRanking = showBI ? (monthSummary?.clientes_top_facturacion || []).slice(0,5).map(c => ({id:c.id,name:c.nombre,total:Number(c.facturado || 0)})) : data.ranking;
   const kpiCards = [
-    ["Viajes activos",data.active,"truck","success","pedidos","Confirmados y en operación"],
+    ["Viajes activos",data.active,"truck","success","pedidos","Sin completar, aunque su fecha prevista haya pasado"],
     ["Pedidos de hoy",data.today,"invoice","info","pedidos","Con fecha de carga hoy"],
     ...(showBI ? [
       ["Viajes realizados · mes",monthCount,"truck","neutral","pedidos",`${monthRange} · entregados o facturados`],
@@ -84,7 +83,7 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
   const status = p => <span title={incidentDescription(p)}><TransportStateBadge state={p}/>{overdueOrder(p)&&<Badge tone="warning">Vencido</Badge>}</span>;
   const quick = [
     ["Nuevo pedido","invoice","pedidos",true,() => openOrder({action:"nuevo"})],
-    ["Asignar vehículo","truck","pedidos",true,() => navigate("pedidos")],
+    ["Asignar viajes","truck","gestion_trafico",true,() => navigate("gestion_trafico")],
     ["Peticiones de viaje","route","solicitudes",false],
     ["Revisar incidencias","alert","pedidos",false,() => openOrder({estado:"incidencia",title:"Incidencias"})],
     ["Calcular porte","coins","calculador_portes",false],
@@ -110,10 +109,8 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
     {loading ? <div role="status" className="dashboard-loading">Cargando actividad…</div> : <>
     {notices.error && <div role="alert" className="notices-error">{notices.error} <Button onClick={notices.reload}>Reintentar</Button></div>}
     {notices.data?.errors?.length > 0 && <p role="alert">Vencimientos incompletos: revisa las fuentes en Avisos.</p>}
-    <div className="dashboard-view-tabs" role="tablist" aria-label="Vistas del dashboard"><button type="button" role="tab" aria-selected={activeTab==='resumen'} onClick={()=>setActiveTab('resumen')}>Resumen</button><button type="button" role="tab" aria-selected={activeTab==='vencimientos'} onClick={()=>setActiveTab('vencimientos')}>Vencimientos ({due.length})</button></div>
-    {activeTab==='vencimientos' ? <div className="dashboard-due-view"><Section title="Vencimientos documentales y de cobro" icon="clock" action={link('Ver todos los avisos','avisos')}><p className="dashboard-caption">Cada aviso abre su factura o ficha. Antelación según la configuración de cada tipo.</p><div className="dashboard-scroll">{due.map(d=><button key={d.id} className="dashboard-due-row" onClick={()=>openAlert(d)}><Icon name="clock" size={20}/><span>{d.title}</span><time>{dateLabel(d.date)}</time></button>)}{!due.length&&<EmptyState title="Sin vencimientos en los datos cargados"/>}</div></Section></div> : <>
     <div className="dashboard-kpis">
-      {kpiCards.filter(k => puedeVer(k[4])).map(([label,value,icon,tone,view,detail]) => <button key={label} className="dashboard-kpi-button" onClick={() => label==="Incidencias activas" ? openOrder({estado:"incidencia"}) : navigate(view)}><KpiCard {...{label,value,icon,tone,detail}}/></button>)}
+      {kpiCards.filter(k => puedeVer(k[4])).map(([label,value,icon,tone,view,detail]) => <button key={label} className="dashboard-kpi-button" onClick={() => label==="Incidencias activas" ? openOrder({estado:"incidencia"}) : label==="Pedidos de hoy" ? openOrder({estado:'todos',desde:dayKey(new Date()),hasta:dayKey(new Date()),title:'Pedidos de hoy'}) : label==="Viajes activos" ? openOrder({estado:'activos',pedido_ids:pedidos.filter(p=>p.estado!=='cancelado'&&activeStates.includes(p.estado)).map(p=>p.id),title:'Viajes activos del dashboard'}) : navigate(view)}><KpiCard {...{label,value,icon,tone,detail}}/></button>)}
     </div>
     {showBI && <p className="dashboard-kpi-explanation">Servicios realizados: viajes entregados o facturados por fecha económica. Facturación emitida: facturas válidas por fecha de emisión. Pueden diferir por viajes pendientes de facturar y por fechas distintas. {monthSummaryError && <span role="alert">{monthSummaryError}</span>}</p>}
     {puedeVer("pedidos")&&<LiveOperations initialItems={pedidos} onSnapshot={onSnapshot} openOrder={openOrder}/>}
@@ -126,10 +123,10 @@ export default function DashboardWorkspace({ pedidos, facturas, vehiculos, chofe
       <Section title="Próximos vencimientos" icon="clock" className="dashboard-due"><p className="dashboard-caption">{due.length} vencimientos · Plazos configurados</p><div className="dashboard-scroll">{due.map(d => <button key={d.id} className="dashboard-due-row" onClick={() => openAlert(d)}><Icon name="clock" size={20}/><span>{d.title}</span><time>{dateLabel(d.date)}</time></button>)}{!due.length && <EmptyState title="Sin vencimientos próximos en los datos cargados"/>}</div></Section>
       {puedeVer("pedidos") && <Section title="Actividad semanal" icon="route" className="dashboard-week"><p className="dashboard-caption">Cargas y descargas planificadas · semana actual</p><div className="dashboard-chart" role="img" aria-label={data.week.map(d=>`${d.day}: ${d.cargas} cargas, ${d.descargas} descargas`).join("; ")}><ResponsiveContainer width="100%" height="100%"><BarChart data={data.week} margin={{top:8,right:8,left:-25,bottom:0}}><CartesianGrid vertical={false} stroke="var(--border)"/><XAxis dataKey="day" tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false}/><YAxis allowDecimals={false} tick={{fontSize:10,fill:"var(--text3)"}} axisLine={false} tickLine={false}/><Tooltip contentStyle={{background:"var(--card-bg)",borderColor:"var(--border)",color:"var(--text)"}}/><Bar dataKey="cargas" name="Cargas" fill="var(--accent)" radius={[3,3,0,0]}/><Bar dataKey="descargas" name="Descargas" fill="#83cdb9" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer></div><div className="dashboard-legend"><span>Cargas</span><span>Descargas</span></div></Section>}
       {puedeVer("facturacion") && <Section title="Facturación por cliente" icon="coins" className="dashboard-ranking"><p className="dashboard-caption">Mes actual · base imponible emitida</p>{billingRanking.length ? billingRanking.map(c => <div className="dashboard-ranking-row" key={c.id}><span title={c.name}>{c.name}</span><div><i style={{width:`${Math.max(0,c.total)/Math.max(1,...billingRanking.map(r=>r.total))*100}%`}}/></div><strong>{money(c.total)}</strong></div>) : <EmptyState title={showBI && (monthSummaryLoading || monthSummaryError || !monthSummary) ? "Facturación no disponible" : "Sin facturación emitida este mes"}/>}</Section>}
-      {puedeVer("control_tower") && <Section title="Control Tower" icon="shield" className="dashboard-tower" action={link("Abrir control","control_tower")}><div className="dashboard-tower-grid">{[[data.route,"Pedidos en curso"],[data.handling,"En carga / descarga"],[data.workshop,"Vehículos en taller"]].map(([n,label])=><div key={label}><strong>{n}</strong><small>{label}</small></div>)}</div><Button className="dashboard-tower-action" onClick={() => navigate("control_tower")}><Icon name="shield"/>Consultar seguimiento operativo <Icon name="chevron" size={16}/></Button><p className="dashboard-caption">Resumen de los datos cargados al abrir el Dashboard.</p></Section>}
+      {puedeVer("control_tower") && <Section title="Control Tower" icon="shield" className="dashboard-tower" action={link("Abrir control","control_tower")}><div className="dashboard-tower-grid">{[[data.route,"Pedidos en tránsito"],[data.handling,"En carga / descarga"],[data.workshop,"Vehículos en taller"]].map(([n,label])=><div key={label}><strong>{n}</strong><small>{label}</small></div>)}</div><Button className="dashboard-tower-action" onClick={() => navigate("control_tower")}><Icon name="shield"/>Consultar seguimiento operativo <Icon name="chevron" size={16}/></Button><p className="dashboard-caption">Resumen de los datos cargados al abrir el Dashboard.</p></Section>}
       {puedeVer("pedidos")&&<Section title="Distribución de pedidos" icon="truck" className="dashboard-analysis" action={showBI?<Button onClick={advanced}>Explorar BI</Button>:null}><p className="dashboard-caption">Todos los pedidos cargados · selecciona un estado para consultar el detalle.</p><div className="dashboard-state-table">{Array.from(new Set(pedidos.map(p=>p.estado))).map(state=>{const n=pedidos.filter(p=>p.estado===state).length;return <button key={state} onClick={()=>openOrder({estado:state})}><span>{stateMeta(state).label}</span><strong>{n}</strong><progress value={n} max={pedidos.length||1}/><span>{Math.round(n/(pedidos.length||1)*100)}%</span></button>;})}</div></Section>}
       {puedeVer("facturacion")&&<Section title="Detalle de facturación por cliente" icon="coins" className="dashboard-analysis" action={showBI?<Button onClick={advanced}>Ver análisis completo</Button>:null}><p className="dashboard-caption">Cinco principales clientes · mes actual</p><DataTable rows={billingRanking} rowKey={r=>r.id} columns={[{key:"name",label:"Cliente"},{key:"total",label:"Base imponible",render:r=>money(r.total)}]} renderMobile={r=><MobileDataCard title={r.name} amount={money(r.total)}/>}/></Section>}
-    </div></>}
+    </div>
     </>}
   </main>;
 }

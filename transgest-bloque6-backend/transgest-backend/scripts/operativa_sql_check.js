@@ -10,7 +10,7 @@ async function main() {
   const empresa='11111111-1111-4111-8111-111111111111';
   const cliente='22222222-2222-4222-8222-222222222222';
   const cliente2='33333333-3333-4333-8333-333333333333';
-  const adapt=client=>({query:async(sql,params)=>{const result=await client.query(sql,params);return {...result,rowCount:result.affectedRows};}});
+  const adapt=client=>({query:async(sql,params)=>{const result=!params&&sql.includes(';')?(await client.exec(sql)).at(-1):await client.query(sql,params);return {...result,rowCount:result.affectedRows};}});
   db.query=adapt(pg).query;
   db.transaction=callback=>pg.transaction(client=>callback(adapt(client)));
   try {
@@ -35,9 +35,10 @@ async function main() {
     await ensurePointIdentitySchema(db);
     assert.equal((await pg.query('SELECT count(*)::int AS total FROM puntos_interes WHERE activo')).rows[0].total,5);
     await pg.exec(`CREATE TABLE clientes(id UUID PRIMARY KEY, empresa_id UUID);
+      CREATE TABLE pedidos(id UUID PRIMARY KEY);
       CREATE TABLE rutas(id UUID PRIMARY KEY DEFAULT gen_random_uuid(), origen TEXT, destino TEXT, km NUMERIC, notas TEXT,
         empresa_id UUID, cliente_id UUID, tipo_vehiculo TEXT, tarifa_tipo TEXT, precio_base NUMERIC,
-        minimo_facturable NUMERIC, minimo_unidades NUMERIC, recargo_combustible_pct NUMERIC, activa BOOLEAN DEFAULT true);
+        minimo_facturable NUMERIC, minimo_unidades NUMERIC, recargo_combustible_pct NUMERIC, peajes NUMERIC, tiempo_h NUMERIC, activa BOOLEAN DEFAULT true);
       CREATE TABLE ruta_precios_cliente(ruta_id UUID, cliente_id UUID, precio NUMERIC CHECK(precio>=0),
         tarifa_tipo TEXT, minimo_facturable NUMERIC, minimo_unidades NUMERIC, recargo_combustible_pct NUMERIC, UNIQUE(ruta_id,cliente_id))`);
     await pg.query('INSERT INTO clientes VALUES($1,$2)',[cliente,empresa]);
@@ -49,11 +50,11 @@ async function main() {
       return response;
     };
     const first=await save('Málaga',100);
-    assert.equal(first.code,201);
+    assert.equal(first.code,201,JSON.stringify(first.data));
     const second=await save(' MALAGA ',120);
     assert.equal(second.data.ruta_id,first.data.ruta_id);
     assert.equal((await pg.query('SELECT precio FROM ruta_precios_cliente')).rows[0].precio,'120');
-    assert.equal((await save('Vigo',-1)).code,500);
+    assert.equal((await save('Vigo',-1)).code,400);
     assert.equal((await pg.query('SELECT count(*)::int AS total FROM rutas')).rows[0].total,1);
     const pedido='44444444-4444-4444-8444-444444444444';
     await queue.enqueue(pedido,empresa,null,{});

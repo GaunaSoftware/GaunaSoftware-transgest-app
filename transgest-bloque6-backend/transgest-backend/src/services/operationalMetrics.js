@@ -13,7 +13,7 @@ const localParts = date => {
   const part = type => parts.find(x => x.type === type)?.value;
   return {date:`${part('year')}-${part('month')}-${part('day')}`, minute:Number(part('hour')) * 60 + Number(part('minute'))};
 };
-const duration = (a, b) => {const start=finiteDate(a),end=finiteDate(b);if(!start||!end)return null;const minutes=(end-start)/60000;return minutes>=0&&minutes<=7*24*60?money(minutes):null;};
+const {duration} = require('./routePerformance');
 const percentile = (values, fraction) => {if(!values.length)return null;const sorted=[...values].sort((a,b)=>a-b);return money(sorted[Math.ceil(fraction*sorted.length)-1]);};
 function distribution(values, eligible) {
   const valid=values.filter(v=>v!=null && v>=0);
@@ -58,7 +58,7 @@ function buildOperationalMetrics({empresaId,range,orders=[],steps=[],docs=[],cli
       const finish=data[isLoad?'carga_ok_at':'descarga_ok_at'];
       const observation={order_id:order.id,numero:order.numero,stop_id:stop.id,label:stop.label,
         window:explicitWindow(stop,order),arrival,wait:duration(arrival,start),handling:duration(start,finish),
-        start:finiteDate(start),finish:finiteDate(finish)};
+        start:finiteDate(start),finish:finiteDate(finish),travel:isLoad?null:duration(data.viaje_iniciado_at,arrival)};
       if(isLoad) {loadStops.push(observation);if(!data.carga_ok)loadComplete=false;}
       else {
         const signed=finiteDate(data.firma_entrega_at)||finiteDate(finish);
@@ -161,7 +161,7 @@ function buildOperationalMetrics({empresaId,range,orders=[],steps=[],docs=[],cli
     },
     tiempos:{espera_carga:distribution(loadStops.map(s=>s.wait),loadStops.length),carga_efectiva:distribution(loadStops.map(s=>s.handling),loadStops.length),
       espera_descarga:distribution(unloadStops.map(s=>s.wait),unloadStops.length),descarga_efectiva:distribution(unloadStops.map(s=>s.handling),unloadStops.length),
-      recepcion_pod:distribution(podDelays,delivered.length)},
+      recepcion_pod:distribution(podDelays,delivered.length),trayecto:distribution(unloadStops.map(s=>s.travel),unloadStops.length)},
     puntualidad:{recogida:pickup,entrega:delivery},
     flota:{litros_repostados:attributionScope&&fuelRows.length?money(litres):null,nota:'Litros repostados no son litros consumidos.',km_propia:ownKm.total,cobertura_km_propia:ownKm.cobertura,
       repostajes:attributionScope?paged(fuelRows.map(r=>({id:r.id,fecha:day(r.fecha),vehiculo:own(vehicles,empresaId).find(v=>String(v.id)===String(r.vehiculo_id))?.matricula||String(r.vehiculo_id),litros:number(r.litros),importe:number(r.importe)}))):paged([]),
@@ -184,7 +184,25 @@ async function loadOperationalEvidence(empresaId,orderIds,queryDb=db.query) {
     optional('pedido_chofer_pasos','SELECT pedido_id,empresa_id,data FROM pedido_chofer_pasos WHERE empresa_id=$1 AND pedido_id=ANY($2::uuid[])',[empresaId,ids]),
     optional('pedido_docs','SELECT pedido_id,empresa_id,tipo,nombre,created_at FROM pedido_docs WHERE empresa_id=$1 AND pedido_id=ANY($2::uuid[])',[empresaId,ids]),
     queryDb('SELECT cfg_precios FROM empresas WHERE id=$1',[empresaId])]);
-  return {steps:steps.rows,docs:docs.rows,config:company.rows[0]?.cfg_precios||{},missingSources:[steps.missingSource,docs.missingSource].filter(Boolean)};
+  const graphExists=(await queryDb("SELECT to_regclass('viaje_paradas') AS stops,to_regclass('viaje_pedidos') AS members,to_regclass('viajes_operativos') AS trips")).rows[0];
+  const merged=new Map(steps.rows.map(r=>[String(r.pedido_id),{...r,data:{...r.data,paradas:{...r.data?.paradas}}}]));
+  if(graphExists?.stops&&graphExists?.members&&graphExists?.trips){
+    const graph=await queryDb(`SELECT vp.pedido_id,s.*,v.legacy_pedido_id FROM viaje_paradas s
+      JOIN viajes_operativos v ON v.id=s.viaje_id AND v.empresa_id=s.empresa_id
+      JOIN viaje_pedidos vp ON vp.viaje_id=v.id AND vp.empresa_id=v.empresa_id
+      WHERE vp.empresa_id=$1 AND vp.pedido_id=ANY($2::uuid[]) AND v.estado<>'cancelado'
+      AND v.id=(SELECT v2.id FROM viajes_operativos v2 JOIN viaje_pedidos vp2 ON vp2.viaje_id=v2.id AND vp2.empresa_id=v2.empresa_id
+        WHERE vp2.empresa_id=$1 AND vp2.pedido_id=vp.pedido_id AND v2.estado<>'cancelado' ORDER BY v2.created_at DESC LIMIT 1)
+      AND (s.legacy_key LIKE vp.pedido_id::text||':%' OR (v.legacy_pedido_id=vp.pedido_id AND s.legacy_key NOT LIKE '%:%'))`,[empresaId,ids]);
+    for(const s of graph.rows){
+      const id=String(s.pedido_id),key=String(s.legacy_key).replace(id+':',''),load=s.tipo==='carga';
+      const row=merged.get(id)||{pedido_id:id,empresa_id:empresaId,data:{paradas:{}}};
+      const data={...row.data.paradas[key],...s.progreso};
+      for(const [field,value] of [[load?'carga_iniciada_at':'posicionado_descarga_at',s.llegada_real_at],[load?'carga_proceso_at':'descarga_iniciada_at',s.inicio_real_at],[load?'carga_ok_at':'descarga_ok_at',s.fin_real_at]])if(value)data[field]=value;
+      row.data.paradas[key]=data;merged.set(id,row);
+    }
+  }
+  return {steps:[...merged.values()],docs:docs.rows,config:company.rows[0]?.cfg_precios||{},missingSources:[steps.missingSource&&!merged.size?steps.missingSource:null,docs.missingSource].filter(Boolean)};
 }
 async function loadPlannerMetrics(empresaId,range,queryDb=db.query) {
   if(!empresaId)throw Object.assign(new Error('Sin empresa_id'),{status:401});

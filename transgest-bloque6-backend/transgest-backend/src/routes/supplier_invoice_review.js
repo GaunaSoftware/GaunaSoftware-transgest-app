@@ -3,6 +3,9 @@ const {requireModulePermission,requireRole,requirePlanFeature}=require('../middl
 router.use(requireRole('gerente','contable','administrativo'),requireModulePermission('facturacion'));
 router.use((req,res,next)=>{res.set('Cache-Control','private, no-store');next();});
 const wrap=fn=>async(req,res,next)=>{try{await fn(req,res);}catch(e){if(e.status)return res.status(e.status).json({error:e.message});next(e);}};
+const payments=require('../services/supplierInvoicePayments');
+router.get('/:id/pagos',wrap(async(req,res)=>{await payments.ensure(db);res.json(await payments.read(db,req.empresaId,req.params.id));}));
+router.post('/:id/pagos',wrap(async(req,res)=>res.status(201).json(await payments.record(db,req.empresaId,req.params.id,req.user.id,req.body))));
 router.get('/proveedores',wrap(async(req,res)=>res.json((await db.query("SELECT id,nombre,cif FROM colaboradores WHERE empresa_id=$1 AND (nombre ILIKE $2 OR cif ILIKE $2) ORDER BY nombre,id LIMIT 100",[req.empresaId,'%'+String(req.query.q||'').slice(0,120)+'%'])).rows)));
 router.get('/config',wrap(async(req,res)=>res.json((await db.query('SELECT tolerancia_eur,tolerancia_pct FROM factura_proveedor_config WHERE empresa_id=$1',[req.empresaId])).rows[0]||{tolerancia_eur:0,tolerancia_pct:0})));
 router.put('/config',requireRole('gerente'),wrap(async(req,res)=>{const eur=s.amount(req.body.tolerancia_eur),pct=s.amount(req.body.tolerancia_pct);if(eur===null||eur<0||pct===null||pct<0||pct>100)throw fail('Tolerancias no válidas.');await db.query('INSERT INTO factura_proveedor_config(empresa_id,tolerancia_eur,tolerancia_pct,updated_by) VALUES($1,$2,$3,$4) ON CONFLICT(empresa_id) DO UPDATE SET tolerancia_eur=$2,tolerancia_pct=$3,updated_by=$4,updated_at=now()',[req.empresaId,eur,pct,req.user.id]);res.json({ok:true});}));

@@ -15,6 +15,8 @@ module.exports=async({db,base,company,user,token,password})=>{
  const lines=(await db.query('SELECT concepto,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[invoice.id])).rows;assert.equal(lines.length,2);assert.equal(Number(lines[0].importe),110);assert.equal(Number(lines[1].importe),10);assert.match(lines[1].concepto,/combustible/i);
  await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5},400);
  const previousId=invoice.id;
+ await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5,fuel_clause_confirmed:true},409);
+ await call('DELETE','/facturas/'+previousId);
  invoice=await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5,fuel_clause_confirmed:true},201);
  assert.notEqual(invoice.id,previousId);assert.equal(Number(invoice.base_imponible),123.75);
  assert.equal((await call('POST','/facturas',{workflow_pedidos_ids:[order],fuel_clause_percent:12.5,fuel_clause_confirmed:true},201)).id,invoice.id);

@@ -3,8 +3,8 @@ import {getPedidos,transportExchange} from '../services/api';
 import {Button} from '../ui';
 import {Panel,money} from './PlannerUI';
 
-export default function NetworkConsentPanel({user,clients,canReceive,onConnected}){
- const [catalog,setCatalog]=useState({}),[invitations,setInvitations]=useState([]),[orders,setOrders]=useState([]),[workspace,setWorkspace]=useState(user.productos?.includes('planner')?'planner':'transgest');
+export default function NetworkConsentPanel({user,clients,canReceive,onConnected,defaultWorkspace}){
+ const [catalog,setCatalog]=useState({}),[invitations,setInvitations]=useState([]),[orders,setOrders]=useState([]),[workspace,setWorkspace]=useState(defaultWorkspace|| (user.productos?.includes('planner')?'planner':'transgest'));
  const [order,setOrder]=useState(''),[outScopes,setOutScopes]=useState(['pedidos']),[generated,setGenerated]=useState(null),[suggestion,setSuggestion]=useState(null);
  const [token,setToken]=useState(()=>new URLSearchParams(window.location.hash.slice(1)).get('encargo')||''),[preview,setPreview]=useState(null),[inScopes,setInScopes]=useState([]),[customer,setCustomer]=useState(''),[accepted,setAccepted]=useState(false);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');const operation=useRef(null);

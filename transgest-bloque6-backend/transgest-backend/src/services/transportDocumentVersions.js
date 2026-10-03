@@ -216,7 +216,7 @@ async function issue(db, { empresaId, pedidoId, payload, source = 'transgest', e
 }
 function assertReadyToIssue(order) {
   const state = String(order?.estado || '').toLowerCase();
-  if (!['confirmado','en_curso','descarga','entregado','facturado'].includes(state)) {
+  if (!['confirmado','cargado','en_curso','descarga','entregado','facturado'].includes(state)) {
     fail('Confirma el pedido antes de emitir el DeCA.', 'ORDER_NOT_CONFIRMED');
   }
 }

@@ -43,6 +43,8 @@ async function main(){
  app.use('/api/v1/auth',auth);
  app.use('/api/v1/empresa',authMiddleware.authenticate,authMiddleware.requireModulePermission('empresa'),req('./routes/datos_empresa'));
  app.use('/api/v1/superadmin',req('./routes/superadminCore'));
+ app.use('/api/v1/user-experience',authMiddleware.authenticate,req('./routes/userExperience'));
+ app.use('/api/v1/notificaciones',authMiddleware.authenticate,authMiddleware.requireModulePermission('avisos'),req('./routes/notificaciones'));
  app.use('/api/v1/usuarios',authMiddleware.authenticate,req('./routes/usuarios'));
  app.use('/api/v1/route-optimizer',boundaries.routeOptimizerAuthUnlessPublic,boundaries.routeOptimizerPlanUnlessPublic,req('./routes/route_optimizer'));
  for(const name of ['clientes','choferes','vehiculos','pedidos','facturas','rutas','palets','taller','agenda','intelligence','puntos_interes'])app.use('/api/v1/'+(name==='puntos_interes'?'puntos-interes':name),name==='pedidos'?boundaries.pedidosAuthUnlessPublic:authMiddleware.authenticate,...(name==='choferes'?[boundaries.choferesPermissionUnlessApp]:[]),req('./routes/'+name));
@@ -50,6 +52,8 @@ async function main(){
  app.use('/api/v1/planner',req('./middleware/auth').authenticate,req('./routes/planner'));
  app.use('/api/v1/portal-cliente',authMiddleware.authenticate,boundaries.portalClientePermission,req('./routes/cliente_portal'));
  app.use('/api/v1/informes',authMiddleware.authenticate,authMiddleware.requireModulePermission('informes'),authMiddleware.requirePlanFeature('kpis_avanzados'),req('./routes/informes'));
+ app.use('/api/v1/docs',authMiddleware.authenticate,authMiddleware.requireModulePermission('documentos'),req('./routes/docs'));
+ app.use('/api/v1/whatsapp',req('./routes/whatsapp'));
  // Exercise the compatibility router separately; production registers it after pedidos.
  app.use('/api/v1/legacy-pedidos',boundaries.pedidosAuthUnlessPublic,req('./routes/carta_porte'));
  app.use('/api/v1/colaboradores',boundaries.colaboradoresAuthUnlessPublic,req('./routes/colaboradores'));
@@ -60,6 +64,7 @@ async function main(){
  app.use('/api/v1/mi-cuenta',req('./middleware/auth').authenticate,req('./routes/mi_cuenta'));
  app.use('/api/v1/control-horario',authMiddleware.authenticate,authMiddleware.requireModulePermission('control_horario'),req('./routes/control_horario'));
  app.use('/api/v1/importacion',req('./middleware/auth').authenticate,req('./middleware/auth').requireModulePermission('importacion'),req('./routes/importacion'));
+ app.use('/api/v1',(request,res)=>res.status(404).json({error:'Ruta no incluida en el entorno de auditoría.'}));
  if(process.env.AUDIT_BROWSER==='1'){
   const browserBuild=path.resolve(root,'../transgest-frontend/build');
   if(!fs.existsSync(path.join(browserBuild,'index.html')))throw Error('Build local ausente para AUDIT_BROWSER');
@@ -83,6 +88,7 @@ async function main(){
  const client=await call('Crear cliente con datos fiscales','POST','/clientes',{nombre:'Alfa Auditoría',cif:'B12345678',direccion:'Calle de Prueba 1',cp:'46001',ciudad:'Valencia',codigo_postal:'46001',municipio:'Valencia',provincia:'Valencia',pais:'España',email:'client@example.invalid',email_pedidos:'orders-client@example.invalid',telefono:'960000000',tipo_iva:21,forma_pago:'transferencia',vencimiento:'30 dias',pendiente_revision:true});
  require('node:assert/strict').ok(client.id,'Debe crearse el cliente de prueba');
  require('node:assert/strict').equal((await db.query('SELECT email_pedidos FROM clientes WHERE id=$1 AND empresa_id=$2',[client.id,company])).rows[0]?.email_pedidos,'orders-client@example.invalid');
+ evidence.orderSenders=await require('./audit_order_senders.cjs')({db,call,company,client});
  const contactSupplier=await call('Crear colaborador con correos por finalidad','POST','/colaboradores',{tipo:'empresa',nombre:'Proveedor de correos',cif:'B87654321',email:'general-supplier@example.invalid',email_pedidos:'orders-supplier@example.invalid',email_facturacion:'billing-supplier@example.invalid',pendiente_revision:false});
  require('node:assert/strict').ok(contactSupplier.id,'Debe crearse el colaborador de prueba');
  const supplierContact=(await db.query('SELECT email_pedidos,email_facturacion FROM colaboradores WHERE id=$1 AND empresa_id=$2',[contactSupplier.id,company])).rows[0];
@@ -102,11 +108,11 @@ async function main(){
   require('node:assert/strict').equal(String(secondDelayed.fecha_carga).slice(0,10),'2026-09-18');
   require('node:assert/strict').equal(String(secondDelayed.fecha_descarga).slice(0,10),'2026-09-19');
  require('node:assert/strict').equal(defaultLengthOrder.longitud_ocupada_mode,'auto');
- require('node:assert/strict').equal(Number(defaultLengthOrder.metros_lineales),13.65);
- require('node:assert/strict').equal(Number(defaultLengthOrder.carga_largo_m),13.65);
+ require('node:assert/strict').equal(Number(defaultLengthOrder.metros_lineales),0,'Sin vehículo no se inventa una capacidad');
+ require('node:assert/strict').equal(Number(defaultLengthOrder.carga_largo_m),0);
  const defaultLengthReload=await call('Reabrir carga completa automática','GET','/pedidos/'+defaultLengthOrder.id);
  require('node:assert/strict').equal(defaultLengthReload.longitud_ocupada_mode,'auto');
- require('node:assert/strict').equal(Number(defaultLengthReload.carga_largo_m),13.65);
+ require('node:assert/strict').equal(Number(defaultLengthReload.carga_largo_m),0);
  const trailerLengthOrder=await call('Carga completa con remolque corto','POST','/pedidos',{cliente_id:client.id,remolque_id_manual:trailer.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',tipo_carga:'completa',importe:400});
  require('node:assert/strict').equal(trailerLengthOrder.longitud_ocupada_mode,'auto');
  require('node:assert/strict').equal(Number(trailerLengthOrder.metros_lineales),12.4);
@@ -207,12 +213,9 @@ async function main(){
   for(const [i,amount,fuel] of [[1,528,48],[2,220,20]]){
     const trip=await call('Crear viaje con recargo '+i,'POST','/pedidos',{cliente_id:client.id,origen:'Valencia',destino:'Madrid',fecha_carga:'2026-09-16',importe:amount,importe_revision_combustible:fuel,recargo_combustible_pct:10,precio_base_sin_combustible:amount-fuel});
     await call('Completar viaje con recargo '+i,'PATCH','/pedidos/'+trip.id+'/estado',{estado:'entregado'});
-    await req('./routes/pedidos')._test.crearFacturaBorradorPedido(trip.id,company,user);
     const saved=(await db.query('SELECT importe,importe_revision_combustible,factura_id FROM pedidos WHERE id=$1',[trip.id])).rows[0];
     require('node:assert/strict').equal(Number(saved.importe_revision_combustible),fuel);
-    const lines=(await db.query('SELECT concepto,precio_unit,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[saved.factura_id])).rows;
-    require('node:assert/strict').equal(lines.length,2,'automatic draft must split fuel');
-    require('node:assert/strict').equal(Number(lines[0].importe)+Number(lines[1].importe),amount);
+    require('node:assert/strict').equal(saved.factura_id,null,'Entregar no crea un borrador automáticamente');
     fuelOrders.push(trip.id);
   }
   const beforeFuel=(await db.query('SELECT factura_id FROM pedidos WHERE id=ANY($1::uuid[]) ORDER BY id',[fuelOrders])).rows;
@@ -223,6 +226,9 @@ async function main(){
   require('node:assert/strict').equal(Number(fuelInvoice.total),905.08);
   const fuelLines=(await db.query('SELECT concepto,importe FROM factura_lineas WHERE factura_id=$1 ORDER BY orden',[fuelInvoice.id])).rows;
   require('node:assert/strict').equal(fuelLines.length,2);require('node:assert/strict').equal(Number(fuelLines[1].importe),68);
+  const reservationConflict=await call('Impedir factura duplicada de viajes reservados','POST','/facturas',{cliente_id:client.id,serie:'A',pedidos_ids:fuelOrders,lineas:[{concepto:'Portes',cantidad:1,precio_unit:680}]});
+  require('node:assert/strict').match(reservationConflict.error,/reservado/);
+  await call('Eliminar borrador de prueba y liberar los viajes','DELETE','/facturas/'+fuelInvoice.id);
   const unconfirmedClause=await call('Rechazar cláusula de gasóleo sin confirmación','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',pedidos_ids:fuelOrders,fuel_clause_percent:12.5,lineas:[{concepto:'Portes',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:85}]});
   require('node:assert/strict').ok(unconfirmedClause.error);
   const changedClause=await call('Aplicar cláusula de gasóleo en factura','POST','/facturas',{cliente_id:client.id,serie:'A',estado:'borrador',pedidos_ids:fuelOrders,fuel_clause_percent:12.5,fuel_clause_confirmed:true,lineas:[{concepto:'Portes',cantidad:1,precio_unit:680},{concepto:'Recargo de combustible',cantidad:1,precio_unit:85}]});
@@ -479,19 +485,21 @@ async function main(){
   ['Rechazar ruta de otro cliente al editar',400],
   ['Exigir confirmación de carga real en otro día',409],
   ['Exigir decisión sobre descarga fuera de fecha',409],
-  ['Rechazar recargo incluido en porte',409],
+  ['Rechazar recargo incluido en porte',409],['Impedir factura duplicada de viajes reservados',409],
   ['Rechazar cláusula de gasóleo sin confirmación',400],
   ['No cambiar el recorrido compartido',409],
   ['Planner: albaran de otro transportista bloqueado',404],
   ['Planner: rechazar autorización sin documentos',409],
-  ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],['Revision sin documentos bloqueada',409],
+  ['Bloquear rectificativa sin revision',409],['Emitir SIN revisar documentación',409],['Enviar SIN documentación',409],
   ['Revision caducada por cambio de pedido',409],['Impedir emitida a borrador',409],
   ['Guardar taller usuario B con lectura anterior',409],['Montar segundo neumático en posición ocupada',409],
   ['Bloquear carta de porte de otro viaje',403],['Bloquear resumen económico ida-retorno al chófer',403],
   ['Rechazar jornada sin confirmar conjunto',400],['Rechazar km de cierre iguales',400],
-  ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403]
+  ['Rechazar km de cierre inferiores',400],['Chófer sin permiso de facturación',403],
+  ['Rechazar remitentes inválidos',400]
  ]);
  for(const c of evidence.checks) {if(expectedErrors.has(c.label))assert.equal(c.status,expectedErrors.get(c.label),JSON.stringify(c));else assert.ok(c.status>=200 && c.status<300,JSON.stringify(c));}
+ evidence.workflowOct02=await require('./audit_workflow_oct02.cjs')({db,base,company,token,client,vehicle,password});
  evidence.technicalHealth=await req('./services/technicalHealth').readTechnicalHealth();
  assert.equal(evidence.technicalHealth.checks.find(c=>c.key==='database').state,'ok');
  assert.equal(evidence.technicalHealth.checks.find(c=>c.key==='schema').state,'ok');
@@ -514,7 +522,7 @@ async function main(){
   await db.query('INSERT INTO pedido_chofer_pasos(pedido_id,empresa_id,data) VALUES($1,$2,$3)',[qaOrder.id,company,JSON.stringify({carga_ok:true})]);
   await db.query("INSERT INTO usuarios(id,empresa_id,cliente_id,nombre,email,password_hash,rol,activo) VALUES($1,$2,$3,'Cliente de pruebas','portal@example.invalid',$4,'cliente',true)",[crypto.randomUUID(),company,qaClient.id,await req('bcryptjs').hash(password,10)]);
   await db.query("INSERT INTO superadmins(email,password_hash,nombre,activo) VALUES('superadmin-audit@example.invalid',$1,'SuperAdmin sintético',true) ON CONFLICT(email) DO UPDATE SET password_hash=EXCLUDED.password_hash",[await req('bcryptjs').hash(password,10)]);
-  console.log(JSON.stringify({browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',portalEmail:'portal@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
+  console.log(JSON.stringify({companyCode:(await db.query('SELECT codigo_acceso FROM empresas WHERE id=$1',[company])).rows[0].codigo_acceso,browserQa:'ready',url:'http://127.0.0.1:'+server.address().port,email:'audit@example.invalid',portalEmail:'portal@example.invalid',password,company,qaOrder:qaOrder.numero,mode:'PGlite sintético; correo y conexiones externas desactivados'}));
   await new Promise(resolve=>process.once('SIGINT',resolve));
  }
  }finally{await new Promise(r=>server.close(r));}

@@ -6,7 +6,7 @@ export function madridDate(now = new Date()) {
 export async function askOperationalDateChoice(order, nextState, role, confirmDialog, now = new Date()) {
   const state = String(nextState || "").toLowerCase();
   const current = String(order?.estado || "").toLowerCase();
-  const load = ["espera_carga", "cargando", "en_curso"].includes(state);
+  const load = ["espera_carga", "cargando", "cargado", "en_curso"].includes(state);
   const delivery = ["espera_descarga", "descarga", "entregado"].includes(state);
   if (role === "chofer" || current === state || (!load && !delivery)) return {};
   const phase = load ? "carga" : "descarga";

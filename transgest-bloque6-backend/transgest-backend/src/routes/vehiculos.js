@@ -764,14 +764,20 @@ async function updateVehiclePosition({ empresaId, vehiculoId, provider = "manual
 }
 
 function normalizeVehiculoBody(body = {}) {
+  const number=(key,value)=>{
+    if(value===undefined||value===null||value==='')return null;
+    const parsed=Number(value);
+    if(!Number.isFinite(parsed)||parsed<0)throw Object.assign(Error(`Revisa el valor de ${key}.`),{status:422});
+    return parsed;
+  };
   return {
     matricula: body.matricula,
     marca: body.marca,
     modelo: body.modelo,
-    anio: body.anio ?? body["a\u00f1o"] ?? null,
+    anio: number('año',body.anio ?? body["a\u00f1o"]),
     tipo: body.tipo,
-    tara_kg: body.tara_kg,
-    carga_max_kg: body.carga_max_kg,
+    tara_kg: number('tara',body.tara_kg),
+    carga_max_kg: number('carga máxima',body.carga_max_kg),
     estado: body.estado,
     km_actuales: body.km_actuales,
     activo: body.activo,
@@ -794,7 +800,7 @@ const VEHICULO_EXT_FIELDS = [
   "masa_total_kg", "plazas", "potencia_cv", "cilindrada", "combustible",
   "longitud_mm", "anchura_mm", "altura_mm", "ejes", "velocidad_max_kmh", "homologacion_co2",
   "tipo_carroceria", "apertura_lateral", "techo_elevable", "temperatura_min_c", "temperatura_max_c",
-  "capacidad_palets", "volumen_m3", "lateral_bajo", "piso_movil", "metros_carga",
+  "capacidad_palets", "volumen_m3", "unidad_ocupacion", "capacidad_unidades", "lateral_bajo", "piso_movil", "metros_carga",
   "fecha_compra", "valor_compra", "financiacion", "concesionario", "numero_pedido_compra",
   "fecha_venta", "valor_venta", "comprador",
   "compania_seguro", "numero_poliza",
@@ -1226,7 +1232,10 @@ r1.post("/", GERENTE_O_TRAFICO, async (req, res) => {
       });
     }
 
-    const { rows } = await db.query(
+    const documentService=require('../services/vehicleDocuments');
+    const documents=documentService.prepareDocuments(req.body.documentos||[]);
+    const { rows } = await db.transaction(async client=>{
+      const result=await client.query(
       `INSERT INTO vehiculos
        (matricula,marca,modelo,"a\u00f1o",tipo,tara_kg,carga_max_kg,empresa_id,clase,fecha_matriculacion,fecha_itv,fecha_seguro,
         ubicacion_actual,ubicacion_fuente,gps_provider,gps_external_id,ubicacion_ts)
@@ -1240,7 +1249,10 @@ r1.post("/", GERENTE_O_TRAFICO, async (req, res) => {
         v.gps_provider || null,
         v.gps_external_id || null,
       ]
-    );
+      );
+      await documentService.savePreparedDocuments(client,empresaId,result.rows[0].id,documents);
+      return result;
+    });
     const extData = extractVehiculoExtData(req.body || {});
     await upsertVehiculoExt({ empresaId, vehiculoId: rows[0].id, data: extData, updatedBy: req.user?.id || null });
     await syncVehiculoStatusAux({
@@ -1261,7 +1273,8 @@ r1.post("/", GERENTE_O_TRAFICO, async (req, res) => {
     if (e.code === "23505") {
       return res.status(409).json({ error: "Esa matricula ya existe en el sistema. No se puede crear un vehiculo duplicado." });
     }
-    res.status(500).json({ error: e.message });
+    require('../services/logger').warn('Alta de vehículo fallida',{request_id:req.id,code:e.code,status:e.status||500});
+    res.status(e.status||500).json({ error:e.status?e.message:'No se pudo guardar el vehículo.' });
   }
 });
 
@@ -1351,16 +1364,16 @@ r1.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
 
     const { rows } = await db.query(
       `UPDATE vehiculos SET matricula=$1,marca=$2,modelo=$3,"a\u00f1o"=$4,tipo=$5,tara_kg=$6,
-       carga_max_kg=$7,estado=$8,activo=$10,notas=$11,chofer_id=$12,clase=$13,notas_operacion=$14,
-       fecha_matriculacion=$15,fecha_itv=$16,fecha_seguro=$17,ubicacion_actual=COALESCE($18::varchar,ubicacion_actual),
-       ubicacion_fuente=COALESCE(NULLIF($19::text,''),ubicacion_fuente),
-       ubicacion_ts=CASE WHEN NULLIF($18::text,'') IS NULL THEN ubicacion_ts ELSE NOW() END,
-       gps_provider=COALESCE(NULLIF($20,''),gps_provider),
-       gps_external_id=COALESCE(NULLIF($21,''),gps_external_id)
-       WHERE id=$22 AND empresa_id=$23 RETURNING *`,
+       carga_max_kg=$7,estado=$8,activo=$9,notas=$10,chofer_id=$11,clase=$12,notas_operacion=$13,
+       fecha_matriculacion=$14,fecha_itv=$15,fecha_seguro=$16,ubicacion_actual=COALESCE($17::varchar,ubicacion_actual),
+       ubicacion_fuente=COALESCE(NULLIF($18::text,''),ubicacion_fuente),
+       ubicacion_ts=CASE WHEN NULLIF($17::text,'') IS NULL THEN ubicacion_ts ELSE NOW() END,
+       gps_provider=COALESCE(NULLIF($19,''),gps_provider),
+       gps_external_id=COALESCE(NULLIF($20,''),gps_external_id)
+       WHERE id=$21 AND empresa_id=$22 RETURNING *`,
       [
         v.matricula, v.marca, v.modelo, v.anio, v.tipo, v.tara_kg, v.carga_max_kg,
-        v.estado, v.km_actuales, v.activo, v.notas, v.chofer_id || null,
+        v.estado, v.activo, v.notas, v.chofer_id || null,
         v.clase || null, v.notas_operacion || null,
         v.fecha_matriculacion || null, v.fecha_itv || null, v.fecha_seguro || null, v.ubicacion_actual || null,
         v.ubicacion_fuente || (v.ubicacion_actual ? "manual" : null),
@@ -1392,7 +1405,8 @@ r1.put("/:id", GERENTE_O_TRAFICO, async (req, res) => {
     res.json((await hydrateVehiculos(empresaId, rows))[0]);
   } catch (e) {
     if (e.code === "23505") return res.status(409).json({ error: "La matricula ya existe en el sistema." });
-    res.status(500).json({ error: e.message });
+    require('../services/logger').warn('Edición de vehículo fallida',{request_id:req.id,code:e.code,status:e.status||500});
+    res.status(e.status||500).json({ error:e.status?e.message:'No se pudo guardar el vehículo.' });
   }
 });
 

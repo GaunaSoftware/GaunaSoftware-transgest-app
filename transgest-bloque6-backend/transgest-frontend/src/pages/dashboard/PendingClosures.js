@@ -6,7 +6,7 @@ import { incidentDescription } from './operationalStatus';
 import './pending-closures.css';
 
 const PAGE_SIZE = 8;
-const status = { pendiente:'Pendiente', confirmado:'Confirmado', espera_carga:'Espera de carga', cargando:'Cargando', en_curso:'En curso', espera_descarga:'Espera de descarga', descarga:'Descargando', incidencia:'Incidencia registrada' };
+const status = { pendiente:'Pendiente de asignar', confirmado:'Confirmado', espera_carga:'Espera de carga', cargando:'Cargando', cargado:'Cargado', en_curso:'En tránsito', espera_descarga:'Espera de descarga', descarga:'Descargando', incidencia:'Incidencia registrada' };
 const dateText = value => new Date(`${value}T12:00:00`).toLocaleDateString('es-ES', { day:'2-digit', month:'short', year:'numeric' });
 
 export default function PendingClosures({ orders, openOrder }) {

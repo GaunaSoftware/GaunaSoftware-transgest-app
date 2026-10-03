@@ -32,7 +32,7 @@ test("cambiar cliente no arrastra tarifa ni referencia del cliente anterior", ()
   }, { id: "b", tipo_iva: 21, iva_regimen: "general", horario_carga: "14:00", horario_descarga: "18:00" });
   expect(switched).toMatchObject({
     cliente_id: "b", ruta_id: "", precio_unitario: "", referencia_cliente: "",
-    ventana_carga: "14:00", ventana_descarga: "18:00", mercancia: "Carga manual",
+    ventana_carga: "", ventana_descarga: "", mercancia: "Carga manual",
     tipo_iva: 21,
   });
 });

@@ -3,7 +3,7 @@ const { cacheMiddleware, invalidateCache } = require("../services/cache");
 const express = require("express");
 const db      = require("../services/db");
 const {DatabaseDocumentStorageProvider}=require('../services/DocumentStorageProvider');
-const { authenticate, GERENTE_O_TRAFICO } = require("../middleware/auth");
+const { authenticate, GERENTE_O_TRAFICO, requirePlanFeature, requireRole } = require("../middleware/auth");
 const router  = express.Router();
 const privateStorage=new DatabaseDocumentStorageProvider(db);
 router.use(authenticate);
@@ -20,7 +20,8 @@ router.get('/archivo/:scope/:id',async(req,res)=>{
     if(!rows[0]?.storage_key)return res.status(404).json({error:'Archivo no encontrado'});
     const file=await privateStorage.read(req.empresaId||req.user?.empresa_id,rows[0].storage_key);
     if(!file)return res.status(404).json({error:'Archivo no encontrado'});
-    res.set('Content-Type','application/pdf');
+    res.set('Content-Type',file.mime||'application/pdf');
+    res.set('X-Content-Type-Options','nosniff');
     res.set('Content-Disposition',`attachment; filename="${String(file.file_name||'documento.pdf').replace(/["\r\n]/g,'_')}"`);
     res.set('Cache-Control','private, no-store');
     res.send(Buffer.from(file.content));
@@ -160,36 +161,55 @@ router.get("/vehiculo/:id", async (req,res) => {
   res.json(rows.map(r => normalizeDocRow(r, { entidad_tipo:"vehiculo" })));
 });
 
+router.post('/vehiculo/analizar',requireRole('gerente','trafico','responsable_taller'),requirePlanFeature('ai'),async(req,res)=>{
+  try{const result=await require('../services/vehicleDocumentExtraction').extractUploadedVehicleDocument(req.empresaId||req.user?.empresa_id,req.body||{});res.set('Cache-Control','private, no-store');res.json(result);}
+  catch(error){res.status(error.status||500).json({error:error.status?error.message:'No se pudo analizar el documento. Conserva el archivo seleccionado y completa la ficha manualmente.'});}
+});
+
+router.post('/vehiculo/:id/:docId/analizar',requireRole('gerente','trafico','responsable_taller'),requirePlanFeature('ai'),async(req,res)=>{
+  try{const result=await require('../services/vehicleDocumentExtraction').extractStoredVehicleDocument(db,req.empresaId||req.user?.empresa_id,req.params.id,req.params.docId);res.set('Cache-Control','private, no-store');res.json(result);}
+  catch(error){res.status(error.status||500).json({error:error.status?error.message:'No se pudo analizar el documento. El archivo sigue guardado y la ficha no se ha modificado.'});}
+});
+
 router.post("/vehiculo/:id", GERENTE_O_TRAFICO, invalidateCache("docs"), async (req,res) => {
   try {
     const empresaId = req.empresaId || req.user?.empresa_id;
     const data = normalizeDocInput(req.body, "vehiculo");
+    if(data.file_url){
+      const service=require('../services/vehicleDocuments'),prepared=service.prepareDocuments([data]);
+      const saved=await db.transaction(async client=>{
+        const [row]=await service.savePreparedDocuments(client,empresaId,req.params.id,prepared);
+        await client.query(`UPDATE docs_vehiculos SET fecha_emision=$2,fecha_vencimiento=$3,referencia=$4,alerta_dias=$5 WHERE id=$1`,[row.id,data.fecha_emision,data.fecha_vencimiento,data.referencia,data.alerta_dias]);
+        return {...row,fecha_emision:data.fecha_emision,fecha_vencimiento:data.fecha_vencimiento,referencia:data.referencia,alerta_dias:data.alerta_dias};
+      });
+      return res.status(201).json(normalizeDocRow(saved,{entidad_tipo:'vehiculo'}));
+    }
     let rows;
     try {
       ({ rows } = await db.query(
         `INSERT INTO docs_vehiculos
-          (vehiculo_id,empresa_id,tipo,descripcion,fecha_emision,fecha_vencimiento,referencia,alerta_dias,file_url,file_nombre,file_size_kb)
-         SELECT v.id,v.empresa_id,$2,$3,$4,$5,$6,$7,$8,$9,$10
+          (vehiculo_id,empresa_id,tipo,tipo_doc,descripcion,fecha_emision,fecha_vencimiento,referencia,alerta_dias,file_url,file_nombre,file_size_kb)
+         SELECT v.id,v.empresa_id,$2,$12,$3,$4,$5,$6,$7,$8,$9,$10
          FROM vehiculos v
          WHERE v.id=$1 AND v.empresa_id=$11
          RETURNING *`,
-        [req.params.id, data.tipo, data.descripcion, data.fecha_emision, data.fecha_vencimiento, data.referencia, data.alerta_dias, data.file_url, data.file_nombre, data.file_size_kb, empresaId]
+        [req.params.id, data.tipo, data.descripcion, data.fecha_emision, data.fecha_vencimiento, data.referencia, data.alerta_dias, data.file_url, data.file_nombre, data.file_size_kb, empresaId, data.tipo]
       ));
     } catch(e) {
       if (e.code !== "22P02") throw e;
       ({ rows } = await db.query(
         `INSERT INTO docs_vehiculos
-          (vehiculo_id,empresa_id,tipo,descripcion,fecha_emision,fecha_vencimiento,referencia,alerta_dias,file_url,file_nombre,file_size_kb)
-         SELECT v.id,v.empresa_id,$2,$3,$4,$5,$6,$7,$8,$9,$10
+          (vehiculo_id,empresa_id,tipo,tipo_doc,descripcion,fecha_emision,fecha_vencimiento,referencia,alerta_dias,file_url,file_nombre,file_size_kb)
+         SELECT v.id,v.empresa_id,$2,$12,$3,$4,$5,$6,$7,$8,$9,$10
          FROM vehiculos v
          WHERE v.id=$1 AND v.empresa_id=$11
          RETURNING *`,
-        [req.params.id, "otro", data.descripcion, data.fecha_emision, data.fecha_vencimiento, data.referencia, data.alerta_dias, data.file_url, data.file_nombre, data.file_size_kb, empresaId]
+        [req.params.id, "otro", data.descripcion, data.fecha_emision, data.fecha_vencimiento, data.referencia, data.alerta_dias, data.file_url, data.file_nombre, data.file_size_kb, empresaId, "otro"]
       ));
     }
     if (!rows.length) return res.status(404).json({ error:"Vehiculo no encontrado" });
     res.status(201).json(normalizeDocRow(rows[0], { entidad_tipo:"vehiculo" }));
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) { res.status(e.status||500).json({ error:e.status?e.message:"No se pudo archivar el documento del vehículo." }); }
 });
 
 router.delete("/vehiculo/:vehiculoId/:docId", GERENTE_O_TRAFICO, invalidateCache("docs"), async (req,res) => {

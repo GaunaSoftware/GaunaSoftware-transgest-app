@@ -28,15 +28,9 @@ function unbilledOptions(query = {}, clienteId) {
 function pendingQuery(empresaId, options) {
   const params = [empresaId];
   const where = ["p.empresa_id=$1", "p.estado='entregado'", "COALESCE(to_jsonb(p)->>'origen_producto','transgest')<>'planner'",
-    `(p.factura_id IS NULL OR (f.estado='borrador' AND f.cliente_id=p.cliente_id))`,
-    // A stale reverse link must not allow billing a trip a second time.
-    `NOT EXISTS (
-      SELECT 1 FROM factura_pedidos fp LEFT JOIN facturas linked ON linked.id=fp.factura_id
-      WHERE fp.pedido_id=p.id AND (linked.id IS NULL
-        OR linked.empresa_id IS DISTINCT FROM p.empresa_id
-        OR linked.cliente_id IS DISTINCT FROM p.cliente_id
-        OR linked.estado IS DISTINCT FROM 'borrador')
-    )`];
+    `p.factura_id IS NULL`,
+    // Every linked invoice reserves its orders, including drafts.
+    `NOT EXISTS (SELECT 1 FROM factura_pedidos fp WHERE fp.pedido_id=p.id)`];
   const dateFilter = pedidoDateFilter(options, params);
   if (dateFilter) where.push(dateFilter);
   if (options.cliente_id) {

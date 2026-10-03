@@ -17,9 +17,10 @@ async function main(){
  }
  assert.equal(activeDriverStop(order,all).id,stops[2].id);
  assert.throws(()=>apply(0,{mercancia_peso_kg:'999'}),/confirmada/);
- assert.equal(apply(0,{carga_ok:true}).state,'en_curso','completed stop retry cannot move trip backwards');
+ assert.equal(apply(0,{carga_ok:true}).state,'cargado','completed load stays loaded until departure is confirmed');
  for(let i=2;i<4;i++){
   apply(i,{viaje_iniciado:true});assert.equal(order.estado,'en_curso');
+  if(i===2)assert.equal(apply(0,{carga_ok:true}).state,'en_curso','completed stop retry cannot move a departed trip backwards');
   apply(i,{posicionado_descarga:true});apply(i,{descarga_iniciada:true});
   assert.throws(()=>apply(i,{descarga_ok:true}),/mercancía/);
   assert.throws(()=>apply(i,{mercancia_confirmada:true,mercancia_cargada:'Sacos',mercancia_palets:'99',mercancia_peso_kg:'999'}),/supera/);

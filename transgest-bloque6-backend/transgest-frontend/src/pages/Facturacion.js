@@ -1,3 +1,4 @@
+import SupplierInvoicePaymentPanel from '../components/SupplierInvoicePaymentPanel';
 import useRuntimeFocus from "../hooks/useRuntimeFocus";
 import InvoiceWorkflow from "./finance/InvoiceWorkflow";
 import SupplierInvoiceCenter from "./colaboradores/SupplierInvoiceCenter";
@@ -14,7 +15,7 @@ import "./finance/finance.css";
 import "./finance/summary.css";
 import { getLogoDataUrl } from "../services/logoHelper";
 import ContabilidadExportPanel from "../components/ContabilidadExportPanel";
-import { useState, useEffect, useCallback , useMemo } from "react";
+import { useState, useEffect, useCallback , useMemo, useRef } from "react";
 import { supplierInvoiceReview, registrarRevisionFactura } from '../services/api';
 import { getPedido, getFacturas, getFactura, guardarFacturaAnotaciones, getFacturaFiscal, facturaFiscalXmlUrl,  getControlCobros, getBloqueosDocumentalesCobro, cambiarEstadoFactura, crearRectificativa, getPedidos, getCliente, getClientes, getViajesSinFacturar, borrarFactura, crearFactura, procesarReclamacionesFacturas, getFacturacionFiscalResumen, reencolarFacturaFiscal, procesarColaFiscalFacturas, sincronizarFacturaFiscal, revisarEmailFactura, enviarEmailFactura, getPagosColaboradorPendientes, guardarPedidoColaboradorPago, getEmpresaConfig, editarPedido, analizarPedidoFacturacionIA } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -322,7 +323,7 @@ function buildTesoreriaReportHtml({ prevision = {}, facturas = [], pagosProveedo
     ? facturas.filter(f => ["emitida", "enviada", "vencida", "reclamada", "sin_cobrar"].includes(String(f.estado || "")) && Number(f.total || 0) > 0)
     : [];
   const pagosPendientes = Array.isArray(pagosProveedor)
-    ? pagosProveedor.filter(p => !p.pagado && Number(p.importe || p.precio_colaborador || 0) > 0)
+    ? pagosProveedor.filter(p => !p.pagado && Number(p.importe ?? p.precio_colaborador ?? 0) > 0)
     : [];
   const bucketRows = buckets.map(b => {
     const neto = Number(b.cobros || 0) - Number(b.pagos || 0);
@@ -353,7 +354,7 @@ function buildTesoreriaReportHtml({ prevision = {}, facturas = [], pagosProveedo
     <td>${escapeHtml(p.colaborador_nombre || "-")}</td>
     <td>${escapeHtml([p.origen, p.destino].filter(Boolean).join(" -> ") || "-")}</td>
     <td>${escapeHtml(fmtDate(p.fecha_pago_calculada || p.fecha_descarga || p.fecha_carga))}</td>
-    <td class="money amber">${escapeHtml(money(p.importe || p.precio_colaborador))}</td>
+    <td class="money amber">${escapeHtml(money(p.importe ?? p.precio_colaborador))}</td>
   </tr>`).join("");
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"/>
     <title>Informe de tesoreria</title>
@@ -394,7 +395,7 @@ function buildTesoreriaReportHtml({ prevision = {}, facturas = [], pagosProveedo
 function buildOrdenPagoProveedorHtml(group = {}) {
   const viajes = Array.isArray(group.viajes) ? group.viajes : [];
   const generado = new Date().toLocaleString("es-ES");
-  const total = viajes.reduce((sum, p) => sum + Number(p.importe || p.precio_colaborador || 0), 0);
+  const total = viajes.reduce((sum, p) => sum + Number(p.importe ?? p.precio_colaborador ?? 0), 0);
   const rows = viajes.map(p => `
     <tr>
       <td>${escapeHtml(p.numero || "-")}</td>
@@ -403,7 +404,7 @@ function buildOrdenPagoProveedorHtml(group = {}) {
       <td>${escapeHtml(fmtDate(p.fecha_descarga))}</td>
       <td>${escapeHtml(p.factura_nombre || "Pendiente")}</td>
       <td>${escapeHtml(fmtDate(p.fecha_pago_calculada))}</td>
-      <td class="money">${escapeHtml(fmt2(p.importe || p.precio_colaborador))} EUR</td>
+      <td class="money">${escapeHtml(fmt2(p.importe ?? p.precio_colaborador))} EUR</td>
     </tr>
   `).join("");
   return `<!doctype html><html><head><meta charset="utf-8"/>
@@ -1479,7 +1480,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   const [pedidos,    setPedidos]    = useState(initialOrders);
   const [resumenClientes, setResumenClientes] = useState([]);
   const [selIds,     setSelIds]     = useState(new Set(initialOrders.map(p => p.id)));
-  const [modo,       setModo]       = useState("linea"); // linea|detalle|kg
+  const [modo,       setModo]       = useState(""); // no format until the customer default or an explicit choice
   const [aplicarClausulaGasoil, setAplicarClausulaGasoil] = useState(false);
   const [porcentajeGasoil, setPorcentajeGasoil] = useState('0');
   const [mostrarVariacionGasoil, setMostrarVariacionGasoil] = useState(false);
@@ -1517,8 +1518,8 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   },[initialClientId]);
 
   const pedidoFacturableEnPeriodo = useCallback((p) => {
-    const tieneFacturaDefinitiva = p.factura_id && p.factura_estado !== "borrador";
-    if (tieneFacturaDefinitiva) return false;
+    const tieneFacturaReservada = Boolean(p.factura_id || p.borrador_id);
+    if (tieneFacturaReservada) return false;
     if (p.estado !== "entregado") return false;
     const f = String(p.fecha_carga || p.fecha_pedido || "").slice(0, 10);
     return (!fechaDesde || f >= fechaDesde) && (!fechaHasta || f <= fechaHasta);
@@ -1597,9 +1598,18 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
   function toggleSel(id){ setSelIds(p=>{ const n=new Set(p); n.has(id)?n.delete(id):n.add(id); return n; }); }
   function toggleAll(){ selIds.size===pedidos.length ? setSelIds(new Set()) : setSelIds(new Set(pedidos.map(p=>p.id))); }
 
+  const modeCustomerRef=useRef(null);
+  useEffect(()=>{
+    if(modeCustomerRef.current===clienteSel)return;
+    const client=clientes.find(c=>String(c.id)===String(clienteSel));
+    if(!client)return;
+    modeCustomerRef.current=clienteSel;
+    setModo(({por_viaje:'individual',agrupada_linea:'linea',agrupada_detalle:'detalle',agrupada_kg:'kg'})[client.modo_facturacion]||'');
+  },[clienteSel,clientes]);
+
   function buildLineas(fuelPercent = aplicarClausulaGasoil && porcentajeGasoilValido ? porcentajeGasoilNumero : null){
-    const cliente = clientes.find(c=>c.id===clienteSel);
-    const modoFact = modo || cliente?.modo_facturacion || "linea";
+    const modoFact = modo;
+    if(!modoFact)return [];
     return buildTransportInvoiceLines(selArr, modoFact, concepto, fuelPercent);
   }
 
@@ -1657,7 +1667,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
     pedidosConAvisoIA.length ? `${pedidosConAvisoIA.length} pedido(s) con diferencias detectadas por IA documental` : null,
     diferenciaLineas > 0.01 ? `El total editado difiere ${fmt2(diferenciaLineas)} EUR del total de pedidos` : null,
   ].filter(Boolean);
-  const listoParaBorrador = clienteSel && selArr.length > 0 && lineasValidas.length > 0 && (!aplicarClausulaGasoil || porcentajeGasoilValido) && confirmCantidades && confirmReferencias && confirmAlbaranes;
+  const listoParaBorrador = clienteSel && modo && selArr.length > 0 && lineasValidas.length > 0 && (!aplicarClausulaGasoil || porcentajeGasoilValido) && confirmCantidades && confirmReferencias && confirmAlbaranes;
 
   async function emitir(){
     if (!clienteSel)     { notify("Selecciona un cliente", "warning"); return; }
@@ -1665,6 +1675,19 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
     if (!listoParaBorrador) { notify("Completa la revision previa de cantidades, referencias y albaranes.", "warning"); setPaso(4); return; }
     setSaving(true);
     try {
+      if(modo==='individual' && selArr.length>1){
+        if(lineasPersonalizadas){notify('Para facturas individuales, regenera las líneas antes de preparar el lote.','warning');return;}
+        let count=0;
+        try{
+          for(const order of selArr){
+            const generated=await crearFactura({cliente_id:clienteSel,serie:empresa.serie_facturas||'A',fecha:fechaFactura||localDateValue(),fecha_vencimiento:fechaVencimiento||null,estado:'borrador',pedidos_ids:[order.id],lineas:buildTransportInvoiceLines([order],'detalle',concepto,aplicarClausulaGasoil?porcentajeGasoilNumero:null),...(aplicarClausulaGasoil?{fuel_clause_percent:porcentajeGasoilNumero,fuel_clause_confirmed:true}:{}),referencia_cliente:referenciaFactura.trim()||null});
+            count++;setSelIds(previous=>{const next=new Set(previous);next.delete(order.id);return next;});
+            broadcastFacturasChanged(normalizarDetalleCambioFactura(generated,{factura_id:generated.id,estado_nuevo:'borrador',pedido_ids_afectados:[order.id]}));
+          }
+          notify(`${count} borradores individuales preparados. Revísalos antes de emitir.`,'success');onClose();
+        }catch(error){notify(`${count} borradores preparados. Los restantes siguen seleccionados: ${error.message}`,'error');}
+        return;
+      }
       const lineas = lineasValidas;
       const created = await crearFactura({
         cliente_id:  clienteSel,
@@ -1808,9 +1831,10 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
 
         {/* Modo factura */}
         {paso===2 && <div style={{marginBottom:12}}>
-          <label style={lbl}>Formato de la factura</label>
+          <label style={lbl}>Formato de la factura</label><p>Se propone el modo del cliente; puedes cambiarlo para esta factura. {!modo && "Elige un formato para preparar las líneas."}</p>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             {[
+              ["individual", "Una factura por viaje", "Prepara un borrador separado por cada pedido seleccionado"],
               ["linea",   "Portes agrupados",   "Transporte agrupado y recargo de combustible aparte"],
               ["detalle", "Detalle por viaje",  "Porte y recargo de combustible por pedido"],
               ["detalle_combustible_agrupado", "Viaje por línea · gasoil agrupado", "Un porte por viaje y un recargo total aparte"],
@@ -2011,7 +2035,7 @@ function ModalFacturarMultiple({ onClose, initialClientId = "", initialOrders = 
               </div>
               {aiDisponible && (
                 <button type="button" onClick={analizarSeleccionIA} disabled={analizandoIA || !selArr.length} style={{...S.btn,background:"rgba(139,92,246,.12)",color:"#8b5cf6",border:"1px solid rgba(139,92,246,.24)",padding:"6px 9px"}}>
-                  {analizandoIA ? "Analizando IA..." : "Analizar soportes IA"}
+                  {analizandoIA ? "Analizando IA..." : "Comparar albaranes con IA"}
                 </button>
               )}
             </div>
@@ -2177,6 +2201,8 @@ export default function Facturacion() {
   const [bloqueosDocCobro,setBloqueosDocCobro] = useState(null);
   const [fiscalResumen,setFiscalResumen]= useState(null);
   const [pagosProveedor, setPagosProveedor] = useState([]);
+  const [pagosProveedorError,setPagosProveedorError]=useState("");
+  const [supplierPaymentInvoice,setSupplierPaymentInvoice]=useState(null);
   const [proveedorAbierto, setProveedorAbierto] = useState(null);
   const [documentosOpen, setDocumentosOpen] = useState(false);
   const [estadoFacturaEdit, setEstadoFacturaEdit] = useState(null);
@@ -2235,7 +2261,7 @@ export default function Facturacion() {
       }).catch(()=>setControlCobros(null));
       getBloqueosDocumentalesCobro().then(setBloqueosDocCobro).catch(()=>setBloqueosDocCobro(null));
       getFacturacionFiscalResumen().then(setFiscalResumen).catch(()=>setFiscalResumen(null));
-      getPagosColaboradorPendientes().then(d => setPagosProveedor(Array.isArray(d) ? d : [])).catch(()=>setPagosProveedor([]));
+      getPagosColaboradorPendientes().then(d => {setPagosProveedor(Array.isArray(d) ? d : []);setPagosProveedorError("");}).catch(e=>setPagosProveedorError(e.message||"No se pudieron consultar las previsiones de proveedores."));
     } catch(e){console.error(e);}
     finally{setLoading(false);}
   },[filtro, fiscalEstadoFiltro, fiscalModoFiltro, fechaDesde, fechaHasta, page]);
@@ -2539,7 +2565,7 @@ export default function Facturacion() {
       fecha_pago_calculada: pago.fecha_pago_calculada || "",
       fecha_pago_real: pago.fecha_pago_real || "",
       fecha_documentacion_recepcion: pago.fecha_documentacion_recepcion || "",
-      importe: Number(pago.importe || pago.precio_colaborador || 0),
+      importe: Number(pago.importe ?? pago.precio_colaborador ?? 0),
       pagado: Boolean(pago.pagado),
       documentacion_recibida: Boolean(pago.documentacion_recibida),
       notas_pago: pago.notas_pago || "",
@@ -2574,7 +2600,7 @@ export default function Facturacion() {
       fecha_pago_calculada: pago.fecha_pago_calculada || "",
       fecha_pago_real: pago.fecha_pago_real || "",
       fecha_documentacion_recepcion: pago.fecha_documentacion_recepcion || "",
-      importe: Number(pago.importe || pago.precio_colaborador || 0),
+      importe: Number(pago.importe ?? pago.precio_colaborador ?? 0),
       pagado: Boolean(pago.pagado),
       documentacion_recibida: Boolean(pago.documentacion_recibida),
       notas_pago: pago.notas_pago || "",
@@ -2699,7 +2725,7 @@ export default function Facturacion() {
         vencidos: 0,
       };
       current.viajes.push(p);
-      current.total += Number(p.importe || p.precio_colaborador || 0);
+      current.total += Number(p.importe ?? p.precio_colaborador ?? 0);
       if (!p.factura_nombre) current.pendientesFactura += 1;
       if (!p.documentacion_recibida) current.pendientesDocumentacion += 1;
       if (p.fecha_pago_calculada && String(p.fecha_pago_calculada).slice(0, 10) < today) current.vencidos += 1;
@@ -2777,7 +2803,7 @@ export default function Facturacion() {
     });
     pagosProveedor.forEach(p => {
       if (p.pagado) return;
-      const importe = Number(p.importe || p.precio_colaborador || 0);
+      const importe = Number(p.importe ?? p.precio_colaborador ?? 0);
       if (importe <= 0) return;
       const fecha = p.fecha_pago_calculada || p.fecha_descarga || p.fecha_carga;
       addItem({
@@ -2815,7 +2841,7 @@ export default function Facturacion() {
   ];
   const fiscalAttention = Number(fiscalInfo.pendientes || 0) + Number(fiscalInfo.con_error || 0) + Number(fiscalInfo.atascados || 0);
   const fiscalNeedsSetup = fiscalSetupStatus && fiscalSetupStatus.level !== "ok";
-  const totalPorPagar = pagosProveedor.reduce((sum, pago) => sum + Number(pago.importe || pago.precio_colaborador || 0), 0);
+  const totalPorPagar = pagosProveedor.reduce((sum, pago) => sum + Number(pago.importe ?? pago.precio_colaborador ?? 0), 0);
   const summaryInvoices = useMemo(() => filtradas.filter(f => !summaryClient || String(f.cliente_id) === summaryClient), [filtradas, summaryClient]);
   const summaryClientOptions = new Map([...clientes.map(c => [String(c.id), c.nombre]), ...facturas.filter(f => f.cliente_id).map(f => [String(f.cliente_id), f.cliente_nombre])]);
   if (summaryClient && !summaryClientOptions.has(summaryClient)) summaryClientOptions.set(summaryClient, "Cliente seleccionado (sin facturas cargadas)");
@@ -2904,7 +2930,7 @@ export default function Facturacion() {
           <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(controlResumen.importe_pendiente || 0)} €`} detail="Resumen de control de cobros" />
           <KpiCard icon="clock" label="Vencido" value={`${Number(controlResumen.vencidas || 0)} facturas`} tone="danger" />
           <KpiCard icon="invoice" label="Reclamado" value={`${Number(controlResumen.reclamadas || 0)} facturas`} tone="warning" />
-          <KpiCard icon="shield" label="Bloqueado documentalmente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
+          <KpiCard icon="shield" label="Documentación pendiente" value={`${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} €`} />
         </> : <>
           <KpiCard icon="invoice" label="Facturación emitida" value={`${fmt2(total)} €`} detail="Base sin IVA del listado filtrado · Incluye rectificaciones" />
           <KpiCard icon="coins" label="Por cobrar" value={`${fmt2(pendiente)} €`} detail={isSummary ? "Facturas cargadas" : "Facturas cargadas del período"} />
@@ -3068,12 +3094,14 @@ export default function Facturacion() {
       )}
 
       {activeFacturacionTab === "pagos" && <SupplierInvoiceCenter onRegistered={cargar}/>}
+      {activeFacturacionTab === "pagos" && pagosProveedorError&&<p role="alert">{pagosProveedorError} <Button onClick={cargar}>Reintentar</Button></p>}
+      {supplierPaymentInvoice&&<Modal title="Pago de factura de proveedor" width={700} onClose={()=>setSupplierPaymentInvoice(null)}><SupplierInvoicePaymentPanel invoiceId={supplierPaymentInvoice} editable={canEdit} onRegistered={cargar}/></Modal>}
       {activeFacturacionTab === "pagos" && pagosProveedor.length > 0 && (
         <div style={{...S.card,padding:14,marginBottom:16,borderColor:"var(--border)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}>
             <div>
-              <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Pagos pendientes a proveedores</div>
-              <div style={{fontSize:12,color:"var(--text4)"}}>Abre cada proveedor para revisar viajes, factura, documentacion, vencimientos y ordenes de pago.</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Previsiones de pago por servicio</div>
+              <div style={{fontSize:12,color:"var(--text4)"}}>Importes previstos sin impuestos. Abre el proveedor para conciliar la factura recibida y registrar su pago sobre el saldo real.</div>
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
               <select aria-label="Filtrar proveedores" value={filtroPagosProveedor} onChange={e=>setFiltroPagosProveedor(e.target.value)} style={S.sel}>
@@ -3083,7 +3111,7 @@ export default function Facturacion() {
                 <option value="sin_docs">Sin documentacion</option>
               </select>
               <span style={{...S.badge,background:"rgba(251,191,36,.12)",border:"1px solid rgba(251,191,36,.24)",color:"#f59e0b"}}>{pagosProveedor.length} viajes</span>
-              <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:"#f59e0b"}}>{fmt2(pagosProveedor.reduce((s,p)=>s+Number(p.importe || p.precio_colaborador || 0),0))} EUR</span>
+              <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:"#f59e0b"}}>{fmt2(pagosProveedor.reduce((s,p)=>s+Number(p.importe ?? p.precio_colaborador ?? 0),0))} EUR</span>
             </div>
           </div>
           <DataTable rows={pagosProveedorPorColaborador} rowKey={g => g.key} emptyTitle="Sin proveedores para este filtro" columns={[
@@ -3114,14 +3142,15 @@ export default function Facturacion() {
                             <span style={{...S.badge,background:p.documentacion_recibida?"rgba(34,211,160,.12)":"rgba(59,130,246,.12)",color:p.documentacion_recibida?"var(--green)":"var(--accent)"}}>{p.documentacion_recibida ? "docs ok" : "falta docs"}</span>
                             <span style={{fontSize:11,color:"var(--text5)",width:"100%"}}>Pago: {fmtDate(p.fecha_pago_calculada)}</span>
                           </div>
-                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:900,color:"var(--text2)"}}>{fmt2(p.importe || p.precio_colaborador)} EUR</div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:900,color:"var(--text2)"}}>{fmt2(p.importe ?? p.precio_colaborador)} EUR</div>
                           <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
                             {canEdit && !p.documentacion_recibida && <button onClick={()=>accionRapidaPagoProveedor(p,"documentacion")} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Docs recibida</button>}
                             {canEdit && !p.factura_nombre && <button onClick={()=>accionRapidaPagoProveedor(p,"factura")} style={{...S.btn,padding:"5px 8px",background:"rgba(251,191,36,.12)",color:"#f59e0b",border:"1px solid rgba(251,191,36,.24)"}}>Factura recibida</button>}
                             {p.factura_proveedor_id && <Button onClick={()=>descargarFacturaRevisada(p.factura_proveedor_id)}>Descargar factura revisada</Button>}
                             {p.factura_data && <button onClick={()=>verFacturaProveedor(p.factura_data)} style={{...S.btn,padding:"5px 8px",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.24)"}}>Ver factura</button>}
                             <button onClick={()=>abrirGestionPagoProveedor(p)} style={{...S.btn,padding:"5px 8px",background:"var(--bg4)",color:"var(--text3)",border:"1px solid var(--border)"}}>Gestionar</button>
-                            {canEdit && <button onClick={()=>accionRapidaPagoProveedor(p,"pagado")} style={{...S.btn,padding:"5px 8px",background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.24)"}}>Pagado</button>}
+                            {canEdit && p.factura_proveedor_id && <Button onClick={()=>setSupplierPaymentInvoice(p.factura_proveedor_id)}>Pagar factura revisada</Button>}
+                            {canEdit && !p.factura_proveedor_id && <button onClick={()=>accionRapidaPagoProveedor(p,"pagado")} style={{...S.btn,padding:"5px 8px",background:"rgba(34,211,160,.12)",color:"var(--green)",border:"1px solid rgba(34,211,160,.24)"}}>Pagado</button>}
                           </div>
                         </div>
                       ))}
@@ -3135,13 +3164,13 @@ export default function Facturacion() {
         <div style={{...S.card,padding:14,marginBottom:16,borderColor:"var(--border)"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:10}}>
             <div>
-              <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Pagos pendientes a proveedores</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:800,fontSize:15,color:"var(--text)",marginBottom:4}}>Previsiones de pago por servicio</div>
               <div style={{fontSize:12,color:"var(--text4)"}}>
-                Viajes de colaborador pendientes de factura recibida o de pago. Las fechas se calculan con Mi Empresa &gt; condiciones de pago a colaboradores.
+                Previsiones netas por servicio. La factura revisada tiene su propio saldo con impuestos e historial de pagos. Las fechas previstas siguen las condiciones de pago de Mi Empresa.
               </div>
             </div>
             <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:"#f59e0b"}}>
-              {fmt2(pagosProveedor.reduce((s,p)=>s+Number(p.importe || p.precio_colaborador || 0),0))} EUR
+              {fmt2(pagosProveedor.reduce((s,p)=>s+Number(p.importe ?? p.precio_colaborador ?? 0),0))} EUR
             </div>
           </div>
           <div className="finance-grid" style={{display:"grid","--finance-columns":"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
@@ -3153,7 +3182,7 @@ export default function Facturacion() {
                 </div>
                 <div style={{fontSize:11,color:"var(--text4)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.colaborador_nombre}</div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:3}}>{p.origen} -> {p.destino}</div>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text2)",marginTop:5}}>{fmt2(p.importe || p.precio_colaborador)} EUR</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,color:"var(--text2)",marginTop:5}}>{fmt2(p.importe ?? p.precio_colaborador)} EUR</div>
                 <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
                   Recibida: {fmtDate(p.fecha_recepcion)} · Pago: {fmtDate(p.fecha_pago_calculada)}
                 </div>
@@ -3178,7 +3207,7 @@ export default function Facturacion() {
               ["Pedidos sin soporte", bloqueoDocResumen.pedidos_sin_soporte, "#f59e0b"],
               ["Facturas afectadas", bloqueoDocResumen.facturas_con_soporte_pendiente, "#ef4444"],
               ["Cobros en riesgo", bloqueoDocResumen.cobros_en_riesgo_documental, "#b91c1c"],
-              ["Importe bloqueado", `${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} EUR`, "var(--text)"],
+              ["Importe con documentación pendiente", `${fmt2(Number(bloqueoDocResumen.importe_bloqueado_facturacion||0)+Number(bloqueoDocResumen.importe_facturas_con_soporte_pendiente||0)+Number(bloqueoDocResumen.importe_cobro_riesgo_documental||0))} EUR`, "var(--text)"],
             ].map(([label,value,color])=>(
               <div key={label} style={{minWidth:130,border:"1px solid var(--border)",borderRadius:8,padding:"8px 10px",background:"var(--bg3)"}}>
                 <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:900,color}}>{value || 0}</div>

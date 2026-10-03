@@ -1,0 +1,111 @@
+{
+  "reviewed_at": "2026-10-03",
+  "status": "reference_reviewed_implementation_pending",
+  "reference": {
+    "description": "Carta de porte de Dashdoc aportada por el usuario",
+    "pages_reviewed": 2,
+    "page_1": "Partes, lugares, mercancía, horarios, reservas, acuerdos y espacios de firma",
+    "page_2": "Condiciones particulares del contratante del ejemplo",
+    "visible_signatures": "Los tres espacios de firma están vacíos",
+    "embedded_signature_fields": "No hay campos de firma PDF en este archivo",
+    "limitations": "El archivo no acredita el procedimiento de autenticación, aceptación, modificación o conservación que usa Dashdoc. No se ha abierto su QR ni contactado a las empresas del ejemplo."
+  },
+  "adaptation": {
+    "style": "TransGest: logo y colores propios, casillas legibles, condiciones completas y sin duplicar nombres o direcciones",
+    "data_entry": "Datos desde el pedido y sus envíos; los faltantes se corrigen en el pedido, sin crear una segunda ficha de mercancía dentro del DeCA o CMR",
+    "shipment_scope": "Identificar cada envío y su relación con la carga y descarga. No sumar ni repartir pesos entre destinatarios de forma automática",
+    "privacy": "No trasladar datos, firmas, logos ni cláusulas privadas de este ejemplo a plantillas o pruebas del producto"
+  },
+  "field_mapping": [
+    {
+      "reference_field": "1 Remitente/cargador",
+      "source": "Parte contractual del pedido; identificación fiscal y domicilio",
+      "check": "Distinguir cargador contractual y expedidor físico; no sustituir el remitente por el nombre del punto"
+    },
+    {
+      "reference_field": "2 Destinatario",
+      "source": "Destinatario del envío y punto de entrega",
+      "check": "Nombre y dirección completa del destinatario, aunque el punto de entrega tenga otro nombre comercial"
+    },
+    {
+      "reference_field": "3 Entrega y 4 Recogida",
+      "source": "Puntos exactos de origen y destino del envío",
+      "check": "Nombre del punto, calle, código postal, población, provincia y país disponibles; fecha prevista separada de los eventos reales"
+    },
+    {
+      "reference_field": "5 Documentos anexos",
+      "source": "Documentos vinculados al pedido/envío",
+      "check": "Enumerar solo archivos existentes y conservar el vínculo con su versión; no anunciar POD adjunto antes de recibirlo"
+    },
+    {
+      "reference_field": "Mercancía: marcas, bultos, embalaje, naturaleza, peso, volumen e información complementaria",
+      "source": "Datos generales del pedido cuando hay un único envío; datos individuales del envío cuando hay repartos",
+      "check": "Mantener separadas las unidades: kg, m³ y metros lineales. No presentar metros lineales como volumen ni tomar la capacidad máxima del vehículo por mercancía transportada"
+    },
+    {
+      "reference_field": "16 Transportista, conductor y matrículas",
+      "source": "Transportista contractual/efectivo y asignación del pedido",
+      "check": "Incluir nombre del conductor cuando esté informado; no confundirlo con el porteador ni asumir que su firma operativa acredita representación contractual"
+    },
+    {
+      "reference_field": "17 Transportistas sucesivos",
+      "source": "Cambios documentados de porteador durante el transporte",
+      "check": "Un relevo de conductor no implica por sí solo un cambio de transportista; conservar quién intervino y cuándo"
+    },
+    {
+      "reference_field": "18 Reservas y observaciones",
+      "source": "Reservas de carga y entrega comunicadas por las partes",
+      "check": "Conservar autor, fecha, contenido y eventual aceptación; no copiar notas internas o precios al documento público"
+    },
+    {
+      "reference_field": "Horarios de carga y descarga",
+      "source": "Planificación del pedido y eventos reales del chófer/colaborador",
+      "check": "Mostrar zona horaria y distinguir previsto, llegada y salida. No rellenar una hora real con la hora prevista"
+    },
+    {
+      "reference_field": "19 Acuerdos, 21 Emisión y condiciones de la segunda página",
+      "source": "Acuerdos aplicables al pedido y configuración contractual de la empresa",
+      "check": "Lugar/fecha de emisión y condiciones conservados en la versión aceptada. No imponer las condiciones particulares de Dashdoc o de su cliente"
+    },
+    {
+      "reference_field": "22 Remitente, 23 Porteador y 24 Destinatario",
+      "source": "Aceptación de la versión concreta por cada parte y recibo de entrega",
+      "check": "Identificación, facultad para actuar, intención de firmar, fecha y enlace íntegro con la versión. Las firmas actuales de carga/entrega siguen siendo evidencias operativas hasta validar este procedimiento"
+    },
+    {
+      "reference_field": "QR y referencia",
+      "source": "Identificador inmutable del documento/envío y descarga de esa versión",
+      "check": "No reutilizar un QR para sustituir silenciosamente el contenido; acceso según permisos y sin divulgar importes privados"
+    }
+  ],
+  "legal_review": {
+    "national": {
+      "source": "https://www.boe.es/buscar/act.php?id=BOE-A-2009-18004",
+      "articles": ["10", "10 bis", "11", "12", "15"],
+      "summary": "La carta nacional exige identificar partes, envío y datos aplicables; contempla firma con identidad acreditada y emisión electrónica de acuerdo entre partes. El artículo 10 bis permite que precio y gastos consten en otro documento contractual escrito en los supuestos que regula. Ese documento debe quedar vinculado y conservado; no es una exención general del precio."
+    },
+    "international": {
+      "source": "https://www.boe.es/buscar/act.php?id=BOE-A-1974-753",
+      "articles": ["1", "5", "6", "8"],
+      "summary": "Aplicar CMR según el ámbito real del contrato, no por usar casillas CMR. Revisar datos obligatorios, gastos, instrucciones y reservas que correspondan al envío."
+    },
+    "electronic": {
+      "source": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2011-10283",
+      "articles": ["3", "4", "5"],
+      "summary": "Validar autenticación fiable vinculada al documento, integridad, conservación de originales y modificaciones detectables, y procedimientos acordados de emisión, acceso y entrega. La ley no impone una marca concreta de proveedor ni la firma digital incrustada en el PDF como único procedimiento."
+    }
+  },
+  "remaining_work": [
+    "Adaptar y probar la plantilla propia de carta de porte por envío con datos sintéticos",
+    "Completar el procedimiento de consentimiento y autenticación de partes, versión firmada, reservas y entrega; evaluar el proveedor en negociación o el procedimiento propio conforme a la normativa aplicable",
+    "Conservar originales, anexos y evidencias, y verificar acceso y cambios sin sobrescribir versiones",
+    "Vincular el documento contractual privado con precio y gastos cuando corresponda",
+    "Adjuntar al correo DeCA y carta de porte efectivamente emitidos, sin presentar un borrador como documento firmado",
+    "Probar una carga/descarga, múltiples envíos, reservas, relevo de conductor, cambio de porteador, corrección y reenvío antes de habilitarlo"
+  ],
+  "release_constraints": {
+    "production": "Sin despliegue ni fusión hasta nueva autorización",
+    "no_verifactu": "Fuera de este bloque",
+    "current_user_tests": "El punto 38 sigue pendiente de implementación y validación; recibir esta referencia no lo convierte en una funcionalidad terminada"
+  }
+}

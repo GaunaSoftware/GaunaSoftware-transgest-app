@@ -27,7 +27,7 @@
 .traffic-location-scroll thead th small{display:block;font-size:11px;font-weight:500;color:var(--text4);margin-top:2px}
 .traffic-location-scroll thead th:first-child{left:0;z-index:6}
 .traffic-location-scroll tbody th{position:sticky;left:0;z-index:3;min-width:0;background:var(--bg3)}
-.traffic-location-scroll tbody tr:not(.traffic-location-group){height:125px}
+.traffic-location-scroll tbody tr:not(.traffic-location-group){height:108px}
 .traffic-location-scroll tbody tr.traffic-location-row-collapsed{height:44px}
 .traffic-location-scroll .traffic-weekend{background:var(--bg4)}
 .traffic-location-scroll thead .traffic-today{background:linear-gradient(var(--accent-a10),var(--accent-a10)),var(--bg3);box-shadow:inset 0 -2px var(--accent)}
@@ -45,10 +45,10 @@
 .traffic-location-trip small{font-size:11px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text4)}
 .traffic-location-trip .traffic-location-trip-badge{justify-self:start;max-width:100%;font-size:10px;font-weight:600;line-height:1.2;padding:2px 5px;border:0;color:var(--text3);background:var(--bg2)}
 .traffic-location-trip-chevron{display:none}
-.traffic-location-trip.retorno{border-left-color:#2563eb;background:rgba(37,99,235,.1)}
-.traffic-location-trip.salida:not(.retorno){background:rgba(15,154,145,.1)}
-.traffic-location-trip.ruta{border-left-color:#ea7800;background:rgba(234,120,0,.11)}
-.traffic-location-trip.destino,.traffic-location-trip.descarga{border-left-color:#954bea;background:rgba(149,75,234,.1)}
+.traffic-location-agenda .traffic-location-trip.retorno{border-left-color:#2563eb;background:rgba(37,99,235,.1)}
+.traffic-location-agenda .traffic-location-trip.salida:not(.retorno):not(.ruta):not(.destino):not(.descarga){border-left-color:var(--accent);background:var(--accent-a10)}
+.traffic-location-agenda .traffic-location-trip.ruta{border-left-color:#ea7800;background:rgba(234,120,0,.11)}
+.traffic-location-agenda .traffic-location-trip.destino,.traffic-location-agenda .traffic-location-trip.descarga{border-left-color:#954bea;background:rgba(149,75,234,.1)}
 .traffic-location-empty-action{opacity:0;width:100%;min-height:42px;background:transparent;border:1px dashed var(--border2);border-radius:8px;color:var(--text4);font:inherit;font-size:11px;cursor:pointer}
 .traffic-location-scroll td:hover>.traffic-location-empty-action,.traffic-location-empty-action:focus-visible{opacity:1}
 .traffic-location-agenda[data-dragging=true] .traffic-location-drop-valid td{background:var(--accent-a10);outline:1px dashed var(--accent);outline-offset:-3px}
@@ -77,7 +77,7 @@
 .traffic-location-summary>div:last-child{border-right:0}
 .traffic-location-summary strong{font-size:16px;color:var(--accent)}
 .traffic-location-summary span{font-size:10px;color:var(--text4)}
-@media (min-width:640px) and (max-width:1499px){
+@media (min-width:640px) and (max-width:1199px){
  .traffic-location-layout,.traffic-location-layout.sidebar-visible{display:grid;grid-template-columns:minmax(0,1fr) 24px;align-items:stretch}
  .traffic-location-scroll{order:0}
  .traffic-location-panel-divider{order:0;position:static;align-self:stretch;margin-left:9px;height:100%;border-left:1px solid var(--border)}
@@ -140,3 +140,67 @@
 
 .traffic-location-mobile-day>div{display:grid;justify-items:center;min-width:0}
 .traffic-location-mobile-day .traffic-location-mobile-today{font-size:11px;width:auto;min-height:28px;padding:3px 12px}
+
+/* One module surface contains navigation, controls and the planning board. */
+.traffic-shell-surface{min-width:0;max-width:100%;border:1px solid var(--border);border-radius:14px;background:var(--bg2);overflow:hidden}
+.traffic-module-tabs{padding:12px 20px 0}
+.traffic-module-tabs .tgui-tabs{padding:0;gap:6px;border:0;flex-wrap:wrap;margin-bottom:0}
+.traffic-module-tabs .tgui-tabs button{padding:8px 12px;min-height:34px;border:1px solid var(--border);border-radius:7px;background:var(--bg3);font-size:12px;font-weight:700;color:var(--text3)}
+.traffic-module-tabs .tgui-tabs button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+.traffic-shell-panel{min-width:0;display:flex;flex-direction:column}
+.traffic-shell-panel>.traffic-location-agenda{border:0;border-radius:0;padding:18px 20px 16px}
+.traffic-location-agenda>header>div:first-child{flex:1;min-width:250px}
+.traffic-location-agenda>header .traffic-location-controls{flex:0 1 auto}
+@media(min-width:1200px){.traffic-location-agenda>header{flex-wrap:nowrap}}
+.traffic-location-toolbar{display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.traffic-location-toolbar .traffic-location-legend{margin:0;gap:5px}
+.traffic-location-toolbar .traffic-location-legend span{font-size:10px;font-weight:600;padding:5px 8px;border-color:var(--border)}
+.traffic-location-vehicle-search{width:240px;min-height:34px!important;font-size:12px!important;padding:7px 10px!important;flex:0 1 240px}
+.traffic-location-scroll{max-height:calc(100dvh - 335px);min-height:300px}
+.traffic-shell .traffic-location-scroll table{min-width:1365px!important}
+.traffic-location-scroll .traffic-vehicle-column,.traffic-location-scroll th:first-child,.traffic-location-scroll td:first-child{width:210px}
+.traffic-location-scroll .traffic-day-column{width:165px}
+.traffic-location-scroll th,.traffic-location-scroll td{padding:8px;vertical-align:middle}
+.traffic-location-scroll thead th{height:56px}
+.traffic-location-scroll .traffic-weekend{background:color-mix(in srgb,var(--text4) 4%,var(--bg2))}
+.traffic-location-vehicle small{font-size:12px;line-height:1.35}
+.traffic-location-trip{display:grid;grid-template-columns:17px minmax(0,1fr);gap:3px 6px;padding:8px;min-height:72px;margin-bottom:5px;border-top-color:color-mix(in srgb,currentColor 12%,transparent);border-right-color:color-mix(in srgb,currentColor 12%,transparent);border-bottom-color:color-mix(in srgb,currentColor 12%,transparent)}
+.traffic-location-trip:last-child{margin-bottom:0}
+.traffic-location-trip-icon{grid-row:1/span 3;align-self:center;color:var(--accent);display:flex}
+.traffic-location-trip.retorno .traffic-location-trip-icon{color:#2563eb}
+.traffic-location-trip.ruta .traffic-location-trip-icon{color:#d97706}
+.traffic-location-trip:is(.destino,.descarga) .traffic-location-trip-icon{color:#954bea}
+.traffic-location-trip>strong,.traffic-location-trip-route,.traffic-location-trip-meta{grid-column:2;min-width:0}
+.traffic-location-trip .traffic-location-trip-route{display:block;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:11px;line-height:1.4}
+.traffic-location-trip-meta{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.traffic-location-trip-meta small{font-size:10px}
+.traffic-location-trip .traffic-location-trip-badge{font-size:9px;padding:2px 4px;background:rgba(255,255,255,.65);color:#263d45}
+.traffic-location-sidebar{height:auto;max-height:calc(100dvh - 335px);min-height:300px;align-self:stretch}
+.traffic-location-sidebar-head{padding:10px 12px}
+.traffic-location-sidebar-head strong{font-size:13px}
+.traffic-location-pending-list{padding:0 10px 12px}
+.traffic-location-pending{padding:8px;gap:6px}
+.traffic-location-pending button{gap:3px;font:inherit}
+.traffic-location-pending button .traffic-location-pending-route{font-size:11px;line-height:1.35}
+.traffic-location-pending button .traffic-location-pending-badges{display:flex}
+.traffic-location-pending-badges .tgui-badge{max-width:135px}
+.traffic-location-summary{margin-top:10px}
+.traffic-location-summary>div{padding:10px 12px}
+.traffic-location-summary-icon{display:grid;place-items:center;width:30px;height:32px;border-radius:8px;background:var(--accent-a10);color:var(--accent);flex:none}
+.traffic-location-summary>div:nth-child(3) .traffic-location-summary-icon{background:rgba(234,120,0,.1);color:#d97706}
+.traffic-location-summary>div:nth-child(4) .traffic-location-summary-icon{background:rgba(149,75,234,.1);color:#954bea}
+@media(min-width:640px) and (max-width:1199px){.traffic-location-sidebar{height:calc(100dvh - 335px)} .traffic-location-toolbar .traffic-location-vehicle-search{width:220px}}
+@media(max-width:639px){
+ .traffic-module-tabs{padding:10px 10px 0}
+ .traffic-module-tabs .tgui-tabs{gap:4px}
+ .traffic-module-tabs .tgui-tabs button{font-size:10px;padding:7px 8px;min-height:40px}
+ .traffic-shell-panel>.traffic-location-agenda{padding:12px 10px 24px}
+ .traffic-location-toolbar{display:block}
+ .traffic-location-toolbar .traffic-location-legend{display:grid;margin-bottom:10px}
+ .traffic-location-toolbar .traffic-location-vehicle-search{display:none}
+ .traffic-location-sidebar{max-height:none;min-height:0}
+ .traffic-location-mobile-vehicle .traffic-location-trip{min-height:78px}
+ .traffic-location-mobile-vehicle .traffic-location-trip-route{font-size:12px}
+ .traffic-location-summary>div{gap:6px;padding:10px 8px;flex-wrap:wrap}
+ .traffic-location-summary-icon{width:26px;height:28px}
+}

@@ -30,7 +30,7 @@ export function organizeSidebar(modules, financeTabs, role) {
     group("nav_clientes", "Clientes", "clientes_grupo", [
       take("clientes", "Clientes"),
       group("nav_rutas_tarifas", "Rutas y tarifas", "rutas", [take("rutas", "Rutas"), take("tarifas", "Tarifas")]),
-      take("colaboradores", "Colaboradores"),
+      take("colaboradores", "Colaboradores"), take("network", "TransGest Network"),
     ]),
     group("nav_flota", "Flota", "vehiculos", [take("choferes", "Conductores"), take("vehiculos", "Vehículos"), take("taller", "Taller")]),
     group("nav_finanzas", "Finanzas", "facturacion_grupo", [

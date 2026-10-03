@@ -63,7 +63,7 @@ async function main() {
       assert.equal(response.status, 201, `${role}: ${await response.clone().text()}`);
       const customer = await response.json();
       assert.equal(customer.empresa_id, company, 'request cannot change tenant');
-      assert.equal(customer.pendiente_revision, true, 'missing data remain visible for completion');
+      assert.equal(customer.pendiente_revision, role==='trafico', 'authorized office profiles create reviewed customers; traffic keeps incomplete review');
       assert.equal(customer.bloqueado, false, 'pending review is not a manual block');
       created.push(customer);
     }

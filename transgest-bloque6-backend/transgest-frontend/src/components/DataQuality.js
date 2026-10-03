@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import {setRuntimeFocus} from '../services/runtimeFocus';
 import { getDatosMaestrosReadiness } from '../services/api';
 
 const SECTIONS=[
@@ -29,18 +30,18 @@ export default function DataQuality(){
   const items=(data?.secciones?.[key]?.items||[]).filter(item=>Number(item.missing_required||0)>0||Number(item.score||0)<90);
   return <section style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:12,padding:20,color:'var(--text)'}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><div><h2 style={{font:"800 16px 'Syne',sans-serif",margin:'0 0 5px'}}>Calidad de datos para operar</h2>
-      <p style={{color:'var(--text4)',fontSize:12,margin:0}}>Registros incompletos que pueden bloquear pedidos, documentación o facturación.</p></div>
+      <p style={{color:'var(--text4)',fontSize:12,margin:0}}>Lista de datos pendientes para mejorar cada ficha. La puntuación indica completitud; no es una aprobación fiscal ni impide crear un pedido por sí sola.</p></div>
       <div style={{display:'flex',gap:8,flexWrap:'wrap'}}><button onClick={load} disabled={loading}>Actualizar</button>
         <button onClick={()=>download([['Módulo','Registro','Score','Faltantes obligatorios','Campos pendientes'],...pending.map(item=>[item.section,item.nombre||'',item.score??'',item.missing_required||0,(item.missing||[]).map(m=>m.label).join(' | ')])])} disabled={!pending.length}>Descargar pendientes CSV</button></div></div>
     {error&&<p role="alert" style={{color:'var(--red)'}}>{error}</p>}
     <div style={{display:'flex',gap:10,flexWrap:'wrap',margin:'17px 0',fontSize:12}}>
-      <span>Revisados: <strong>{summary.total??'—'}</strong></span><span>Completos: <strong>{summary.completos??'—'}</strong></span>
+      <span>Registros evaluados: <strong>{summary.total??'—'}</strong></span><span>Completos: <strong>{summary.completos??'—'}</strong></span>
       <span>Incompletos: <strong>{summary.incompletos??'—'}</strong></span><span>Faltantes obligatorios: <strong>{summary.faltantes_obligatorios??'—'}</strong></span>
-      <span>Score: <strong>{Number(summary.total||0)>0?`${summary.score_medio??0}%`:'Sin datos'}</strong></span></div>
+      <span>Completitud media: <strong>{Number(summary.total||0)>0?`${summary.score_medio??0}%`:'Sin datos'}</strong></span></div>
     <div style={{display:'flex',gap:7,flexWrap:'wrap',marginBottom:15}}>{SECTIONS.map(([section,name])=><button key={section} onClick={()=>setSelected(section)} aria-pressed={selected===section} style={{background:selected===section?'var(--accent)':'var(--bg2)',color:selected===section?'#fff':'var(--text)',border:'1px solid var(--border)',borderRadius:7,padding:'7px 10px',cursor:'pointer'}}>{name}</button>)}</div>
     <div style={{display:'flex',justifyContent:'space-between',gap:10,alignItems:'center'}}><strong>{label}</strong><button onClick={()=>window.dispatchEvent(new CustomEvent('tms:navegar',{detail:view}))}>Abrir módulo</button></div>
     {loading&&!data?<p>Cargando…</p>:items.length?<div style={{display:'grid',gap:7,marginTop:12}}>{items.slice(0,30).map(item=><div key={item.id} style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:7,padding:10,fontSize:12}}>
-      <strong>{item.nombre||'Sin nombre'}</strong><span>{(item.missing||[]).map(m=>m.label).join(' · ')}</span><span>{item.score??'—'}%</span></div>)}</div>
+      <strong>{item.nombre||'Sin nombre'}</strong><span>{(item.missing||[]).map(m=>`${m.label}${m.required?' (necesario para esta ficha)':' (recomendado)'}`).join(' · ')}</span><button onClick={()=>{const focus=view==='pedidos'?['tms_pedidos_focus',{pedido_id:item.id}]:view==='facturacion'?['tms_facturacion_focus',{factura_id:item.id,open:true}]:view==='vehiculos'?['tms_vehiculos_focus',{vehiculo_id:item.id,open:true}]:view==='choferes'?['tms_choferes_focus',{chofer_id:item.id,open:true}]:view==='colaboradores'?['tms_colaborador_focus',{colaborador_id:item.id,open:true}]:['tms_clientes_focus',{cliente_id:item.id,open:true}];setRuntimeFocus(...focus);window.dispatchEvent(new CustomEvent('tms:navegar',{detail:view}));}}>Completar ficha</button></div>)}</div>
       :<p style={{color:'var(--text4)',fontSize:12,marginTop:12}}>{Number(data?.secciones?.[key]?.resumen?.total||0)>0?'Sin pendientes relevantes.':'Sin registros evaluables.'}</p>}
   </section>;
 }

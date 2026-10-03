@@ -5,7 +5,10 @@ import VehiclePhotoEditor from "./fleet/VehiclePhotoEditor";
 import StoredDocumentButton from "../components/StoredDocumentButton";
 import "./fleet/fleet.css";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
+import { getVehiculos, crearVehiculo, editarVehiculo, eliminarVehiculo, reactivarVehiculo, cambiarEstadoVehiculo, getPedidos, asignarRemolque, getChoferes, getGpsProviders, getGpsStatus, vincularGpsVehiculo, vincularGpsVehiculosBulk, actualizarPosicionVehiculo, sincronizarGpsVehiculos, sincronizarPosicionesVehiculo, getPosicionesVehiculo, getVehiculoEventos, getDocsVehiculo, analizarDocVehiculo, crearDocVehiculo, borrarDocVehiculo } from "../services/api";
+import VehicleDocumentReview from "../components/VehicleDocumentReview";
+import {analizarDocVehiculoNuevo} from '../services/api';
+import {getEmpresaPlanLocal,planHasFeature} from "../utils/planFeatures";
 import { useAuth } from "../context/AuthContext";
 import { formatMatricula, upperFromEvent } from "../utils/formatos";
 import { confirmDialog, notify } from "../services/notify";
@@ -208,20 +211,8 @@ function normalizeVehiculoForClase(data = {}) {
   return next;
 }
 
-// Longitud de carga (metros lineales) estandar de un semirremolque para
-// carrocerias tipo tautliner/lona, plataforma lisa o lateral bajo.
-const METROS_CARGA_ESTANDAR = "13.65";
-function carroceriaUsaMedidaEstandar(form = {}) {
-  const c = String(form.tipo_carroceria || "").toLowerCase();
-  return c.includes("tautliner") || c.includes("lona") || c.includes("plataforma") || !!form.lateral_bajo;
-}
-function aplicarMedidasEstandarCarga(next = {}) {
-  // Rellena la medida estandar solo si esta vacia (no pisa lo que ponga el usuario).
-  if (!esClaseRigido(next.clase) && carroceriaUsaMedidaEstandar(next) && !String(next.metros_carga || "").trim()) {
-    next.metros_carga = METROS_CARGA_ESTANDAR;
-  }
-  return next;
-}
+// Changing a body type never invents usable dimensions.
+function aplicarMedidasEstandarCarga(next = {}) { return {...next,unidad_ocupacion:''}; }
 
 const TIPO_COMBUSTIBLE = ["Diesel","AdBlue/Diesel","GNL (Gas Natural)","GNC","Electrico","Hibrido","Gasolina"];
 
@@ -1025,7 +1016,7 @@ function ModalChoferPicker({ vehiculoId, matricula, estado, choferes, onConfirm,
   );
 }
 
-function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'identificacion', onClose, onSaved, choferes=[], vehiculos=[], onVehiculoActualizado = null, onGpsRefresh = null }) {
+export function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'identificacion', onClose, onSaved, choferes=[], vehiculos=[], onVehiculoActualizado = null, onGpsRefresh = null }) {
   const { puedeEditar } = useAuth();
   const canEdit = puedeEditar("vehiculos");
   const [tab,    setTab]    = useState(initialTab);
@@ -1073,6 +1064,15 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
   const [docsVehiculo, setDocsVehiculo] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [docUploading, setDocUploading] = useState(false);
+  const [docAnalyzing,setDocAnalyzing]=useState('');
+  const [docReview,setDocReview]=useState(null);
+  const [pendingDocuments,setPendingDocuments]=useState([]);
+  const canReadAI=canEdit&&planHasFeature(getEmpresaPlanLocal(),'ai');
+  async function analyzeDocument(documentId,pendingDoc){
+    if(!documentId)return;setDocAnalyzing(documentId);setDocReview(null);
+    try{setDocReview(pendingDoc?await analizarDocVehiculoNuevo({...pendingDoc,matricula:form.matricula}):await analizarDocVehiculo(editando.id,documentId));}
+    catch(e){notify(e.message,'warning');}finally{setDocAnalyzing('');}
+  }
   const gpsProviderOptions = [
     { id:"manual", label:"Sin GPS · app del conductor" },
     ...gpsProviders.filter(p => p.id !== "manual").map(p => ({ id:p.id, label:GPS_PROVIDER_LABELS[p.id] || p.label || p.id, configured:p.configured })),
@@ -1100,7 +1100,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
   }, [tab, cargarDocsVehiculo]);
 
   async function subirDocumentoVehiculo(file) {
-    if (!editando?.id || !file) return;
+    if (!file) return;
     if (file.size > 3 * 1024 * 1024) {
       notify("Archivo demasiado grande. Usa archivos de hasta 3 MB.", "warning");
       return;
@@ -1109,15 +1109,26 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
     try {
       const fileUrl = await fileToDataUrl(file);
       const tipo = inferVehiculoDocTipo(file.name);
-      await crearDocVehiculo(editando.id, {
+      const document={
         tipo,
         descripcion: `Archivado desde ficha de vehiculo. Tipo detectado: ${tipo}.`,
         file_url: fileUrl,
         file_nombre: file.name,
         file_size_kb: Math.ceil(file.size / 1024),
-      });
+      };
+      if(!editando?.id){
+        if(pendingDocuments.length>=6){notify('Puedes adjuntar hasta seis documentos por vehículo.','warning');return;}
+        if(pendingDocuments.reduce((sum,item)=>sum+item.file_size_kb,0)+Math.ceil(file.size/1024)>6*1024){notify('Los documentos pendientes no pueden superar 6 MB en total. Guarda el vehículo y añade el resto después.','warning');return;}
+        const pending={...document,id:`pending-${Date.now()}-${Math.random()}`,pending:true};
+        setPendingDocuments(previous=>[...previous,pending]);
+        notify('Documento seleccionado. Se archivará junto al vehículo al guardar.','success');
+        if(canReadAI)await analyzeDocument(pending.id,pending);
+        return;
+      }
+      const savedDoc=await crearDocVehiculo(editando.id,document);
       notify("Documento archivado en la ficha del vehiculo", "success");
       cargarDocsVehiculo();
+      if(canReadAI)await analyzeDocument(savedDoc?.id);
     } catch (e) {
       notify(e.message || "No se pudo archivar el documento", "error");
     } finally {
@@ -1167,7 +1178,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
           });
         }
       } else {
-        const created = await crearVehiculo(formToSave);
+        const created = await crearVehiculo({...formToSave,documentos:pendingDocuments});
         savedVehiculo = created;
         savedId = created?.id || created?.data?.id;
       }
@@ -1221,7 +1232,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
             </div>}
           </div>
           {canEdit && (
-            <button style={{ ...S.btn, background:"var(--accent)", color:"#fff" }} onClick={guardar} disabled={saving}>
+            <button style={{ ...S.btn, background:"var(--accent)", color:"#fff" }} onClick={guardar} disabled={saving||docUploading||!!docAnalyzing}>
               {saving ? "Guardando..." : "Guardar"}
             </button>
           )}
@@ -1244,7 +1255,7 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
         )}
 
         {/* Tabs */}
-        <div style={{ display:"flex", gap:0, borderBottom:"1px solid var(--border)", flexShrink:0, overflowX:"auto" }}>
+        <div className="fleet-form-tabs" style={{ display:"flex", gap:0, borderBottom:"1px solid var(--border)", flexShrink:0, overflowX:"auto" }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               style={{ padding:"8px 14px", border:"none", borderBottom:`2px solid ${tab===t.id?"var(--accent-l)":"transparent"}`,
@@ -1485,6 +1496,8 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                         {CARROCERIAS_REMOLQUE.map(c=><option key={c} value={c}>{c}</option>)}
                       </select>
                     </div>
+                    <div><label style={S.lbl}>Unidad de ocupación</label><select style={S.sel} value={form.unidad_ocupacion||''} onChange={f('unidad_ocupacion')}><option value="">Según carrocería</option><option value="ml">Metros lineales</option><option value="m3">Metros cúbicos</option><option value="unidades">Vehículos / unidades</option></select></div>
+                    <div><label style={S.lbl}>Capacidad en vehículos (portacoches)</label><input type="number" min="0" step="1" style={S.inp} value={form.capacidad_unidades||''} onChange={f('capacidad_unidades')}/></div>
                     <div>
                       <label style={S.lbl}>Apertura / carga</label>
                       <input style={S.inp} value={form.apertura_lateral||""} onChange={f("apertura_lateral")} placeholder="Lateral, trasera, techo, superior..."/>
@@ -1657,10 +1670,10 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
               </div>
 
               <div style={S.sec}>Archivo documental</div>
-              {editando?.id ? (
+              {(
                 <div style={{display:"grid",gap:10}}>
                   {canEdit && (
-                    <label style={{border:"1px dashed var(--border2)",borderRadius:8,padding:"12px 14px",background:"var(--bg3)",cursor:docUploading?"wait":"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                    <label className="fleet-document-upload" style={{border:"1px solid var(--border2)",borderRadius:8,padding:"12px 14px",background:"var(--bg3)",cursor:docUploading?"wait":"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
                       <span>
                         <span style={{display:"block",fontWeight:800,color:"var(--text)",fontSize:13}}>Subir documento del vehículo</span>
                         <span style={{display:"block",color:"var(--text5)",fontSize:11,marginTop:2}}>PDF o imagen. Se archiva en la ficha y se clasifica por nombre: ITV, seguro, tacógrafo, tarjeta de transporte o permiso.</span>
@@ -1668,27 +1681,33 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                       <span style={{...S.btn,background:"rgba(16,185,129,.12)",color:"var(--green)",border:"1px solid rgba(16,185,129,.25)"}}>
                         {docUploading ? "Subiendo..." : "Seleccionar"}
                       </span>
-                      <input type="file" accept="application/pdf,image/*" style={{display:"none"}} disabled={docUploading} onChange={e=>subirDocumentoVehiculo(e.target.files?.[0])}/>
+                      <input aria-label="Documento del vehículo" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" style={{display:"none"}} disabled={docUploading||saving||!!docAnalyzing} onChange={e=>{subirDocumentoVehiculo(e.target.files?.[0]);e.target.value='';}}/>
                     </label>
                   )}
+                  {canReadAI&&<p style={{fontSize:12,color:'var(--text4)'}}>Al seleccionar un documento se usa una lectura IA. Si no es legible puedes completar la ficha manualmente. Los campos requieren revisión y guardado; cada análisis consume un uso de IA.</p>}
+                  {!editando?.id&&<p role="status" style={{fontSize:12,color:'var(--text4)'}}>Puedes seleccionar y leer los documentos antes de crear el vehículo. Se archivarán al pulsar Guardar; si cierras sin guardar, se descartan.</p>}
+                  {docAnalyzing&&<p role="status">Leyendo el documento; la ficha aún no se ha modificado…</p>}
+                  {docReview&&<VehicleDocumentReview result={docReview} onClose={()=>setDocReview(null)} onApply={values=>{setForm(previous=>({...previous,...values}));setDocReview(null);notify('Datos aplicados al formulario. Revisa y guarda la ficha.','success');}}/>}
                   {docsLoading ? (
                     <div style={{color:"var(--text5)",fontSize:12}}>Cargando documentos...</div>
-                  ) : docsVehiculo.length === 0 ? (
+                  ) : [...docsVehiculo,...pendingDocuments].length === 0 ? (
                     <div style={{color:"var(--text5)",fontSize:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12}}>Sin documentos archivados todavia.</div>
                   ) : (
                     <div style={{display:"grid",gap:8}}>
-                      {docsVehiculo.map(doc => (
-                        <div key={doc.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 11px",background:"var(--bg3)"}}>
+                      {[...docsVehiculo,...pendingDocuments].map(doc => (
+                        <div key={doc.id} style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,230px),1fr))",gap:10,alignItems:"center",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 11px",background:"var(--bg3)"}}>
                           <div>
                             <div style={{fontWeight:800,color:"var(--text)",fontSize:13}}>{doc.file_name || doc.file_nombre || doc.descripcion || doc.tipo_doc || "Documento"}</div>
                             <div style={{fontSize:11,color:"var(--text5)",marginTop:2}}>
-                              {(doc.tipo_doc || doc.tipo || "otro")} {doc.fecha_vencimiento ? `- vence ${new Date(doc.fecha_vencimiento).toLocaleDateString("es-ES")}` : ""} {doc.file_size_kb ? `- ${doc.file_size_kb} KB` : ""}
+                              {(doc.tipo_doc || doc.tipo || "otro")} {doc.pending?'· Pendiente de guardar':''} {doc.fecha_vencimiento ? `- vence ${new Date(doc.fecha_vencimiento).toLocaleDateString("es-ES")}` : ""} {doc.file_size_kb ? `- ${doc.file_size_kb} KB` : ""}
                             </div>
                           </div>
-                          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                            {canReadAI&&<button type="button" style={S.btn} disabled={!!docAnalyzing||saving} onClick={()=>analyzeDocument(doc.id,doc.pending?doc:null)}>Leer datos con IA</button>}
                             <StoredDocumentButton doc={doc} scope="vehiculo" style={{...S.btn,textDecoration:"none",background:"rgba(59,130,246,.12)",color:"var(--accent)",border:"1px solid rgba(59,130,246,.25)"}}/>
                             {canEdit && (
                               <button type="button" style={{...S.btn,background:"rgba(239,68,68,.10)",color:"#ef4444",border:"1px solid rgba(239,68,68,.22)"}} onClick={async()=>{
+                                if(doc.pending){setPendingDocuments(values=>values.filter(item=>item.id!==doc.id));setDocReview(null);return;}
                                 if (!await confirmDialog({title:"Eliminar documento",message:"Eliminar este documento archivado?",confirmText:"Eliminar",tone:"danger"})) return;
                                 try { await borrarDocVehiculo(editando.id, doc.id); cargarDocsVehiculo(); } catch(e) { notify(e.message || "No se pudo eliminar", "error"); }
                               }}>Eliminar</button>
@@ -1699,8 +1718,6 @@ function ModalVehiculo({ editando, initialClase = "Tractora", initialTab = 'iden
                     </div>
                   )}
                 </div>
-              ) : (
-                <div style={{color:"var(--text5)",fontSize:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:12}}>Guarda primero el vehículo para adjuntar documentos.</div>
               )}
             </div>
           )}

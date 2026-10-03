@@ -76,18 +76,19 @@ async function save(db,c,id,actor,input,confirm=false){
   if(confirm){
    if(input.revisado!==true||!data.numero||!data.fecha||data.moneda!=='EUR'||!data.lineas.length||[data.base,data.impuestos,data.total].some(v=>v===null))throw fail('Revisa número, fecha, moneda EUR, bases, impuestos y líneas y confirma la revisión.');
    if(Math.abs(cents(data.base)+cents(data.impuestos)-cents(data.total))>1||data.lineas.some(l=>l.base===null||l.impuestos===null)||Math.abs(data.lineas.reduce((n,l)=>n+cents(l.base),0)-cents(data.base))>1||Math.abs(data.lineas.reduce((n,l)=>n+cents(l.impuestos),0)-cents(data.impuestos))>1)throw fail('El desglose de líneas, impuestos y total no cuadra con el original.');
-   const provider=(await tx.query('SELECT cif FROM colaboradores WHERE id=$1 AND empresa_id=$2',[row.proveedor_id,c])).rows[0];if(!data.proveedor_cif||data.proveedor_cif!==normalized(provider?.cif))throw fail('Revisa el NIF del emisor: no coincide con el proveedor seleccionado.');
+   const provider=(await tx.query('SELECT cif,notas FROM colaboradores WHERE id=$1 AND empresa_id=$2',[row.proveedor_id,c])).rows[0];if(!data.proveedor_cif||data.proveedor_cif!==normalized(provider?.cif))throw fail('Revisa el NIF del emisor: no coincide con el proveedor seleccionado.');
    if(result.lineas.some(l=>l.conciliacion.estado!=='coincide')&&!data.nota_revision)throw fail('Justifica las diferencias, líneas parciales o sin servicio antes de registrar la factura.');
   }
   try{await tx.query('UPDATE facturas_proveedor SET datos=$3,numero=$4,numero_normalizado=$5,version=version+1 WHERE id=$1 AND empresa_id=$2',[id,c,JSON.stringify(data),data.numero||null,normalized(data.numero)||null]);}catch(e){if(e.code==='23505')throw fail('Número de factura duplicado para este proveedor.',409);throw e;}
   await tx.query('DELETE FROM factura_proveedor_lineas WHERE factura_id=$1 AND empresa_id=$2',[id,c]);
   for(const [index,line]of result.lineas.entries())await tx.query('INSERT INTO factura_proveedor_lineas(empresa_id,factura_id,posicion,pedido_id,datos,conciliacion) VALUES($1,$2,$3,$4,$5,$6)',[c,id,index+1,line.pedido_id,JSON.stringify(line),JSON.stringify(line.conciliacion)]);
   if(confirm){
+   const providerNotes=(await tx.query('SELECT notas FROM colaboradores WHERE id=$1 AND empresa_id=$2',[row.proveedor_id,c])).rows[0]?.notas;
    const groups=new Map();for(const line of result.lineas){const key=line.pedido_id||'sin_servicio',g=groups.get(key)||{pedido_id:line.pedido_id,base:0,impuestos:0,refs:[]};g.base+=cents(line.base);g.impuestos+=cents(line.impuestos);g.refs.push(line.referencia);groups.set(key,g);}
    for(const g of groups.values()){
     // Replace only an unnumbered, unpaid forecast. Never change a received invoice.
     const prior=g.pedido_id?(await tx.query("SELECT * FROM colaborador_facturas WHERE empresa_id=$1 AND colaborador_id=$2 AND pedido_id=$3 AND NULLIF(trim(numero_factura),'') IS NULL AND estado='pendiente' AND factura_proveedor_id IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE",[c,row.proveedor_id,g.pedido_id])).rows[0]:null;
-    const values=[c,row.proveedor_id,g.pedido_id,data.numero,data.fecha,data.vencimiento,g.base/100,g.base?g.impuestos/g.base*100:0,(g.base+g.impuestos)/100,id,actor,'Factura recibida revisada. Desglose fiscal y original en conciliación proveedor. '+data.nota_revision];
+    const values=[c,row.proveedor_id,g.pedido_id,data.numero,data.fecha,data.vencimiento,g.base/100,g.base?g.impuestos/g.base*100:0,(g.base+g.impuestos)/100,id,actor,'Factura recibida revisada. Desglose fiscal y original en conciliación proveedor. '+data.nota_revision+(providerNotes?'\nObservaciones del colaborador: '+providerNotes:'')];
     if(prior){await event(tx,c,id,actor,'prevision_sustituida',{registro:prior});await tx.query(`UPDATE colaborador_facturas SET numero_factura=$4,fecha=$5,vencimiento=$6,base=$7,iva_pct=$8,total=$9,factura_proveedor_id=$10,created_by=$11,notas=$12,updated_at=now() WHERE empresa_id=$1 AND colaborador_id=$2 AND pedido_id=$3 AND id=$13`,[...values,prior.id]);}
     else await tx.query(`INSERT INTO colaborador_facturas(empresa_id,colaborador_id,pedido_id,numero_factura,fecha,vencimiento,base,iva_pct,total,factura_proveedor_id,created_by,notas,estado) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pendiente')`,values);
    }

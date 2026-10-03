@@ -5,6 +5,7 @@ const CUSTOMER_FIELDS = {
   cliente_nombre: "",
   ruta_id: "",
   referencia_cliente: "",
+  _tarifaNotas:"", _tarifaNotasAceptadas:false, tarifa_notas_confirmadas:null, tarifa_instrucciones:null, observaciones_factura:null,
   tipo_precio: "viaje",
   precio_unitario: "",
   precio_base_sin_combustible: "",
@@ -43,8 +44,8 @@ export function switchCustomerDraft(draft = {}, customer = null) {
     cliente_nombre: customer.nombre || "",
     tipo_iva: customer.tipo_iva ?? "",
     iva_regimen: customer.iva_regimen || "",
-    ventana_carga: customer.horario_carga || "",
-    ventana_descarga: customer.horario_descarga || "",
+    ventana_carga: "",
+    ventana_descarga: "",
     mercancia: draft.mercancia || customer.mercancia_habitual || "",
   };
 }

@@ -1,4 +1,5 @@
 import { palletLayout, cargoCount, cargoLength } from "../utils/cargoDimensions";
+import { vehicleCapacity } from "../utils/vehicleCapacity";
 import { useMemo } from "react";
 
 // Vista de un remolque desde arriba con las cargas de un grupaje colocadas por
@@ -33,17 +34,9 @@ export const paletsDeCarga = p => p.palets_tipo === 'granel' ? 0 : cargoCount(p)
 // al trailer estandar y lo indica, para no confundir un valor por defecto con
 // una medida real de la flota.
 export function capacidadRemolque(vehiculo, { estricta = false } = {}) {
-  // La longitud exterior del vehículo no equivale a su longitud útil de carga.
-  const metros = Number(String(vehiculo?.metros_carga || "").replace(",", ".")) || 0;
-  // Gross vehicle mass is not payload capacity.
-  const peso = Number(vehiculo?.carga_max_kg || 0);
-  const palets = Number(vehiculo?.capacidad_palets || 0);
-  return {
-    metros: metros > 0 ? metros : (estricta ? null : REMOLQUE_DEFECTO.metros),
-    peso: peso > 0 ? peso : (estricta ? null : REMOLQUE_DEFECTO.peso),
-    palets: palets > 0 ? palets : (estricta ? null : REMOLQUE_DEFECTO.palets),
-    estimado: !(metros > 0 && peso > 0 && palets > 0),
-  };
+  const cap=vehicleCapacity(vehiculo||{});
+  return {metros:cap.length,peso:cap.weight,palets:cap.pallets,volumen:cap.volume,unit:cap.unit,quantity:cap.quantity,
+    estimado:!cap.quantity||!cap.weight};
 }
 
 const COLORES = ["#0ea5e9", "#8b5cf6", "#f59e0b", "#10b981", "#ec4899", "#14b8a6", "#f97316", "#6366f1"];
@@ -79,14 +72,16 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
   const cargas = useMemo(() => pedidos.map((p, i) => ({
     pedido: p,
     ml: mlDeCarga(p),
+    volumen:Number(String(p.volumen||0).replace(",","."))||0,
+    unidades:cargoCount(p),
     peso: Number(p.peso_kg || 0),
     palets: paletsDeCarga(p),
     color: COLORES[i % COLORES.length],
   })), [pedidos]);
 
   const totales = useMemo(() => cargas.reduce((a, c) => ({
-    ml: a.ml + c.ml, peso: a.peso + c.peso, palets: a.palets + c.palets,
-  }), { ml: 0, peso: 0, palets: 0 }), [cargas]);
+    ml: a.ml + c.ml, volumen:a.volumen+c.volumen, unidades:a.unidades+c.unidades, peso: a.peso + c.peso, palets: a.palets + c.palets,
+  }), { ml: 0, volumen:0, unidades:0, peso: 0, palets: 0 }), [cargas]);
 
   // Carga mixta: europeos y americanos NO comparten fila (el americano ocupa
   // 1,20 de ancho x 1,00 de fondo y el europeo 1,20 x 0,80), asi que cada tipo
@@ -99,11 +94,15 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
   )], [pedidos]);
   const esMixto = tiposPalet.length > 1;
 
-  const excedeAlgo = (cap.metros > 0 && totales.ml > cap.metros) || (cap.peso > 0 && totales.peso > cap.peso) || (cap.palets > 0 && totales.palets > cap.palets);
+  const quantityKey=cap.unit==='m3'?'volumen':cap.unit==='unidades'?'unidades':'ml';
+  const unitLabel=cap.unit==='m3'?'m³':cap.unit==='unidades'?'unidades':'ML';
+  const totalQuantity=totales[quantityKey];
+  const missing=pedidos.filter(p=>!(Number(cap.unit==='m3'?String(p.volumen||'').replace(',','.'):cap.unit==='unidades'?cargoCount(p):cargoLength(p))>0)).length;
+  const excedeAlgo = (cap.quantity > 0 && totalQuantity > cap.quantity) || (cap.peso > 0 && totales.peso > cap.peso) || (cap.unit==="ml" && cap.palets > 0 && totales.palets > cap.palets);
   // La escala usa el mayor entre capacidad y carga, para que el exceso se VEA
   // saliendose del remolque en lugar de recortarse.
-  const escala = Math.max(cap.metros, totales.ml) || 1;
-  const libre = Math.max(0, cap.metros - totales.ml);
+  const escala = Math.max(cap.quantity, totalQuantity) || 1;
+  const libre = missing ? 0 : Math.max(0, cap.quantity - totalQuantity);
 
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg2)", padding: 14 }}>
@@ -112,7 +111,7 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
           <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text)" }}>Ocupación {String(vehiculo?.clase || "").toLowerCase().includes("rígido") || String(vehiculo?.clase || "").toLowerCase().includes("rigido") ? "del camión rígido" : "del remolque"}</div>
           <div style={{ fontSize: 11, color: "var(--text5)", marginTop: 2 }}>
             {vehiculo?.matricula ? `${vehiculo.matricula} - ` : ""}
-            {cap.metros > 0 ? `${fmt(cap.metros, 2)} m de carga` : "Longitud sin informar"}, {cap.peso > 0 ? `${fmt(cap.peso, 0)} kg` : "carga máxima sin informar"}, {cap.palets > 0 ? `${cap.palets} palets` : "palets sin informar"}
+            {cap.quantity > 0 ? `${fmt(cap.quantity, 2)} ${unitLabel} de capacidad útil` : "Capacidad sin informar"}, {cap.peso > 0 ? `${fmt(cap.peso, 0)} kg` : "carga máxima sin informar"}{cap.unit==="ml"&&cap.palets>0?`, ${cap.palets} palés`:""}
             {cap.estimado ? (capacidadEstricta ? " · completa la ficha para verificar la ocupación" : " (medidas estimadas)") : ""}
           </div>
         </div>
@@ -130,7 +129,8 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
         </div>
         <div style={{ flex: 1, position: "relative", minHeight: 74, display: "flex", borderRadius: 6, border: `2px solid ${excedeAlgo ? "#ef4444" : "var(--border2)"}`, background: "var(--bg3)", overflow: "hidden" }}>
           {cargas.map((c, i) => {
-            const pct = (c.ml / escala) * 100;
+            const quantity=c[quantityKey];
+            const pct = (quantity / escala) * 100;
             const sel = String(c.pedido.id) === String(seleccionadoId);
             return (
               <div key={c.pedido.id || i}
@@ -140,9 +140,9 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
                 onDrop={event=>{if(!onReorder)return;event.preventDefault();event.stopPropagation();const source=event.dataTransfer.getData('application/transgest-cargo')||event.dataTransfer.getData('text/plain');if(source&&source!==String(c.pedido.id))onReorder(source,c.pedido.id);}}
                 onClick={() => onSelect && onSelect(c.pedido)}
                 aria-label={`${c.pedido.numero || `Carga ${i+1}`}. Posición ${i+1}${onReorder?'. Arrastra para cambiar la disposición.':''}`}
-                title={`${c.pedido.numero || "Viaje"} - ${c.pedido.cliente_nombre || ""} | ${fmt(c.ml)} ML, ${fmt(c.peso, 0)} kg, ${c.palets} palets`}
+                title={`${c.pedido.numero || "Viaje"} - ${c.pedido.cliente_nombre || ""} | ${fmt(c[quantityKey])} ${unitLabel}, ${fmt(c.peso, 0)} kg`}
                 style={{
-                  width: `${pct}%`, minWidth: pct > 0 ? 8 : 0,
+                  width: `${pct}%`, minWidth: pct > 0 ? 8 : 40,
                   background: c.color, opacity: sel ? 1 : 0.82,
                   borderRight: "1px solid rgba(255,255,255,.35)",
                   cursor: onReorder ? "grab" : onSelect ? "pointer" : "default",
@@ -153,13 +153,13 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
                 <div style={{ fontSize: 10, fontWeight: 900, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
                   {c.pedido.numero || `Carga ${i + 1}`}
                 </div>
-                <div style={{ fontSize: 9, opacity: 0.9, whiteSpace: "nowrap" }}>{fmt(c.ml)} ML</div>
+                <div style={{ fontSize: 9, opacity: 0.9, whiteSpace: "nowrap" }}>{quantity>0?`${fmt(quantity)} ${unitLabel}`:"Sin cantidad"}</div>
               </div>
             );
           })}
           {libre > 0 && (
             <div style={{ width: `${(libre / escala) * 100}%`, display: "grid", placeItems: "center", fontSize: 10, color: "var(--text5)", fontWeight: 800 }}>
-              {libre >= 1 ? `${fmt(libre)} m libres` : ""}
+              {libre >= 1 ? `${fmt(libre)} ${unitLabel} libres` : ""}
             </div>
           )}
           {!cargas.length && (
@@ -172,12 +172,13 @@ export default function RemolqueGrupaje({ pedidos = [], vehiculo = null, onSelec
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <Barra etiqueta="Metros lineales" valor={totales.ml} max={cap.metros} unidad="m" />
+        <Barra etiqueta={cap.unit==='m3'?"Volumen":cap.unit==='unidades'?"Vehículos":"Metros lineales"} valor={totalQuantity} max={cap.quantity} unidad={unitLabel} />
         <Barra etiqueta="Peso" valor={totales.peso} max={cap.peso} unidad="kg" decimales={0} />
-        <Barra etiqueta="Palets" valor={totales.palets} max={cap.palets} unidad="" decimales={0} />
+        {cap.unit==='ml'&&<Barra etiqueta="Palets" valor={totales.palets} max={cap.palets} unidad="" decimales={0} />}
       </div>
 
-      {esMixto && (
+      {missing>0&&<p role="status" style={{fontSize:12,color:"var(--text4)"}}>{missing} carga(s) sin {cap.unit==='m3'?"volumen":cap.unit==='unidades'?"número de vehículos":"longitud ocupada"}. La ocupación está incompleta.</p>}
+      {esMixto && cap.unit==='ml' && (
         <div style={{ marginTop: 10, fontSize: 11, color: "#b45309", background: "rgba(245,158,11,.10)", border: "1px solid rgba(245,158,11,.28)", borderRadius: 7, padding: "7px 10px", lineHeight: 1.45 }}>
           <b>Carga mixta ({tiposPalet.join(" + ")}).</b> Los tipos de palet no comparten fila,
           asi que cada uno ocupa las suyas y se aprovecha peor el remolque que cargando de un

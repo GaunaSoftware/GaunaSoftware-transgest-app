@@ -8,7 +8,7 @@ import { Button, Card, EmptyState, Select, TransportStateBadge } from "../../ui"
 
 import {overdueOrder,incidentDescription} from "./operationalStatus";
 
-const states=['pendiente','confirmado','espera_carga','cargando','en_curso','espera_descarga','descarga','incidencia'].map(key=>[key,transportStateMeta(key).label]);
+const states=['pendiente','confirmado','espera_carga','cargando','cargado','en_curso','espera_descarga','descarga','incidencia'].map(key=>[key,transportStateMeta(key).label]);
 const displayStateKey=order=>transportStateKey(order)==='en_transito'?'en_curso':transportStateKey(order);
 export default function LiveOperations({ initialItems, onSnapshot, openOrder }) {
   const [items,setItems]=useState(initialItems),[busy,setBusy]=useState(false),[error,setError]=useState(''),[updated,setUpdated]=useState(null),[filter,setFilter]=useState('todos');

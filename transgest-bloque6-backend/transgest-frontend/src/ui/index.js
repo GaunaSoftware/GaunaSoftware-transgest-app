@@ -23,6 +23,14 @@ export function TransportStateBadge({ state, children, ...props }) {
 }
 export function Icon({ name, size = 20 }) {
   const paths = {
+    mail: "M3 5h18v14H3Z M3 5l9 7 9-7",
+    sparkles: "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z M21 2v4 M19 4h4",
+    edit: "m16 3 5 5-12 12-6 1 1-6Z M14 5l5 5",
+    cargo: "m12 2 9 5v10l-9 5-9-5V7Z M3 7l9 5 9-5 M12 12v10 M7.5 4.5l9 5",
+    info: "M12 11v6 M12 7h.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+    settings: "M9 3h6l1 4 4 1v8l-4 1-1 4H9l-1-4-4-1V8l4-1Z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+    refresh: "M21 10a9 9 0 0 0-16-5L2 8 M2 3v5h5 M3 14a9 9 0 0 0 16 5l3-3 M22 21v-5h-5",
+    attachment: "m8 13 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9a6 6 0 0 1 9 9l-9 9",
     clients: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75",
     route: "M7 5a2 2 0 1 1-4 0 2 2 0 0 1 4 0 M21 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0 M7 5h8a4 4 0 0 1 0 8H9a3 3 0 0 0 0 6h8",
     alert: "M10.3 3.4 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.4a2 2 0 0 0-3.4 0 M12 9v4 M12 17h.01",

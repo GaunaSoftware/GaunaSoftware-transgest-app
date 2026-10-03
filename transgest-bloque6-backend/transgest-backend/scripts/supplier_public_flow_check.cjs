@@ -9,7 +9,7 @@ const tokenIds = { carga:'33333333-3333-4333-8333-333333333333', descarga:'44444
 const state = { loaded:false, delivered:false, used:new Set(), events:[], documents:[] };
 const order = { id:orderId, pedido_id:orderId, empresa_id:enterpriseId, numero:'PED-QA-1',
   colaborador_nombre:'Colaborador de prueba', empresa_nombre:'Empresa de prueba',
-  origen:'Almacén A', destino:'Almacén B' };
+  colaborador_id:enterpriseId,estado:'confirmado',mercancia:'Goods',peso_kg:8000,bultos:8,origen:'Almacén A', destino:'Almacén B' };
 
 db.query = async (sql,params=[]) => {
   if (/FROM colaborador_pedido_tokens t/i.test(sql)) {
@@ -19,12 +19,14 @@ db.query = async (sql,params=[]) => {
       colaborador_carga_confirmada_at:state.loaded ? new Date() : null,
       colaborador_descarga_confirmada_at:state.delivered ? new Date() : null}]};
   }
+  if(/FROM pedidos p/i.test(sql))return{rows:[{...order,estado:state.loaded?'cargado':'confirmado',colaborador_carga_confirmada_at:state.loaded?new Date():null}]};
   return {rows:[]};
 };
 db.transaction = async fn => {
   const previous = {loaded:state.loaded,delivered:state.delivered,used:new Set(state.used),events:[...state.events],documents:[...state.documents]};
   const client = {query:async (sql,params=[]) => {
-    if (/UPDATE pedidos SET estado='en_curso'/i.test(sql)) {
+    if(/SELECT \* FROM pedidos/.test(sql))return{rows:[{...order,estado:state.loaded?'cargado':'confirmado',colaborador_carga_confirmada_at:state.loaded?new Date():null}]};
+    if (/UPDATE pedidos SET estado='cargado'/i.test(sql)) {
       if (state.loaded) return {rows:[]};
       state.loaded=true;return {rows:[{id:orderId}]};
     }
@@ -72,9 +74,12 @@ async function main() {
     assert.match(await loaded.text(),/name="deca_origen"/);
     const decision = await fetch(`${base}/carga/test-load/deca`,{method:'POST',
       headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'deca_origen=solicitar'});
-    assert.equal(decision.status,200);
+    assert.equal(decision.status,422,'missing cargo must be completed before issuing');
+    assert.equal(state.used.has('carga'),false);
+    const received=await fetch(`${base}/carga/test-load/deca`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'deca_origen=recibido'});
+    assert.equal(received.status,200,await received.text());
     assert.equal(state.used.has('carga'),true);
-    assert.ok(state.events.some(params=>params.includes('documento_control.solicitado')));
+    assert.ok(state.events.some(params=>params.includes('documento_control.recibido_cargador')));
 
     const page = await (await fetch(`${base}/descarga/test-unload`)).text();
     assert.match(page,/descarga-form\.js/);

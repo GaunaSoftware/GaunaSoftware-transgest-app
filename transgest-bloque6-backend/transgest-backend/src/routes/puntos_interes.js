@@ -8,8 +8,27 @@ const { googleGeocode } = require("../services/googleGeocode");
 const { coordinatesCompatible } = require("../services/geoCoordinateGuard");
 
 const router = express.Router();
-const PUEDE_EDITAR = requireRole("gerente", "trafico", "administrativo");
+const PUEDE_EDITAR = requireRole("gerente", "contable", "trafico", "administrativo");
 const DEFAULT_COUNTRY = "España";
+// Association preserves the point's owner and all its other customer links.
+router.post('/:id/clientes', PUEDE_EDITAR, async (req, res, next) => {
+  try {
+    const company = empresaId(req), customer = req.body?.cliente_id;
+    if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(String(customer || '')) ||
+        !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(req.params.id)) {
+      return res.status(400).json({error:'Selecciona un cliente y un punto válidos.'});
+    }
+    const { rows } = await db.query(`UPDATE puntos_interes p SET
+      clientes_ids=CASE WHEN $3::uuid=ANY(COALESCE(p.clientes_ids,'{}'::uuid[])) OR p.cliente_id=$3::uuid
+        THEN COALESCE(p.clientes_ids,'{}'::uuid[]) ELSE array_append(COALESCE(p.clientes_ids,'{}'::uuid[]),$3::uuid) END,
+      updated_at=NOW()
+      WHERE p.id=$1 AND p.empresa_id=$2 AND p.activo=true
+        AND EXISTS(SELECT 1 FROM clientes c WHERE c.id=$3 AND c.empresa_id=$2 AND c.activo=true)
+      RETURNING p.*`, [req.params.id, company, customer]);
+    if (!rows[0]) return res.status(404).json({error:'Punto o cliente no encontrado en esta empresa.'});
+    res.json(withComputedFields(rows[0]));
+  } catch (error) { next(error); }
+});
 const STREET_ADDRESS_RE = /\b(calle|c\/|avda|avenida|carretera|ctra|crta|camino|poligono|pol\.|parcela|nave|autovia|autopista|plaza|paseo|ronda|km)\b/i;
 
 function empresaId(req) {

@@ -1,8 +1,8 @@
 const crypto=require('crypto');
 const {canonical}=require('./transportDocumentVersions');
-const defaults={hito:'delivery',exigir_pod:true,exigir_deca:false,bloquear_incidencia:true};
+const defaults={hito:'delivery',exigir_pod:false,exigir_deca:false,bloquear_incidencia:true};
 const fail=(s,status=400)=>Object.assign(new Error(s),{status});
-function policy(raw={}) {return {hito:raw.hito==='departure'?'departure':'delivery',exigir_pod:raw.exigir_pod!==false,exigir_deca:raw.exigir_deca===true,bloquear_incidencia:raw.bloquear_incidencia!==false};}
+function policy(raw={}) {return {hito:raw.hito==='departure'?'departure':'delivery',exigir_pod:false,exigir_deca:raw.exigir_deca===true,bloquear_incidencia:raw.bloquear_incidencia!==false};}
 const factSelect=`SELECT p.*,c.nombre AS cliente_nombre,
  COALESCE(cp.reglas,gp.reglas,'{}'::jsonb) AS reglas,
  COALESCE(pasos.data,'{}'::jsonb) AS progreso,
@@ -28,14 +28,16 @@ function evaluate(p) {
  if(p.importe===null||p.importe===''||!Number.isFinite(Number(p.importe))||Number(p.importe)<=0)errors.push('Revisar tarifa: importe ausente, cero o negativo');
  const data={estado:p.estado,importe:p.importe,combustible:p.importe_revision_combustible,cliente_id:p.cliente_id,referencia:p.referencia_cliente,origen:p.origen,destino:p.destino,fecha_carga:p.fecha_carga,fecha_descarga:p.fecha_descarga,soportes:p.soportes,decas:p.decas,envios:p.envios,salida:departure(p),reglas:rules};
  data.paralizacion=p.importe_paralizacion;
+ data.observaciones_factura=p.observaciones_factura;
+ data.tarifa_instrucciones=p.tarifa_instrucciones;
  const huella=crypto.createHash('sha256').update(canonical(data)).digest('hex');
  return {id:p.id,numero:p.numero,cliente_id:p.cliente_id,cliente_nombre:p.cliente_nombre,importe:p.importe,reglas:rules,huella,eligible,errores:errors,estado:errors.length?'excepcion':p.review_hash===huella?'listo':'revisar',documentos:{pod:p.soportes?.length||0,deca:p.decas?.length||0}};
 }
 async function facts(tx,company,ids){if(!ids.length)return [];return (await tx.query(factSelect+' WHERE p.empresa_id=$1 AND p.id=ANY($2::uuid[]) ORDER BY p.id',[company,ids])).rows.map(evaluate);}
 async function list(tx,company,{page=1,cliente_id}={}){
  const params=[company],where=["p.empresa_id=$1","p.estado::text NOT IN ('cancelado','facturado')","COALESCE(to_jsonb(p)->>'origen_producto','transgest')<>'planner'",
- "NOT EXISTS(SELECT 1 FROM facturas f WHERE f.id=p.factura_id AND f.estado<>'borrador')",
- "NOT EXISTS(SELECT 1 FROM factura_pedidos fp JOIN facturas f ON f.id=fp.factura_id WHERE fp.pedido_id=p.id AND f.estado<>'borrador')"];
+ "p.factura_id IS NULL",
+ "NOT EXISTS(SELECT 1 FROM factura_pedidos fp JOIN facturas f ON f.id=fp.factura_id WHERE fp.pedido_id=p.id )"];
  if(cliente_id){params.push(cliente_id);where.push(`p.cliente_id=$${params.length}`);}
  const condition=where.join(' AND '),total=Number((await tx.query('SELECT count(*)::int n FROM pedidos p WHERE '+condition,params)).rows[0].n);
  const rows=(await tx.query(factSelect+' WHERE '+condition+` ORDER BY p.fecha_carga,p.id LIMIT 30 OFFSET $${params.length+1}`,[...params,(page-1)*30])).rows;

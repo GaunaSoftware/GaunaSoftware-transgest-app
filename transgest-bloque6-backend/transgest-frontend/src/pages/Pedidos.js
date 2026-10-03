@@ -1,5 +1,5 @@
 import { TUTORIALS_ENABLED } from "../services/tutorialPolicy";
-import OrderAiInbox, {notifyInboxChanged} from './orders/OrderAiInbox';
+import OrderAiInbox, {InboxHeading,notifyInboxChanged} from './orders/OrderAiInbox';
 import {getOrderInbox} from '../services/api';
 import TransportDocumentVersions from './TransportDocumentVersions';
 import JourneyReplanning from './traffic/JourneyReplanning';
@@ -21,7 +21,7 @@ import { driverName, hasActiveIncident, stopSchedule } from "./orders/quickInfo"
 import { hasCustomerDependentValues, recoverExistingTripPrice, routesForCustomer, switchCustomerDraft } from "./orders/clientTariffDraft";
 import { tariffChanges, tariffDraftValues } from "./orders/tariffUpdate";
 import CancelOrderDialog from "./orders/CancelOrderDialog";
-import { DropdownMenu, Modal as WorkspaceModal } from "../ui";
+import { Button, Badge, Card, Icon, Tabs, DropdownMenu, Modal as WorkspaceModal } from "../ui";
 import "./orders/refinements.css";
 import "./orders/actionDialogs.css";
 import { cargoPayload, fullLoadLength, resolveQuickFullLoadLength, syncFullLoadLength } from "../utils/cargoDimensions";
@@ -56,6 +56,7 @@ import { getEmpresaPerfilSync, useEmpresaPerfil } from "../hooks/useEmpresaPerfi
 import { useAuth } from "../context/AuthContext";
 import { confirmDialog, promptDialog, notify } from "../services/notify";
 import { getEmpresaPlanLocal, planHasFeature } from "../utils/planFeatures";
+import { orderFocusFilters } from "../utils/orderFocusFilters";
 import { clearRuntimeFocus, readRuntimeFocus, setRuntimeFocus } from "../services/runtimeFocus";
 import { canonicalCountry, cmrTypeForCountries, completeOnTab, getEnabledEuropeCountries, getRegionsForCountry } from "../utils/europeGeo";
 import ModalNuevoClienteRapido from "./orders/NewCustomerModal";
@@ -581,7 +582,7 @@ function buildPedidoCopyPayload(basePedido = {}, overrides = {}) {
     merged.destino = "";
   }
   const {
-    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
+    _tarifaNotas, _tarifaNotasAceptadas, _routePointMissing, _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, colaborador_nombre,
     chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, facturado, cliente_email, cliente_telefono,
     chofer2_nombre, remolque_id, mantener_asignacion, mantener_cargas, mantener_descargas, ...formClean
@@ -631,7 +632,7 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   const merged = normalizePedidoTarifaDraft(cargoPayload({ ...basePedido, ...overrides }));
   const geoMerged = withPedidoGeoDefaults(merged);
   const {
-    _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
+    _tarifaNotas, _tarifaNotasAceptadas, _routePointMissing, _cargoLengthManual, _cargoWidthManual, remolque_id_manual, _readonly, _aiCreado, _ai_docs, _ai_meta, _duplicado, _focus_asignacion,
     colaborador_nombre, chofer_nombre, vehiculo_matricula, cliente_nombre, remolque_matricula,
     factura_numero, factura_estado, factura_id,
     facturado, cliente_email, cliente_telefono,
@@ -644,6 +645,7 @@ function buildPedidoUpdatePayload(basePedido = {}, overrides = {}) {
   } = merged;
   const payload = sanitizePedidoPayload({
     ...formClean,
+    tarifa_notas_confirmadas: _tarifaNotasAceptadas ? _tarifaNotas : undefined,
     origen_pais: geoMerged.origen_pais,
     origen_provincia: geoMerged.origen_provincia || null,
     destino_pais: geoMerged.destino_pais,
@@ -740,7 +742,7 @@ function buildPedidoCriticalAlertKey(item) {
   ].filter(Boolean).join("::");
 }
 
-const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
+const ESTADOS_RAW = ["pendiente","confirmado","espera_carga","cargando","cargado","en_curso","espera_descarga","descarga","entregado","cancelado","incidencia"];
 const ESTADOS_ACTIVOS = ESTADOS_RAW.filter(estado => !["entregado", "cancelado"].includes(estado));
 const LABEL_ESTADO = Object.fromEntries(ESTADOS_RAW.map(estado => [estado, transportStateMeta(estado).label]));
 
@@ -833,7 +835,7 @@ function getPedidoStateValidationIssues(pedido, targetEstado = "") {
   if (["cancelado","incidencia"].includes(estado)) return issues;
   const hasCollaborator = Boolean(pedido?.colaborador_id || pedido?.colaborador_nombre);
   const hasManualMatricula = Boolean(String(pedido?.matricula_manual || "").trim());
-  const needsOperationalData = ["confirmado", "en_curso", "descarga", "entregado"].includes(estado);
+  const needsOperationalData = ["confirmado", "cargado", "en_curso", "descarga", "entregado"].includes(estado);
   const needsDeliveryData = ["descarga", "entregado"].includes(estado);
   if (!toDateInputValue(pedido?.fecha_carga)) issues.push("Falta fecha de carga");
   if (needsOperationalData) {
@@ -1885,8 +1887,10 @@ function findPuntoInteresForRouteEndpoint(endpoint, clienteId, tipo = "ambos") {
 
 function applyRouteEndpointsFromSavedPoints(draft = {}, ruta = {}) {
   let next = { ...draft };
-  const puntoCarga = findPuntoInteresForRouteEndpoint(ruta.origen || next.origen, next.cliente_id, "carga");
-  const puntoDescarga = findPuntoInteresForRouteEndpoint(ruta.destino || next.destino, next.cliente_id, "descarga");
+  const exact=(key,text,side)=>ruta[key] ? getPuntosInteres().find(p=>String(p.id)===String(ruta[key])) : findPuntoInteresForRouteEndpoint(text,next.cliente_id,side);
+  const puntoCarga=exact('origen_punto_id',ruta.origen||next.origen,'carga');
+  const puntoDescarga=exact('destino_punto_id',ruta.destino||next.destino,'descarga');
+  next._routePointMissing=[ruta.origen_punto_id&&!puntoCarga?'carga':null,ruta.destino_punto_id&&!puntoDescarga?'descarga':null].filter(Boolean);
   if (puntoCarga) next = applyPuntoCargaToDraft(next, puntoCarga);
   if (puntoDescarga) next = applyPuntoDescargaToDraft(next, puntoDescarga);
   return next;
@@ -2317,27 +2321,16 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
   const [modo,      setModo]      = useState("texto"); // texto | archivo
   const [runs,      setRuns]      = useState([]);
   const [runsLoading, setRunsLoading] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  const [inboxTab,setInboxTab]=useState('entries');
+  const [inbound,setInbound]=useState(null);
+  const [inboxRevision,setInboxRevision]=useState(0);
   const [draggingFile, setDraggingFile] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
   const [voiceListening, setVoiceListening] = useState(false);
-  const previewRef = useRef(null);
-  useEffect(()=>{ if(preview){previewRef.current?.focus();previewRef.current?.scrollIntoView({block:"start"});} },[preview]);
   const fileInputRef = useRef(null);
+  const manualDraftId = useRef(null);
   const speechSupported = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
-  const pedidoPreview = preview?.pedido || null;
-  const puntosPreview = [
-    { titulo: "Recogidas", puntos: parseStops(pedidoPreview?.puntos_carga) },
-    { titulo: "Entregas", puntos: parseStops(pedidoPreview?.puntos_descarga) },
-  ];
-  const camposClave = [
-    "cliente_nombre", "transportista_detectado", "origen", "destino", "fecha_carga", "hora_carga", "fecha_descarga",
-    "hora_descarga", "mercancia", "peso_kg", "bultos", "importe", "tipo_precio",
-    "precio_unitario", "referencia_cliente", "matricula_detectada", "km_ruta"
-  ];
-  const avisoTexto = item => item?.message || item?.detail || item?.label || String(item || "");
-  const visualInfo = preview?.source?.attachments?.length ? (preview?.source?.ai_visual || null) : null;
   const statusLabel = status => ({
     listo_para_revisar: "Listo",
     requiere_revision: "Revisar",
@@ -2345,11 +2338,6 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     error: "Error",
     local: "Local",
   }[String(status || "")] || String(status || "-"));
-  const prioridadIA = priority => ({
-    alta: { label:"Alta", color:"#ef4444", bg:"rgba(239,68,68,.10)", border:"rgba(239,68,68,.28)" },
-    media: { label:"Media", color:"#f59e0b", bg:"rgba(245,158,11,.10)", border:"rgba(245,158,11,.28)" },
-    baja: { label:"Baja", color:"var(--green)", bg:"rgba(16,185,129,.09)", border:"rgba(16,185,129,.25)" },
-  }[String(priority || "media")] || { label:"Media", color:"#f59e0b", bg:"rgba(245,158,11,.10)", border:"rgba(245,158,11,.28)" });
   const resumenRunIA = run => {
     const summary = run?.operational_summary || {};
     if (summary.action) return summary.action;
@@ -2412,7 +2400,9 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
           base64: a.base64,
         })),
       });
+      manualDraftId.current=data.inbox_id;
       setPreview(data);
+      setInboxTab('entries');setInboxRevision(value=>value+1);
       notifyInboxChanged();
       cargarHistorialIA();
     } catch(e) {
@@ -2484,269 +2474,45 @@ function ModalCrearConIA({ clientes, vehiculos, choferes, onClose, onCreado, emb
     recognition.start();
   }
 
-  const content = (
-      <div className="order-inbox-content">
-        <OrderAiInbox revision={preview?.inbox_id} onOpenOrder={onCreado} onPrepared={data=>{setPreview(data);setArchivos([]);setError('');}}/>
-        <div style={{fontSize:12,color:"var(--text4)",marginBottom:12}}>
-          Pega el email, WhatsApp u orden de carga. La bandeja detecta cliente, ruta, matricula, tarifa, conflictos y huecos antes de abrir el pedido.
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:12,background:aiStatus?.visual_available?"rgba(16,185,129,.08)":"rgba(59,130,246,.08)",border:`1px solid ${aiStatus?.visual_available?"rgba(16,185,129,.22)":"rgba(59,130,246,.22)"}`,borderRadius:8,padding:"8px 10px"}}>
-          <span style={{fontSize:10,fontWeight:900,textTransform:"uppercase",letterSpacing:".08em",color:aiStatus?.visual_available?"var(--green)":"#60a5fa"}}>
-            {aiStatus?.mode_label || "Modo basico local"}
-          </span>
-          <span style={{fontSize:12,color:"var(--text3)",lineHeight:1.35}}>
-            {aiStatus?.guidance || "Texto, emails y documentos con texto funcionan sin API externa. Imagenes o PDF escaneados requieren API visual."}
-          </span>
-        </div>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12,background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Historial IA</div>
-            <div style={{fontSize:12,color:"var(--text3)"}}>
-              {runsLoading ? "Cargando ultimos analisis..." : runs.length ? `${runs.length} analisis recientes registrados` : "Sin analisis recientes registrados"}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={()=>setShowHistory(v=>!v)}
-            style={{padding:"6px 10px",borderRadius:7,border:"1px solid var(--border2)",background:"var(--bg4)",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:700,cursor:"pointer"}}
-          >
-            {showHistory ? "Ocultar" : "Ver historial"}
-          </button>
-        </div>
-        {showHistory && (
-          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
-            {runs.slice(0, 6).map(run => {
-              const priority = prioridadIA(run.operational_summary?.priority);
-              const detected = Array.isArray(run.operational_summary?.detected) ? run.operational_summary.detected : [];
-              const missing = Array.isArray(run.operational_summary?.missing) ? run.operational_summary.missing : [];
-              return (
-              <div key={run.id} style={{display:"grid",gridTemplateColumns:"82px 1fr auto",gap:8,alignItems:"start",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 9px"}}>
-                <div style={{fontSize:11,color:"var(--text4)",fontFamily:"'JetBrains Mono',monospace"}}>{formatRunDate(run.created_at)}</div>
-                <div style={{minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}}>
-                    <div style={{fontSize:12,fontWeight:800,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:280}}>
-                      {run.filename || run.source_type || "Analisis de pedido"}
-                    </div>
-                    <span style={{fontSize:9,fontWeight:900,textTransform:"uppercase",letterSpacing:".06em",color:priority.color,background:priority.bg,border:`1px solid ${priority.border}`,borderRadius:999,padding:"2px 6px"}}>
-                      {priority.label}
-                    </span>
-                  </div>
-                  <div style={{fontSize:10,color:"var(--text5)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {statusLabel(run.status)} | {run.provider || "parser local"} | {(run.attachments || []).length} adjunto(s)
-                    {(run.issues || []).length ? ` | ${(run.issues || []).length} pendiente(s)` : ""}
-                    {run.error ? ` | ${run.error}` : ""}
-                  </div>
-                  <div style={{fontSize:11,color:"var(--text3)",marginTop:4,lineHeight:1.35}}>{resumenRunIA(run)}</div>
-                  {(detected.length || missing.length) && (
-                    <div style={{fontSize:10,color:"var(--text5)",marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                      {detected.length ? `Detectado: ${detected.slice(0, 2).join(", ")}` : ""}
-                      {detected.length && missing.length ? " | " : ""}
-                      {missing.length ? `Falta: ${missing.slice(0, 2).join(", ")}` : ""}
-                    </div>
-                  )}
-                </div>
-                <span style={{fontSize:11,fontWeight:800,color:Number(run.confidence || 0) >= 70 ? "var(--green)" : "#f59e0b",background:"var(--bg3)",border:"1px solid var(--border2)",borderRadius:16,padding:"3px 8px"}}>
-                  {Number(run.confidence || 0)}%
-                </span>
-              </div>
-            );})}
-            {!runs.length && <div style={{fontSize:12,color:"var(--text5)",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"9px 10px"}}>Todavia no hay analisis IA guardados en esta empresa.</div>}
-          </div>
-        )}
-
-        {/* Selector modo */}
-        <div style={{display:"flex",gap:6,marginBottom:14}}>
-          {[["texto","Texto / email"],["archivo","Documento + texto"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setModo(v)}
-              style={{padding:"6px 14px",borderRadius:8,border:`1.5px solid ${modo===v?"var(--accent)":"var(--border)"}`,
-                background:modo===v?"var(--accent)":"var(--bg3)",color:modo===v?"#fff":"var(--text3)",
-                fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>
-              {l}
-            </button>
-          ))}
-        </div>
-
-        {modo==="texto" && (
-          <div style={{display:"grid",gap:8}}>
-            {speechSupported && (
-              <button type="button" onClick={dictarPedidoIA} disabled={voiceListening}
-                style={{justifySelf:"start",padding:"7px 12px",borderRadius:8,border:"1px solid rgba(59,130,246,.28)",background:voiceListening?"rgba(239,68,68,.12)":"rgba(59,130,246,.10)",color:voiceListening?"#ef4444":"var(--accent-xl)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:900,cursor:voiceListening?"wait":"pointer"}}>
-                {voiceListening ? "Escuchando..." : "Dictar pedido"}
-              </button>
-            )}
-            <textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)}
-              placeholder={"Ej: Cliente: Transportes Garcia\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancia: palets fruta\nPeso: 24000 kg\nPrecio: 850 EUR\nReferencia: OC-1234"}
-              style={{width:"100%",minHeight:132,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
-          </div>
-        )}
-
-        {modo==="archivo" && (
-          <div
-            onDragOver={(e)=>{ e.preventDefault(); setDraggingFile(true); }}
-            onDragLeave={()=>setDraggingFile(false)}
-            onDrop={handleDropFiles}
-            style={{border:`2px dashed ${draggingFile ? "var(--accent)" : "var(--border2)"}`,borderRadius:10,padding:"24px",textAlign:"center",background:draggingFile?"rgba(59,130,246,.10)":"var(--bg3)"}}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.docx,.xlsx"
-              onChange={handleFile}
-              style={{display:"none"}}
-            />
-            <div style={{fontSize:18,fontWeight:800,marginBottom:8,color:"var(--text)"}}>{fileLoading ? "Leyendo documento..." : "Seleccionar documentos"}</div>
-            <div style={{fontWeight:600,color:"var(--text)",fontSize:13}}>PDF, Word DOCX, Excel XLSX, email EML, texto o imagen</div>
-            <div style={{fontSize:11,color:"var(--text5)",marginTop:4}}>
-              Los PDF con texto se leen en el servidor. Imagenes y PDF escaneados usan la IA documental configurada para la empresa.
-            </div>
-            <button
-              type="button"
-              onClick={()=>fileInputRef.current?.click()}
-              disabled={fileLoading}
-              style={{marginTop:12,padding:"8px 14px",borderRadius:7,border:"1px solid var(--accent)",background:"rgba(59,130,246,.14)",color:"var(--accent-xl)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:800,cursor:fileLoading?"wait":"pointer"}}
-            >
-              Buscar archivo
-            </button>
-            <div style={{fontSize:10,color:"var(--text5)",marginTop:8}}>Tambien puedes arrastrar aqui los documentos. Maximo 6MB por archivo y 7MB en total.</div>
-            {archivos.length > 0 && (
-              <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6,textAlign:"left"}}>
-                {archivos.map((a, idx)=>(
-                  <div key={`${a.name}-${idx}`} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 9px",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:7}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
-                      <div style={{fontSize:10,color:a.extractionStatus==="ok"?"var(--green)":"#f59e0b"}}>
-                        {a.sizeKb}KB | {describeAttachmentStatus(a)}
-                      </div>
-                    </div>
-                    <button type="button" onClick={()=>setArchivos(prev=>prev.filter((_, i)=>i!==idx))} style={{background:"none",border:"none",color:"var(--text5)",cursor:"pointer",fontSize:12}}>Quitar</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)}
-              placeholder={"Opcional: pega aqui el cuerpo del email o texto adicional si el documento es escaneado."}
-              style={{width:"100%",minHeight:92,marginTop:14,background:"var(--bg4)",border:"1px solid var(--border2)",color:"var(--text)",padding:"10px 12px",borderRadius:8,fontFamily:"'DM Sans',sans-serif",fontSize:13,outline:"none",resize:"vertical",boxSizing:"border-box",textAlign:"left"}}/>
-          </div>
-        )}
-
-        <div style={{display:"flex",gap:8,margin:"14px 0"}}>
-          <button onClick={interpretar} disabled={loading || fileLoading || (!texto.trim() && !archivos.length)}
-            style={{padding:"8px 16px",borderRadius:7,border:"none",background:"var(--accent)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:(loading||fileLoading)?"not-allowed":"pointer",opacity:(loading||fileLoading)?0.6:1}}>
-            {loading?"Analizando pedido...":"Analizar pedido"}
-          </button>
-          <button onClick={onClose} style={{padding:"8px 14px",borderRadius:7,border:"1px solid var(--border2)",background:"transparent",color:"var(--text3)",fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-        </div>
-        {error && <div style={{color:"var(--red)",fontSize:12,marginBottom:10}}>{error}</div>}
-        {preview && (
-          <div ref={previewRef} tabIndex={-1} aria-label="Pedido interpretado para revisar">
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"var(--green)"}}>Pedido interpretado - revisa y confirma</div>
-              <div style={{display:"inline-flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--text5)"}}>Confianza</span>
-                <span style={{fontSize:12,fontWeight:800,color:"var(--text)",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:18,padding:"4px 10px"}}>
-                  {Math.round(Math.min(100, Number(preview.confidence || 0)))}%
-                </span>
-              </div>
-            </div>
-            {visualInfo && (
-              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",background:"var(--bg4)",border:"1px solid var(--border2)",borderRadius:8,padding:"8px 10px",fontSize:11,color:"var(--text3)",marginBottom:10}}>
-                <span style={{fontWeight:800,color:visualInfo.ok ? "var(--green)" : "#f59e0b"}}>IA documental</span>
-                <span>
-                  {visualInfo.ok
-                    ? `Documento analizado con ${visualInfo.provider || "proveedor configurado"}${visualInfo.model ? ` (${visualInfo.model})` : ""}`
-                    : visualInfo.reason === "sin_api_key"
-                      ? "Preparada para analizar imagen/PDF cuando se configure la API en SuperAdmin"
-                      : "No hubo JSON interpretable; se mantiene el analisis local"}
-                </span>
-              </div>
-            )}
-            {(preview.suggestions?.length > 0 || preview.warnings?.length > 0 || preview.issues?.length > 0) && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,marginBottom:12}}>
-                {preview.suggestions?.length > 0 && (
-                  <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.25)",borderRadius:8,padding:"9px 11px"}}>
-                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--green)",marginBottom:5}}>Sugerencias</div>
-                    {preview.suggestions.slice(0, 4).map((x, i) => <div key={i} style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{avisoTexto(x)}</div>)}
-                  </div>
-                )}
-                {preview.warnings?.length > 0 && (
-                  <div style={{background:"rgba(251,191,36,.08)",border:"1px solid rgba(251,191,36,.28)",borderRadius:8,padding:"9px 11px"}}>
-                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"#f59e0b",marginBottom:5}}>Avisos</div>
-                    {preview.warnings.slice(0, 4).map((x, i) => <div key={i} style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{avisoTexto(x)}</div>)}
-                  </div>
-                )}
-                {preview.issues?.length > 0 && (
-                  <div style={{background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.26)",borderRadius:8,padding:"9px 11px"}}>
-                    <div style={{fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".08em",color:"var(--red)",marginBottom:5}}>Pendiente</div>
-                    {preview.issues.slice(0, 4).map((x, i) => <div key={i} style={{fontSize:12,color:"var(--text3)",marginTop:3}}>{avisoTexto(x)}</div>)}
-                  </div>
-                )}
-              </div>
-            )}
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
-              {camposClave.filter(k => pedidoPreview?.[k] !== undefined && pedidoPreview?.[k] !== null && pedidoPreview?.[k] !== "").map(k=>(
-                <div key={k} style={{background:"var(--bg4)",borderRadius:7,padding:"7px 10px"}}>
-                  <div style={{fontSize:9,color:"var(--text5)",fontWeight:700,textTransform:"uppercase",letterSpacing:".06em"}}>{({cliente_nombre:"Cliente contractual",transportista_detectado:"Transportista efectivo"})[k] || k.replace(/_/g," ")}</div>
-                  <div style={{fontSize:13,color:"var(--text)",fontWeight:600,marginTop:2}}>{String(pedidoPreview[k])}</div>
-                </div>
-              ))}
-            </div>
-            {puntosPreview.some(grupo => grupo.puntos.length) && (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(min(100%, 240px), 1fr))",gap:8,marginBottom:14}}>
-                {puntosPreview.map(grupo => grupo.puntos.length > 0 && (
-                  <div key={grupo.titulo} style={{background:"var(--bg4)",borderRadius:8,padding:"10px 12px"}}>
-                    <div style={{fontSize:11,fontWeight:800,color:"var(--teal)",marginBottom:7}}>{grupo.titulo}</div>
-                    {grupo.puntos.map((punto, index) => (
-                      <div key={`${grupo.titulo}-${index}`} style={{fontSize:12,color:"var(--text)",marginTop:index ? 9 : 0,overflowWrap:"anywhere"}}>
-                        <strong>{index + 1}. {punto.cliente_nombre || punto.nombre || punto.ciudad || "Punto sin identificar"}</strong>
-                        {punto.direccion && <div>{punto.direccion}</div>}
-                        {(punto.fecha || punto.ventana || punto.hora) && <div style={{color:"var(--text3)"}}>{[punto.fecha, punto.ventana || punto.hora].filter(Boolean).join(" · ")}</div>}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{background:"rgba(59,130,246,.08)",border:"1px solid rgba(59,130,246,.2)",borderRadius:8,padding:"9px 13px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
-              {preview.next_action || "Se abrira el formulario de pedido con estos datos pre-rellenados. Puedes completar o corregir antes de guardar."}
-            </div>
-            {archivos.length > 0 && (
-              <div style={{background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.22)",borderRadius:8,padding:"8px 12px",fontSize:12,color:"var(--text3)",marginBottom:12}}>
-                Los originales se conservan en la bandeja. Los PDF, imágenes y documentos de Office también se adjuntarán al guardar el pedido.
-              </div>
-            )}
-            <button onClick={async()=>{
-              if(preview.pedido_id){try{onCreado(await getPedido(preview.pedido_id));}catch(e){setError(e.message);}return;}
-              onCreado({
-              ...(pedidoPreview || {}),
-              _ai_meta: {
-                inbox_id: preview.inbox_id,
-                source: preview.source?.type || "bandeja_ia",
-                filename: preview.source?.filename || archivos.map(a => a.name).join(", ") || null,
-                confidence: Math.round(Math.min(100, Number(preview.confidence || 0))),
-                status: preview.status || "",
-                issues_count: Array.isArray(preview.issues) ? preview.issues.length : 0,
-                warnings_count: Array.isArray(preview.warnings) ? preview.warnings.length : 0,
-                attachments_count: archivos.length,
-                visual_provider: preview.source?.ai_visual?.provider || null,
-                visual_ok: Boolean(preview.source?.ai_visual?.ok),
-              },
-              _ai_docs: archivos.filter(a=>/\.(pdf|png|jpg|jpeg|webp|docx|xlsx)$/i.test(a.name)).map(a => ({
-                nombre: a.name,
-                tipo: inferPedidoDocTipo(a.name),
-                file_base64: a.base64,
-                file_mime: a.mediaType || "application/pdf",
-                file_size_kb: a.sizeKb,
-              })),
-            });}}
-              style={{padding:"9px 18px",borderRadius:7,border:"none",background:"var(--green)",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-              {preview.pedido_id ? "Ver pedido ya creado" : "Revisar y completar el pedido"}
-            </button>
-          </div>
-        )}
-      </div>
-  );
-  return embedded ? content : <WorkspaceModal title="Bandeja IA de pedidos" width={980} onClose={onClose} closeOnBackdrop={false}>{content}</WorkspaceModal>;
+function reviewPrepared(data=preview){
+    if(!data)return;
+    if(data.pedido_id){getPedido(data.pedido_id).then(onCreado).catch(e=>setError(e.message));return;}
+    const localDocuments=manualDraftId.current===data.inbox_id?archivos:[];
+    onCreado({
+      ...(data.pedido||{}),
+      _ai_meta:{
+        inbox_id:data.inbox_id,source:data.source?.type||"bandeja_ia",
+        filename:data.source?.filename||localDocuments.map(a=>a.name).join(", ")||null,
+        confidence:Math.round(Math.min(100,Number(data.confidence||0))),status:data.status||"",
+        issues_count:Array.isArray(data.issues)?data.issues.length:0,
+        warnings_count:Array.isArray(data.warnings)?data.warnings.length:0,
+        attachments_count:localDocuments.length||data.source?.attachments?.length||0,visual_provider:data.source?.ai_visual?.provider||null,visual_ok:Boolean(data.source?.ai_visual?.ok),
+      },
+      _ai_docs:localDocuments.filter(a=>/\.(pdf|png|jpg|jpeg|webp|docx|xlsx)$/i.test(a.name)).map(a=>({
+        nombre:a.name,tipo:inferPedidoDocTipo(a.name),file_base64:a.base64,file_mime:a.mediaType||"application/pdf",file_size_kb:a.sizeKb,
+      })),
+    });
+  }
+  const documentAnalyzer=<div className="ai-inbox-document-analyzer">
+    <header><h3>Analizar documentos o texto</h3><p>Pega un email, mensaje u orden de carga, o añade sus archivos para preparar un pedido.</p></header>
+    <div className="ai-inbox-mode"><Tabs idPrefix="ai-document-mode" label="Tipo de entrada manual" value={modo} onChange={setModo} items={[{value:'texto',label:'Texto / email',icon:'mail'},{value:'archivo',label:'Documento + texto',icon:'attachment'}]}/>{speechSupported&&modo==='texto'&&<Button onClick={dictarPedidoIA} disabled={voiceListening}>{voiceListening?'Escuchando…':'Dictar pedido'}</Button>}</div>
+    <div className="ai-inbox-provider"><Badge>{aiStatus?.mode_label||'Extracción local'}</Badge><span>{aiStatus?.guidance||'Texto y documentos con texto funcionan sin API externa. Las imágenes y los PDF escaneados requieren IA visual.'}</span></div>
+    {modo==='archivo'&&<div className={`ai-inbox-dropzone ${draggingFile?'dragging':''}`} onDragOver={e=>{e.preventDefault();setDraggingFile(true);}} onDragLeave={()=>setDraggingFile(false)} onDrop={handleDropFiles}>
+      <Icon name="attachment" size={32}/><strong>{fileLoading?'Leyendo documento…':'Arrastra aquí tus documentos'}</strong><p>PDF, DOCX, XLSX, EML, texto e imágenes JPG, PNG o WebP.</p><Button onClick={()=>fileInputRef.current?.click()} disabled={fileLoading}>Buscar archivo</Button><small>Máximo 6 MB por archivo y 7 MB en total.</small>
+    </div>}
+    {archivos.length>0&&<div className="ai-inbox-files">{archivos.map((a,index)=><Card className="ai-inbox-file" key={index}><span className="ai-inbox-icon"><Icon name="invoice"/></span><div><strong>{a.name}</strong><small>{a.sizeKb} KB · {describeAttachmentStatus(a)}</small></div><Button onClick={()=>setArchivos(prev=>prev.filter((_,i)=>i!==index))}>Quitar</Button></Card>)}</div>}
+    <label className="ai-inbox-text-label">{modo==='texto'?'Texto del pedido':'Texto adicional (opcional)'}<textarea aria-label="Texto del pedido" value={texto} onChange={e=>setTexto(e.target.value)} placeholder={modo==='texto'?"Cliente: Transportes García\nOrigen: Barcelona\nDestino: Madrid\nFecha carga: 15/06/2026 08:00\nMercancía: palets\nPeso: 24000 kg":"Pega el cuerpo del email o añade instrucciones para interpretar el documento."}/></label>
+    <Button variant="primary" onClick={interpretar} disabled={loading||fileLoading||(!texto.trim()&&!archivos.length)}>{loading?'Analizando pedido…':'Analizar pedido'}</Button>
+  </div>;
+  const history=<section className="ai-inbox-history"><header><div><h3>Análisis recientes</h3><p>Resultado y avisos de los análisis guardados en esta empresa.</p></div><Button disabled={runsLoading} onClick={cargarHistorialIA}>Actualizar historial</Button></header>{runsLoading?<p role="status">Cargando análisis…</p>:runs.length?runs.map(run=><Card key={run.id} className="ai-inbox-history-item"><span className="ai-inbox-icon"><Icon name="clock"/></span><div><strong>{run.filename||run.source_type||'Análisis de pedido'}</strong><small>{formatRunDate(run.created_at)} · {run.provider||'Extracción local'} · {(run.attachments||[]).length} adjuntos</small><p>{resumenRunIA(run)}</p>{run.operational_summary?.detected?.length>0&&<small>{run.operational_summary.detected.join(' · ')}</small>}{run.operational_summary?.missing?.length>0&&<small>Pendiente: {run.operational_summary.missing.join(' · ')}</small>}{run.operational_summary?.priority&&<Badge tone={run.operational_summary.priority==='alta'?'danger':'warning'}>Prioridad {{alta:'Alta',media:'Media',baja:'Baja'}[run.operational_summary.priority]||run.operational_summary.priority}</Badge>}{run.error&&<p role="alert">{run.error}</p>}</div><Badge tone={run.status==='error'?'danger':'neutral'}>{statusLabel(run.status)}</Badge>{run.confidence!=null&&<Badge>{Number(run.confidence)}%</Badge>}</Card>):<p>Todavía no hay análisis guardados.</p>}</section>;
+  const footer=<div className="ai-inbox-footer" onDragOver={e=>{if(e.dataTransfer?.types?.includes('Files')){e.preventDefault();setDraggingFile(true);}}} onDrop={e=>{setInboxTab('documents');setModo('archivo');handleDropFiles(e);}}><span><Icon name="info" size={20}/>{draggingFile?'Suelta los archivos para analizarlos':'También puedes arrastrar aquí archivos PDF, imágenes o documentos para que la IA los analice.'}</span><Button variant="primary" onClick={()=>{setInboxTab('documents');setModo('archivo');}}><Icon name="attachment" size={17}/>Analizar documento</Button><Button onClick={onClose}>Cerrar</Button></div>;
+  const content=<div className="ai-inbox-content" onDragOver={e=>{if(e.dataTransfer?.types?.includes('Files')){e.preventDefault();setDraggingFile(true);}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDraggingFile(false);}} onDrop={e=>{setInboxTab('documents');setModo('archivo');handleDropFiles(e);}}>
+    <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.md,.json,.eml,.html,.htm,.csv,.tsv,.xml,.jpg,.jpeg,.png,.webp,.docx,.xlsx" onChange={handleFile} style={{display:'none'}}/>
+    {draggingFile&&inboxTab!=='documents'&&<div className="ai-inbox-drop-overlay">Suelta los archivos para analizarlos</div>}
+    {error&&<p className="ai-inbox-error" role="alert">{error}</p>}
+    <OrderAiInbox revision={inboxRevision} preview={preview} activeTab={inboxTab} onTabChange={value=>{setInboxTab(value);if(value==='documents')setModo('archivo');}} onInbound={setInbound} onConfigure={()=>{onClose();window.dispatchEvent(new CustomEvent('tms:navegar',{detail:'empresa'}));}} onOpenOrder={onCreado} onCreate={reviewPrepared} onPrepared={data=>{setPreview(data);setError('');}} documentAnalyzer={documentAnalyzer} history={history} historyCount={runs.length} documentCount={archivos.length}/>
+  </div>;
+  return embedded?<section className="ai-inbox-embedded"><header><InboxHeading inbound={inbound}/></header>{content}{footer}</section>:<WorkspaceModal title={<InboxHeading inbound={inbound}/>} className="tg-ai-inbox-dialog" width={1380} onClose={onClose} footer={footer} closeOnBackdrop={false}>{content}</WorkspaceModal>;
 }
 
 
@@ -3455,7 +3221,7 @@ function ModalPedidoRapido({ clientes = [], vehiculos = [], choferes = [], colab
   );
 }
 
-function PuntoInteresModal({ initial, onClose, onSave }) {
+export function PuntoInteresModal({ initial, onClose, onSave }) {
   const initialPoint = normalizePuntoInteresForForm(initial || {});
   const geoRequestRef = React.useRef(0);
   function inferPuntoGeoDraft(draft = {}) {
@@ -6398,7 +6164,7 @@ function pedidoPointTone({ tipo, pedido = {}, pasos = {} }) {
   const incidencia = estado === "incidencia" || pedido?.incidencia_activa === true;
   if (incidencia) return { key:"incidencia", label:"Incidencia", color:"#ef4444", bg:"rgba(239,68,68,.16)", border:"rgba(239,68,68,.55)" };
   if (tipo === "carga") {
-    if (pasos.carga_ok || ["en_curso","espera_descarga","descarga","entregado","facturado"].includes(estado)) {
+    if (pasos.carga_ok || ["cargado","en_curso","espera_descarga","descarga","entregado","facturado"].includes(estado)) {
       return { key:"ok", label:"Carga OK", color:"#10b981", bg:"rgba(16,185,129,.17)", border:"rgba(16,185,129,.55)" };
     }
     if (estado === "cargando" || pasos.carga_proceso || pasos.carga_iniciada) {
@@ -6453,7 +6219,8 @@ function PedidoMapaOperativo({ pedido, choferPasos, compact = false }) {
     : pasos.descarga_ok || ["entregado","facturado"].includes(estado) ? "entregado"
     : pasos.descarga_iniciada || estado === "descarga" ? "descarga"
     : pasos.posicionado_descarga ? "espera_descarga"
-    : pasos.viaje_iniciado || pasos.carga_ok || estado === "en_curso" ? "en_curso"
+    : pasos.viaje_iniciado || estado === "en_curso" ? "en_curso"
+    : pasos.carga_ok || estado === "cargado" ? "cargado"
     : pasos.carga_proceso || pasos.carga_iniciada ? "cargando"
     : estado;
   const mapStateMeta = transportStateMeta(pedido?.estado_operativo ? pedido : mapState);
@@ -7624,6 +7391,8 @@ async function guardar({sendWorkflow = false, forceWorkflow = false} = {}) {
     setEditorStep(1); notify(bloqueoClienteModal.message, "error");
     return;
   }
+  if(form._routePointMissing?.length){setEditorStep(1);notify('No se ha cargado el punto exacto de '+form._routePointMissing.join(' y ')+'. Actualiza los puntos y vuelve a seleccionar la tarifa.','warning');return;}
+  if(form._tarifaNotas && !form._tarifaNotasAceptadas && (!editando?.id || String(form.ruta_id)!==String(editando.ruta_id))){setEditorStep(1);notify('Revisa y acepta las instrucciones de la tarifa.','warning');return;}
   if (rutaIncompatible) {
     setEditorStep(1); notify("La ruta seleccionada no es compatible con el remolque actual. Cambia el remolque antes de guardar.", "warning");
     return;
@@ -7997,6 +7766,8 @@ const aplicarTarifaRutaADraft = (draft, ruta) => {
   const minimoUnidades = normalizeMinimoUnidadesRuta(ruta, tarifaTipo);
   const next = {
     ...draft,
+    _tarifaNotas:String(ruta.notas||" ").trim(),
+    _tarifaNotasAceptadas:draft._tarifaNotas===String(ruta.notas||" ").trim()&&draft._tarifaNotasAceptadas===true,
     tipo_precio: tarifaTipo,
     precio_unitario: precioFinal,
     precio_base_sin_combustible: precioBase,
@@ -8700,7 +8471,7 @@ function buildPedidoDraftFromTrafficFocus(focus = {}, vehiculos = [], choferes =
     requiere_cinchas: true,
     pendiente_completar: true,
     aviso_completar: "Pedido iniciado desde Gestion de trafico: completar cliente, ruta, precio y documentacion.",
-    _focus_asignacion: focus.source !== "gestion_trafico" || focus.view !== "grupajes",
+    _focus_asignacion: false,
     _nuevo_desde_trafico: true,
     ...(focus.source === "almacen_palets" ? {
       cliente_id: defaults.cliente_id || "",
@@ -8822,8 +8593,8 @@ export default function Pedidos() {
   useEffect(()=>{
     if(!aiDisponible)return;let active=true;
     const refresh=()=>getOrderInbox({summary:true}).then(data=>{if(active)setInboxCount(data.counts.filter(row=>!['creado','descartado'].includes(row.state)).reduce((n,row)=>n+row.count,0));}).catch(()=>{if(active)setInboxCount(null);});
-    refresh();window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
-    return()=>{active=false;window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
+    refresh();const timer=setInterval(refresh,30000);window.addEventListener('tms:inbox-changed',refresh);window.addEventListener('focus',refresh);
+    return()=>{active=false;clearInterval(timer);window.removeEventListener('tms:inbox-changed',refresh);window.removeEventListener('focus',refresh);};
   },[aiDisponible]);
   const [focusPedido] = useState(() => readPedidosFocus());
   // El foco es de UN SOLO USO: ya se ha volcado en el estado inicial (filtro de
@@ -8847,10 +8618,12 @@ export default function Pedidos() {
   const _rangoSemanaActual = currentWeekRangeLocal();
   const [filtroEst,  setFiltroEst]  = useState(() => (focusPedido?.estado && !focusPedido?.pedido_id) ? String(focusPedido.estado) : "todos");
   const [filtroMes,  setFiltroMes]  = useState("");
-  const [filtroFechasCustom, setFiltroFechasCustom] = useState(false);
+  const [filtroFechasCustom, setFiltroFechasCustom] = useState(() => Boolean(orderFocusFilters(focusPedido).from || orderFocusFilters(focusPedido).to));
   const [mostrarHistorico, setMostrarHistorico] = useState(Boolean(focusPedido?.pedido_id));
-  const [filtroDesde, setFiltroDesde] = useState("");
-  const [filtroHasta, setFiltroHasta] = useState("");
+  const [filtroDesde, setFiltroDesde] = useState(() => orderFocusFilters(focusPedido).from);
+  const [filtroHasta, setFiltroHasta] = useState(() => orderFocusFilters(focusPedido).to);
+  const [focusIds, setFocusIds] = useState(() => orderFocusFilters(focusPedido).ids);
+  const [focusTitle, setFocusTitle] = useState(() => orderFocusFilters(focusPedido).title);
   const [filtroCliente,setFiltroCliente]=useState("");
   const [q,          setQ]          = useState(() => focusPedido?.pedido_id ? (focusPedido?.numero || "") : "");
   const [soloCriticos, setSoloCriticos] = useState(false);
@@ -8912,7 +8685,7 @@ export default function Pedidos() {
   const filtroSemanaActualActivo = filtroDesde === _rangoSemanaActual.desde && filtroHasta === _rangoSemanaActual.hasta;
 
 
-  const hayFiltrosPedidos = Boolean(debouncedQ.trim() || filtroEst !== "todos" || filtroCliente || filtroSinAsignacion || filtroPendienteCompletar || filtroColaborador || soloCriticos);
+  const hayFiltrosPedidos = Boolean(focusIds !== null || debouncedQ.trim() || filtroEst !== "todos" || filtroCliente || filtroSinAsignacion || filtroPendienteCompletar || filtroColaborador || soloCriticos);
 
 
   useEffect(() => {
@@ -9127,6 +8900,7 @@ export default function Pedidos() {
     try {
       const params = {};
       params.incluir_incidencias = "false";
+      if (focusIds !== null) params.pedido_ids = JSON.stringify(focusIds);
       if (filtroEst === "activos") {
         params.estado = ESTADOS_ACTIVOS.join(",");
       }
@@ -9207,7 +8981,7 @@ export default function Pedidos() {
         if (!silent) setLoadError(e.message || "No se pudieron cargar los viajes.");
       }
     finally { if (!listadoCargado && !silent) setLoading(false); }
-  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico, hayFiltrosPedidos]);
+  }, [filtroEst, filtroMes, filtroFechasCustom, filtroDesde, filtroHasta, debouncedQ, filtroCliente, page, groupByCliente, mostrarHistorico, hayFiltrosPedidos, focusIds]);
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
@@ -9283,6 +9057,8 @@ export default function Pedidos() {
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
     const resetFocusFilters = () => {
+      setFocusIds(null);
+      setFocusTitle("");
       setFiltroMes("");
       setFiltroFechasCustom(false);
       setFiltroDesde("");
@@ -9329,6 +9105,14 @@ export default function Pedidos() {
       if (focus.estado) {
         resetFocusFilters();
         setFiltroEst(String(focus.estado));
+        const scope = orderFocusFilters(focus);
+        setFocusIds(scope.ids);
+        setFocusTitle(scope.title);
+        if (scope.from || scope.to) {
+          setFiltroFechasCustom(true);
+          setFiltroDesde(scope.from);
+          setFiltroHasta(scope.to);
+        }
         if (focus.operativo === "carga") {
           setFiltroFechasCustom(true);
           setFiltroHasta(new Date().toISOString().slice(0, 10));
@@ -9366,7 +9150,7 @@ export default function Pedidos() {
       notify(`No se puede pasar a "${LABEL_ESTADO[estado] || estado}" hasta completar: ${validationIssues.join(", ")}.`, "warning");
       return false;
     }
-    const confirmaCargaReal = estado === "en_curso" &&
+    const confirmaCargaReal = ["cargado", "en_curso"].includes(estado) &&
       ["confirmado", "espera_carga", "cargando"].includes(String(p?.estado || "").toLowerCase()) &&
       !p?.carga_real_at;
     const incidenciaTexto = String(extra.incidencia || "").trim();
@@ -10346,11 +10130,11 @@ export default function Pedidos() {
           };
           return {origin:origin.label, destination:destination.label, loads:loads.length, unloads:unloads.length, originMissing:origin.missing, destinationMissing:destination.missing, loadDetails:loads.map((stop,i)=>detail(stop,i,"carga")).join("\n"), unloadDetails:unloads.map((stop,i)=>detail(stop,i,"descarga")).join("\n")};
         }}
-        filters={{q,setQ,state:filtroEst,setState:setFiltroEst,client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
+        filters={{q,setQ,scopeTitle:focusTitle,state:filtroEst,setState:value=>{setFocusIds(null);setFocusTitle("");setFiltroEst(value);},client:filtroCliente,setClient:setFiltroCliente,from:filtroDesde,to:filtroHasta,
           setFrom:value => {setFiltroFechasCustom(true);setFiltroDesde(value);},setTo:value => {setFiltroFechasCustom(true);setFiltroHasta(value);},
           history:mostrarHistorico,setHistory:value => {setMostrarHistorico(value);setFiltroFechasCustom(false);setFiltroMes("");setFiltroDesde("");setFiltroHasta("");setPage(1);setSelectedPedidoIds([]);},
           incomplete:filtroPendienteCompletar,setIncomplete:setFiltroPendienteCompletar,external:filtroColaborador,setExternal:setFiltroColaborador,unassigned:filtroSinAsignacion,setUnassigned:setFiltroSinAsignacion,critical:soloCriticos,setCritical:setSoloCriticos,
-          reset:() => {setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
+          reset:() => {setFocusIds(null);setFocusTitle("");setMostrarHistorico(false);setFiltroEst("todos");setFiltroMes("");setFiltroFechasCustom(false);setFiltroDesde("");setFiltroHasta("");setFiltroCliente("");setQ("");setFiltroSinAsignacion(false);setFiltroPendienteCompletar(false);setFiltroColaborador(false);setSoloCriticos(false);}
         }}
       />
 

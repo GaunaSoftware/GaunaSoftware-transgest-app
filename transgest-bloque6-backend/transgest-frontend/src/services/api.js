@@ -53,7 +53,7 @@ async function parseApiResponse(res) {
   return text ? { raw_text: text } : {};
 }
 
-function friendlyApiError(message, status, requestId, path = "") {
+function friendlyApiError(message, status, requestId, path = "", code = "") {
   const raw = String(message || "").trim();
   const lower = raw.toLowerCase();
   const moduloLabel =
@@ -98,6 +98,12 @@ function friendlyApiError(message, status, requestId, path = "") {
   if (status === 404) return "No se encontro el registro solicitado.";
   if (status === 409) return raw || "No se pudo guardar porque hay un conflicto con datos ya existentes.";
   if (status === 422) return raw || "Hay datos del formulario que no son validos.";
+  // These routes return fixed, sanitized provider diagnostics. All other 5xx
+  // responses retain the generic message instead of exposing server details.
+  if (raw && status >= 500 && (
+    (path === '/email/test' && code === 'SMTP_CONNECTION_FAILED') ||
+    (/^\/email\/order-mailbox\/(test|sync)$/.test(path) && code === 'IMAP_CONNECTION_FAILED')
+  )) return raw;
   if (status >= 500) {
     return requestId
       ? `No se pudo completar ${moduloLabel}. Codigo de seguimiento: ${requestId}.`
@@ -237,7 +243,8 @@ async function apiFetch(path, options = {}) {
       data.error || data.message || data.mensaje || validationMsg || fallbackText || `Error ${res.status}`,
       res.status,
       requestId,
-      path
+      path,
+      data.code
     );
     rememberApiError({
       status: res.status,
@@ -590,6 +597,17 @@ export const interpretarPedidoIA = (data) =>
 export const getAiInboxRuns = (limit = 30) =>
   apiFetch(`/pedidos/ai-inbox/runs?limit=${encodeURIComponent(limit)}`, { silentSuccess:true });
 export const getOrderInbox = ({page=1,state='',summary=false}={}) => apiFetch(`/pedidos/ai-inbox/entries?page=${page}&state=${encodeURIComponent(state)}${summary?'&summary=true':''}`,{silentSuccess:true});
+export const getOrderInboxEntry = id => apiFetch(`/pedidos/ai-inbox/entries/${encodeURIComponent(id)}`,{silentSuccess:true});
+// Read an existing protected attachment for the inbox's plain-text original view.
+export async function readOrderInboxOriginal(id,index){
+  const token=getToken(),path=`/pedidos/ai-inbox/entries/${encodeURIComponent(id)}/attachments/${index}`;
+  const response=await fetch(apiUrl(path),{headers:token?{Authorization:`Bearer ${token}`}:{},signal:AbortSignal.timeout(20000)});
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el correo.');
+  if(!response.ok){const data=await parseApiResponse(response);throw new Error(friendlyApiError(data.error||`Error ${response.status}`,response.status,extractRequestId(response,data),path));}
+  const text=await response.text();
+  if(getToken()!==token)throw new Error('La sesión ha cambiado. Vuelve a abrir el correo.');
+  return text;
+}
 export const changeOrderInboxState = (id,body) => apiFetch(`/pedidos/ai-inbox/entries/${id}`,{method:'PATCH',body,silentSuccess:true});
 export const getAiInboxStatus = () =>
   apiFetch("/pedidos/ai-inbox/status", { silentSuccess:true });
@@ -625,6 +643,7 @@ export const avisarClientePedido = (id, data = {}) => apiFetch(`/pedidos/${id}/a
 export const getWhatsappStatus = () => apiFetch("/whatsapp/status", { silentSuccess:true });
 export const getWhatsappConfig = () => apiFetch("/whatsapp/config", { silentSuccess:true });
 export const guardarWhatsappConfig = (data) => apiFetch("/whatsapp/config", { method:"PUT", body:data });
+export const probarWhatsappConfig = () => apiFetch("/whatsapp/test",{method:"POST",body:{},silentSuccess:true});
 export const getWhatsappLog = () => apiFetch("/whatsapp/log", { silentSuccess:true });
 export const getPedidoWhatsappPreflight = (id, target = "cliente") =>
   apiFetch(`/whatsapp/pedido/${id}/preflight?target=${encodeURIComponent(target)}`, { silentSuccess:true });
@@ -1462,3 +1481,13 @@ export async function downloadClaveicon(id) {
  if(!response.ok){const data=await parseApiResponse(response);throw new Error(data.error || 'No se pudo exportar');}
  const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filenameFromDisposition(response.headers.get('content-disposition')) || 'claveicon.xml';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
 }
+
+export const asociarPuntoCliente = (id, cliente_id) => apiFetch(`/puntos-interes/${id}/clientes`, {method:"POST",body:{cliente_id}});
+
+export const getRutaAnalisis = id => apiFetch(`/rutas/${id}/analisis`);
+
+export const analizarDocVehiculo=(vehicleId,documentId)=>apiFetch(`/docs/vehiculo/${vehicleId}/${documentId}/analizar`,{method:"POST",body:JSON.stringify({}),timeoutMs:75000});
+export const analizarDocVehiculoNuevo=data=>apiFetch('/docs/vehiculo/analizar',{method:'POST',body:data,timeoutMs:75000});
+
+export const getSupplierDocumentDeliveries=id=>apiFetch(`/pedidos/${id}/deca-envios`,{silentSuccess:true});
+export const retrySupplierDocumentDelivery=(id,job)=>apiFetch(`/pedidos/${id}/deca-envios/${job}/reintentar`,{method:"POST",body:JSON.stringify({})});

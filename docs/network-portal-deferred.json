@@ -1,0 +1,14 @@
+{
+  "status": "DEFERRED_NOT_PUBLISHED",
+  "routes": [],
+  "feature": "Portal: bolsa interna de cargas entre empresas TransGest",
+  "rules": [
+    "Publicación voluntaria de cargas, independiente de conectar una empresa",
+    "Audiencia: solo empresas TransGest autorizadas",
+    "Ningún dato fiscal, precio interno o GPS compartido por defecto",
+    "Propuesta y aceptación explícitas; reserva para impedir adjudicaciones duplicadas",
+    "Permisos y trazabilidad por empresa",
+    "Revisar con el usuario después del resto del flujo"
+  ],
+  "implementation": "Sin código de producto ni ruta pública; pendiente de retomarlo"
+}
